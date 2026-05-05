@@ -1,0 +1,65 @@
+{
+  "name": "@openclaw/policy",
+  "version": "0.1.0",
+  "description": "OpenClaw policy substrate: PolicyIR types contract (upstream PR-1) + reference markdown extractor pack consuming the oc-paths universal substrate. Sister to oc-path / lkg.",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "openclaw-policy": "./bin/openclaw-policy.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./plugin-sdk": {
+      "types": "./dist/plugin-sdk/policy/index.d.ts",
+      "import": "./dist/plugin-sdk/policy/index.js"
+    },
+    "./extractors-starter": {
+      "types": "./dist/extensions/policy-from-md-starter/index.d.ts",
+      "import": "./dist/extensions/policy-from-md-starter/index.js"
+    },
+    "./lint-rules-starter": {
+      "types": "./dist/extensions/policy-lint-rules-starter/index.d.ts",
+      "import": "./dist/extensions/policy-lint-rules-starter/index.js"
+    },
+    "./doctor-fixers-starter": {
+      "types": "./dist/extensions/policy-doctor-fixers-starter/index.d.ts",
+      "import": "./dist/extensions/policy-doctor-fixers-starter/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@openclaw/oc-path": "workspace:*",
+    "@openclaw/lkg": "workspace:*",
+    "@openclaw/oc-lint": "workspace:*",
+    "@openclaw/oc-doctor": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test"
+  }
+}

@@ -54,6 +54,12 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
+    name: "policy",
+    description:
+      "OpenClaw PolicyIR substrate — generate / check / diff / evaluate policy artifacts (LKG-anchored, content-addressable)",
+    hasSubcommands: true,
+  },
+  {
     name: "migrate",
     description: "Import state from another agent system",
     hasSubcommands: true,

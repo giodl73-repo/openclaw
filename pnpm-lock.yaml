@@ -115,6 +115,9 @@ importers:
       '@openclaw/oc-path':
         specifier: workspace:*
         version: link:packages/oc-path
+      '@openclaw/policy':
+        specifier: workspace:*
+        version: link:packages/policy
       '@slack/bolt':
         specifier: ^4.7.2
         version: 4.7.2(@types/express@5.0.6)
@@ -1745,6 +1748,34 @@ importers:
   packages/plugin-package-contract: {}
 
   packages/plugin-sdk: {}
+
+  packages/policy:
+    dependencies:
+      '@openclaw/lkg':
+        specifier: workspace:*
+        version: link:../lkg
+      '@openclaw/oc-doctor':
+        specifier: workspace:*
+        version: link:../oc-doctor
+      '@openclaw/oc-lint':
+        specifier: workspace:*
+        version: link:../oc-lint
+      '@openclaw/oc-path':
+        specifier: workspace:*
+        version: link:../oc-path
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      '@vitest/coverage-v8':
+        specifier: ^4.0.0
+        version: 4.1.5(@vitest/browser@4.1.5)(vitest@4.1.5)
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.0
+        version: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/browser-playwright@4.1.5)(@vitest/coverage-v8@4.1.5)(jsdom@29.1.1(@noble/hashes@2.0.1))(vite@8.0.10(@types/node@20.19.39)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/sdk: {}
 

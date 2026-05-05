@@ -1729,7 +1729,8 @@
     "@openclaw/oc-lint": "workspace:*",
     "@openclaw/oc-doctor": "workspace:*",
     "@openclaw/lkg": "workspace:*",
-    "@openclaw/lkg-git": "workspace:*"
+    "@openclaw/lkg-git": "workspace:*",
+    "@openclaw/policy": "workspace:*"
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.17.0",

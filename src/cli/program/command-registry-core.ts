@@ -97,6 +97,11 @@ const coreEntrySpecs: readonly CommandGroupDescriptorSpec<
         exportName: "registerCageCommand",
       },
       {
+        commandNames: ["policy"],
+        loadModule: () => import("./register.policy.js"),
+        exportName: "registerPolicyCommand",
+      },
+      {
         commandNames: ["migrate"],
         loadModule: () => import("./register.migrate.js"),
         exportName: "registerMigrateCommand",
