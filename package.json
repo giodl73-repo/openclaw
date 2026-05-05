@@ -1727,7 +1727,9 @@
     "zod": "^4.4.3",
     "@openclaw/oc-path": "workspace:*",
     "@openclaw/oc-lint": "workspace:*",
-    "@openclaw/oc-doctor": "workspace:*"
+    "@openclaw/oc-doctor": "workspace:*",
+    "@openclaw/lkg": "workspace:*",
+    "@openclaw/lkg-git": "workspace:*"
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.17.0",

@@ -1,0 +1,39 @@
+{
+  "name": "@openclaw/lkg-git",
+  "version": "0.1.0",
+  "description": "OpenClaw lkg-recovery PR-2 prototype: git-backed second-backend LKGStore impl. Same contract as @openclaw/lkg's FS impl; closes #40245 multi-agent shared workspace via git three-way merge.",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@openclaw/lkg": "workspace:*",
+    "@openclaw/oc-path": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test"
+  }
+}

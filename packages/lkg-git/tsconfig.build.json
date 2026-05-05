@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "paths": {
+      "@openclaw/lkg": ["../lkg/dist/index.d.ts"],
+      "@openclaw/lkg/*": ["../lkg/dist/*"]
+    }
+  }
+}

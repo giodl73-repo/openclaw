@@ -48,6 +48,12 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
+    name: "cage",
+    description:
+      "OpenClaw LKG substrate — promote / observe / rollback workspace state with labeled pins for upgrade recovery",
+    hasSubcommands: true,
+  },
+  {
     name: "migrate",
     description: "Import state from another agent system",
     hasSubcommands: true,

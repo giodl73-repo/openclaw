@@ -92,6 +92,11 @@ const coreEntrySpecs: readonly CommandGroupDescriptorSpec<
         exportName: "registerPinchCommand",
       },
       {
+        commandNames: ["cage"],
+        loadModule: () => import("./register.cage.js"),
+        exportName: "registerCageCommand",
+      },
+      {
         commandNames: ["migrate"],
         loadModule: () => import("./register.migrate.js"),
         exportName: "registerMigrateCommand",
