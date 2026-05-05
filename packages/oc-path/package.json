@@ -1,0 +1,54 @@
+{
+  "name": "@openclaw/oc-path",
+  "version": "0.1.0",
+  "description": "OpenClaw oc-paths substrate (PR-1 prototype): generic-MD AST + OcPath resolver + emit + sentinel guard. Lands at openclaw-core/src/plugin-sdk/oc-path/.",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "openclaw-path": "./bin/openclaw-path.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./oc-path": {
+      "types": "./dist/plugin-sdk/oc-path/index.d.ts",
+      "import": "./dist/plugin-sdk/oc-path/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js"
+    },
+    "./workspace": {
+      "types": "./dist/plugin-sdk/oc-path/workspace/index.d.ts",
+      "import": "./dist/plugin-sdk/oc-path/workspace/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test"
+  },
+  "dependencies": {
+    "yaml": "^2.8.4"
+  }
+}

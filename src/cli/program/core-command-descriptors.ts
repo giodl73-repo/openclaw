@@ -36,6 +36,12 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
+    name: "path",
+    description:
+      "OcPath substrate — universal addressing for workspace artifacts (resolve / set / find / validate / emit)",
+    hasSubcommands: true,
+  },
+  {
     name: "migrate",
     description: "Import state from another agent system",
     hasSubcommands: true,

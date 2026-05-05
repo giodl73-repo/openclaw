@@ -1724,7 +1724,8 @@
     "web-tree-sitter": "^0.26.8",
     "ws": "^8.20.0",
     "yaml": "^2.8.4",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@openclaw/oc-path": "workspace:*"
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.17.0",
