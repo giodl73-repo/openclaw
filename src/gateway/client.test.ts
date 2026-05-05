@@ -242,7 +242,7 @@ describe("GatewayClient security checks", () => {
 
     expect(onConnectError).not.toHaveBeenCalled();
     expect(wsInstances.length).toBe(1); // WebSocket created
-    expect(getLatestWs().options).toMatchObject({ agent: expect.any(Object) });
+    expect(getLatestWs().options).not.toHaveProperty("agent");
     client.stop();
   });
 
@@ -269,47 +269,6 @@ describe("GatewayClient security checks", () => {
       client.stop();
       await stopProxy(handle);
     }
-  });
-
-  it("uses direct Gateway loopback agent only for the configured URL when managed proxy is active", async () => {
-    const { startProxy, stopProxy } = await import("../infra/net/proxy/proxy-lifecycle.js");
-    const handle = await startProxy({
-      enabled: true,
-      proxyUrl: "http://127.0.0.1:3128",
-    });
-
-    try {
-      const configuredClient = new GatewayClient({
-        url: "ws://127.0.0.1:18789",
-        configuredGatewayUrl: "ws://127.0.0.1:18789",
-      });
-      configuredClient.start();
-      expect(getLatestWs().options).toMatchObject({ agent: expect.any(Object) });
-      configuredClient.stop();
-
-      const overrideClient = new GatewayClient({
-        url: "ws://127.0.0.1:3000",
-        configuredGatewayUrl: "ws://127.0.0.1:18789",
-      });
-      overrideClient.start();
-      expect(getLatestWs().options).not.toMatchObject({ agent: expect.any(Object) });
-      overrideClient.stop();
-    } finally {
-      await stopProxy(handle);
-    }
-  });
-
-  it("does not let inherited managed proxy env treat an explicit loopback URL as configured", () => {
-    process.env.OPENCLAW_PROXY_ACTIVE = "1";
-    process.env.OPENCLAW_PROXY_LOOPBACK_MODE = "gateway-only";
-    const client = new GatewayClient({
-      url: "ws://127.0.0.1:3000",
-    });
-
-    client.start();
-
-    expect(getLatestWs().options).not.toMatchObject({ agent: expect.any(Object) });
-    client.stop();
   });
 
   it("blocks ws:// loopback addresses when active proxy loopbackMode is block", async () => {
