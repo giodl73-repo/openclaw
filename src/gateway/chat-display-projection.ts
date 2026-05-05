@@ -163,43 +163,6 @@ function sanitizeAssistantPhasedContentBlocks(content: unknown[]): {
   };
 }
 
-function sanitizeBlockedOriginalContentMeta(
-  meta: unknown,
-  maxChars: number,
-): { meta: unknown; changed: boolean } {
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
-    return { meta, changed: false };
-  }
-  const openclaw = meta as Record<string, unknown>;
-  const originalBlockedContent = openclaw.originalBlockedContent;
-  if (
-    !originalBlockedContent ||
-    typeof originalBlockedContent !== "object" ||
-    Array.isArray(originalBlockedContent)
-  ) {
-    return { meta, changed: false };
-  }
-  const blocked = originalBlockedContent as Record<string, unknown>;
-  const content = blocked.content;
-  if (!Array.isArray(content)) {
-    return { meta, changed: false };
-  }
-  const updated = content.map((block) => sanitizeChatHistoryContentBlock(block, { maxChars }));
-  if (!updated.some((item) => item.changed)) {
-    return { meta, changed: false };
-  }
-  return {
-    meta: {
-      ...openclaw,
-      originalBlockedContent: {
-        ...blocked,
-        content: updated.map((item) => item.block),
-      },
-    },
-    changed: true,
-  };
-}
-
 function toFiniteNumber(x: unknown): number | undefined {
   return typeof x === "number" && Number.isFinite(x) ? x : undefined;
 }
@@ -339,14 +302,6 @@ function sanitizeChatHistoryMessage(
       const res = truncateChatHistoryText(stripped.text, maxChars);
       entry.text = res.text;
       changed ||= stripped.changed || res.truncated;
-    }
-  }
-
-  if ("__openclaw" in entry) {
-    const sanitized = sanitizeBlockedOriginalContentMeta(entry.__openclaw, maxChars);
-    if (sanitized.changed) {
-      entry.__openclaw = sanitized.meta;
-      changed = true;
     }
   }
 
