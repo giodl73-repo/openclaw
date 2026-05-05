@@ -100,6 +100,9 @@ importers:
       '@mozilla/readability':
         specifier: ^0.6.0
         version: 0.6.0
+      '@openclaw/oc-doctor':
+        specifier: workspace:*
+        version: link:packages/oc-doctor
       '@openclaw/oc-lint':
         specifier: workspace:*
         version: link:packages/oc-lint
@@ -1625,6 +1628,28 @@ importers:
         version: link:../..
 
   packages/memory-host-sdk: {}
+
+  packages/oc-doctor:
+    dependencies:
+      '@openclaw/oc-lint':
+        specifier: workspace:*
+        version: link:../oc-lint
+      '@openclaw/oc-path':
+        specifier: workspace:*
+        version: link:../oc-path
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      '@vitest/coverage-v8':
+        specifier: ^4.0.0
+        version: 4.1.5(@vitest/browser@4.1.5)(vitest@4.1.5)
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.0
+        version: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@20.19.39)(@vitest/browser-playwright@4.1.5)(@vitest/coverage-v8@4.1.5)(jsdom@29.1.1(@noble/hashes@2.0.1))(vite@8.0.10(@types/node@20.19.39)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/oc-lint:
     dependencies:

@@ -1,0 +1,51 @@
+{
+  "name": "@openclaw/oc-doctor",
+  "version": "0.1.0",
+  "description": "OpenClaw oc-paths PR-3 prototype: ocPathFixerContribution adapter wrapping OcPath-aware fixers into existing registerDoctorHealthContribution; ships starter-v0 starter pack.",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./plugin-sdk": {
+      "types": "./dist/plugin-sdk/oc-doctor/index.d.ts",
+      "import": "./dist/plugin-sdk/oc-doctor/index.js"
+    },
+    "./fixers-starter": {
+      "types": "./dist/extensions/ocdoctor-fixers-starter/index.d.ts",
+      "import": "./dist/extensions/ocdoctor-fixers-starter/index.js"
+    },
+    "./test-harness": {
+      "types": "./dist/test-harness/index.d.ts",
+      "import": "./dist/test-harness/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@openclaw/oc-path": "workspace:*",
+    "@openclaw/oc-lint": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "paths": {
+      "@openclaw/oc-path": ["../oc-path/dist/index.d.ts"],
+      "@openclaw/oc-path/*": ["../oc-path/dist/*"],
+      "@openclaw/oc-lint": ["../oc-lint/dist/index.d.ts"],
+      "@openclaw/oc-lint/*": ["../oc-lint/dist/*"]
+    }
+  }
+}
