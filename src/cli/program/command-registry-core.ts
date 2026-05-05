@@ -87,6 +87,11 @@ const coreEntrySpecs: readonly CommandGroupDescriptorSpec<
         exportName: "registerPathCommand",
       },
       {
+        commandNames: ["pinch"],
+        loadModule: () => import("./register.pinch.js"),
+        exportName: "registerPinchCommand",
+      },
+      {
         commandNames: ["migrate"],
         loadModule: () => import("./register.migrate.js"),
         exportName: "registerMigrateCommand",

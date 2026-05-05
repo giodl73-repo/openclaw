@@ -1,0 +1,62 @@
+{
+  "name": "@openclaw/oc-lint",
+  "version": "0.1.0",
+  "description": "OpenClaw lint framework. Bin: `openclaw-pinch` (cute-themed name; package identity stays `oc-lint`). Universal LintRule shape across md/jsonc/jsonl/yaml; rules consume oc-path's universal verbs. Cargo:Clippy \u2194 OpenClaw:Pinch (we're crab-themed).",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "openclaw-pinch": "./bin/openclaw-pinch.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./plugin-sdk": {
+      "types": "./dist/plugin-sdk/oc-lint/index.d.ts",
+      "import": "./dist/plugin-sdk/oc-lint/index.js"
+    },
+    "./runner": {
+      "types": "./dist/oc-lint/index.d.ts",
+      "import": "./dist/oc-lint/index.js"
+    },
+    "./rules-starter": {
+      "types": "./dist/extensions/oclint-rules-starter/index.d.ts",
+      "import": "./dist/extensions/oclint-rules-starter/index.js"
+    },
+    "./test-harness": {
+      "types": "./dist/test-harness/index.d.ts",
+      "import": "./dist/test-harness/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@openclaw/oc-path": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test"
+  }
+}

@@ -42,6 +42,12 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
+    name: "pinch",
+    description:
+      "OpenClaw lint framework — run plugin-contributed rules over workspace artifacts (run / lint / list-rules)",
+    hasSubcommands: true,
+  },
+  {
     name: "migrate",
     description: "Import state from another agent system",
     hasSubcommands: true,

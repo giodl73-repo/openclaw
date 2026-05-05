@@ -1725,7 +1725,8 @@
     "ws": "^8.20.0",
     "yaml": "^2.8.4",
     "zod": "^4.4.3",
-    "@openclaw/oc-path": "workspace:*"
+    "@openclaw/oc-path": "workspace:*",
+    "@openclaw/oc-lint": "workspace:*"
   },
   "devDependencies": {
     "@copilotkit/aimock": "1.17.0",
