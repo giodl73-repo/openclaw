@@ -32,8 +32,10 @@ export {
   WORKSPACE_CONFIG_PATH,
   WorkspaceConfigError,
   filterByOnlyGlobs,
+  jsoncValueToJs,
   loadWorkspaceConfig,
   matchRuleIdGlob,
+  parseJsoncToPlain,
   type WorkspaceConfig,
   type WorkspaceConfigErrorCode,
 } from './config.js';

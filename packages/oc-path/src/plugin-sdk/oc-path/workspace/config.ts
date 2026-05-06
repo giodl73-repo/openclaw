@@ -75,8 +75,13 @@ export class WorkspaceConfigError extends Error {
  * expect (Record / array / scalar). Strips `line` metadata on the
  * way through — consumers reading `cfg.lint.skip` shouldn't see the
  * AST internals.
+ *
+ * Exported so other substrates (policy, lkg) can parse `.jsonc` files
+ * (with comments + trailing commas) without re-implementing JSON.parse
+ * fallbacks. See `parseJsoncToPlain` in this module for the one-shot
+ * convenience wrapper.
  */
-function jsoncValueToJs(value: JsoncValue): unknown {
+export function jsoncValueToJs(value: JsoncValue): unknown {
   switch (value.kind) {
     case 'object':
       return Object.fromEntries(
@@ -91,6 +96,23 @@ function jsoncValueToJs(value: JsoncValue): unknown {
     case 'null':
       return null;
   }
+}
+
+/**
+ * One-shot: parse a JSONC string to plain JS. Convenience wrapper
+ * around `parseJsonc` + `jsoncValueToJs`. Consumers that historically
+ * called `JSON.parse(raw)` on `.jsonc` content (and silently choked on
+ * comments / trailing commas) can swap to this.
+ *
+ * Throws on parse failure with the same diagnostic message the parser
+ * produced. Returns `null` for an empty / whitespace-only document.
+ */
+export function parseJsoncToPlain(raw: string): unknown {
+  const result = parseJsonc(raw);
+  const fatal = result.diagnostics.find((d) => d.severity === 'error');
+  if (fatal !== undefined) throw new Error(`jsonc parse failed: ${fatal.message}`);
+  if (result.ast.root === null) return null;
+  return jsoncValueToJs(result.ast.root);
 }
 
 /**

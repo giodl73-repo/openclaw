@@ -133,14 +133,18 @@ export { slugify } from './slug.js';
 export {
   OPENCLAW_WORKSPACE_ROLES,
   WORKSPACE_CONFIG_PATH,
+  WorkspaceConfigError,
   buildWorkspaceManifest,
   filterByOnlyGlobs,
+  jsoncValueToJs,
   loadWorkspaceConfig,
   matchRuleIdGlob,
+  parseJsoncToPlain,
   roleForBasename,
   type BuildWorkspaceManifestOptions,
   type OpenClawWorkspaceRole,
   type WorkspaceConfig,
+  type WorkspaceConfigErrorCode,
   type WorkspaceManifest,
   type WorkspaceManifestEntry,
 } from './workspace/index.js';
