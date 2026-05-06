@@ -312,4 +312,43 @@ describe('openclaw-pinch CLI', () => {
     const r = await runCliCapture(['run', dir]);
     expect(r.exitCode).toBe(0);
   });
+
+  it('CLI-19 malformed workspace.json surfaces WORKSPACE_CONFIG_PARSE_FAILED code', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pinch-ws-bad-'));
+    writeFileSync(join(dir, 'AGENTS.md'), '## Tools\n', 'utf-8');
+    writeFileSync(join(dir, 'workspace.json'), '{ this is not valid', 'utf-8');
+    const r = await runCliCapture(['run', dir]);
+    expect(r.exitCode).toBe(2);
+    const json = JSON.parse(r.stdoutLines[0]!);
+    expect(json.ok).toBe(false);
+    expect(json.code).toBe('WORKSPACE_CONFIG_PARSE_FAILED');
+    expect(json.error).toMatch(/parse failed/);
+  });
+
+  it('CLI-20 lint.skip:["*"] surfaces rulesRun=0 and warning in summary', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pinch-ws-skip-all-'));
+    writeFileSync(join(dir, 'AGENTS.md'), '## Tools\n', 'utf-8');
+    writeFileSync(
+      join(dir, 'workspace.json'),
+      JSON.stringify({ lint: { skip: ['*'] } }),
+      'utf-8',
+    );
+    const r = await runCliCapture(['run', dir]);
+    expect(r.exitCode).toBe(0);
+    const json = JSON.parse(r.stdoutLines[0]!);
+    expect(json.rulesRun).toBe(0);
+    expect(json.rulesDisabledByConfig).toBeGreaterThan(0);
+    expect(json.rulesRegistered).toBeGreaterThan(0);
+    expect(json.diagnostics).toEqual([]);
+  });
+
+  it('CLI-21 normal run surfaces rulesRun > 0 and rulesDisabledByConfig = 0', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pinch-ws-baseline-'));
+    writeFileSync(join(dir, 'AGENTS.md'), '## Tools\n', 'utf-8');
+    const r = await runCliCapture(['run', dir]);
+    const json = JSON.parse(r.stdoutLines[0]!);
+    expect(json.rulesRun).toBeGreaterThan(0);
+    expect(json.rulesDisabledByConfig).toBe(0);
+    expect(json.rulesRegistered).toBe(json.rulesRun);
+  });
 });

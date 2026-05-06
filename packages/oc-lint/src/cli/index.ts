@@ -174,12 +174,22 @@ async function runCmdRun(
     (d) => SEVERITY_RANK[d.severity] >= severityMin,
   );
 
+  // Visibility for "everything was disabled by workspace.json" — without
+  // this, `lint.skip:["*"]` produces filesLinted=N, diagnostics=[] and the
+  // operator sees a clean run when in fact NO rule fired. Surface the gap
+  // in both JSON metadata and the human summary.
+  const rulesRegistered = allRules.length;
+  const rulesRun = rules.length - overrides.disabledRuleIds.size;
+
   emit(
     out,
     {
       ok: filtered.length === 0,
       workspaceDir: dir,
       filesLinted: files.length,
+      rulesRegistered,
+      rulesRun,
+      rulesDisabledByConfig: overrides.disabledRuleIds.size,
       diagnostics: filtered.map((d) => ({
         ruleId: d.ruleId,
         severity: d.severity,
@@ -190,7 +200,10 @@ async function runCmdRun(
       })),
     },
     [
-      `openclaw-pinch: ran ${rules.length} rule(s) over ${files.length} file(s) in ${dir}`,
+      `openclaw-pinch: ran ${rulesRun} rule(s) over ${files.length} file(s) in ${dir}`,
+      ...(rulesRun === 0
+        ? [`  WARNING: all ${rulesRegistered} registered rule(s) disabled by workspace.json or --skip`]
+        : []),
       ...(filtered.length === 0
         ? ['  no findings ✓']
         : filtered.map(
@@ -499,7 +512,15 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    emit(out, { ok: false, error: msg }, [`openclaw-pinch: error: ${msg}`]);
+    // Preserve the failure-mode code from typed substrate errors
+    // (e.g. WorkspaceConfigError from @openclaw/oc-path). Without this
+    // a malformed workspace.json collapses to a generic error and
+    // operators can't distinguish operator-typo from substrate bug.
+    const code =
+      err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : 'ERR_INTERNAL';
+    emit(out, { ok: false, error: msg, code }, [`openclaw-pinch: error [${code}]: ${msg}`]);
     return 2;
   }
 }
