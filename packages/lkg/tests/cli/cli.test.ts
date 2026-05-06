@@ -197,6 +197,27 @@ describe('openclaw-cage CLI', () => {
     expect(json.skippedByConfig).toBeGreaterThan(0);
   });
 
+  it('CLI-LKG-15 status detects orphan tracker (file deleted since promote)', async () => {
+    const { mkdtempSync, rmSync, writeFileSync: wsync } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'oc-lkg-orphan-'));
+    wsync(join(dir, 'AGENTS.md'), '## Tools\n- gh\n## Boundaries\n- never rm -rf\n', 'utf-8');
+    wsync(join(dir, 'gateway.jsonc'), '{ "version": "0.1.0" }\n', 'utf-8');
+    // First, promote — captures both files into LKG.
+    const promoteR = await captureCli(['promote', dir]);
+    expect(promoteR.exitCode).toBe(0);
+    // Delete gateway.jsonc — it's now an orphan.
+    rmSync(join(dir, 'gateway.jsonc'));
+    // Status should detect the orphan.
+    const r = await captureCli(['status', dir]);
+    expect(r.exitCode).toBe(1); // ok=false because of orphan
+    const json = JSON.parse(r.out.join(''));
+    expect(json.orphanCount).toBe(1);
+    expect(json.orphans[0].relPath).toMatch(/gateway\.jsonc$/);
+    expect(json.orphans[0].lastPromotedHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(json.byOutcome.orphan).toBe(1);
+    expect(json.ok).toBe(false);
+  });
+
   it('CLI-LKG-12 status surfaces LKG_STATE_FILE_CORRUPT on malformed state file', async () => {
     const dir = makeFixtureWorkspace();
     mkdirSync(join(dir, '.openclaw'));

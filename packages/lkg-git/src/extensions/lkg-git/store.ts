@@ -272,6 +272,16 @@ export class GitLKGStore implements LKGStore {
     return reg.cachedEntry;
   }
 
+  async listPaths(): Promise<readonly string[]> {
+    const out: string[] = [];
+    for (const [path, reg] of this.trackers) {
+      // Only paths that have actually been promoted are meaningful
+      // — a freshly-registered tracker has an empty cachedEntry.
+      if (reg.cachedEntry.lastPromotedGood !== undefined) out.push(path);
+    }
+    return out;
+  }
+
   // ---------- Labeled pins (upgrade-recovery) -----------------------------
   // Mapping: label `<name>` ⇔ git tag `lkg/<name>` at HEAD. Rollback
   // restores tracked paths from `git checkout lkg/<name> -- <relPath>`.

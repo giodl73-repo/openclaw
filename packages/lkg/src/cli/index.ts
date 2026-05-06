@@ -44,7 +44,7 @@
 
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
+import { relative, resolve as resolvePath } from 'node:path';
 import {
   REDACTED_SENTINEL,
   buildWorkspaceManifest,
@@ -236,23 +236,51 @@ async function runCmdStatus(argv: readonly string[], out: OutputContext): Promis
     if (summary.outcome === 'failed') failedCount++;
   }
 
+  // Detect ORPHANS — paths the LKG remembers but that the manifest walk
+  // didn't reach (deleted / moved / .gitignored). Without this, a deleted
+  // canonical file silently drops out of the report (claws-hapi F-019).
+  //
+  // Two-step shape (path list, then per-orphan detail) so we don't ship
+  // the labels-map for entries we're about to discard. For typical
+  // workspaces N is small (~10-30 canonical files); even at large N the
+  // hot loop is set membership.
+  const observedPathSet = new Set(registration.registered.map((e) => e.path));
+  const orphans: Array<{ relPath: string; lastPromotedHash: string | null; lastPromotedAt: string | null }> = [];
+  const trackedPaths = await store.listPaths();
+  for (const path of trackedPaths) {
+    if (observedPathSet.has(path)) continue;
+    const entry = store.getEntry(path);
+    if (entry?.lastPromotedGood === undefined) continue;
+    orphans.push({
+      relPath: relative(dir, path),
+      lastPromotedHash: entry.lastPromotedGood.hash,
+      lastPromotedAt: entry.lastPromotedGood.observedAt,
+    });
+  }
+
+  const ok = failedCount === 0 && orphans.length === 0;
   emit(
     out,
     {
-      ok: failedCount === 0,
+      ok,
       workspaceDir: dir,
       walkedFiles: manifest.walkedFiles,
       tracked: registration.registered.length,
       observed: observations.length,
       skippedByConfig: skipped.length,
+      orphanCount: orphans.length,
       observations,
       skipped,
-      byOutcome: countByOutcome(observations.map((o) => o.outcome)),
+      orphans,
+      byOutcome: { ...countByOutcome(observations.map((o) => o.outcome)), orphan: orphans.length },
     },
     [
       `openclaw-cage status: ${dir}`,
       `  walked: ${manifest.walkedFiles} file(s)`,
       `  tracked: ${registration.registered.length} canonical artifact(s)`,
+      ...(orphans.length > 0
+        ? [`  ORPHANS: ${orphans.length} tracked path(s) missing from disk`, ...orphans.map((o) => `    [orphan] ${o.relPath}  lastPromoted=${o.lastPromotedHash?.slice(0, 12) ?? '?'}…  at ${o.lastPromotedAt ?? '?'}`)]
+        : []),
       ...(skipped.length > 0
         ? [`  skipped (config): ${skipped.length}`, ...skipped.map((s) => `    [skipped] ${s.relPath}  role=${s.role}  (${s.reason})`)]
         : []),
@@ -264,7 +292,7 @@ async function runCmdStatus(argv: readonly string[], out: OutputContext): Promis
       ),
     ],
   );
-  return failedCount === 0 ? 0 : 1;
+  return ok ? 0 : 1;
 }
 
 /**

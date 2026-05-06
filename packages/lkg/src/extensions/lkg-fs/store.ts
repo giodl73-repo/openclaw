@@ -332,6 +332,11 @@ export class FsLKGStore implements LKGStore {
     return this.entries.get(this.normalizePath(path)) ?? null;
   }
 
+  async listPaths(): Promise<readonly string[]> {
+    await this.loadStateOnce();
+    return [...this.entries.keys()];
+  }
+
   // ---------- Labeled pins (upgrade-recovery) -----------------------------
 
   async promoteAll(opts?: PromoteAllOptions): Promise<PromoteAllResult> {

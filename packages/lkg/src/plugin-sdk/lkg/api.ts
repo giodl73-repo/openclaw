@@ -121,6 +121,26 @@ export interface LKGStore {
   getEntry(path: string): LKGEntry | null;
 
   /**
+   * List every path the store has promoted bytes for. Returns just
+   * the path keys — operators wanting per-entry detail (fingerprint,
+   * label map) call `getEntry(path)` on the ones they care about.
+   *
+   * Used by `cage status` for ORPHAN detection (set-diff: tracked-here
+   * minus reachable-from-manifest-walk). Returning paths only avoids
+   * shipping the labels map for entries we're about to discard.
+   *
+   * Backend-specific freshness:
+   * - FS impl: lazy-loads state from `<root>/.openclaw/lkg-health.json`.
+   * - Git impl: returns the in-process tracker cache (entries hydrate
+   *   on first `register` / `observe`).
+   *
+   * Future: a `{label?}` filter could scope to a cohort for upgrade
+   * scenarios. Not added now — the only consumer (orphan detection)
+   * doesn't need it.
+   */
+  listPaths(): Promise<readonly string[]>;
+
+  /**
    * Workspace-wide promote. Observes every registered tracker,
    * promotes each that validates, and (if a label was passed) pins
    * the cohort atomically: ALL trackers must be valid, else NOTHING
