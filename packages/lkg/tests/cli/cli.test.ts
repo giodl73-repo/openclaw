@@ -3,7 +3,7 @@
  * list-trackers / fingerprint / help end-to-end against a real
  * temp-directory workspace.
  */
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -195,6 +195,41 @@ describe('openclaw-cage CLI', () => {
     const json = JSON.parse(r.out.join(''));
     expect(json.observed).toBe(0);
     expect(json.skippedByConfig).toBeGreaterThan(0);
+  });
+
+  it('CLI-LKG-12 status surfaces LKG_STATE_FILE_CORRUPT on malformed state file', async () => {
+    const dir = makeFixtureWorkspace();
+    mkdirSync(join(dir, '.openclaw'));
+    writeFileSync(join(dir, '.openclaw', 'lkg-health.json'), '{ this is not valid', 'utf-8');
+    const r = await captureCli(['status', dir]);
+    expect(r.exitCode).toBe(2);
+    const errBody = JSON.parse(r.err.join(''));
+    expect(errBody.error.code).toBe('LKG_STATE_FILE_CORRUPT');
+    expect(errBody.error.message).toMatch(/parse failed/);
+  });
+
+  it('CLI-LKG-13 status surfaces LKG_STATE_FILE_VERSION_MISMATCH on future-version state', async () => {
+    const dir = makeFixtureWorkspace();
+    mkdirSync(join(dir, '.openclaw'));
+    writeFileSync(
+      join(dir, '.openclaw', 'lkg-health.json'),
+      JSON.stringify({ version: '9.9.9', entries: {} }),
+      'utf-8',
+    );
+    const r = await captureCli(['status', dir]);
+    expect(r.exitCode).toBe(2);
+    const errBody = JSON.parse(r.err.join(''));
+    expect(errBody.error.code).toBe('LKG_STATE_FILE_VERSION_MISMATCH');
+    expect(errBody.error.message).toMatch(/9\.9\.9/);
+  });
+
+  it('CLI-LKG-14 status surfaces WORKSPACE_CONFIG_PARSE_FAILED on malformed workspace.json', async () => {
+    const dir = makeFixtureWorkspace();
+    writeFileSync(join(dir, 'workspace.json'), '{ this is not valid', 'utf-8');
+    const r = await captureCli(['status', dir]);
+    expect(r.exitCode).toBe(2);
+    const errBody = JSON.parse(r.err.join(''));
+    expect(errBody.error.code).toBe('WORKSPACE_CONFIG_PARSE_FAILED');
   });
 
   it('CLI-LKG-11 closed-pipe writes (sync EPIPE) exit gracefully', async () => {

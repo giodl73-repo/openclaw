@@ -733,7 +733,18 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     }
   } catch (err) {
     if (isClosedPipeError(err)) return 0;
-    emitError(out, err instanceof Error ? err.message : String(err), 'ERR_INTERNAL');
+    // Preserve typed error codes (LKGError, WorkspaceConfigError) so
+    // operators can branch on LKG_STATE_FILE_CORRUPT /
+    // LKG_STATE_FILE_VERSION_MISMATCH / WORKSPACE_CONFIG_PARSE_FAILED
+    // instead of the catch-all ERR_INTERNAL. The per-verb catches above
+    // already handle promote / rollback / delete-label paths; this is
+    // the safety net for verbs without their own try/catch (e.g.
+    // `cage status`, where state-file load happens lazily inside observe).
+    const code =
+      err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : 'ERR_INTERNAL';
+    emitError(out, err instanceof Error ? err.message : String(err), code);
     return 2;
   } finally {
     teardownStdout();
