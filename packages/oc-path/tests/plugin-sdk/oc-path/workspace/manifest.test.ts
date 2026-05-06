@@ -63,6 +63,12 @@ describe('roleForBasename', () => {
     expect(roleForBasename('events.jsonl')?.id).toBe('session.jsonl');
   });
 
+  it('M-RB-05b matches uuid- and timestamp-named .jsonl (claude-code style)', () => {
+    expect(roleForBasename('f47ac10b-58cc-4372-a567-0e02b2c3d479.jsonl')?.id).toBe('session.jsonl');
+    expect(roleForBasename('2026-01-15T10-30-00.jsonl')?.id).toBe('session.jsonl');
+    expect(roleForBasename('any-name.jsonl')?.id).toBe('session.jsonl');
+  });
+
   it('M-RB-06 matches *.lobster as lobster.workflow', () => {
     expect(roleForBasename('build.lobster')?.id).toBe('lobster.workflow');
     expect(roleForBasename('test.lobster')?.id).toBe('lobster.workflow');

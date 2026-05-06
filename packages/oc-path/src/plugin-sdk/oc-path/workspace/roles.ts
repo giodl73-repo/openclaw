@@ -38,7 +38,14 @@ export interface OpenClawWorkspaceRole {
 
 const CONFIG_PREFIX_RE = /^(?:gateway|openclaw|config)([.-][^.]+)?\.jsonc$/;
 const POLICY_PREFIX_RE = /^policy([.-][^.]+)?\.jsonc$/;
-const SESSION_PREFIX_RE = /^(?:session|audit|events)([.-][^.]+)?\.jsonl$/;
+// Accept any `.jsonl` as a session-log candidate. The earlier
+// prefix-required form (`session|audit|events` + optional suffix) ruled
+// out claude-code-style uuid-named logs (`f47ac10b-58cc-4372-...jsonl`)
+// and timestamp-named logs (`2026-01-15T10-30-00.jsonl`). The jsonl
+// content rules then determine whether the file actually parses as a
+// session stream — a permissive name + strict content gate is more
+// useful in practice than a strict name + permissive content gate.
+const SESSION_JSONL_RE = /\.jsonl$/;
 
 /**
  * The curated openclaw role set. Order is documentation-meaningful
@@ -110,7 +117,7 @@ export const OPENCLAW_WORKSPACE_ROLES: readonly OpenClawWorkspaceRole[] = [
     id: 'session.jsonl',
     kind: 'jsonl',
     description: 'Agent session / audit / event logs',
-    matchesBasename: (n) => SESSION_PREFIX_RE.test(n),
+    matchesBasename: (n) => SESSION_JSONL_RE.test(n),
   },
 
   // Tier 4 — lobster workflows (yaml-shaped).
