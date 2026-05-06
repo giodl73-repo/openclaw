@@ -816,7 +816,14 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     }
   } catch (err) {
     if (isClosedPipeError(err)) return 0; // graceful exit on closed pipe
-    emitError(out, err instanceof Error ? err.message : String(err), 'ERR_INTERNAL');
+    // Preserve typed error codes (e.g. WorkspaceConfigError from
+    // @openclaw/oc-path's loadWorkspaceConfig). Operators can branch
+    // on WORKSPACE_CONFIG_PARSE_FAILED instead of catch-all ERR_INTERNAL.
+    const code =
+      err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : 'ERR_INTERNAL';
+    emitError(out, err instanceof Error ? err.message : String(err), code);
     return 2;
   } finally {
     teardownStdout();

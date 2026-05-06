@@ -398,4 +398,13 @@ describe('openclaw-policy CLI', () => {
     expect(calls).toBeGreaterThan(0);
     expect(exitCode).toBe(0); // graceful — no throw, return 0
   });
+
+  it('CLI-POLICY-N1 generate surfaces WORKSPACE_CONFIG_PARSE_FAILED on malformed workspace.json', async () => {
+    const ws = makeFixtureWorkspace();
+    writeFileSync(join(ws, 'workspace.json'), '{ this is not valid', 'utf-8');
+    const r = await captureCli(['generate', ws]);
+    expect(r.exitCode).toBe(2);
+    const errBody = JSON.parse(r.err.join(''));
+    expect(errBody.error.code).toBe('WORKSPACE_CONFIG_PARSE_FAILED');
+  });
 });
