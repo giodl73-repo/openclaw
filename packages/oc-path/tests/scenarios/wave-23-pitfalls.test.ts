@@ -8,11 +8,9 @@
  * pitfall has a positive validation here; DEFERRED ones are covered
  * as documented limits with a `.skip` note.
  *
- * **Namespace note**: substrate pitfall IDs (P-001 … P-040) are a
- * separate namespace from the claws-side `docs/PITFALLS.md`
- * governance taxonomy (which uses P-NNN for completely different
- * pitfalls — e.g., P-033 there is "Memory poisoning"). The package
- * boundary disambiguates.
+ * **Namespace note**: substrate pitfall IDs (P-001 … P-040) are
+ * package-local; consumers may have their own P-NNN taxonomies for
+ * different pitfalls. The package boundary disambiguates.
  */
 import { describe, expect, it } from 'vitest';
 import {

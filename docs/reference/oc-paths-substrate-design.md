@@ -86,7 +86,7 @@ This branch (`substrate/oc-paths`) demonstrates four integration points:
 
 3. **Replace `loadWorkspaceBootstrapFiles`'s ad-hoc walker** with `buildWorkspaceManifest`. Same files, but every consumer now references `oc://` URIs in audit envelopes — cross-substrate correlation falls out free.
 
-4. **Sentinel-DoS guardrail** at every `emit*` call. Closes `B1` from claws-side R2 review: refuse to write redacted-view bytes to disk no matter where they came from.
+4. **Sentinel-DoS guardrail** at every `emit*` call: refuse to write redacted-view bytes to disk no matter where they came from.
 
 ## Open questions
 
@@ -97,9 +97,9 @@ This branch (`substrate/oc-paths`) demonstrates four integration points:
 
 ## Test surface
 
-- `packages/oc-path/tests/` — 743 tests across 46 files in the source repo (claws-hapi). Covers grammar parsing, AST verbs, per-kind round-trip, sentinel guard, manifest builder, workspace.json loader, and CLI bin.
+- `packages/oc-path/tests/` — 745+ tests across 46 files. Covers grammar parsing, AST verbs, per-kind round-trip, sentinel guard, manifest builder, workspace.json loader, and CLI bin.
 - Real-world validation: 25-fixture suite at `validation/` runs the substrate against 13 community OpenClaw-shaped repos (zod, dyad, kitcn, hexis, stackflow, codebattle, banjo, dialtone, alkem-io-server, chordsheetjs, immich-discord-bot, aztec-editor-android, spec-to-agents, microsoft/spec-to-agents) plus 12 synthetic edge-case fixtures.
 
 ## Provenance
 
-Drafted with Claude Opus 4.7 (1M context) by giodl@microsoft.com (claws monorepo / Microsoft). Full design narrative + sister substrate PRs (pinch lint, oc-doctor, lkg-cage, policy-anchoring) drafted at `lobster-docs` (Microsoft GHE internal); migration to public form lives on this fork's `substrate/*` branches.
+Drafted with Claude Opus 4.7 (1M context). Companion substrate designs (pinch lint, oc-doctor, lkg-cage, policy-anchoring) live alongside this file under `docs/reference/`.

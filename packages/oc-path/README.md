@@ -1,10 +1,10 @@
 # `@openclaw/oc-path`
 
-claws-hapi prototype of the upstream `oc-paths` package's PR-1 substrate.
+Substrate package for the openclaw workspace-walk + role-detection +
+parsing layer. Backs the `openclaw path` verb and is consumed by
+`openclaw-pinch`, `openclaw-cage`, `openclaw-policy`, and the doctor.
 
 ## What this package contains
-
-The substrate that PR-1 of the [`oc-paths` upstream package](https://microsoft.ghe.com/bic/lobster/blob/main/project-lobster-vault/Tech/OpenClaw/specs/proposals/upstream/oc-paths.md) proposes:
 
 - **Generic-MD AST** (`WorkspaceMdAst`, `AstBlock`, `AstItem`, `AstTable`, `AstCodeBlock`, `FrontmatterEntry`) — opinion-free addressing index over the 8 workspace files
 - **OcPath types** + `parseOcPath` / `formatOcPath` / `isValidOcPath` — universal `oc://` addressing scheme

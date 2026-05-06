@@ -1,8 +1,8 @@
 /**
- * `@openclaw/oc-path` — claws-hapi prototype of the upstream
- * `@openclaw/oc-path` substrate. Exports re-export `./plugin-sdk/oc-path/`
- * verbatim; the directory layout exists so the prototype mirrors what
- * lands in `openclaw-core/src/plugin-sdk/oc-path/` 1:1.
+ * `@openclaw/oc-path` — substrate for the workspace-walk + role-detection
+ * + parsing + workspace-config layer. Exports re-export `./plugin-sdk/
+ * oc-path/` verbatim; the directory layout exists so consumers can
+ * import either from the package root or from the `./plugin-sdk` slice.
  *
  * @module @openclaw/oc-path
  */

@@ -3,12 +3,10 @@
 Pitfall IDs used inside this package — by `wave-23-pitfalls.test.ts`, by
 inline `// P-NNN` comments in `find.ts`, `oc-path.ts`, and elsewhere.
 
-**Scope**: ONLY the OcPath substrate's pitfall taxonomy. This is a
-**separate namespace** from the claws-side governance taxonomy in
-`/docs/PITFALLS.md` (which numbers a different set of pitfalls — e.g.,
-P-033 there is "Memory poisoning"). The two namespaces deliberately
-overlap in number range; the prefix context (`oc-paths-substrate/`
-vs. claws root) disambiguates.
+**Scope**: ONLY the OcPath substrate's pitfall taxonomy. P-NNN IDs in
+this file are package-local; consumers may use the same number range
+for unrelated pitfalls. The package prefix (`oc-path/...`)
+disambiguates.
 
 Each pitfall is locked by at least one test. `MITIGATED` = substrate
 defends; `REJECTED` = parser/runner rejects with `OcPathError`;
