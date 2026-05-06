@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  WorkspaceConfigError,
   filterByOnlyGlobs,
   loadWorkspaceConfig,
   matchRuleIdGlob,
@@ -79,6 +80,25 @@ describe('loadWorkspaceConfig', () => {
     const dir = mkdtempSync(join(tmpdir(), 'wsc-array-'));
     writeFileSync(join(dir, 'workspace.json'), '[1, 2, 3]', 'utf-8');
     await expect(loadWorkspaceConfig(dir)).rejects.toThrow(/object at the root/);
+  });
+
+  it('LWC-08 parse failure throws WorkspaceConfigError with WORKSPACE_CONFIG_PARSE_FAILED code', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wsc-typed-parse-'));
+    writeFileSync(join(dir, 'workspace.json'), '{ this is not valid', 'utf-8');
+    await expect(loadWorkspaceConfig(dir)).rejects.toMatchObject({
+      name: 'WorkspaceConfigError',
+      code: 'WORKSPACE_CONFIG_PARSE_FAILED',
+    });
+    await expect(loadWorkspaceConfig(dir)).rejects.toBeInstanceOf(WorkspaceConfigError);
+  });
+
+  it('LWC-09 not-an-object throws WorkspaceConfigError with WORKSPACE_CONFIG_NOT_OBJECT code', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wsc-typed-array-'));
+    writeFileSync(join(dir, 'workspace.json'), '[1, 2, 3]', 'utf-8');
+    await expect(loadWorkspaceConfig(dir)).rejects.toMatchObject({
+      name: 'WorkspaceConfigError',
+      code: 'WORKSPACE_CONFIG_NOT_OBJECT',
+    });
   });
 });
 

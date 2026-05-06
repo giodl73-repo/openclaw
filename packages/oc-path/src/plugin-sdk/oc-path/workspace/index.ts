@@ -30,8 +30,10 @@ export {
 } from './manifest.js';
 export {
   WORKSPACE_CONFIG_PATH,
+  WorkspaceConfigError,
   filterByOnlyGlobs,
   loadWorkspaceConfig,
   matchRuleIdGlob,
   type WorkspaceConfig,
+  type WorkspaceConfigErrorCode,
 } from './config.js';

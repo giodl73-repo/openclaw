@@ -45,6 +45,32 @@ export const WORKSPACE_CONFIG_PATH: 'workspace.json' = 'workspace.json';
 export type WorkspaceConfig = Readonly<Record<string, unknown>>;
 
 /**
+ * Stable error codes for workspace.json failures. Operators / CLI
+ * dispatchers branch on `code` (not message text) to decide whether
+ * a parse failure should fall back to defaults, halt the pipeline,
+ * or page someone.
+ */
+export type WorkspaceConfigErrorCode =
+  | 'WORKSPACE_CONFIG_PARSE_FAILED'
+  | 'WORKSPACE_CONFIG_NOT_OBJECT';
+
+/**
+ * Typed error thrown by `loadWorkspaceConfig` so CLI top-level
+ * catches can preserve the failure-mode code instead of collapsing
+ * to a generic `ERR_INTERNAL`.
+ */
+export class WorkspaceConfigError extends Error {
+  readonly code: WorkspaceConfigErrorCode;
+  readonly path: string;
+  constructor(code: WorkspaceConfigErrorCode, message: string, path: string) {
+    super(message);
+    this.name = 'WorkspaceConfigError';
+    this.code = code;
+    this.path = path;
+  }
+}
+
+/**
  * Convert a typed `JsoncValue` tree to the plain JS shape consumers
  * expect (Record / array / scalar). Strips `line` metadata on the
  * way through — consumers reading `cfg.lint.skip` shouldn't see the
@@ -102,15 +128,21 @@ export async function loadWorkspaceConfig(
   // hide a typo until something downstream fails.
   const fatal = result.diagnostics.find((d) => d.severity === 'error');
   if (fatal !== undefined) {
-    throw new Error(`workspace.json parse failed at ${path}: ${fatal.message}`);
+    throw new WorkspaceConfigError(
+      'WORKSPACE_CONFIG_PARSE_FAILED',
+      `workspace.json parse failed at ${path}: ${fatal.message}`,
+      path,
+    );
   }
   if (result.ast.root === null) {
     // Empty / whitespace-only file — treat as empty config.
     return {};
   }
   if (result.ast.root.kind !== 'object') {
-    throw new Error(
+    throw new WorkspaceConfigError(
+      'WORKSPACE_CONFIG_NOT_OBJECT',
       `workspace.json at ${path} must be a JSON object at the root (got ${result.ast.root.kind})`,
+      path,
     );
   }
   return jsoncValueToJs(result.ast.root) as WorkspaceConfig;
