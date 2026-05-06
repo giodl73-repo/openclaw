@@ -57,7 +57,7 @@ Walks files, matches `appliesTo` globs, dispatches rules, collects diagnostics. 
 
 | Pack | Kind | Rules | Source |
 |------|------|-------|--------|
-| `starter-v0` | md | 10 (agents/empty-tools-section, agents/missing-boundaries, tools/empty-guidance-table, memory/missing-frontmatter-scope, memory/invalid-scope-value, skill/missing-required-frontmatter, skill/invalid-tier-value, identity/missing-trust-level, user/missing-preferences-section, agents/duplicate-tool-key) | claws-side scenario waves |
+| `starter-v0` | md | 10 (agents/empty-tools-section, agents/missing-boundaries, tools/empty-guidance-table, memory/missing-frontmatter-scope, memory/invalid-scope-value, skill/missing-required-frontmatter, skill/invalid-tier-value, identity/missing-trust-level, user/missing-preferences-section, agents/duplicate-tool-key) | adversarial scenario sweeps |
 | `jsonc-starter-v0` | jsonc | 5 (config/missing-plugins, config/empty-plugins-entries, config/missing-version, config/secret-as-literal, config/no-duplicate-top-level-keys) | issues #74462, #76619, #65623, #62438 |
 | `jsonl-starter-v0` | jsonl | 4 (session/empty-log, session/missing-event-key, session/malformed-line, session/no-terminal-event) | #13700 cluster |
 | `lobster-yaml-starter-v0` | yaml (`*.lobster`) | 4 (step/shell-tool-collision, step/mutually-exclusive-body, step/duplicate-id, step/undefined-stdin-ref) | openclaw/lobster #25, #26, #41, #76, #77 |
@@ -106,7 +106,7 @@ This branch (`substrate/pinch`) demonstrates two integration points:
 ## Test surface
 
 - `packages/oc-lint/tests/` — 462 tests across 23 files. Covers contract types, registry, runner, all 4 starter packs, CLI argument parsing, severity overrides, output formatting (TTY-aware human/JSON), pipe-guard, sentinel scrub.
-- Real-world validation: 25-fixture suite at `validation/` (claws-hapi side) runs the substrate against 13 community OpenClaw-shaped repos plus 12 synthetic edge-case fixtures. Triggers found: F-002 (3 of 4 lint packs unreachable from CLI bootstrap, fixed), F-003 (CLAUDE.md not in canonical roles, open), F-005 (secret-as-literal false-positive on zero-filled placeholder hashes, open).
+- Real-world validation: a separate fixture-suite consumer runs the substrate against community OpenClaw-shaped repos plus synthetic edge-case fixtures. Real bugs surfaced in pre-PR validation include lint-pack registration gaps (fixed pre-merge), CLAUDE.md canonical-role coverage (tracked), and false-positive guards on placeholder hash strings.
 
 ## Provenance
 

@@ -44,6 +44,14 @@ export interface ResolvedLintOverrides {
   readonly disabledRuleIds: ReadonlySet<string>;
   readonly severityOverrides: Readonly<Record<string, LintSeverity>>;
   readonly onlyGlobs: readonly string[];
+  /**
+   * `lint.skip` glob patterns from workspace.json that matched zero
+   * registered rule IDs. Surfaced so the CLI can warn — operators
+   * upgrading past a rule rename otherwise believe the old ID is
+   * still skipped when in fact the new-name rule is enabled. Empty
+   * array if every pattern matched at least one rule.
+   */
+  readonly staleSkipPatterns: readonly string[];
 }
 
 /**
@@ -64,11 +72,17 @@ export function resolveLintOverrides(
   const wsOnly = section?.only ?? [];
 
   // Glob-expand workspace skips against registered rule IDs.
+  // Track patterns that matched zero IDs so the CLI can warn — operators
+  // upgrading past a rule rename otherwise miss that their old skip
+  // glob no longer applies (and the new-name rule is now firing).
   const disabled = new Set<string>();
+  const staleSkipPatterns: string[] = [];
   for (const glob of wsSkipGlobs) {
+    let matched = 0;
     for (const id of registeredRuleIds) {
-      if (matchRuleIdGlob(glob, id)) disabled.add(id);
+      if (matchRuleIdGlob(glob, id)) { disabled.add(id); matched++; }
     }
+    if (matched === 0) staleSkipPatterns.push(glob);
   }
   // CLI --skip is exact-id (matches existing pinch flag shape).
   for (const id of cliFlags.skip ?? []) disabled.add(id);
@@ -88,5 +102,6 @@ export function resolveLintOverrides(
     disabledRuleIds: disabled,
     severityOverrides: severity,
     onlyGlobs,
+    staleSkipPatterns,
   };
 }

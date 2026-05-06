@@ -342,6 +342,43 @@ describe('openclaw-pinch CLI', () => {
     expect(json.diagnostics).toEqual([]);
   });
 
+  it('CLI-22 stale skip patterns surface in summary', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pinch-stale-skip-'));
+    writeFileSync(join(dir, 'AGENTS.md'), '## Tools\n', 'utf-8');
+    writeFileSync(
+      join(dir, 'workspace.json'),
+      JSON.stringify({
+        lint: {
+          skip: [
+            'starter-v0/agents/missing-boundaries', // valid
+            'old-pack-v0/long-since-removed-rule', // stale
+            'pack-renamed/never-existed', // stale
+          ],
+        },
+      }),
+      'utf-8',
+    );
+    const r = await runCliCapture(['run', dir]);
+    const json = JSON.parse(r.stdoutLines[0]!);
+    expect(json.staleSkipPatterns).toHaveLength(2);
+    expect(json.staleSkipPatterns).toContain('old-pack-v0/long-since-removed-rule');
+    expect(json.staleSkipPatterns).toContain('pack-renamed/never-existed');
+    expect(json.rulesDisabledByConfig).toBe(1); // only the valid one
+  });
+
+  it('CLI-23 no stale patterns when every skip matches', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pinch-clean-skip-'));
+    writeFileSync(join(dir, 'AGENTS.md'), '## Tools\n', 'utf-8');
+    writeFileSync(
+      join(dir, 'workspace.json'),
+      JSON.stringify({ lint: { skip: ['starter-v0/agents/missing-boundaries'] } }),
+      'utf-8',
+    );
+    const r = await runCliCapture(['run', dir]);
+    const json = JSON.parse(r.stdoutLines[0]!);
+    expect(json.staleSkipPatterns).toEqual([]);
+  });
+
   it('CLI-21 normal run surfaces rulesRun > 0 and rulesDisabledByConfig = 0', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pinch-ws-baseline-'));
     writeFileSync(join(dir, 'AGENTS.md'), '## Tools\n', 'utf-8');

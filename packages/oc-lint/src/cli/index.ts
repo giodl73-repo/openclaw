@@ -190,6 +190,10 @@ async function runCmdRun(
       rulesRegistered,
       rulesRun,
       rulesDisabledByConfig: overrides.disabledRuleIds.size,
+      // Surface skip glob patterns from workspace.json that matched
+      // ZERO registered rule IDs — usually a rule was renamed/removed
+      // and the operator's skip config is stale.
+      staleSkipPatterns: overrides.staleSkipPatterns,
       diagnostics: filtered.map((d) => ({
         ruleId: d.ruleId,
         severity: d.severity,
@@ -203,6 +207,12 @@ async function runCmdRun(
       `openclaw-pinch: ran ${rulesRun} rule(s) over ${files.length} file(s) in ${dir}`,
       ...(rulesRun === 0
         ? [`  WARNING: all ${rulesRegistered} registered rule(s) disabled by workspace.json or --skip`]
+        : []),
+      ...(overrides.staleSkipPatterns.length > 0
+        ? [
+            `  WARNING: ${overrides.staleSkipPatterns.length} skip pattern(s) in workspace.json match no registered rule (renamed/removed?):`,
+            ...overrides.staleSkipPatterns.map((p) => `    - ${p}`),
+          ]
         : []),
       ...(filtered.length === 0
         ? ['  no findings ✓']

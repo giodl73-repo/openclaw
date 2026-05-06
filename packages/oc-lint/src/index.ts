@@ -1,6 +1,6 @@
 /**
- * `@openclaw/oc-lint` — claws-hapi prototype of the upstream
- * `@openclaw/oc-lint` package.
+ * `@openclaw/oc-lint` — lint substrate for the openclaw workspace; the
+ * runtime engine behind the `openclaw-pinch` CLI.
  *
  * @module @openclaw/oc-lint
  */

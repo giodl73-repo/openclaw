@@ -97,6 +97,27 @@ describe('jsonc-starter — config-secret-as-literal', () => {
       ).length,
     ).toBeGreaterThan(0);
   });
+  it('passes on all-zero placeholder hash (no false positive)', () => {
+    expect(
+      configSecretAsLiteral.check(
+        ctx('{ "policyId": "0000000000000000000000000000000000000000000000000000000000000000" }'),
+      ),
+    ).toHaveLength(0);
+  });
+  it('passes on all-f / all-deadbeef placeholder hashes', () => {
+    expect(
+      configSecretAsLiteral.check(
+        ctx('{ "a": "ffffffffffffffffffffffffffffffffffffffff", "b": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" }'),
+      ),
+    ).toHaveLength(0);
+  });
+  it('still flags real-entropy 40+char hex (no false negative)', () => {
+    expect(
+      configSecretAsLiteral.check(
+        ctx('{ "x": "5da345d2e7af56926e2fc4ad1a922a54d342edc3b1735e7af0c1cf41dce" }'),
+      ).length,
+    ).toBeGreaterThan(0);
+  });
 });
 
 describe('jsonc-starter — config-no-duplicate-top-level-keys', () => {

@@ -99,7 +99,7 @@ describe('wave-09 jsonc — secret-as-literal coverage matrix', () => {
     { name: 'Slack bot token', value: 'xoxb-1234567890-abcdefghij' },
     { name: 'OpenAI / Anthropic key', value: 'sk-abcdef0123456789abcdef0123456789ABCDEF' },
     { name: 'AWS access key ID', value: 'AKIAIOSFODNN7EXAMPLE' },
-    { name: 'generic 40-hex', value: 'a'.repeat(40) },
+    { name: 'generic 40-hex', value: '5da345d2e7af56926e2fc4ad1a922a54d342edc3' },
   ];
   for (const { name, value } of secretShapes) {
     it(`flags ${name}`, () => {

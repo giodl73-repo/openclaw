@@ -1,8 +1,8 @@
 /**
  * `oclint-rules-starter` — starter-v0 starter rule pack.
  *
- * Ten rules at `info` severity, distilled from claws's adversarial
- * scenario waves. Demonstrates the `oc-lint` framework's value
+ * Ten rules at `info` severity drawn from common adversarial
+ * authoring patterns. Demonstrates the `oc-lint` framework's value
  * without forcing upstream to ratify any opinion: operators see
  * lint output on `openclaw doctor` runs and can opt out per-rule
  * via host config; severities can graduate as community signal
