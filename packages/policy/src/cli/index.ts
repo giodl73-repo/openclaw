@@ -48,6 +48,7 @@ import {
   buildWorkspaceManifest,
   loadWorkspaceConfig,
   parseJsonc,
+  parseJsoncToPlain,
   parseJsonl,
   parseMd,
   parseYaml,
@@ -338,7 +339,8 @@ async function runCheckFile(path: string, out: OutputContext): Promise<number> {
   }
   let ir: PolicyIR;
   try {
-    ir = JSON.parse(raw) as PolicyIR;
+    // policy.jsonc is JSONC: comments + trailing commas are accepted.
+    ir = parseJsoncToPlain(raw) as PolicyIR;
   } catch (err) {
     emitError(out, `parse failed: ${err instanceof Error ? err.message : String(err)}`, 'ERR_PARSE');
     return 2;
@@ -393,7 +395,8 @@ async function runCheckWorkspace(
   }
   let onDisk: PolicyIR;
   try {
-    onDisk = JSON.parse(raw) as PolicyIR;
+    // policy.jsonc is JSONC: comments + trailing commas are accepted.
+    onDisk = parseJsoncToPlain(raw) as PolicyIR;
   } catch (err) {
     emitError(out, `policy parse failed at ${policyPath}: ${err instanceof Error ? err.message : String(err)}`, 'ERR_PARSE');
     return 2;
