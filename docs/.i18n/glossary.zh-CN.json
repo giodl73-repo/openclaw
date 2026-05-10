@@ -881,6 +881,37 @@
   },
   {
     "source": "ACP agents setup",
-    "target": "ACP Agents 设置"
+    "target": "ACP Agents 设置"  },
+  {
+    "source": "ClickClack",
+    "target": "ClickClack"
+  },
+  {
+    "source": "Policy",
+    "target": "Policy"
+  },
+  {
+    "source": "Doctor lint mode",
+    "target": "Doctor lint mode"
+  },
+  {
+    "source": "Policy plugin reference",
+    "target": "Policy plugin reference"
+  },
+  {
+    "source": "Path CLI",
+    "target": "Path CLI"
+  },
+  {
+    "source": "Configuration examples",
+    "target": "Configuration examples"
+  },
+  {
+    "source": "Policy plugin",
+    "target": "Policy plugin"
+  },
+  {
+    "source": "Policy CLI",
+    "target": "Policy CLI"
   }
 ]

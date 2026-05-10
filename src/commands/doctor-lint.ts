@@ -1,11 +1,6 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { readConfigFileSnapshot } from "../config/config.js";
-import {
-  healthFindingMeetsSeverity,
-  parseHealthFindingSeverity,
-  type HealthCheckContext,
-  type HealthFinding,
-} from "../flows/health-checks.js";
+import { registerBundledHealthChecks } from "../flows/bundled-health-checks.js";
 import {
   configValidationIssuesToHealthFindings,
   registerCoreHealthChecks,
@@ -15,6 +10,12 @@ import {
   runDoctorLintChecks,
   type DoctorLintRunOptions,
 } from "../flows/doctor-lint-flow.js";
+import {
+  healthFindingMeetsSeverity,
+  parseHealthFindingSeverity,
+  type HealthCheckContext,
+  type HealthFinding,
+} from "../flows/health-checks.js";
 import type { RuntimeEnv } from "../runtime.js";
 
 export interface DoctorLintCliOptions {
@@ -37,7 +38,8 @@ export async function runDoctorLintCli(
 ): Promise<number> {
   registerCoreHealthChecks();
 
-  const sevMin = opts.severityMin === undefined ? "info" : parseHealthFindingSeverity(opts.severityMin);
+  const sevMin =
+    opts.severityMin === undefined ? "info" : parseHealthFindingSeverity(opts.severityMin);
   if (sevMin === null) {
     throw new Error("Invalid --severity-min value. Expected one of: info, warning, error.");
   }
@@ -69,6 +71,7 @@ export async function runDoctorLintCli(
     cwd: resolveAgentWorkspaceDir(snapshot.config, resolveDefaultAgentId(snapshot.config)),
     ...(snapshot.path !== undefined ? { configPath: snapshot.path } : {}),
   };
+  registerBundledHealthChecks({ cfg: snapshot.config, cwd: ctx.cwd });
 
   const runOpts: DoctorLintRunOptions = {
     ...(opts.skipIds && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
