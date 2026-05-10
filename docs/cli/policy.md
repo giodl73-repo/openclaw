@@ -1,5 +1,5 @@
 ---
-summary: "CLI reference for `openclaw policy` channel conformance checks"
+summary: "CLI reference for `openclaw policy` conformance checks"
 read_when:
   - You want to check OpenClaw settings against an authored policy.jsonc
   - You want policy findings in doctor lint
@@ -11,13 +11,13 @@ title: "Policy"
 
 `openclaw policy` is provided by the bundled `policy` extension. Policy is an
 enterprise conformance feature: it lets an operator express required workspace
-posture in `policy.jsonc`, checks existing OpenClaw settings against those
+posture in `policy.jsonc`, checks existing OpenClaw surfaces against those
 requirements, and emits audit evidence that can be recorded.
 
-This first policy slice manages configured channels. For example, IT or a
-workspace operator can record that Telegram is not an approved channel
-provider, then use `doctor --lint` to report any enabled Telegram channel and
-`doctor --fix` to turn it off when workspace repairs are explicitly enabled.
+Policy currently manages configured channels and governed tool declarations.
+For example, IT or a workspace operator can record that Telegram is not an
+approved channel provider, require governed tools to carry risk and sensitivity
+metadata, then use `doctor --lint` as the shared conformance gate.
 
 Policy is a conformance layer over existing OpenClaw settings. It does not add
 a second channel configuration system. The final conformance signal is a clean
@@ -25,9 +25,10 @@ a second channel configuration system. The final conformance signal is a clean
 instead of creating a separate health gate.
 
 Use policy when a workspace needs a durable statement such as "these channels
-must not be enabled" and a repeatable way to prove that OpenClaw still conforms
-to that statement. Use regular config alone when you only need to set local
-behavior and do not need policy findings or attestation output.
+must not be enabled" or "governed tools must declare approval metadata" and a
+repeatable way to prove that OpenClaw still conforms to that statement. Use
+regular config and workspace docs alone when you only need local behavior and
+do not need policy findings or attestation output.
 
 ## Enable
 
@@ -45,7 +46,7 @@ artifact needs to be restored or added.
 ## Author Policy
 
 Policy is authored, not generated from the user's current settings. A minimal
-channel policy looks like this:
+policy for channels and tool metadata looks like this:
 
 ```jsonc
 {
@@ -58,12 +59,19 @@ channel policy looks like this:
       },
     ],
   },
+  "tools": {
+    "settings": {
+      "requireRisk": true,
+      "requireSensitivity": true,
+    },
+  },
 }
 ```
 
 The rules are the authority. A category block is only a namespace; checks run
 when a concrete rule is present. OpenClaw reads current `channels.*` settings
-and reports settings that do not conform.
+and `TOOLS.md` declarations as evidence, then reports observed state that does
+not conform.
 
 ## Commands
 
@@ -104,9 +112,19 @@ Example JSON output:
         "ocPath": "oc://openclaw.config/channels/telegram",
         "enabled": false
       }
+    ],
+    "tools": [
+      {
+        "id": "deploy",
+        "ocPath": "oc://TOOLS.md/tools/deploy",
+        "line": 12,
+        "risk": "critical",
+        "sensitivity": "restricted",
+        "capabilities": ["IRREVERSIBLE_EXTERNAL"]
+      }
     ]
   },
-  "checksRun": 3,
+  "checksRun": 6,
   "checksSkipped": 0,
   "findings": []
 }
@@ -143,6 +161,8 @@ Policy config lives under `plugins.entries.policy.config`:
         "enabled": true,
         "config": {
           "enabled": true,
+          "requireRisk": true,
+          "requireSensitivity": true,
           "workspaceRepairs": false,
           "expectedHash": "sha256:...",
           "path": "policy.jsonc",
@@ -153,12 +173,17 @@ Policy config lives under `plugins.entries.policy.config`:
 }
 ```
 
-| Setting            | Purpose                                                         |
-| ------------------ | --------------------------------------------------------------- |
-| `enabled`          | Enable policy checks even before `policy.jsonc` exists.         |
-| `workspaceRepairs` | Allow `doctor --fix` to edit policy-managed workspace settings. |
-| `expectedHash`     | Optional hash-lock for the approved policy artifact.            |
-| `path`             | Workspace-relative location of the policy artifact.             |
+| Setting              | Purpose                                                             |
+| -------------------- | ------------------------------------------------------------------- |
+| `enabled`            | Enable policy checks even before `policy.jsonc` exists.             |
+| `requireRisk`        | Require governed tool declarations to include risk metadata.        |
+| `requireSensitivity` | Require governed tool declarations to include sensitivity metadata. |
+| `workspaceRepairs`   | Allow `doctor --fix` to edit policy-managed workspace settings.     |
+| `expectedHash`       | Optional hash-lock for the approved policy artifact.                |
+| `path`               | Workspace-relative location of the policy artifact.                 |
+
+Tool requirement booleans can also live under `tools.settings` in
+`policy.jsonc`. Config wins when both places set the same value.
 
 Set `plugins.entries.policy.config.enabled` to `false` to disable policy
 checks for a workspace.
@@ -167,11 +192,14 @@ checks for a workspace.
 
 Policy currently verifies:
 
-| Check id                          | Finding                                          |
-| --------------------------------- | ------------------------------------------------ |
-| `policy/policy-jsonc-missing`     | Policy is enabled but `policy.jsonc` is missing. |
-| `policy/policy-hash-mismatch`     | Policy does not match configured `expectedHash`. |
-| `policy/channels-denied-provider` | An enabled channel matches a channel deny rule.  |
+| Check id                                 | Finding                                                        |
+| ---------------------------------------- | -------------------------------------------------------------- |
+| `policy/policy-jsonc-missing`            | Policy is enabled but `policy.jsonc` is missing.               |
+| `policy/policy-hash-mismatch`            | Policy does not match configured `expectedHash`.               |
+| `policy/channels-denied-provider`        | An enabled channel matches a channel deny rule.                |
+| `policy/tools-missing-risk-level`        | A governed tool declaration is missing risk metadata.          |
+| `policy/tools-missing-sensitivity-token` | A governed tool declaration is missing sensitivity metadata.   |
+| `policy/tools-unknown-sensitivity-token` | A governed tool declaration uses an unknown sensitivity value. |
 
 Example JSON finding:
 
@@ -186,6 +214,22 @@ Example JSON finding:
   "target": "oc://openclaw.config/channels/telegram",
   "requirement": "oc://policy.jsonc/channels/denyRules/#0",
   "fixHint": "Telegram is not approved for this workspace."
+}
+```
+
+Example tool finding:
+
+```json
+{
+  "checkId": "policy/tools-missing-risk-level",
+  "severity": "error",
+  "message": "TOOLS.md tool 'deploy' has no explicit risk classification.",
+  "source": "policy",
+  "path": "TOOLS.md",
+  "line": 12,
+  "ocPath": "oc://TOOLS.md/tools/deploy",
+  "target": "oc://TOOLS.md/tools/deploy",
+  "requirement": "oc://policy.jsonc/tools/settings/requireRisk"
 }
 ```
 

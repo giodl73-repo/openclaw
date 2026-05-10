@@ -9,7 +9,7 @@ title: "Policy plugin"
 
 Policy-backed doctor checks for workspace conformance. Policy is an enterprise
 conformance feature: `policy.jsonc` records authored requirements, existing
-OpenClaw settings are observed as evidence, and policy checks produce findings
+OpenClaw surfaces are observed as evidence, and policy checks produce findings
 plus attestation hashes that can be recorded for audit.
 
 ## Distribution
@@ -24,22 +24,24 @@ plugin; CLI command: [`openclaw policy`](/cli/policy)
 ## Behavior
 
 The policy plugin contributes doctor health checks for policy-managed OpenClaw
-settings. In this first version, policy manages channel conformance:
+settings and governed workspace declarations. Policy currently manages channel
+conformance and tool metadata conformance:
 
-- `policy.jsonc` stores operator-owned channel requirements.
+- `policy.jsonc` stores operator-owned channel and tool requirements.
 - `openclaw policy check` runs only the policy health checks and emits
-  observed channel evidence plus policy/evidence/findings/attestation hashes.
+  observed channel/tool evidence plus policy/evidence/findings/attestation
+  hashes.
 - `openclaw doctor --lint` reports the same policy findings alongside other
   structured health checks.
 - `openclaw doctor --fix` can disable denied enabled channels when
   `workspaceRepairs` is explicitly enabled.
 
-Policy is not a duplicate channel governance stack. It records expected
-conformance in `policy.jsonc`, reports missing, hash-mismatched, or denied
-settings through doctor,
-and repairs existing OpenClaw config through the same config repair model. The
-final conformance signal remains a clean `doctor --lint` run; policy adds
-domain-specific findings to that shared health surface.
+Policy is not a duplicate governance stack. It records expected conformance in
+`policy.jsonc`, observes existing OpenClaw settings and `TOOLS.md` declarations
+as evidence, reports non-conformance through doctor, and repairs existing
+OpenClaw config through the same config repair model. The final conformance
+signal remains a clean `doctor --lint` run; policy adds domain-specific
+findings to that shared health surface.
 
 Policy findings identify both sides of the decision when available: `target`
 points to the observed workspace thing, and `requirement` points to the
@@ -47,9 +49,10 @@ authored policy rule. The current addresses are `oc://` paths, but the fields
 are named for their policy roles rather than the address format.
 
 Use policy when operators need to prove that a workspace still conforms to an
-approved requirement, such as a denied channel provider. Use ordinary OpenClaw
-config when the workspace only needs local behavior and does not need policy
-findings or attestation output.
+approved requirement, such as a denied channel provider or required tool
+metadata. Use ordinary OpenClaw config and workspace docs when the workspace
+only needs local behavior and does not need policy findings or attestation
+output.
 
 When policy is enabled, doctor loads the policy health checks through the
 extension public API. That keeps lint and repair plugin-free while still
@@ -67,6 +70,8 @@ Policy config lives under `plugins.entries.policy.config`:
         "enabled": true,
         "config": {
           "enabled": true,
+          "requireRisk": true,
+          "requireSensitivity": true,
           "workspaceRepairs": false,
           "expectedHash": "sha256:...",
           "path": "policy.jsonc",
@@ -86,11 +91,14 @@ the policy file to an approved hash.
 
 The plugin registers these doctor health checks:
 
-| Check id                          | Purpose                                      |
-| --------------------------------- | -------------------------------------------- |
-| `policy/policy-jsonc-missing`     | Report missing policy artifact when enabled. |
-| `policy/policy-hash-mismatch`     | Reject policy files that do not match hash.  |
-| `policy/channels-denied-provider` | Reject enabled channels matching deny rules. |
+| Check id                                 | Purpose                                        |
+| ---------------------------------------- | ---------------------------------------------- |
+| `policy/policy-jsonc-missing`            | Report missing policy artifact when enabled.   |
+| `policy/policy-hash-mismatch`            | Reject policy files that do not match hash.    |
+| `policy/channels-denied-provider`        | Reject enabled channels matching deny rules.   |
+| `policy/tools-missing-risk-level`        | Require governed tools to declare risk.        |
+| `policy/tools-missing-sensitivity-token` | Require governed tools to declare sensitivity. |
+| `policy/tools-unknown-sensitivity-token` | Reject unknown governed tool sensitivity.      |
 
 Run them through either surface:
 

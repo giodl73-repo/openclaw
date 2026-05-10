@@ -50,7 +50,7 @@ describe("policy commands", () => {
     expect(exitCode).toBe(0);
     const parsed = JSON.parse(output.at(-1) ?? "{}");
     const policyHash = policyDocumentHash(policy);
-    const evidence = { channels: [] };
+    const evidence = { channels: [], tools: [] };
     const workspaceHash = policyWorkspaceHash(evidence);
     const findingsHash = policyFindingsHash([]);
     expect(typeof parsed.attestation.checkedAt).toBe("string");
