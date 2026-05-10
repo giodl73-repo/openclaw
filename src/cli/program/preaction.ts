@@ -101,14 +101,12 @@ export function registerPreActionHooks(program: Command, programVersion: string)
     if (!verbose) {
       process.env.NODE_NO_WARNINGS ??= "1";
     }
-    if (shouldBypassConfigGuardForCommandPath(commandPath)) {
-      return;
-    }
     await ensureCliExecutionBootstrap({
       runtime: defaultRuntime,
       commandPath,
       startupPolicy,
       allowInvalid: shouldAllowInvalidConfigForAction(actionCommand, commandPath),
+      skipConfigGuard: shouldBypassConfigGuardForCommandPath(commandPath),
     });
   });
 }
