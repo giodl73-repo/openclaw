@@ -73,6 +73,7 @@ describe("registerPolicyDoctorChecks", () => {
       "policy/channels-denied-provider",
       "policy/models-denied-provider",
       "policy/models-unapproved-provider",
+      "policy/network-private-access-enabled",
       "policy/tools-missing-risk-level",
       "policy/tools-missing-sensitivity-token",
       "policy/tools-unknown-sensitivity-token",
@@ -536,6 +537,109 @@ describe("registerPolicyDoctorChecks", () => {
 
     registerPolicyDoctorChecks();
     const result = await runDoctorLintChecks(ctx(configPath, cfgWithPolicy({ enabled: undefined })));
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("reports private-network SSRF settings denied by policy", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      browser: {
+        ssrfPolicy: {
+          dangerouslyAllowPrivateNetwork: true,
+        },
+      },
+      tools: {
+        web: {
+          fetch: {
+            ssrfPolicy: {
+              allowIpv6UniqueLocalRange: true,
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        network: {
+          privateNetwork: { allow: false },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/network-private-access-enabled",
+        severity: "error",
+        ocPath: "oc://openclaw.config/browser/ssrfPolicy/dangerouslyAllowPrivateNetwork",
+        requirement: "oc://policy.jsonc/network/privateNetwork/allow",
+      }),
+      expect.objectContaining({
+        checkId: "policy/network-private-access-enabled",
+        severity: "error",
+        ocPath: "oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowIpv6UniqueLocalRange",
+        requirement: "oc://policy.jsonc/network/privateNetwork/allow",
+      }),
+    ]);
+  });
+
+  it("allows private-network SSRF settings when policy permits them", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      browser: {
+        ssrfPolicy: {
+          allowPrivateNetwork: true,
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        network: {
+          privateNetwork: { allow: true },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("does not enable model checks from a network-only policy block", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy({ enabled: undefined }),
+      models: {
+        providers: {
+          openrouter: {},
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        network: {
+          privateNetwork: { allow: false },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
 
     expect(result.findings).toEqual([]);
   });

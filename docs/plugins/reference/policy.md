@@ -25,12 +25,13 @@ plugin; CLI command: [`openclaw policy`](/cli/policy)
 
 The policy plugin contributes doctor health checks for policy-managed OpenClaw
 settings and governed workspace declarations. Policy currently manages channel
-conformance, model-provider conformance, and tool metadata conformance:
+conformance, model-provider conformance, network SSRF posture, and tool
+metadata conformance:
 
-- `policy.jsonc` stores operator-owned channel, model-provider, and tool
-  requirements.
+- `policy.jsonc` stores operator-owned channel, model-provider, network, and
+  tool requirements.
 - `openclaw policy check` runs only the policy health checks and emits
-  observed channel/model/tool evidence plus policy/evidence/findings/
+  observed channel/model/network/tool evidence plus policy/evidence/findings/
   attestation hashes.
 - `openclaw doctor --lint` reports the same policy findings alongside other
   structured health checks.
@@ -54,9 +55,10 @@ are named for their policy roles rather than the address format.
 
 Use policy when operators need to prove that a workspace still conforms to an
 approved requirement, such as a denied channel provider or required tool
-metadata. Use ordinary OpenClaw config and workspace docs when the workspace
-only needs local behavior and does not need policy findings or attestation
-output.
+metadata. Network checks are lint-only and report explicit private-network SSRF
+escape hatches when policy does not allow them. Use ordinary OpenClaw config
+and workspace docs when the workspace only needs local behavior and does not
+need policy findings or attestation output.
 
 When policy is enabled, the extension registers its health checks with the
 shared health registry. Doctor then runs registered checks; doctor does not
@@ -112,6 +114,7 @@ The plugin registers these doctor health checks:
 | `policy/channels-denied-provider`        | Reject enabled channels matching deny rules.   |
 | `policy/models-denied-provider`          | Reject denied model providers and refs.        |
 | `policy/models-unapproved-provider`      | Reject model providers outside the allowlist.  |
+| `policy/network-private-access-enabled`  | Reject private-network SSRF escape hatches.    |
 | `policy/tools-missing-risk-level`        | Require governed tools to declare risk.        |
 | `policy/tools-missing-sensitivity-token` | Require governed tools to declare sensitivity. |
 | `policy/tools-unknown-sensitivity-token` | Reject unknown governed tool sensitivity.      |

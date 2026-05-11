@@ -19,6 +19,7 @@ export type PolicyEvidence = {
   readonly channels: readonly PolicyChannelEvidence[];
   readonly modelProviders: readonly PolicyModelProviderEvidence[];
   readonly modelRefs: readonly PolicyModelRefEvidence[];
+  readonly network: readonly PolicyNetworkEvidence[];
   readonly tools: readonly PolicyToolEvidence[];
 };
 
@@ -48,6 +49,12 @@ export type PolicyModelRefEvidence = {
   readonly provider: string;
   readonly model: string;
   readonly ocPath: string;
+};
+
+export type PolicyNetworkEvidence = {
+  readonly id: string;
+  readonly ocPath: string;
+  readonly value: boolean;
 };
 
 export function policyDocumentHash(policy: unknown): string {
@@ -80,6 +87,7 @@ export function collectPolicyEvidence(
     channels: scanPolicyChannels(cfg),
     modelProviders: scanPolicyModelProviders(cfg),
     modelRefs: scanPolicyModelRefs(cfg),
+    network: scanPolicyNetwork(cfg),
     tools: options.toolsRaw === undefined ? [] : scanPolicyTools(options.toolsRaw),
   };
 }
@@ -124,6 +132,47 @@ export function scanPolicyModelRefs(cfg: Record<string, unknown>): readonly Poli
   return refs.toSorted(
     (a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
   );
+}
+
+export function scanPolicyNetwork(cfg: Record<string, unknown>): readonly PolicyNetworkEvidence[] {
+  return [
+    networkBooleanEvidence(
+      cfg,
+      "browser-private-network",
+      ["browser", "ssrfPolicy", "dangerouslyAllowPrivateNetwork"],
+      "oc://openclaw.config/browser/ssrfPolicy/dangerouslyAllowPrivateNetwork",
+    ),
+    networkBooleanEvidence(
+      cfg,
+      "browser-private-network-legacy",
+      ["browser", "ssrfPolicy", "allowPrivateNetwork"],
+      "oc://openclaw.config/browser/ssrfPolicy/allowPrivateNetwork",
+    ),
+    networkBooleanEvidence(
+      cfg,
+      "web-fetch-private-network",
+      ["tools", "web", "fetch", "ssrfPolicy", "dangerouslyAllowPrivateNetwork"],
+      "oc://openclaw.config/tools/web/fetch/ssrfPolicy/dangerouslyAllowPrivateNetwork",
+    ),
+    networkBooleanEvidence(
+      cfg,
+      "web-fetch-private-network-legacy",
+      ["tools", "web", "fetch", "ssrfPolicy", "allowPrivateNetwork"],
+      "oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowPrivateNetwork",
+    ),
+    networkBooleanEvidence(
+      cfg,
+      "web-fetch-rfc2544-benchmark-range",
+      ["tools", "web", "fetch", "ssrfPolicy", "allowRfc2544BenchmarkRange"],
+      "oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowRfc2544BenchmarkRange",
+    ),
+    networkBooleanEvidence(
+      cfg,
+      "web-fetch-ipv6-unique-local-range",
+      ["tools", "web", "fetch", "ssrfPolicy", "allowIpv6UniqueLocalRange"],
+      "oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowIpv6UniqueLocalRange",
+    ),
+  ].filter((entry): entry is PolicyNetworkEvidence => entry !== undefined);
 }
 
 export function scanPolicyTools(raw: string): readonly PolicyToolEvidence[] {
@@ -202,6 +251,27 @@ function configuredChannels(cfg: Record<string, unknown>): Record<string, unknow
 
 function configuredModelProviders(cfg: Record<string, unknown>): Record<string, unknown> {
   return isRecord(cfg.models) && isRecord(cfg.models.providers) ? cfg.models.providers : {};
+}
+
+function networkBooleanEvidence(
+  cfg: Record<string, unknown>,
+  id: string,
+  path: readonly string[],
+  ocPath: string,
+): PolicyNetworkEvidence | undefined {
+  const value = readBooleanPath(cfg, path);
+  return value === undefined ? undefined : { id, ocPath, value };
+}
+
+function readBooleanPath(value: unknown, path: readonly string[]): boolean | undefined {
+  let current = value;
+  for (const part of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+  return typeof current === "boolean" ? current : undefined;
 }
 
 function collectModelRefsFromValue(

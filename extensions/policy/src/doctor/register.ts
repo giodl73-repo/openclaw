@@ -25,6 +25,7 @@ const CHECK_IDS = {
   policyMissingFile: "policy/policy-jsonc-missing",
   policyDeniedModelProvider: "policy/models-denied-provider",
   policyUnapprovedModelProvider: "policy/models-unapproved-provider",
+  policyPrivateNetworkAccess: "policy/network-private-access-enabled",
   policyMissingToolRisk: "policy/tools-missing-risk-level",
   policyMissingToolSensitivity: "policy/tools-missing-sensitivity-token",
   policyUnknownToolSensitivity: "policy/tools-unknown-sensitivity-token",
@@ -36,6 +37,7 @@ export const POLICY_CHECK_IDS = [
   CHECK_IDS.policyDeniedChannelProvider,
   CHECK_IDS.policyDeniedModelProvider,
   CHECK_IDS.policyUnapprovedModelProvider,
+  CHECK_IDS.policyPrivateNetworkAccess,
   CHECK_IDS.policyMissingToolRisk,
   CHECK_IDS.policyMissingToolSensitivity,
   CHECK_IDS.policyUnknownToolSensitivity,
@@ -65,6 +67,7 @@ export function registerPolicyDoctorChecks(): void {
   registerHealthCheck(policyChannelsDeniedProviderCheck);
   registerHealthCheck(policyModelsDeniedProviderCheck);
   registerHealthCheck(policyModelsUnapprovedProviderCheck);
+  registerHealthCheck(policyNetworkPrivateAccessCheck);
   registerHealthCheck(policyToolsMissingRiskCheck);
   registerHealthCheck(policyToolsMissingSensitivityCheck);
   registerHealthCheck(policyToolsUnknownSensitivityCheck);
@@ -160,6 +163,16 @@ const policyModelsUnapprovedProviderCheck: HealthCheck = {
   },
 };
 
+const policyNetworkPrivateAccessCheck: HealthCheck = {
+  id: CHECK_IDS.policyPrivateNetworkAccess,
+  kind: "plugin",
+  description: "Network SSRF policy settings match private-network requirements.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyPrivateNetworkAccess);
+  },
+};
+
 const policyToolsMissingRiskCheck: HealthCheck = {
   id: CHECK_IDS.policyMissingToolRisk,
   kind: "plugin",
@@ -244,6 +257,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
 
   findings.push(...channelFindings(policy, policyFile.ocDocName, evidence));
   findings.push(...modelProviderFindings(policy, policyFile.ocDocName, evidence));
+  findings.push(...networkFindings(policy, policyFile.ocDocName, evidence));
   if (policyRequirementEnabled(settings, policy, "requireRisk")) {
     findings.push(...toolRiskFindings(policyFile.ocDocName, evidence));
   }
@@ -391,6 +405,32 @@ function modelRefConformanceFindings(
     });
   }
   return findings;
+}
+
+function networkFindings(
+  policy: unknown,
+  policyDocName: string,
+  evidence: PolicyEvidence,
+): readonly HealthFinding[] {
+  const allowPrivateNetwork = readPolicyBoolean(policy, ["network", "privateNetwork", "allow"]);
+  if (allowPrivateNetwork !== false) {
+    return [];
+  }
+  return evidence.network
+    .filter((setting) => setting.value)
+    .map((setting): HealthFinding => {
+      return {
+        checkId: CHECK_IDS.policyPrivateNetworkAccess,
+        severity: "error",
+        message: `Network setting '${setting.id}' allows private-network access.`,
+        source: "policy",
+        path: "openclaw config",
+        ocPath: setting.ocPath,
+        target: setting.ocPath,
+        requirement: `oc://${policyDocName}/network/privateNetwork/allow`,
+        fixHint: "Disable this private-network access setting or update policy after review.",
+      };
+    });
 }
 
 function toolRiskFindings(policyDocName: string, evidence: PolicyEvidence): readonly HealthFinding[] {
