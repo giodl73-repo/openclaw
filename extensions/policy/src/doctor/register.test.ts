@@ -71,6 +71,8 @@ describe("registerPolicyDoctorChecks", () => {
       "policy/policy-jsonc-missing",
       "policy/policy-hash-mismatch",
       "policy/channels-denied-provider",
+      "policy/mcp-denied-server",
+      "policy/mcp-unapproved-server",
       "policy/models-denied-provider",
       "policy/models-unapproved-provider",
       "policy/network-private-access-enabled",
@@ -284,14 +286,22 @@ describe("registerPolicyDoctorChecks", () => {
     });
   });
 
-  it("does not run channel checks for an empty category namespace", async () => {
+  it("does not run policy checks for empty category namespaces", async () => {
     const configPath = join(workspaceDir, "openclaw.jsonc");
     const cfg = {
       ...cfgWithPolicy(),
       channels: { telegram: { enabled: true } },
+      mcp: { servers: { untrusted: { command: "uvx", args: ["untrusted-mcp"] } } },
+      models: { providers: { openrouter: {} } },
+      browser: { ssrfPolicy: { dangerouslyAllowPrivateNetwork: true } },
     } as OpenClawConfig;
     await fs.writeFile(configPath, "{}", "utf-8");
-    await fs.writeFile(join(workspaceDir, "policy.jsonc"), JSON.stringify({ channels: {} }), "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({ channels: {}, mcp: {}, models: {}, network: {}, tools: {} }),
+      "utf-8",
+    );
+    await fs.writeFile(join(workspaceDir, "TOOLS.md"), "## Tools\n\n### deploy\n", "utf-8");
 
     registerPolicyDoctorChecks();
     const result = await runDoctorLintChecks(ctx(configPath, cfg));
@@ -537,6 +547,111 @@ describe("registerPolicyDoctorChecks", () => {
 
     registerPolicyDoctorChecks();
     const result = await runDoctorLintChecks(ctx(configPath, cfgWithPolicy({ enabled: undefined })));
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("reports MCP servers denied by policy", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      mcp: {
+        servers: {
+          untrusted: {
+            command: "uvx",
+            args: ["untrusted-mcp"],
+          },
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        mcp: {
+          servers: { deny: ["untrusted"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/mcp-denied-server",
+        severity: "error",
+        ocPath: "oc://openclaw.config/mcp/servers/untrusted",
+        requirement: "oc://policy.jsonc/mcp/servers/deny",
+      }),
+    ]);
+  });
+
+  it("reports MCP servers outside the policy allowlist", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      mcp: {
+        servers: {
+          docs: {
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-fetch"],
+          },
+          remote: {
+            url: "https://example.com/mcp",
+            transport: "streamable-http",
+          },
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        mcp: {
+          servers: { allow: ["docs"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/mcp-unapproved-server",
+        severity: "error",
+        ocPath: "oc://openclaw.config/mcp/servers/remote",
+        requirement: "oc://policy.jsonc/mcp/servers/allow",
+      }),
+    ]);
+  });
+
+  it("does not enable model checks from an MCP-only policy block", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy({ enabled: undefined }),
+      models: {
+        providers: {
+          openrouter: {},
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        mcp: {
+          servers: { allow: ["docs"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
 
     expect(result.findings).toEqual([]);
   });

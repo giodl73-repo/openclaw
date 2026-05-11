@@ -14,12 +14,13 @@ enterprise conformance feature: it lets an operator express required workspace
 posture in `policy.jsonc`, checks existing OpenClaw surfaces against those
 requirements, and emits audit evidence that can be recorded.
 
-Policy currently manages configured channels, model providers, network SSRF
-posture, and governed tool declarations. For example, IT or a workspace
+Policy currently manages configured channels, MCP servers, model providers,
+network SSRF posture, and governed tool declarations. For example, IT or a workspace
 operator can record that Telegram is not an approved channel provider, restrict
-model refs to approved providers, require private-network fetch/browser access
-to remain disabled, require governed tools to carry risk and sensitivity
-metadata, then use `doctor --lint` as the shared conformance gate.
+MCP servers and model refs to approved entries, require private-network
+fetch/browser access to remain disabled, require governed tools to carry risk
+and sensitivity metadata, then use `doctor --lint` as the shared conformance
+gate.
 
 Policy is a conformance layer over existing OpenClaw settings. It does not add
 a second channel configuration system. The final conformance signal is a clean
@@ -49,8 +50,8 @@ added.
 ## Author Policy
 
 Policy is authored, not generated from the user's current settings. A minimal
-policy for channels, model providers, network posture, and tool metadata looks
-like this:
+policy for channels, MCP servers, model providers, network posture, and tool
+metadata looks like this:
 
 ```jsonc
 {
@@ -62,6 +63,12 @@ like this:
         "reason": "Telegram is not approved for this workspace.",
       },
     ],
+  },
+  "mcp": {
+    "servers": {
+      "allow": ["docs"],
+      "deny": ["untrusted"],
+    },
   },
   "models": {
     "providers": {
@@ -85,9 +92,9 @@ like this:
 
 The rules are the authority. A category block is only a namespace; checks run
 when a concrete rule is present. OpenClaw reads current `channels.*` settings
-`models.providers.*`, selected agent model refs, network SSRF settings, and
-`TOOLS.md` declarations as evidence, then reports observed state that does not
-conform.
+`mcp.servers.*`, `models.providers.*`, selected agent model refs, network SSRF
+settings, and `TOOLS.md` declarations as evidence, then reports observed state
+that does not conform.
 
 ## Commands
 
@@ -129,6 +136,14 @@ Example JSON output:
         "enabled": false
       }
     ],
+    "mcpServers": [
+      {
+        "id": "docs",
+        "transport": "stdio",
+        "ocPath": "oc://openclaw.config/mcp/servers/docs",
+        "command": "npx"
+      }
+    ],
     "modelProviders": [
       {
         "id": "openai",
@@ -161,7 +176,7 @@ Example JSON output:
       }
     ]
   },
-  "checksRun": 9,
+  "checksRun": 11,
   "checksSkipped": 0,
   "findings": []
 }
@@ -236,6 +251,8 @@ Policy currently verifies:
 | `policy/policy-jsonc-missing`            | Policy is enabled but `policy.jsonc` is missing.                      |
 | `policy/policy-hash-mismatch`            | Policy does not match configured `expectedHash`.                      |
 | `policy/channels-denied-provider`        | An enabled channel matches a channel deny rule.                       |
+| `policy/mcp-denied-server`               | A configured MCP server is denied by policy.                          |
+| `policy/mcp-unapproved-server`           | A configured MCP server is outside the allowlist.                     |
 | `policy/models-denied-provider`          | A configured model provider or model ref uses a denied provider.      |
 | `policy/models-unapproved-provider`      | A configured model provider or model ref is outside the allowlist.    |
 | `policy/network-private-access-enabled`  | A private-network SSRF escape hatch is enabled when policy denies it. |
@@ -272,6 +289,21 @@ Example tool finding:
   "ocPath": "oc://TOOLS.md/tools/deploy",
   "target": "oc://TOOLS.md/tools/deploy",
   "requirement": "oc://policy.jsonc/tools/settings/requireRisk"
+}
+```
+
+Example MCP finding:
+
+```json
+{
+  "checkId": "policy/mcp-unapproved-server",
+  "severity": "error",
+  "message": "MCP server 'remote' is not in the policy allowlist.",
+  "source": "policy",
+  "path": "openclaw config",
+  "ocPath": "oc://openclaw.config/mcp/servers/remote",
+  "target": "oc://openclaw.config/mcp/servers/remote",
+  "requirement": "oc://policy.jsonc/mcp/servers/allow"
 }
 ```
 

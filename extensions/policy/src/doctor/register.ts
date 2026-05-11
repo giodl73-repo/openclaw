@@ -23,6 +23,8 @@ const CHECK_IDS = {
   policyDeniedChannelProvider: "policy/channels-denied-provider",
   policyHashMismatch: "policy/policy-hash-mismatch",
   policyMissingFile: "policy/policy-jsonc-missing",
+  policyDeniedMcpServer: "policy/mcp-denied-server",
+  policyUnapprovedMcpServer: "policy/mcp-unapproved-server",
   policyDeniedModelProvider: "policy/models-denied-provider",
   policyUnapprovedModelProvider: "policy/models-unapproved-provider",
   policyPrivateNetworkAccess: "policy/network-private-access-enabled",
@@ -35,6 +37,8 @@ export const POLICY_CHECK_IDS = [
   CHECK_IDS.policyMissingFile,
   CHECK_IDS.policyHashMismatch,
   CHECK_IDS.policyDeniedChannelProvider,
+  CHECK_IDS.policyDeniedMcpServer,
+  CHECK_IDS.policyUnapprovedMcpServer,
   CHECK_IDS.policyDeniedModelProvider,
   CHECK_IDS.policyUnapprovedModelProvider,
   CHECK_IDS.policyPrivateNetworkAccess,
@@ -65,6 +69,8 @@ export function registerPolicyDoctorChecks(): void {
   registerHealthCheck(policyMissingFileCheck);
   registerHealthCheck(policyHashMismatchCheck);
   registerHealthCheck(policyChannelsDeniedProviderCheck);
+  registerHealthCheck(policyMcpDeniedServerCheck);
+  registerHealthCheck(policyMcpUnapprovedServerCheck);
   registerHealthCheck(policyModelsDeniedProviderCheck);
   registerHealthCheck(policyModelsUnapprovedProviderCheck);
   registerHealthCheck(policyNetworkPrivateAccessCheck);
@@ -140,6 +146,26 @@ const policyChannelsDeniedProviderCheck: HealthCheck = {
       config: next.config,
       changes: next.changed.map((id) => `Disabled channels.${id}.enabled for policy conformance.`),
     };
+  },
+};
+
+const policyMcpDeniedServerCheck: HealthCheck = {
+  id: CHECK_IDS.policyDeniedMcpServer,
+  kind: "plugin",
+  description: "Configured MCP servers do not match policy deny rules.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyDeniedMcpServer);
+  },
+};
+
+const policyMcpUnapprovedServerCheck: HealthCheck = {
+  id: CHECK_IDS.policyUnapprovedMcpServer,
+  kind: "plugin",
+  description: "Configured MCP servers do not match policy allow rules.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyUnapprovedMcpServer);
   },
 };
 
@@ -256,6 +282,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
   }
 
   findings.push(...channelFindings(policy, policyFile.ocDocName, evidence));
+  findings.push(...mcpServerFindings(policy, policyFile.ocDocName, evidence));
   findings.push(...modelProviderFindings(policy, policyFile.ocDocName, evidence));
   findings.push(...networkFindings(policy, policyFile.ocDocName, evidence));
   if (policyRequirementEnabled(settings, policy, "requireRisk")) {
@@ -313,6 +340,49 @@ function channelFindings(
       },
     ];
   });
+}
+
+function mcpServerFindings(
+  policy: unknown,
+  policyDocName: string,
+  evidence: PolicyEvidence,
+): readonly HealthFinding[] {
+  const denied = new Set(readStringList(policy, ["mcp", "servers", "deny"]));
+  const allowed = readStringList(policy, ["mcp", "servers", "allow"]);
+  const allowedSet = new Set(allowed);
+  const findings: HealthFinding[] = [];
+
+  for (const server of evidence.mcpServers) {
+    if (denied.has(server.id)) {
+      findings.push({
+        checkId: CHECK_IDS.policyDeniedMcpServer,
+        severity: "error",
+        message: `MCP server '${server.id}' is denied by policy.`,
+        source: "policy",
+        path: "openclaw config",
+        ocPath: server.ocPath,
+        target: server.ocPath,
+        requirement: `oc://${policyDocName}/mcp/servers/deny`,
+        fixHint: "Remove this configured MCP server or update the policy after review.",
+      });
+      continue;
+    }
+    if (allowedSet.size > 0 && !allowedSet.has(server.id)) {
+      findings.push({
+        checkId: CHECK_IDS.policyUnapprovedMcpServer,
+        severity: "error",
+        message: `MCP server '${server.id}' is not in the policy allowlist.`,
+        source: "policy",
+        path: "openclaw config",
+        ocPath: server.ocPath,
+        target: server.ocPath,
+        requirement: `oc://${policyDocName}/mcp/servers/allow`,
+        fixHint: "Use an approved MCP server or update the policy after review.",
+      });
+    }
+  }
+
+  return findings;
 }
 
 function modelProviderFindings(

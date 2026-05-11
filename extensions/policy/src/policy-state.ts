@@ -17,6 +17,7 @@ export type PolicyAttestation = {
 
 export type PolicyEvidence = {
   readonly channels: readonly PolicyChannelEvidence[];
+  readonly mcpServers: readonly PolicyMcpServerEvidence[];
   readonly modelProviders: readonly PolicyModelProviderEvidence[];
   readonly modelRefs: readonly PolicyModelRefEvidence[];
   readonly network: readonly PolicyNetworkEvidence[];
@@ -28,6 +29,14 @@ export type PolicyChannelEvidence = {
   readonly provider: string;
   readonly ocPath: string;
   readonly enabled?: boolean;
+};
+
+export type PolicyMcpServerEvidence = {
+  readonly id: string;
+  readonly transport: "stdio" | "sse" | "streamable-http" | "unknown";
+  readonly ocPath: string;
+  readonly command?: string;
+  readonly url?: string;
 };
 
 export type PolicyToolEvidence = {
@@ -85,6 +94,7 @@ export function collectPolicyEvidence(
 ): PolicyEvidence {
   return {
     channels: scanPolicyChannels(cfg),
+    mcpServers: scanPolicyMcpServers(cfg),
     modelProviders: scanPolicyModelProviders(cfg),
     modelRefs: scanPolicyModelRefs(cfg),
     network: scanPolicyNetwork(cfg),
@@ -108,6 +118,33 @@ export function scanPolicyChannels(cfg: Record<string, unknown>): readonly Polic
       };
       if (isRecord(value) && typeof value.enabled === "boolean") {
         entry.enabled = value.enabled;
+      }
+      return entry;
+    });
+}
+
+export function scanPolicyMcpServers(cfg: Record<string, unknown>): readonly PolicyMcpServerEvidence[] {
+  return Object.entries(configuredMcpServers(cfg))
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .map(([id, value]) => {
+      const entry: {
+        id: string;
+        transport: "stdio" | "sse" | "streamable-http" | "unknown";
+        ocPath: string;
+        command?: string;
+        url?: string;
+      } = {
+        id,
+        transport: mcpServerTransport(value),
+        ocPath: `oc://openclaw.config/mcp/servers/${id}`,
+      };
+      if (isRecord(value)) {
+        if (typeof value.command === "string") {
+          entry.command = value.command;
+        }
+        if (typeof value.url === "string") {
+          entry.url = value.url;
+        }
       }
       return entry;
     });
@@ -247,6 +284,26 @@ function riskFromMeta(meta: string): string | undefined {
 
 function configuredChannels(cfg: Record<string, unknown>): Record<string, unknown> {
   return isRecord(cfg.channels) ? cfg.channels : {};
+}
+
+function configuredMcpServers(cfg: Record<string, unknown>): Record<string, unknown> {
+  return isRecord(cfg.mcp) && isRecord(cfg.mcp.servers) ? cfg.mcp.servers : {};
+}
+
+function mcpServerTransport(value: unknown): PolicyMcpServerEvidence["transport"] {
+  if (!isRecord(value)) {
+    return "unknown";
+  }
+  if (typeof value.command === "string") {
+    return "stdio";
+  }
+  if (value.transport === "sse" || value.transport === "streamable-http") {
+    return value.transport;
+  }
+  if (typeof value.url === "string") {
+    return "streamable-http";
+  }
+  return "unknown";
 }
 
 function configuredModelProviders(cfg: Record<string, unknown>): Record<string, unknown> {
