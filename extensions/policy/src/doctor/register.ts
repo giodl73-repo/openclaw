@@ -171,9 +171,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
     });
   }
 
-  if (policyRuleEnabledFromSnapshot(settings, policy, "checkChannels")) {
-    findings.push(...channelFindings(policy, policyFile.ocDocName, evidence));
-  }
+  findings.push(...channelFindings(policy, policyFile.ocDocName, evidence));
 
   return {
     policyPath,
@@ -324,10 +322,24 @@ function readChannelDenyRules(policy: unknown, policyDocName: string): readonly 
         isRecord(entry.rule.when) &&
         typeof entry.rule.when.provider === "string",
     )
-    .map(({ rule, index }) => ({
-      ...rule,
-      requirement: `oc://${policyDocName}/channels/denyRules/#${index}`,
-    }));
+    .map(({ rule, index }) => {
+      const next: {
+        id?: string;
+        when?: { readonly provider?: string };
+        reason?: string;
+        requirement: string;
+      } = {
+        when: rule.when,
+        requirement: `oc://${policyDocName}/channels/denyRules/#${index}`,
+      };
+      if (rule.id !== undefined) {
+        next.id = rule.id;
+      }
+      if (rule.reason !== undefined) {
+        next.reason = rule.reason;
+      }
+      return next;
+    });
 }
 
 function channelIdsFromFindings(findings: readonly HealthFinding[]): readonly string[] {
@@ -366,7 +378,7 @@ function disableChannels(
 
 async function resolvePolicyBooleanSetting(
   ctx: HealthCheckContext,
-  setting: "enabled" | "checkChannels" | "workspaceRepairs",
+  setting: "enabled" | "workspaceRepairs",
 ): Promise<boolean | undefined> {
   const configured = policySettings(ctx)[setting];
   if (typeof configured === "boolean") {
@@ -381,7 +393,6 @@ async function resolvePolicyBooleanSetting(
     return undefined;
   }
   return (
-    readJsoncBoolean(parsed.ast, file.ocDocName, `channels.settings.${setting}`) ??
     readJsoncBoolean(parsed.ast, file.ocDocName, `settings.${setting}`) ??
     readJsoncBoolean(parsed.ast, file.ocDocName, `policy.${setting}`) ??
     readJsoncBoolean(parsed.ast, file.ocDocName, setting)
@@ -390,7 +401,6 @@ async function resolvePolicyBooleanSetting(
 
 function policySettings(ctx: HealthCheckContext): {
   readonly enabled?: boolean;
-  readonly checkChannels?: boolean;
   readonly workspaceRepairs?: boolean;
   readonly expectedHash?: string;
   readonly path?: string;
@@ -400,37 +410,6 @@ function policySettings(ctx: HealthCheckContext): {
     return {};
   }
   return pluginConfig;
-}
-
-function policyRuleEnabledFromSnapshot(
-  settings: ReturnType<typeof policySettings>,
-  policy: unknown,
-  setting: "checkChannels",
-): boolean {
-  const configured = settings[setting];
-  if (typeof configured === "boolean") {
-    return configured;
-  }
-  const policyConfigured =
-    readPolicyBoolean(policy, ["channels", "settings", setting]) ??
-    readPolicyBoolean(policy, ["settings", setting]) ??
-    readPolicyBoolean(policy, ["policy", setting]) ??
-    readPolicyBoolean(policy, [setting]);
-  if (policyConfigured !== undefined) {
-    return policyConfigured;
-  }
-  return (isRecord(policy) && isRecord(policy.channels)) || settings.enabled === true;
-}
-
-function readPolicyBoolean(policy: unknown, path: readonly string[]): boolean | undefined {
-  let current: unknown = policy;
-  for (const part of path) {
-    if (!isRecord(current)) {
-      return undefined;
-    }
-    current = current[part];
-  }
-  return typeof current === "boolean" ? current : undefined;
 }
 
 function policyPathSetting(ctx: HealthCheckContext): string {

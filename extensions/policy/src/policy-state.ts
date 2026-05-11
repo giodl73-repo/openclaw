@@ -7,7 +7,7 @@ export type PolicyAttestation = {
     readonly hash: string;
   };
   readonly workspace: {
-    readonly scope: "channels";
+    readonly scope: "policy";
     readonly hash: string;
   };
   readonly findingsHash?: string;

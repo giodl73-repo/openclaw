@@ -105,7 +105,7 @@ describe("registerPolicyDoctorChecks", () => {
     await fs.writeFile(configPath, "{}", "utf-8");
     await fs.writeFile(
       join(workspaceDir, "policy.jsonc"),
-      JSON.stringify({ channels: { settings: { checkChannels: true } } }),
+      JSON.stringify({ channels: { denyRules: [] } }),
       "utf-8",
     );
 
@@ -125,7 +125,7 @@ describe("registerPolicyDoctorChecks", () => {
 
   it("accepts a policy file that matches the configured expectedHash", async () => {
     const configPath = join(workspaceDir, "openclaw.jsonc");
-    const policy = { channels: { settings: { checkChannels: true } } };
+    const policy = { channels: { denyRules: [] } };
     await fs.writeFile(configPath, "{}", "utf-8");
     await fs.writeFile(join(workspaceDir, "policy.jsonc"), JSON.stringify(policy), "utf-8");
 
@@ -149,7 +149,6 @@ describe("registerPolicyDoctorChecks", () => {
       JSON.stringify(
         {
           channels: {
-            settings: { checkChannels: true },
             denyRules: [
               {
                 id: "no-telegram",
@@ -193,7 +192,6 @@ describe("registerPolicyDoctorChecks", () => {
       JSON.stringify(
         {
           channels: {
-            settings: { checkChannels: true },
             denyRules: [{ id: "no-telegram", when: { provider: "telegram" } }],
           },
         },
@@ -225,7 +223,6 @@ describe("registerPolicyDoctorChecks", () => {
       JSON.stringify(
         {
           channels: {
-            settings: { checkChannels: true },
             denyRules: [{ id: "no-telegram", when: { provider: "telegram" } }],
           },
         },
@@ -260,7 +257,6 @@ describe("registerPolicyDoctorChecks", () => {
       JSON.stringify(
         {
           channels: {
-            settings: { checkChannels: true },
             denyRules: [
               {
                 id: "no-telegram",
@@ -280,5 +276,20 @@ describe("registerPolicyDoctorChecks", () => {
     await expect(runDoctorLintChecks(ctx(configPath, cfg))).resolves.toMatchObject({
       findings: [],
     });
+  });
+
+  it("does not run channel checks for an empty category namespace", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      channels: { telegram: { enabled: true } },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(join(workspaceDir, "policy.jsonc"), JSON.stringify({ channels: {} }), "utf-8");
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([]);
   });
 });

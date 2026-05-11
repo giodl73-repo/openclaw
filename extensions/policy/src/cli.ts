@@ -77,7 +77,11 @@ export async function policyCheckCommand(
     ...(snapshot.path !== undefined ? { configPath: snapshot.path } : {}),
   };
   const evaluation = await evaluatePolicy(ctx);
-  const severityMin = parseHealthFindingSeverity(options.severityMin) ?? "info";
+  const severityMin =
+    options.severityMin === undefined ? "info" : parseHealthFindingSeverity(options.severityMin);
+  if (severityMin === null) {
+    throw new Error("Invalid --severity-min value. Expected one of: info, warning, error.");
+  }
   const findings = evaluation.findings.filter((finding) =>
     healthFindingMeetsSeverity(finding, severityMin),
   );
@@ -97,7 +101,7 @@ export async function policyCheckCommand(
           },
         }),
     workspace: {
-      scope: "channels",
+      scope: "policy",
       hash: workspaceHash,
     },
     findingsHash,

@@ -50,9 +50,6 @@ channel policy looks like this:
 ```jsonc
 {
   "channels": {
-    "settings": {
-      "checkChannels": true,
-    },
     "denyRules": [
       {
         "id": "no-telegram",
@@ -64,8 +61,9 @@ channel policy looks like this:
 }
 ```
 
-The rules are the authority. OpenClaw reads current `channels.*` settings and
-reports settings that do not conform.
+The rules are the authority. A category block is only a namespace; checks run
+when a concrete rule is present. OpenClaw reads current `channels.*` settings
+and reports settings that do not conform.
 
 ## Commands
 
@@ -92,7 +90,7 @@ Example JSON output:
       "hash": "sha256:..."
     },
     "workspace": {
-      "scope": "channels",
+      "scope": "policy",
       "hash": "sha256:..."
     },
     "findingsHash": "sha256:...",
@@ -145,7 +143,6 @@ Policy config lives under `plugins.entries.policy.config`:
         "enabled": true,
         "config": {
           "enabled": true,
-          "checkChannels": true,
           "workspaceRepairs": false,
           "expectedHash": "sha256:...",
           "path": "policy.jsonc",
@@ -159,13 +156,9 @@ Policy config lives under `plugins.entries.policy.config`:
 | Setting            | Purpose                                                         |
 | ------------------ | --------------------------------------------------------------- |
 | `enabled`          | Enable policy checks even before `policy.jsonc` exists.         |
-| `checkChannels`    | Check configured channels against `policy.jsonc` channel rules. |
 | `workspaceRepairs` | Allow `doctor --fix` to edit policy-managed workspace settings. |
 | `expectedHash`     | Optional hash-lock for the approved policy artifact.            |
 | `path`             | Workspace-relative location of the policy artifact.             |
-
-The same booleans can also live under `channels.settings` in `policy.jsonc`.
-Config wins when both places set the same value.
 
 Set `plugins.entries.policy.config.enabled` to `false` to disable policy
 checks for a workspace.

@@ -29,7 +29,6 @@ describe("policy commands", () => {
   it("checks policy rules and emits an attestation", async () => {
     const policy = {
       channels: {
-        settings: { checkChannels: true },
         denyRules: [{ id: "no-telegram", when: { provider: "telegram" } }],
       },
     };
@@ -64,7 +63,7 @@ describe("policy commands", () => {
           hash: policyHash,
         },
         workspace: {
-          scope: "channels",
+          scope: "policy",
           hash: workspaceHash,
         },
         findingsHash,
@@ -86,7 +85,6 @@ describe("policy commands", () => {
       join(workspaceDir, "policy.jsonc"),
       JSON.stringify({
         channels: {
-          settings: { checkChannels: true },
           denyRules: [{ id: "no-telegram", when: { provider: "telegram" } }],
         },
       }),
@@ -135,7 +133,6 @@ describe("policy commands", () => {
       join(workspaceDir, "policy.jsonc"),
       JSON.stringify({
         channels: {
-          settings: { checkChannels: true },
           denyRules: [{ id: "no-telegram", when: { provider: "telegram" } }],
         },
       }),
@@ -174,5 +171,17 @@ describe("policy commands", () => {
         },
       ],
     });
+  });
+
+  it("rejects invalid severity thresholds", async () => {
+    await expect(
+      policyCheckCommand(
+        { cwd: workspaceDir, severityMin: "warnng" },
+        {
+          writeStdout() {},
+          error() {},
+        },
+      ),
+    ).rejects.toThrow("Invalid --severity-min value");
   });
 });

@@ -67,7 +67,6 @@ Policy config lives under `plugins.entries.policy.config`:
         "enabled": true,
         "config": {
           "enabled": true,
-          "checkChannels": true,
           "workspaceRepairs": false,
           "expectedHash": "sha256:...",
           "path": "policy.jsonc",
