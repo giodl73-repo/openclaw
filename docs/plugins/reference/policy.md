@@ -35,6 +35,9 @@ conformance and tool metadata conformance:
   structured health checks.
 - `openclaw doctor --fix` can disable denied enabled channels when
   `workspaceRepairs` is explicitly enabled.
+- When `runtimeToolPolicy` is enabled, the bundled policy extension registers a
+  trusted tool policy that blocks unverifiable governed tool calls and requests
+  approval for critical or irreversible governed tools.
 
 Policy is not a duplicate governance stack. It records expected conformance in
 `policy.jsonc`, observes existing OpenClaw settings and `TOOLS.md` declarations
@@ -54,9 +57,10 @@ metadata. Use ordinary OpenClaw config and workspace docs when the workspace
 only needs local behavior and does not need policy findings or attestation
 output.
 
-When policy is enabled, doctor loads the policy health checks through the
-extension public API. That keeps lint and repair plugin-free while still
-letting bundled extensions contribute bounded health checks.
+When policy is enabled, the extension registers its health checks with the
+shared health registry. Doctor then runs registered checks; doctor does not
+load plugins itself. Runtime tool policy uses OpenClaw's existing trusted tool
+policy hook, not a separate gateway or supervisor path.
 
 ## Config
 
@@ -72,6 +76,7 @@ Policy config lives under `plugins.entries.policy.config`:
           "enabled": true,
           "requireRisk": true,
           "requireSensitivity": true,
+          "runtimeToolPolicy": false,
           "workspaceRepairs": false,
           "expectedHash": "sha256:...",
           "path": "policy.jsonc",
@@ -86,6 +91,14 @@ Policy config lives under `plugins.entries.policy.config`:
 report denied channels, but `doctor --fix` will not edit workspace settings for
 policy unless the operator explicitly enables repairs. `expectedHash` can pin
 the policy file to an approved hash.
+
+`runtimeToolPolicy` also defaults to off. It is enabled from OpenClaw config,
+not from `policy.jsonc`, so a missing policy artifact still fails closed
+instead of disabling the runtime gate. When enabled, the runtime trusted tool
+policy reads the same policy artifact and `TOOLS.md` evidence used by
+`policy check`. It blocks calls when required metadata is missing or the policy
+hash does not match, and requests approval for governed tools marked
+`risk:critical` or `IRREVERSIBLE_EXTERNAL`.
 
 ## Checks
 
