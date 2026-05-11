@@ -17,6 +17,8 @@ export type PolicyAttestation = {
 
 export type PolicyEvidence = {
   readonly channels: readonly PolicyChannelEvidence[];
+  readonly modelProviders: readonly PolicyModelProviderEvidence[];
+  readonly modelRefs: readonly PolicyModelRefEvidence[];
   readonly tools: readonly PolicyToolEvidence[];
 };
 
@@ -34,6 +36,18 @@ export type PolicyToolEvidence = {
   readonly risk?: string;
   readonly sensitivity?: string;
   readonly capabilities?: readonly string[];
+};
+
+export type PolicyModelProviderEvidence = {
+  readonly id: string;
+  readonly ocPath: string;
+};
+
+export type PolicyModelRefEvidence = {
+  readonly ref: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly ocPath: string;
 };
 
 export function policyDocumentHash(policy: unknown): string {
@@ -64,6 +78,8 @@ export function collectPolicyEvidence(
 ): PolicyEvidence {
   return {
     channels: scanPolicyChannels(cfg),
+    modelProviders: scanPolicyModelProviders(cfg),
+    modelRefs: scanPolicyModelRefs(cfg),
     tools: options.toolsRaw === undefined ? [] : scanPolicyTools(options.toolsRaw),
   };
 }
@@ -87,6 +103,27 @@ export function scanPolicyChannels(cfg: Record<string, unknown>): readonly Polic
       }
       return entry;
     });
+}
+
+export function scanPolicyModelProviders(
+  cfg: Record<string, unknown>,
+): readonly PolicyModelProviderEvidence[] {
+  return Object.keys(configuredModelProviders(cfg))
+    .toSorted((a, b) => a.localeCompare(b))
+    .map((id) => ({
+      id,
+      ocPath: `oc://openclaw.config/models/providers/${id}`,
+    }));
+}
+
+export function scanPolicyModelRefs(cfg: Record<string, unknown>): readonly PolicyModelRefEvidence[] {
+  const refs: PolicyModelRefEvidence[] = [];
+  if (isRecord(cfg.agents)) {
+    collectModelRefsFromRecord(refs, cfg.agents, "oc://openclaw.config/agents");
+  }
+  return refs.toSorted(
+    (a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model),
+  );
 }
 
 export function scanPolicyTools(raw: string): readonly PolicyToolEvidence[] {
@@ -161,6 +198,83 @@ function riskFromMeta(meta: string): string | undefined {
 
 function configuredChannels(cfg: Record<string, unknown>): Record<string, unknown> {
   return isRecord(cfg.channels) ? cfg.channels : {};
+}
+
+function configuredModelProviders(cfg: Record<string, unknown>): Record<string, unknown> {
+  return isRecord(cfg.models) && isRecord(cfg.models.providers) ? cfg.models.providers : {};
+}
+
+function collectModelRefsFromValue(
+  refs: PolicyModelRefEvidence[],
+  value: unknown,
+  ocPath: string,
+): void {
+  if (typeof value === "string") {
+    pushModelRef(refs, value, ocPath);
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+  if (typeof value.primary === "string") {
+    pushModelRef(refs, value.primary, `${ocPath}/primary`);
+  }
+  if (Array.isArray(value.fallbacks)) {
+    for (const [index, fallback] of value.fallbacks.entries()) {
+      if (typeof fallback === "string") {
+        pushModelRef(refs, fallback, `${ocPath}/fallbacks/#${index}`);
+      }
+    }
+  }
+}
+
+function collectModelRefsFromRecord(
+  refs: PolicyModelRefEvidence[],
+  value: Record<string, unknown>,
+  ocPath: string,
+): void {
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${ocPath}/${key}`;
+    if (isModelSettingKey(key)) {
+      collectModelRefsFromValue(refs, child, childPath);
+      continue;
+    }
+    if (Array.isArray(child)) {
+      for (const [index, item] of child.entries()) {
+        if (isRecord(item)) {
+          collectModelRefsFromRecord(refs, item, `${childPath}/#${index}`);
+        }
+      }
+      continue;
+    }
+    if (isRecord(child)) {
+      collectModelRefsFromRecord(refs, child, childPath);
+    }
+  }
+}
+
+function isModelSettingKey(key: string): boolean {
+  return key === "model" || key.endsWith("Model");
+}
+
+function pushModelRef(refs: PolicyModelRefEvidence[], ref: string, ocPath: string): void {
+  const parsed = parseModelRef(ref);
+  if (parsed === undefined) {
+    return;
+  }
+  refs.push({ ref, provider: parsed.provider, model: parsed.model, ocPath });
+}
+
+function parseModelRef(ref: string): { readonly provider: string; readonly model: string } | undefined {
+  const trimmed = ref.trim();
+  const slash = trimmed.indexOf("/");
+  if (slash <= 0 || slash >= trimmed.length - 1) {
+    return undefined;
+  }
+  return {
+    provider: trimmed.slice(0, slash),
+    model: trimmed.slice(slash + 1),
+  };
 }
 
 function sha256(value: string): string {

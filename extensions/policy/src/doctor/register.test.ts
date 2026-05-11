@@ -71,6 +71,8 @@ describe("registerPolicyDoctorChecks", () => {
       "policy/policy-jsonc-missing",
       "policy/policy-hash-mismatch",
       "policy/channels-denied-provider",
+      "policy/models-denied-provider",
+      "policy/models-unapproved-provider",
       "policy/tools-missing-risk-level",
       "policy/tools-missing-sensitivity-token",
       "policy/tools-unknown-sensitivity-token",
@@ -323,6 +325,219 @@ describe("registerPolicyDoctorChecks", () => {
         ocPath: "oc://TOOLS.md/tools/deploy",
       }),
     ]);
+  });
+
+  it("reports model providers denied by policy", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      models: {
+        providers: {
+          openrouter: {
+            baseUrl: "https://openrouter.ai/api/v1",
+            models: [],
+          },
+        },
+      },
+      agents: {
+        defaults: {
+          model: "openrouter/openai/gpt-5.5",
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        models: {
+          providers: { deny: ["openrouter"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/models-denied-provider",
+        severity: "error",
+        ocPath: "oc://openclaw.config/models/providers/openrouter",
+        requirement: "oc://policy.jsonc/models/providers/deny",
+      }),
+      expect.objectContaining({
+        checkId: "policy/models-denied-provider",
+        severity: "error",
+        ocPath: "oc://openclaw.config/agents/defaults/model",
+        requirement: "oc://policy.jsonc/models/providers/deny",
+      }),
+    ]);
+  });
+
+  it("reports model refs outside the policy allowlist", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-5.5",
+            fallbacks: ["anthropic/claude-sonnet-4.7"],
+          },
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        models: {
+          providers: { allow: ["openai"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/models-unapproved-provider",
+        severity: "error",
+        ocPath: "oc://openclaw.config/agents/defaults/model/fallbacks/#0",
+        requirement: "oc://policy.jsonc/models/providers/allow",
+      }),
+    ]);
+  });
+
+  it("reports configured model providers outside the policy allowlist", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      models: {
+        providers: {
+          anthropic: {},
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        models: {
+          providers: { allow: ["openai"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/models-unapproved-provider",
+        severity: "error",
+        ocPath: "oc://openclaw.config/models/providers/anthropic",
+        requirement: "oc://policy.jsonc/models/providers/allow",
+      }),
+    ]);
+  });
+
+  it("reports non-default agent model refs outside the policy allowlist", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      agents: {
+        defaults: {
+          imageModel: "openai/gpt-5.5",
+          subagents: {
+            model: "anthropic/claude-sonnet-4.7",
+          },
+        },
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        models: {
+          providers: { allow: ["openai"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/models-unapproved-provider",
+        severity: "error",
+        ocPath: "oc://openclaw.config/agents/defaults/subagents/model",
+        requirement: "oc://policy.jsonc/models/providers/allow",
+      }),
+    ]);
+  });
+
+  it("reports per-agent model refs outside the policy allowlist", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      agents: {
+        list: [
+          {
+            id: "research",
+            model: { primary: "openrouter/openai/gpt-5.5" },
+          },
+        ],
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        models: {
+          providers: { deny: ["openrouter"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/models-denied-provider",
+        severity: "error",
+        ocPath: "oc://openclaw.config/agents/list/#0/model/primary",
+        requirement: "oc://policy.jsonc/models/providers/deny",
+      }),
+    ]);
+  });
+
+  it("does not enable tool metadata checks from a model-only policy block", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        models: {
+          providers: { allow: ["openai"] },
+        },
+      }),
+      "utf-8",
+    );
+    await fs.writeFile(join(workspaceDir, "TOOLS.md"), "## Tools\n\n### deploy\n", "utf-8");
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfgWithPolicy({ enabled: undefined })));
+
+    expect(result.findings).toEqual([]);
   });
 
   it("reports unknown governed tool sensitivity metadata", async () => {

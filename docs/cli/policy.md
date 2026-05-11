@@ -14,10 +14,11 @@ enterprise conformance feature: it lets an operator express required workspace
 posture in `policy.jsonc`, checks existing OpenClaw surfaces against those
 requirements, and emits audit evidence that can be recorded.
 
-Policy currently manages configured channels and governed tool declarations.
-For example, IT or a workspace operator can record that Telegram is not an
-approved channel provider, require governed tools to carry risk and sensitivity
-metadata, then use `doctor --lint` as the shared conformance gate.
+Policy currently manages configured channels, model providers, and governed
+tool declarations. For example, IT or a workspace operator can record that
+Telegram is not an approved channel provider, restrict model refs to approved
+providers, require governed tools to carry risk and sensitivity metadata, then
+use `doctor --lint` as the shared conformance gate.
 
 Policy is a conformance layer over existing OpenClaw settings. It does not add
 a second channel configuration system. The final conformance signal is a clean
@@ -47,7 +48,7 @@ added.
 ## Author Policy
 
 Policy is authored, not generated from the user's current settings. A minimal
-policy for channels and tool metadata looks like this:
+policy for channels, model providers, and tool metadata looks like this:
 
 ```jsonc
 {
@@ -60,6 +61,12 @@ policy for channels and tool metadata looks like this:
       },
     ],
   },
+  "models": {
+    "providers": {
+      "allow": ["openai", "anthropic"],
+      "deny": ["openrouter"],
+    },
+  },
   "tools": {
     "settings": {
       "requireRisk": true,
@@ -71,8 +78,8 @@ policy for channels and tool metadata looks like this:
 
 The rules are the authority. A category block is only a namespace; checks run
 when a concrete rule is present. OpenClaw reads current `channels.*` settings
-and `TOOLS.md` declarations as evidence, then reports observed state that does
-not conform.
+`models.providers.*`, selected agent model refs, and `TOOLS.md` declarations as
+evidence, then reports observed state that does not conform.
 
 ## Commands
 
@@ -114,6 +121,20 @@ Example JSON output:
         "enabled": false
       }
     ],
+    "modelProviders": [
+      {
+        "id": "openai",
+        "ocPath": "oc://openclaw.config/models/providers/openai"
+      }
+    ],
+    "modelRefs": [
+      {
+        "ref": "openai/gpt-5.5",
+        "provider": "openai",
+        "model": "gpt-5.5",
+        "ocPath": "oc://openclaw.config/agents/defaults/model"
+      }
+    ],
     "tools": [
       {
         "id": "deploy",
@@ -125,7 +146,7 @@ Example JSON output:
       }
     ]
   },
-  "checksRun": 6,
+  "checksRun": 8,
   "checksSkipped": 0,
   "findings": []
 }
@@ -195,14 +216,16 @@ checks for a workspace.
 
 Policy currently verifies:
 
-| Check id                                 | Finding                                                        |
-| ---------------------------------------- | -------------------------------------------------------------- |
-| `policy/policy-jsonc-missing`            | Policy is enabled but `policy.jsonc` is missing.               |
-| `policy/policy-hash-mismatch`            | Policy does not match configured `expectedHash`.               |
-| `policy/channels-denied-provider`        | An enabled channel matches a channel deny rule.                |
-| `policy/tools-missing-risk-level`        | A governed tool declaration is missing risk metadata.          |
-| `policy/tools-missing-sensitivity-token` | A governed tool declaration is missing sensitivity metadata.   |
-| `policy/tools-unknown-sensitivity-token` | A governed tool declaration uses an unknown sensitivity value. |
+| Check id                                 | Finding                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------ |
+| `policy/policy-jsonc-missing`            | Policy is enabled but `policy.jsonc` is missing.                   |
+| `policy/policy-hash-mismatch`            | Policy does not match configured `expectedHash`.                   |
+| `policy/channels-denied-provider`        | An enabled channel matches a channel deny rule.                    |
+| `policy/models-denied-provider`          | A configured model provider or model ref uses a denied provider.   |
+| `policy/models-unapproved-provider`      | A configured model provider or model ref is outside the allowlist. |
+| `policy/tools-missing-risk-level`        | A governed tool declaration is missing risk metadata.              |
+| `policy/tools-missing-sensitivity-token` | A governed tool declaration is missing sensitivity metadata.       |
+| `policy/tools-unknown-sensitivity-token` | A governed tool declaration uses an unknown sensitivity value.     |
 
 Example JSON finding:
 
@@ -233,6 +256,21 @@ Example tool finding:
   "ocPath": "oc://TOOLS.md/tools/deploy",
   "target": "oc://TOOLS.md/tools/deploy",
   "requirement": "oc://policy.jsonc/tools/settings/requireRisk"
+}
+```
+
+Example model-provider finding:
+
+```json
+{
+  "checkId": "policy/models-unapproved-provider",
+  "severity": "error",
+  "message": "Model ref 'anthropic/claude-sonnet-4.7' uses unapproved provider 'anthropic'.",
+  "source": "policy",
+  "path": "openclaw config",
+  "ocPath": "oc://openclaw.config/agents/defaults/model/fallbacks/#0",
+  "target": "oc://openclaw.config/agents/defaults/model/fallbacks/#0",
+  "requirement": "oc://policy.jsonc/models/providers/allow"
 }
 ```
 

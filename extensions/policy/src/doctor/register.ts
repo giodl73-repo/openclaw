@@ -23,6 +23,8 @@ const CHECK_IDS = {
   policyDeniedChannelProvider: "policy/channels-denied-provider",
   policyHashMismatch: "policy/policy-hash-mismatch",
   policyMissingFile: "policy/policy-jsonc-missing",
+  policyDeniedModelProvider: "policy/models-denied-provider",
+  policyUnapprovedModelProvider: "policy/models-unapproved-provider",
   policyMissingToolRisk: "policy/tools-missing-risk-level",
   policyMissingToolSensitivity: "policy/tools-missing-sensitivity-token",
   policyUnknownToolSensitivity: "policy/tools-unknown-sensitivity-token",
@@ -32,6 +34,8 @@ export const POLICY_CHECK_IDS = [
   CHECK_IDS.policyMissingFile,
   CHECK_IDS.policyHashMismatch,
   CHECK_IDS.policyDeniedChannelProvider,
+  CHECK_IDS.policyDeniedModelProvider,
+  CHECK_IDS.policyUnapprovedModelProvider,
   CHECK_IDS.policyMissingToolRisk,
   CHECK_IDS.policyMissingToolSensitivity,
   CHECK_IDS.policyUnknownToolSensitivity,
@@ -59,6 +63,8 @@ export function registerPolicyDoctorChecks(): void {
   registerHealthCheck(policyMissingFileCheck);
   registerHealthCheck(policyHashMismatchCheck);
   registerHealthCheck(policyChannelsDeniedProviderCheck);
+  registerHealthCheck(policyModelsDeniedProviderCheck);
+  registerHealthCheck(policyModelsUnapprovedProviderCheck);
   registerHealthCheck(policyToolsMissingRiskCheck);
   registerHealthCheck(policyToolsMissingSensitivityCheck);
   registerHealthCheck(policyToolsUnknownSensitivityCheck);
@@ -131,6 +137,26 @@ const policyChannelsDeniedProviderCheck: HealthCheck = {
       config: next.config,
       changes: next.changed.map((id) => `Disabled channels.${id}.enabled for policy conformance.`),
     };
+  },
+};
+
+const policyModelsDeniedProviderCheck: HealthCheck = {
+  id: CHECK_IDS.policyDeniedModelProvider,
+  kind: "plugin",
+  description: "Configured model providers do not match policy deny rules.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyDeniedModelProvider);
+  },
+};
+
+const policyModelsUnapprovedProviderCheck: HealthCheck = {
+  id: CHECK_IDS.policyUnapprovedModelProvider,
+  kind: "plugin",
+  description: "Configured model providers do not match policy allow rules.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyUnapprovedModelProvider);
   },
 };
 
@@ -217,6 +243,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
   }
 
   findings.push(...channelFindings(policy, policyFile.ocDocName, evidence));
+  findings.push(...modelProviderFindings(policy, policyFile.ocDocName, evidence));
   if (policyRequirementEnabled(settings, policy, "requireRisk")) {
     findings.push(...toolRiskFindings(policyFile.ocDocName, evidence));
   }
@@ -272,6 +299,98 @@ function channelFindings(
       },
     ];
   });
+}
+
+function modelProviderFindings(
+  policy: unknown,
+  policyDocName: string,
+  evidence: PolicyEvidence,
+): readonly HealthFinding[] {
+  const denied = new Set(readStringList(policy, ["models", "providers", "deny"]));
+  const allowed = readStringList(policy, ["models", "providers", "allow"]);
+  const allowedSet = new Set(allowed);
+  const findings: HealthFinding[] = [];
+
+  for (const provider of evidence.modelProviders) {
+    findings.push(...modelProviderConformanceFindings(provider, denied, allowedSet, policyDocName));
+  }
+  for (const modelRef of evidence.modelRefs) {
+    findings.push(...modelRefConformanceFindings(modelRef, denied, allowedSet, policyDocName));
+  }
+
+  return findings;
+}
+
+function modelProviderConformanceFindings(
+  provider: PolicyEvidence["modelProviders"][number],
+  denied: ReadonlySet<string>,
+  allowed: ReadonlySet<string>,
+  policyDocName: string,
+): readonly HealthFinding[] {
+  const findings: HealthFinding[] = [];
+  if (denied.has(provider.id)) {
+    findings.push({
+      checkId: CHECK_IDS.policyDeniedModelProvider,
+      severity: "error",
+      message: `Model provider '${provider.id}' is denied by policy.`,
+      source: "policy",
+      path: "openclaw config",
+      ocPath: provider.ocPath,
+      target: provider.ocPath,
+      requirement: `oc://${policyDocName}/models/providers/deny`,
+      fixHint: "Remove this configured provider or update the policy after review.",
+    });
+  }
+  if (!denied.has(provider.id) && allowed.size > 0 && !allowed.has(provider.id)) {
+    findings.push({
+      checkId: CHECK_IDS.policyUnapprovedModelProvider,
+      severity: "error",
+      message: `Model provider '${provider.id}' is not in the policy allowlist.`,
+      source: "policy",
+      path: "openclaw config",
+      ocPath: provider.ocPath,
+      target: provider.ocPath,
+      requirement: `oc://${policyDocName}/models/providers/allow`,
+      fixHint: "Use an approved model provider or update the policy after review.",
+    });
+  }
+  return findings;
+}
+
+function modelRefConformanceFindings(
+  modelRef: PolicyEvidence["modelRefs"][number],
+  denied: ReadonlySet<string>,
+  allowed: ReadonlySet<string>,
+  policyDocName: string,
+): readonly HealthFinding[] {
+  const findings: HealthFinding[] = [];
+  if (denied.has(modelRef.provider)) {
+    findings.push({
+      checkId: CHECK_IDS.policyDeniedModelProvider,
+      severity: "error",
+      message: `Model ref '${modelRef.ref}' uses denied provider '${modelRef.provider}'.`,
+      source: "policy",
+      path: "openclaw config",
+      ocPath: modelRef.ocPath,
+      target: modelRef.ocPath,
+      requirement: `oc://${policyDocName}/models/providers/deny`,
+      fixHint: "Select an approved model provider or update the policy after review.",
+    });
+  }
+  if (!denied.has(modelRef.provider) && allowed.size > 0 && !allowed.has(modelRef.provider)) {
+    findings.push({
+      checkId: CHECK_IDS.policyUnapprovedModelProvider,
+      severity: "error",
+      message: `Model ref '${modelRef.ref}' uses unapproved provider '${modelRef.provider}'.`,
+      source: "policy",
+      path: "openclaw config",
+      ocPath: modelRef.ocPath,
+      target: modelRef.ocPath,
+      requirement: `oc://${policyDocName}/models/providers/allow`,
+      fixHint: "Select an approved model provider or update the policy after review.",
+    });
+  }
+  return findings;
 }
 
 function toolRiskFindings(policyDocName: string, evidence: PolicyEvidence): readonly HealthFinding[] {
@@ -562,6 +681,20 @@ function policyRequirementEnabled(
     readPolicyBoolean(policy, [setting]) ??
     false
   );
+}
+
+function readStringList(policy: unknown, path: readonly string[]): readonly string[] {
+  let current: unknown = policy;
+  for (const part of path) {
+    if (!isRecord(current)) {
+      return [];
+    }
+    current = current[part];
+  }
+  if (!Array.isArray(current)) {
+    return [];
+  }
+  return current.filter((entry): entry is string => typeof entry === "string");
 }
 
 function readPolicyBoolean(policy: unknown, path: readonly string[]): boolean | undefined {

@@ -120,7 +120,7 @@ export async function evaluatePolicyTrustedToolCall(
           title: "Review undeclared tool",
           description: `Policy requires tool metadata, but '${event.toolName}' is not declared in TOOLS.md.`,
           severity: "warning" as const,
-          allowedDecisions: ["allow-once", "deny"] as const,
+          allowedDecisions: policyApprovalDecisions(),
         },
       };
     }
@@ -144,9 +144,13 @@ export async function evaluatePolicyTrustedToolCall(
       title: "Review policy-governed tool",
       description: `${event.toolName} requires approval because ${approvalReason}.`,
       severity: tool.risk === "critical" ? ("critical" as const) : ("warning" as const),
-      allowedDecisions: ["allow-once", "deny"] as const,
+      allowedDecisions: policyApprovalDecisions(),
     },
   };
+}
+
+function policyApprovalDecisions(): Array<"allow-once" | "deny"> {
+  return ["allow-once", "deny"];
 }
 
 async function loadRuntimePolicyState(

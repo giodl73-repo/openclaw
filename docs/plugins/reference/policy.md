@@ -25,12 +25,13 @@ plugin; CLI command: [`openclaw policy`](/cli/policy)
 
 The policy plugin contributes doctor health checks for policy-managed OpenClaw
 settings and governed workspace declarations. Policy currently manages channel
-conformance and tool metadata conformance:
+conformance, model-provider conformance, and tool metadata conformance:
 
-- `policy.jsonc` stores operator-owned channel and tool requirements.
+- `policy.jsonc` stores operator-owned channel, model-provider, and tool
+  requirements.
 - `openclaw policy check` runs only the policy health checks and emits
-  observed channel/tool evidence plus policy/evidence/findings/attestation
-  hashes.
+  observed channel/model/tool evidence plus policy/evidence/findings/
+  attestation hashes.
 - `openclaw doctor --lint` reports the same policy findings alongside other
   structured health checks.
 - `openclaw doctor --fix` can disable denied enabled channels when
@@ -109,6 +110,8 @@ The plugin registers these doctor health checks:
 | `policy/policy-jsonc-missing`            | Report missing policy artifact when enabled.   |
 | `policy/policy-hash-mismatch`            | Reject policy files that do not match hash.    |
 | `policy/channels-denied-provider`        | Reject enabled channels matching deny rules.   |
+| `policy/models-denied-provider`          | Reject denied model providers and refs.        |
+| `policy/models-unapproved-provider`      | Reject model providers outside the allowlist.  |
 | `policy/tools-missing-risk-level`        | Require governed tools to declare risk.        |
 | `policy/tools-missing-sensitivity-token` | Require governed tools to declare sensitivity. |
 | `policy/tools-unknown-sensitivity-token` | Reject unknown governed tool sensitivity.      |
