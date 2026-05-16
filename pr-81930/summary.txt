@@ -1,0 +1,23 @@
+PR #81930 fresh before/after proof
+
+Behavior: MEMORY.md voice instructions should be framed as durable guidance in the system prompt, and generic TTS guidance should explicitly defer to MEMORY.md/local voice workflow instructions while preserving the normal [[tts:...]] directive path.
+
+BEFORE upstream/main 7b38ac974911:
+memoryGuidance=false
+memoryInstructionPresent=true
+voiceHintPresent=true
+memoryInstructionBeforeVoiceHint=true
+ttsDefers=false
+ttsDirectiveStillPresent=true
+ok=false
+status=0
+
+AFTER PR #81930 head 89fb5581492a426de595d4398e1788122644e85a:
+memoryGuidance=true
+memoryInstructionPresent=true
+voiceHintPresent=true
+memoryInstructionBeforeVoiceHint=true
+ttsDefers=true
+ttsDirectiveStillPresent=true
+ok=true
+status=0
