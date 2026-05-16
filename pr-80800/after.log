@@ -1,0 +1,61 @@
+{
+  "label": "after",
+  "ref": "3081cacad5e7",
+  "hasLintCommand": true,
+  "hasLintFlow": true,
+  "hasDiagnosticRegistry": true,
+  "hasCoreDiagnostics": true,
+  "docsIncludeLint": true,
+  "commandCatalogIncludesLint": true,
+  "maintenanceRegistersLint": true,
+  "registeredIds": [
+    "core/lint/gateway-config",
+    "core/lint/command-owner",
+    "core/lint/workspace-status",
+    "core/lint/skills-readiness",
+    "core/lint/final-config-validation"
+  ],
+  "onlyRun": {
+    "checksRun": 2,
+    "checksSkipped": 3,
+    "findings": [
+      {
+        "checkId": "core/lint/gateway-config",
+        "severity": "warning",
+        "path": "gateway.mode",
+        "message": "gateway.mode is unset; gateway start will be blocked.",
+        "hasFixHint": true
+      },
+      {
+        "checkId": "core/lint/command-owner",
+        "severity": "info",
+        "path": "commands.ownerAllowFrom",
+        "message": "No command owner is configured. Owner-only commands (/diagnostics, /export-trajectory, /config, exec approvals) have no allowed sender.",
+        "hasFixHint": true
+      }
+    ]
+  },
+  "thrownRun": {
+    "checksRun": 2,
+    "findings": [
+      {
+        "checkId": "probe/thrown-check",
+        "severity": "error",
+        "message": "diagnostic check threw: boomsecret-control"
+      }
+    ]
+  },
+  "exitCodes": {
+    "info": 1,
+    "warning": 1,
+    "error": 0
+  },
+  "severityProbe": {
+    "parseWarning": "warning",
+    "parseBad": null,
+    "warningMeetsError": false,
+    "errorMeetsWarning": true
+  },
+  "runtimeError": null,
+  "ok": true
+}

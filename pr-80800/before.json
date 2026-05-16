@@ -1,0 +1,18 @@
+{
+  "label": "before",
+  "ref": "32f7481787b0",
+  "hasLintCommand": false,
+  "hasLintFlow": false,
+  "hasDiagnosticRegistry": false,
+  "hasCoreDiagnostics": false,
+  "docsIncludeLint": false,
+  "commandCatalogIncludesLint": false,
+  "maintenanceRegistersLint": false,
+  "registeredIds": [],
+  "onlyRun": null,
+  "thrownRun": null,
+  "exitCodes": null,
+  "severityProbe": null,
+  "runtimeError": null,
+  "ok": false
+}

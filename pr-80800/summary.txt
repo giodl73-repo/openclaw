@@ -1,0 +1,27 @@
+PR #80800 proof: standalone lint diagnostic command and engine
+
+Behavior under test: PR head should add the read-only `openclaw lint` command plus the diagnostic registry/flow/core checks. The engine should register the built-in checks, honor --only filtering, emit structured findings, convert thrown checks into sanitized error findings, and apply severity-threshold exit-code semantics.
+
+BEFORE upstream/main (32f7481787b0):
+hasLintCommand=False
+hasLintFlow=False
+hasDiagnosticRegistry=False
+hasCoreDiagnostics=False
+docsIncludeLint=False
+registeredIds=[]
+ok=False
+
+AFTER PR #80800 (3081cacad5e7):
+hasLintCommand=True
+hasLintFlow=True
+hasDiagnosticRegistry=True
+hasCoreDiagnostics=True
+docsIncludeLint=True
+registeredIds=['core/lint/gateway-config', 'core/lint/command-owner', 'core/lint/workspace-status', 'core/lint/skills-readiness', 'core/lint/final-config-validation']
+onlyRun={'checksRun': 2, 'checksSkipped': 3, 'findings': [{'checkId': 'core/lint/gateway-config', 'severity': 'warning', 'path': 'gateway.mode', 'message': 'gateway.mode is unset; gateway start will be blocked.', 'hasFixHint': True}, {'checkId': 'core/lint/command-owner', 'severity': 'info', 'path': 'commands.ownerAllowFrom', 'message': 'No command owner is configured. Owner-only commands (/diagnostics, /export-trajectory, /config, exec approvals) have no allowed sender.', 'hasFixHint': True}]}
+thrownRun={'checksRun': 2, 'findings': [{'checkId': 'probe/thrown-check', 'severity': 'error', 'message': 'diagnostic check threw: boomsecret-control'}]}
+exitCodes={'info': 1, 'warning': 1, 'error': 0}
+severityProbe={'parseWarning': 'warning', 'parseBad': None, 'warningMeetsError': False, 'errorMeetsWarning': True}
+ok=True
+
+Command: node --import ./node_modules/tsx/dist/loader.mjs probe-lint-diagnostics.mjs in clean upstream/main and PR-head worktrees.
