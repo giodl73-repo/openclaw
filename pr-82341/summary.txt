@@ -1,0 +1,21 @@
+PR #82341 fresh before/after proof
+
+Behavior: memory-core startup should mark stale persisted session transcript sources dirty and schedule a session-startup-catchup sync after clean restart state is lost.
+
+BEFORE upstream/main:
+status=0
+ok=false
+changedCount=0
+dirtyCount=0
+sessionsDirty=false
+syncReason=<none>
+error=this.runSessionStartupCatchup is not a function
+
+AFTER PR #82341 head 9e1027d9f4d8718576653a97a9c8f01b0a455d67:
+status=0
+ok=true
+changedCount=1
+dirtyCount=1
+sessionsDirty=true
+syncReason=session-startup-catchup
+error=<none>
