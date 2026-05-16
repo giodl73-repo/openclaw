@@ -1,0 +1,21 @@
+PR #82625 fresh before/after proof
+
+Behavior: Telegram partial-preview text delivered through onPartialReply should not be delivered again as final text payloads, while unrelated short final text remains deliverable and media remains deliverable with duplicate caption text stripped.
+
+BEFORE upstream/main:
+status=0
+payloadCount=4
+duplicateFinalCount=2
+shortFinalText=3
+mediaKept=true
+mediaText=Here is the chart
+texts=First block|Second block|3|Here is the chart
+
+AFTER PR #82625 head 15d9d500cd45b8b1db50d90d13fdd62c17cbdb76:
+status=0
+payloadCount=2
+duplicateFinalCount=0
+shortFinalText=3
+mediaKept=true
+mediaText=<missing>
+texts=3|<missing>
