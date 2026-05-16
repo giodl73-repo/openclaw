@@ -1,0 +1,25 @@
+PR #81423 fresh before/after proof
+
+Behavior: QMD v2 hybrid query payloads should preserve the raw hyphenated query for lexical search, while normalizing only semantic vec/hyde searches; vector-only mode should normalize its semantic query.
+
+BEFORE upstream/main bea4f0d2f4b4:
+lexPreserved=true
+semanticNormalized=false
+vectorOnlyNormalized=false
+lexQuery=sqlite-vec backend health 2026-05-04 multi-agent
+vecQuery=sqlite-vec backend health 2026-05-04 multi-agent
+hydeQuery=sqlite-vec backend health 2026-05-04 multi-agent
+vectorOnlyQuery=sqlite-vec backend health
+ok=false
+status=0
+
+AFTER PR #81423 head 0f7460c4d99d028e07a629bfd178afc105a6c308:
+lexPreserved=true
+semanticNormalized=true
+vectorOnlyNormalized=true
+lexQuery=sqlite-vec backend health 2026-05-04 multi-agent
+vecQuery=sqlite vec backend health 2026 05 04 multi agent
+hydeQuery=sqlite vec backend health 2026 05 04 multi agent
+vectorOnlyQuery=sqlite vec backend health
+ok=true
+status=0
