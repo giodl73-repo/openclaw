@@ -1,0 +1,17 @@
+PR #81909 fresh before/after proof
+
+Behavior: edit recovery should recognize file_path as the target path after a post-write failure, detect that the file changed, and return success instead of surfacing a false failure.
+
+BEFORE upstream/main:
+status=0
+threw=true
+isError=n/a
+fileContainsNewInstruction=true
+resultText=Simulated post-write failure (e.g. generateDiffString)
+
+AFTER PR #81909 head e6065687169a48a0f7d167a63ddd2468b6319a05:
+status=0
+threw=false
+isError=false
+fileContainsNewInstruction=true
+resultText=Successfully replaced text in /tmp/openclaw-edit-recovery-proof-y32zA2/.openclaw/workspace/AGENTS.md.
