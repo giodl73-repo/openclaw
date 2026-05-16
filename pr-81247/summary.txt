@@ -1,0 +1,33 @@
+PR #81247 proof: clear poisoned Claude CLI sessions
+
+Behavior under test: reused claude-cli session IDs should be cleared after AbortError or non-session_expired FailoverError without retrying, while the existing session_expired clear-and-retry path remains unchanged.
+
+BEFORE upstream/main (32f7481787b0):
+sourceHasErrorNameImport=False
+sourceHasAbortClassifier=False
+sourceClearsNonExpiredFailover=False
+sourceKeepsSessionExpiredRetry=True
+sourceHasClearOnlyLog=False
+sourceClearOnlyThrowsOriginal=False
+testsSeedReusableClaudeTranscript=False
+testsCoverAbortClearOnly=False
+testsCoverTimeoutClearOnly=False
+testsAssertNoRetry=True
+testsAssertStoreCleared=True
+ok=False
+
+AFTER PR #81247 (8cec105b7017):
+sourceHasErrorNameImport=True
+sourceHasAbortClassifier=True
+sourceClearsNonExpiredFailover=True
+sourceKeepsSessionExpiredRetry=True
+sourceHasClearOnlyLog=True
+sourceClearOnlyThrowsOriginal=True
+testsSeedReusableClaudeTranscript=True
+testsCoverAbortClearOnly=True
+testsCoverTimeoutClearOnly=True
+testsAssertNoRetry=True
+testsAssertStoreCleared=True
+ok=True
+
+Command: node probe-claude-cli-session-invalidation.mjs in clean upstream/main and actual PR-head worktrees. The probe inspects the exact OpenClaw command/session-store seam and the added regression tests that seed reusable Claude CLI transcripts, assert one failed call, and assert all stored claude-cli bindings are cleared.
