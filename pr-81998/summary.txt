@@ -1,0 +1,21 @@
+PR #81998 fresh before/after proof
+
+Behavior: materialized config defaults should include agents.defaults.subagents.archiveAfterMinutes=60 so config get can return the documented default for a fresh config.
+
+BEFORE upstream/main a1d0b2709a55:
+command=node --import ./node_modules/tsx/dist/loader.mjs /tmp/openclaw-proof-81998-fresh/probe-subagent-archive-default.mjs <worktree>
+archiveDefault=<missing>
+subagentMaxConcurrent=8
+agentMaxConcurrent=4
+configGetWouldPrint=<path missing>
+ok=false
+status=0
+
+AFTER PR #81998 head 6f85e4e26d958fad46e075d1e66a207e09c79a93:
+command=node --import ./node_modules/tsx/dist/loader.mjs /tmp/openclaw-proof-81998-fresh/probe-subagent-archive-default.mjs <worktree>
+archiveDefault=60
+subagentMaxConcurrent=8
+agentMaxConcurrent=4
+configGetWouldPrint=60
+ok=true
+status=0
