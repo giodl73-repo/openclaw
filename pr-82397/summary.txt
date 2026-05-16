@@ -1,0 +1,23 @@
+PR #82397 fresh before/after proof
+
+Behavior: with tools.fs.workspaceOnly enabled, read may load files from runtime-resolved skill roots, but sibling/outside reads and writes/edits remain blocked.
+
+BEFORE upstream/main:
+status=0
+readSkill=false
+readGuide=false
+siblingBlocked=true
+outsideBlocked=true
+writeBlocked=true
+editBlocked=true
+skillFileStillOriginal=true
+
+AFTER PR #82397 head 2018a9360c662bae7e24f15a470144fe91f451e2:
+status=0
+readSkill=true
+readGuide=true
+siblingBlocked=true
+outsideBlocked=true
+writeBlocked=true
+editBlocked=true
+skillFileStillOriginal=true
