@@ -1,0 +1,30 @@
+PR #80055 proof: doctor health-check contract and --lint validation
+
+Behavior under test: OpenClaw should expose a read-only doctor lint surface backed by a detect()/repair() health-check contract, with core checks registered and structured findings emitted from real detect() checks.
+
+BEFORE upstream/main (6b4d37172373):
+hasHealthTypes=False
+hasHealthRegistry=False
+hasDoctorLintFlow=False
+hasDoctorLintCli=False
+maintenanceRegistersLint=False
+maintenanceExposesLintFlag=False
+checksRegistered=0
+checksRun=0
+findingCount=0
+ok=False
+
+AFTER PR #80055 (61e6194f8ca1):
+hasHealthTypes=True
+hasHealthRegistry=True
+hasDoctorLintFlow=True
+hasDoctorLintCli=True
+maintenanceRegistersLint=True
+maintenanceExposesLintFlag=True
+checksRegistered=5
+checksRun=2
+findingCount=3
+ok=True
+findings=[{'checkId': 'core/doctor/gateway-config', 'severity': 'warning', 'path': 'gateway.auth.mode', 'message': 'gateway.auth.token and gateway.auth.password are both configured while gateway.auth.mode is unset; auth selection is ambiguous.', 'hasFixHint': True}, {'checkId': 'core/doctor/gateway-config', 'severity': 'warning', 'path': 'gateway.mode', 'message': 'gateway.mode is unset; gateway start will be blocked.', 'hasFixHint': True}, {'checkId': 'core/doctor/command-owner', 'severity': 'info', 'path': 'commands.ownerAllowFrom', 'message': 'No command owner is configured. Owner-only commands (/diagnostics, /export-trajectory, /config, exec approvals) have no allowed sender.', 'hasFixHint': True}]
+
+Command: node --import ./node_modules/tsx/dist/loader.mjs probe-doctor-lint-contract.mjs in clean upstream/main and PR-head worktrees.
