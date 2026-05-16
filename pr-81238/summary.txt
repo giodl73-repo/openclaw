@@ -1,0 +1,23 @@
+PR #81238 fresh before/after proof
+
+Behavior: bundled MCP tool schemas with local $ref into $defs oneOf unions should expose an inlined usable parent schema and accept valid Notion-style { parent: { page_id } } arguments before the MCP call.
+
+BEFORE upstream/main 21244d979334:
+toolName=notion__API-post-page
+schemaHasRef=true
+schemaHasDefs=true
+parentHasOneOf=false
+acceptedPageId=true
+validationError=<none>
+ok=false
+status=0
+
+AFTER PR #81238 head f4beb91003afbc90b8569e4090399ac6462ff9b8:
+toolName=notion__API-post-page
+schemaHasRef=false
+schemaHasDefs=false
+parentHasOneOf=true
+acceptedPageId=true
+validationError=<none>
+ok=true
+status=0
