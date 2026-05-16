@@ -1,0 +1,23 @@
+PR #81918 fresh before/after proof
+
+Behavior: bootstrap prompt truncation warnings should default to always, while explicit off, once, and always settings remain honored.
+
+BEFORE upstream/main 7b38ac974911:
+defaultConstant=once
+noConfig=once
+explicitOff=off
+explicitOnce=once
+explicitAlways=always
+invalidFallsBack=once
+ok=false
+status=0
+
+AFTER PR #81918 head 92e48bc6889a7251ba4acc2fc67a6cbcf319ff2b:
+defaultConstant=always
+noConfig=always
+explicitOff=off
+explicitOnce=once
+explicitAlways=always
+invalidFallsBack=always
+ok=true
+status=0
