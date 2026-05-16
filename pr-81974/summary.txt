@@ -1,0 +1,31 @@
+PR #81974 fresh before/after proof
+
+Behavior: policy doctor/lint should register secrets/auth provenance checks, report denied inline/unmanaged/insecure/exec secret posture and auth profile policy violations, and avoid leaking raw inline secret values.
+
+BEFORE upstream/main 93bc99460ef2:
+command=node --import ./node_modules/tsx/dist/loader.mjs /tmp/openclaw-proof-81974-fresh/probe-secrets-auth-policy.mjs <worktree>
+policyRegisterImport=missing-or-failed
+importError=ENOENT
+checksRegistered=0
+findings=0
+secretLeaked=false
+findingTypes=<none>
+ok=false
+status=0
+
+AFTER PR #81974 head ac8f697003556d3a15f984eb7b7edbf4a076c024:
+command=node --import ./node_modules/tsx/dist/loader.mjs /tmp/openclaw-proof-81974-fresh/probe-secrets-auth-policy.mjs <worktree>
+policyRegisterImport=ok
+importError=<none>
+checksRegistered=6
+findings=6
+secretLeaked=false
+findingTypes=policy/auth-profile-invalid-metadata,policy/auth-profile-unapproved-mode,policy/secrets-denied-provider-source,policy/secrets-inline-value,policy/secrets-insecure-provider,policy/secrets-unmanaged-provider
+error policy/auth-profile-invalid-metadata oc://openclaw.config/auth/profiles/missingMode -> oc://policy.jsonc/auth/profiles/requireMetadata
+error policy/auth-profile-unapproved-mode oc://openclaw.config/auth/profiles/oauth -> oc://policy.jsonc/auth/profiles/allowModes
+error policy/secrets-denied-provider-source oc://openclaw.config/secrets/providers/command -> oc://policy.jsonc/secrets/denySources
+error policy/secrets-inline-value oc://openclaw.config/models/providers/openai/apiKey -> oc://policy.jsonc/secrets/disallowInline
+error policy/secrets-insecure-provider oc://openclaw.config/secrets/providers/vault -> oc://policy.jsonc/secrets/allowInsecureProviders
+error policy/secrets-unmanaged-provider oc://openclaw.config/models/providers/anthropic/apiKey -> oc://policy.jsonc/secrets/requireManagedProviders
+ok=true
+status=0
