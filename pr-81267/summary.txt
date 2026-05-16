@@ -1,0 +1,25 @@
+PR #81267 proof: hidden Windows node task launcher
+
+Behavior under test: `openclaw node install` should opt the node service into a hidden Windows launcher, staging `node.cmd` plus `node.vbs` where the VBS launcher runs the command host hidden.
+
+BEFORE upstream/main (d533a65f56ad):
+nodeHiddenFlag=<missing>
+taskScriptName=node.cmd
+scriptExists=True
+launcherExists=False
+launcherUsesWscriptShell=False
+launcherRunsHidden=False
+ok=False
+
+AFTER PR #81267 (1fa6b3aefbed):
+nodeHiddenFlag=1
+taskScriptName=node.cmd
+scriptExists=True
+launcherExists=True
+launcherUsesWscriptShell=True
+launcherRunsHidden=True
+ok=True
+launcherText=' OpenClaw Node hidden launcher proof
+CreateObject("WScript.Shell").Run """/mnt/c/Users/giodl/AppData/Local/Temp/pr-81267-fresh-proof/state-after/.openclaw/node.cmd""", 0, False
+
+Command: node --import ./node_modules/tsx/dist/loader.mjs probe-hidden-node-task.mjs in clean upstream/main and PR-head worktrees.
