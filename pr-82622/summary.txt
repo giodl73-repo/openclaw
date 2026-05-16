@@ -1,0 +1,17 @@
+PR #82622 fresh before/after proof
+
+Behavior: bundled generated entry resolution should prefer packaged dist-runtime/extensions before falling back to source extensions.
+
+BEFORE upstream/main:
+status=0
+resolved=extensions/plugin/index.ts
+usesDistRuntime=false
+sourceFallback=true
+exists=true
+
+AFTER PR #82622 head 3e53c8bb8165e01a79f9f43c6530f1eec41efaba:
+status=0
+resolved=dist-runtime/extensions/plugin/index.js
+usesDistRuntime=true
+sourceFallback=false
+exists=true
