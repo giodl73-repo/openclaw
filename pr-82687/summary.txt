@@ -1,0 +1,21 @@
+PR #82687 fresh before/after proof
+
+Behavior: doctor unknown-key cleanup must preserve legacy root defaultModel, agent descriptions, and mcp.servers while still removing truly unknown keys. defaultModel must remain public-schema-invalid.
+
+BEFORE upstream/main:
+status=0
+schemaAcceptsDefaultModel=false
+removed=agents.list[0].description,agents.list[1].description,defaultModel,unexpected
+defaultModel=<missing>
+agentDescriptions=main:<missing>,stock-news:<missing>
+mcpServerKeys=tushareMcp
+hasUnexpected=false
+
+AFTER PR #82687 head 4cba3e911404bbdcd6915b8741f0171e12b24e88:
+status=0
+schemaAcceptsDefaultModel=false
+removed=unexpected
+defaultModel=minimax/MiniMax-M2.7
+agentDescriptions=main:Main coordinator,stock-news:Tracks market news
+mcpServerKeys=tushareMcp
+hasUnexpected=false
