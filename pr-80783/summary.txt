@@ -1,0 +1,27 @@
+PR #80783 proof: policy model, MCP, and private-network conformance examples
+
+Behavior under test: enabled bundled policy should register model-provider, MCP-server, and private-network health checks; collect config-derived evidence; and emit structured findings with oc:// target/requirement paths when configured model providers, MCP servers, or private-network SSRF posture violate policy.
+
+BEFORE upstream/main (32f7481787b0):
+hasPolicyExtension=False
+hasPolicyDoctorRegister=False
+sourceMentionsModelChecks=False
+sourceMentionsMcpChecks=False
+sourceMentionsNetworkChecks=False
+newCategoryChecks=[]
+findingCount=0
+evidence={'modelProviders': [], 'modelRefs': [], 'mcpServers': [], 'network': None}
+ok=False
+
+AFTER PR #80783 (9a87f3d807f0):
+newCategoryChecks=['policy/mcp-denied-server', 'policy/mcp-unapproved-server', 'policy/models-denied-provider', 'policy/models-unapproved-provider', 'policy/network-private-access-enabled']
+checksRun=15
+findingCount=8
+findings=[{'checkId': 'policy/mcp-denied-server', 'severity': 'error', 'message': "MCP server 'untrusted' is denied by policy.", 'ocPath': 'oc://openclaw.config/mcp/servers/untrusted', 'requirement': 'oc://policy.jsonc/mcp/servers/deny'}, {'checkId': 'policy/mcp-unapproved-server', 'severity': 'error', 'message': "MCP server 'remote' is not in the policy allowlist.", 'ocPath': 'oc://openclaw.config/mcp/servers/remote', 'requirement': 'oc://policy.jsonc/mcp/servers/allow'}, {'checkId': 'policy/models-denied-provider', 'severity': 'error', 'message': "Model provider 'openrouter' is denied by policy.", 'ocPath': 'oc://openclaw.config/models/providers/openrouter', 'requirement': 'oc://policy.jsonc/models/providers/deny'}, {'checkId': 'policy/models-denied-provider', 'severity': 'error', 'message': "Model ref 'openrouter/openai/gpt-5.5' uses denied provider 'openrouter'.", 'ocPath': 'oc://openclaw.config/agents/defaults/model/primary', 'requirement': 'oc://policy.jsonc/models/providers/deny'}, {'checkId': 'policy/models-unapproved-provider', 'severity': 'error', 'message': "Model provider 'anthropic' is not in the policy allowlist.", 'ocPath': 'oc://openclaw.config/models/providers/anthropic', 'requirement': 'oc://policy.jsonc/models/providers/allow'}, {'checkId': 'policy/models-unapproved-provider', 'severity': 'error', 'message': "Model ref 'anthropic/claude-sonnet-4.7' uses unapproved provider 'anthropic'.", 'ocPath': 'oc://openclaw.config/agents/defaults/model/fallbacks/#0', 'requirement': 'oc://policy.jsonc/models/providers/allow'}, {'checkId': 'policy/network-private-access-enabled', 'severity': 'error', 'message': "Network setting 'browser-private-network' allows private-network access.", 'ocPath': 'oc://openclaw.config/browser/ssrfPolicy/dangerouslyAllowPrivateNetwork', 'requirement': 'oc://policy.jsonc/network/privateNetwork/allow'}, {'checkId': 'policy/network-private-access-enabled', 'severity': 'error', 'message': "Network setting 'web-fetch-ipv6-unique-local-range' allows private-network access.", 'ocPath': 'oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowIpv6UniqueLocalRange', 'requirement': 'oc://policy.jsonc/network/privateNetwork/allow'}]
+evidence.modelProviders=[{'id': 'anthropic', 'source': 'oc://openclaw.config/models/providers/anthropic'}, {'id': 'openrouter', 'source': 'oc://openclaw.config/models/providers/openrouter'}]
+evidence.modelRefs=[{'ref': 'anthropic/claude-sonnet-4.7', 'provider': 'anthropic', 'model': 'claude-sonnet-4.7', 'source': 'oc://openclaw.config/agents/defaults/model/fallbacks/#0'}, {'ref': 'openrouter/openai/gpt-5.5', 'provider': 'openrouter', 'model': 'openai/gpt-5.5', 'source': 'oc://openclaw.config/agents/defaults/model/primary'}]
+evidence.mcpServers=[{'id': 'docs', 'transport': 'stdio', 'source': 'oc://openclaw.config/mcp/servers/docs', 'command': 'npx'}, {'id': 'remote', 'transport': 'streamable-http', 'source': 'oc://openclaw.config/mcp/servers/remote', 'url': 'https://example.com'}, {'id': 'untrusted', 'transport': 'stdio', 'source': 'oc://openclaw.config/mcp/servers/untrusted', 'command': 'uvx'}]
+evidence.network=[{'id': 'browser-private-network', 'source': 'oc://openclaw.config/browser/ssrfPolicy/dangerouslyAllowPrivateNetwork', 'value': True}, {'id': 'web-fetch-ipv6-unique-local-range', 'source': 'oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowIpv6UniqueLocalRange', 'value': True}]
+ok=True
+
+Command: node --import ./node_modules/tsx/dist/loader.mjs probe-policy-conformance-examples.mjs in clean upstream/main and PR-head worktrees. The PR-head worktree used local untracked module shims so direct source imports resolve the new workspace packages exactly as the test runtime does.

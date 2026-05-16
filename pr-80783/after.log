@@ -1,0 +1,154 @@
+{
+  "label": "after",
+  "ref": "9a87f3d807f0",
+  "hasPolicyExtension": true,
+  "hasPolicyDoctorRegister": true,
+  "hasPolicyState": true,
+  "sourceMentionsModelChecks": true,
+  "sourceMentionsMcpChecks": true,
+  "sourceMentionsNetworkChecks": true,
+  "registeredPolicyChecks": [
+    "policy/policy-jsonc-missing",
+    "policy/policy-jsonc-invalid",
+    "policy/policy-hash-mismatch",
+    "policy/attestation-hash-mismatch",
+    "policy/channels-denied-provider",
+    "policy/mcp-denied-server",
+    "policy/mcp-unapproved-server",
+    "policy/models-denied-provider",
+    "policy/models-unapproved-provider",
+    "policy/network-private-access-enabled",
+    "policy/tools-missing-risk-level",
+    "policy/tools-unknown-risk-level",
+    "policy/tools-missing-sensitivity-token",
+    "policy/tools-missing-owner",
+    "policy/tools-unknown-sensitivity-token"
+  ],
+  "newCategoryChecks": [
+    "policy/mcp-denied-server",
+    "policy/mcp-unapproved-server",
+    "policy/models-denied-provider",
+    "policy/models-unapproved-provider",
+    "policy/network-private-access-enabled"
+  ],
+  "checksRun": 15,
+  "findingCount": 8,
+  "findings": [
+    {
+      "checkId": "policy/mcp-denied-server",
+      "severity": "error",
+      "message": "MCP server 'untrusted' is denied by policy.",
+      "ocPath": "oc://openclaw.config/mcp/servers/untrusted",
+      "requirement": "oc://policy.jsonc/mcp/servers/deny"
+    },
+    {
+      "checkId": "policy/mcp-unapproved-server",
+      "severity": "error",
+      "message": "MCP server 'remote' is not in the policy allowlist.",
+      "ocPath": "oc://openclaw.config/mcp/servers/remote",
+      "requirement": "oc://policy.jsonc/mcp/servers/allow"
+    },
+    {
+      "checkId": "policy/models-denied-provider",
+      "severity": "error",
+      "message": "Model provider 'openrouter' is denied by policy.",
+      "ocPath": "oc://openclaw.config/models/providers/openrouter",
+      "requirement": "oc://policy.jsonc/models/providers/deny"
+    },
+    {
+      "checkId": "policy/models-denied-provider",
+      "severity": "error",
+      "message": "Model ref 'openrouter/openai/gpt-5.5' uses denied provider 'openrouter'.",
+      "ocPath": "oc://openclaw.config/agents/defaults/model/primary",
+      "requirement": "oc://policy.jsonc/models/providers/deny"
+    },
+    {
+      "checkId": "policy/models-unapproved-provider",
+      "severity": "error",
+      "message": "Model provider 'anthropic' is not in the policy allowlist.",
+      "ocPath": "oc://openclaw.config/models/providers/anthropic",
+      "requirement": "oc://policy.jsonc/models/providers/allow"
+    },
+    {
+      "checkId": "policy/models-unapproved-provider",
+      "severity": "error",
+      "message": "Model ref 'anthropic/claude-sonnet-4.7' uses unapproved provider 'anthropic'.",
+      "ocPath": "oc://openclaw.config/agents/defaults/model/fallbacks/#0",
+      "requirement": "oc://policy.jsonc/models/providers/allow"
+    },
+    {
+      "checkId": "policy/network-private-access-enabled",
+      "severity": "error",
+      "message": "Network setting 'browser-private-network' allows private-network access.",
+      "ocPath": "oc://openclaw.config/browser/ssrfPolicy/dangerouslyAllowPrivateNetwork",
+      "requirement": "oc://policy.jsonc/network/privateNetwork/allow"
+    },
+    {
+      "checkId": "policy/network-private-access-enabled",
+      "severity": "error",
+      "message": "Network setting 'web-fetch-ipv6-unique-local-range' allows private-network access.",
+      "ocPath": "oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowIpv6UniqueLocalRange",
+      "requirement": "oc://policy.jsonc/network/privateNetwork/allow"
+    }
+  ],
+  "evidence": {
+    "modelProviders": [
+      {
+        "id": "anthropic",
+        "source": "oc://openclaw.config/models/providers/anthropic"
+      },
+      {
+        "id": "openrouter",
+        "source": "oc://openclaw.config/models/providers/openrouter"
+      }
+    ],
+    "modelRefs": [
+      {
+        "ref": "anthropic/claude-sonnet-4.7",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4.7",
+        "source": "oc://openclaw.config/agents/defaults/model/fallbacks/#0"
+      },
+      {
+        "ref": "openrouter/openai/gpt-5.5",
+        "provider": "openrouter",
+        "model": "openai/gpt-5.5",
+        "source": "oc://openclaw.config/agents/defaults/model/primary"
+      }
+    ],
+    "mcpServers": [
+      {
+        "id": "docs",
+        "transport": "stdio",
+        "source": "oc://openclaw.config/mcp/servers/docs",
+        "command": "npx"
+      },
+      {
+        "id": "remote",
+        "transport": "streamable-http",
+        "source": "oc://openclaw.config/mcp/servers/remote",
+        "url": "https://example.com"
+      },
+      {
+        "id": "untrusted",
+        "transport": "stdio",
+        "source": "oc://openclaw.config/mcp/servers/untrusted",
+        "command": "uvx"
+      }
+    ],
+    "network": [
+      {
+        "id": "browser-private-network",
+        "source": "oc://openclaw.config/browser/ssrfPolicy/dangerouslyAllowPrivateNetwork",
+        "value": true
+      },
+      {
+        "id": "web-fetch-ipv6-unique-local-range",
+        "source": "oc://openclaw.config/tools/web/fetch/ssrfPolicy/allowIpv6UniqueLocalRange",
+        "value": true
+      }
+    ]
+  },
+  "runtimeError": null,
+  "ok": true
+}

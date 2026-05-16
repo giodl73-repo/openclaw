@@ -1,0 +1,23 @@
+{
+  "label": "before",
+  "ref": "32f7481787b0",
+  "hasPolicyExtension": false,
+  "hasPolicyDoctorRegister": false,
+  "hasPolicyState": false,
+  "sourceMentionsModelChecks": false,
+  "sourceMentionsMcpChecks": false,
+  "sourceMentionsNetworkChecks": false,
+  "registeredPolicyChecks": [],
+  "newCategoryChecks": [],
+  "checksRun": 0,
+  "findingCount": 0,
+  "findings": [],
+  "evidence": {
+    "modelProviders": [],
+    "modelRefs": [],
+    "mcpServers": [],
+    "network": null
+  },
+  "runtimeError": null,
+  "ok": false
+}
