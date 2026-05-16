@@ -1,0 +1,24 @@
+PR #81104 proof: policy runtime audit metadata and attestation enforcement
+
+Behavior under test: PR head should add policy check audit hashes, stable attestation semantics, watch/diff drift detection, runtime fail-closed enforcement for stale accepted attestations, and structured approval metadata carrying policy/evidence/attestation references.
+
+BEFORE upstream/main (32f7481787b0):
+hasPolicyCli=False
+hasRuntimePolicy=False
+hasApprovalMetadata=False
+cliHasWatch=False
+cliHasDiff=False
+runtimeChecksAttestation=False
+ok=False
+
+AFTER PR #81104 (7dd56cb38b98):
+checkReport={'policyHash': 'sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048', 'evidenceHash': 'sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6', 'findingsHash': 'sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945', 'attestationHash': 'sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4', 'sameHashAcrossCheckedAt': True, 'checkedAtChanged': True}
+diffSameCheckedAtOnly.changed=[]
+diffEvidenceChanged.changed=['evidence', 'attestation']
+watchReport={'expectedAttestationHash': 'sha256:not-current', 'currentAttestationHash': 'sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4', 'status': 'stale'}
+runtimeApproval={'decision': 'approval', 'title': 'Review policy-governed tool', 'severity': 'critical', 'allowedDecisions': ['allow-once', 'deny'], 'metadata': {'source': 'policy', 'policy': {'path': 'policy.jsonc', 'hash': 'sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048'}, 'attestation': {'hash': 'sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4', 'expectedHash': 'sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4'}, 'workspace': {'scope': 'policy', 'hash': 'sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6'}, 'target': 'oc://TOOLS.md/tools/deploy'}}
+approvalMetadataLabels=['Policy Hash: sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048', 'Workspace Hash: sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6', 'Attestation Hash: sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4', 'Expected Attestation: sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4', 'Policy Target: oc://TOOLS.md/tools/deploy']
+runtimeBlock={'decision': 'block', 'reason': 'policy.jsonc no longer matches the accepted policy attestation (current sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4, expected sha256:not-current).'}
+ok=True
+
+Command: node --import ./node_modules/tsx/dist/loader.mjs probe-policy-runtime-audit.mjs in clean upstream/main and PR-head worktrees. The PR-head worktree used local untracked module shims so direct source imports resolve the new workspace packages exactly as the test runtime does.

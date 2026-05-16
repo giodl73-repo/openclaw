@@ -1,0 +1,102 @@
+{
+  "label": "after",
+  "ref": "7dd56cb38b98",
+  "hasPolicyCli": true,
+  "hasRuntimePolicy": true,
+  "hasApprovalMetadata": true,
+  "cliHasWatch": true,
+  "cliHasDiff": true,
+  "runtimeChecksAttestation": true,
+  "approvalMetadataLabels": [
+    "Policy Hash: sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048",
+    "Workspace Hash: sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6",
+    "Attestation Hash: sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+    "Expected Attestation: sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+    "Policy Target: oc://TOOLS.md/tools/deploy"
+  ],
+  "checkReport": {
+    "policyHash": "sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048",
+    "evidenceHash": "sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6",
+    "findingsHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "attestationHash": "sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+    "sameHashAcrossCheckedAt": true,
+    "checkedAtChanged": true
+  },
+  "watchReport": {
+    "expectedAttestationHash": "sha256:not-current",
+    "currentAttestationHash": "sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+    "status": "stale"
+  },
+  "diffSameCheckedAtOnly": {
+    "changed": [],
+    "before": {
+      "ok": true,
+      "policyHash": "sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048",
+      "evidenceHash": "sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6",
+      "findingsHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "attestationHash": "sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+      "checkedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "after": {
+      "ok": true,
+      "policyHash": "sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048",
+      "evidenceHash": "sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6",
+      "findingsHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "attestationHash": "sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+      "checkedAt": "2026-01-02T00:00:00.000Z"
+    }
+  },
+  "diffEvidenceChanged": {
+    "changed": [
+      "evidence",
+      "attestation"
+    ],
+    "before": {
+      "ok": true,
+      "policyHash": "sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048",
+      "evidenceHash": "sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6",
+      "findingsHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "attestationHash": "sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+      "checkedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "after": {
+      "ok": true,
+      "policyHash": "sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048",
+      "evidenceHash": "sha256:a6288ea8097c4a171ca056c57273fb9bdac10edc88259161d5a3bab28f7a5991",
+      "findingsHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "attestationHash": "sha256:354216f281734670405df6537c3cb415b4ade08dbf5aef3e72b889dd920de629",
+      "checkedAt": "2026-01-02T00:00:00.000Z"
+    }
+  },
+  "runtimeApproval": {
+    "decision": "approval",
+    "title": "Review policy-governed tool",
+    "severity": "critical",
+    "allowedDecisions": [
+      "allow-once",
+      "deny"
+    ],
+    "metadata": {
+      "source": "policy",
+      "policy": {
+        "path": "policy.jsonc",
+        "hash": "sha256:11249dca018a73a48a7f49e13e97721d2288580b9b2d3e689ebded3332860048"
+      },
+      "attestation": {
+        "hash": "sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4",
+        "expectedHash": "sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4"
+      },
+      "workspace": {
+        "scope": "policy",
+        "hash": "sha256:50037a259f069d94670b02b88e7de4430dca94a37069dd2dad50cf250e4896f6"
+      },
+      "target": "oc://TOOLS.md/tools/deploy"
+    }
+  },
+  "runtimeBlock": {
+    "decision": "block",
+    "reason": "policy.jsonc no longer matches the accepted policy attestation (current sha256:3589415c6106bacf4ab4edc0e5147b07506d22252eb659ef57d6e9e4e47207f4, expected sha256:not-current)."
+  },
+  "runtimeError": null,
+  "ok": true
+}

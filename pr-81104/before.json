@@ -1,0 +1,19 @@
+{
+  "label": "before",
+  "ref": "32f7481787b0",
+  "hasPolicyCli": false,
+  "hasRuntimePolicy": false,
+  "hasApprovalMetadata": false,
+  "cliHasWatch": false,
+  "cliHasDiff": false,
+  "runtimeChecksAttestation": false,
+  "approvalMetadataLabels": [],
+  "checkReport": null,
+  "watchReport": null,
+  "diffSameCheckedAtOnly": null,
+  "diffEvidenceChanged": null,
+  "runtimeApproval": null,
+  "runtimeBlock": null,
+  "runtimeError": null,
+  "ok": false
+}
