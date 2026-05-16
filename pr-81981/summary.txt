@@ -1,0 +1,35 @@
+PR #81981 fresh before/after proof
+
+Behavior: policy doctor/lint should register gateway exposure checks and report denied unsafe gateway posture from config-only evidence.
+
+BEFORE upstream/main a1d0b2709a55:
+command=node --import ./node_modules/tsx/dist/loader.mjs /tmp/openclaw-proof-81981-fresh/probe-gateway-policy.mjs <worktree>
+policyRegisterImport=missing-or-failed
+importError=ENOENT
+gatewayChecksRegistered=0
+gatewayFindings=0
+gatewayFindingTypes=<none>
+ok=false
+status=0
+
+AFTER PR #81981 head d67f0c3a05d2c3f2f665ca2a282c86fcf958b9c1:
+command=node --import ./node_modules/tsx/dist/loader.mjs /tmp/openclaw-proof-81981-fresh/probe-gateway-policy.mjs <worktree>
+policyRegisterImport=ok
+importError=<none>
+gatewayChecksRegistered=8
+gatewayFindings=12
+gatewayFindingTypes=policy/gateway-auth-disabled,policy/gateway-control-ui-insecure,policy/gateway-http-endpoint-enabled,policy/gateway-http-url-fetch-unrestricted,policy/gateway-non-loopback-bind,policy/gateway-rate-limit-missing,policy/gateway-remote-enabled,policy/gateway-tailscale-funnel
+error policy/gateway-auth-disabled oc://openclaw.config/gateway/auth/mode -> oc://policy.jsonc/gateway/auth/requireAuth
+error policy/gateway-control-ui-insecure oc://openclaw.config/gateway/controlUi/allowInsecureAuth -> oc://policy.jsonc/gateway/controlUi/allowInsecure
+error policy/gateway-control-ui-insecure oc://openclaw.config/gateway/controlUi/dangerouslyAllowHostHeaderOriginFallback -> oc://policy.jsonc/gateway/controlUi/allowInsecure
+error policy/gateway-control-ui-insecure oc://openclaw.config/gateway/controlUi/dangerouslyDisableDeviceAuth -> oc://policy.jsonc/gateway/controlUi/allowInsecure
+error policy/gateway-http-endpoint-enabled oc://openclaw.config/gateway/http/endpoints/chatCompletions/enabled -> oc://policy.jsonc/gateway/http/denyEndpoints
+error policy/gateway-http-endpoint-enabled oc://openclaw.config/gateway/http/endpoints/responses/enabled -> oc://policy.jsonc/gateway/http/denyEndpoints
+error policy/gateway-http-url-fetch-unrestricted oc://openclaw.config/gateway/http/endpoints/chatCompletions/images/allowUrl -> oc://policy.jsonc/gateway/http/requireUrlAllowlists
+error policy/gateway-http-url-fetch-unrestricted oc://openclaw.config/gateway/http/endpoints/responses/files/allowUrl -> oc://policy.jsonc/gateway/http/requireUrlAllowlists
+error policy/gateway-non-loopback-bind oc://openclaw.config/gateway/bind -> oc://policy.jsonc/gateway/exposure/allowNonLoopbackBind
+error policy/gateway-rate-limit-missing oc://openclaw.config/gateway/auth/rateLimit -> oc://policy.jsonc/gateway/auth/requireExplicitRateLimit
+error policy/gateway-remote-enabled oc://openclaw.config/gateway/remote/enabled -> oc://policy.jsonc/gateway/remote/allow
+error policy/gateway-tailscale-funnel oc://openclaw.config/gateway/tailscale/mode -> oc://policy.jsonc/gateway/exposure/allowTailscaleFunnel
+ok=true
+status=0
