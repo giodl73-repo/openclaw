@@ -1,0 +1,65 @@
+{
+  "label": "after",
+  "ref": "8fd71b4c6e4d",
+  "hasPolicyExtension": true,
+  "hasPolicyDoctorRegister": true,
+  "hasRuntimeToolPolicy": true,
+  "beforeToolCallRunsTrustedPolicies": true,
+  "registeredPolicyChecks": [
+    "policy/policy-jsonc-missing",
+    "policy/policy-jsonc-invalid",
+    "policy/policy-hash-mismatch",
+    "policy/attestation-hash-mismatch",
+    "policy/channels-denied-provider",
+    "policy/tools-missing-risk-level",
+    "policy/tools-unknown-risk-level",
+    "policy/tools-missing-sensitivity-token",
+    "policy/tools-missing-owner",
+    "policy/tools-unknown-sensitivity-token"
+  ],
+  "checksRun": 10,
+  "findingCount": 3,
+  "toolFindings": [
+    {
+      "checkId": "policy/tools-missing-owner",
+      "severity": "error",
+      "message": "TOOLS.md tool 'deploy' has no declared owner.",
+      "path": "TOOLS.md",
+      "ocPath": "oc://TOOLS.md/tools/deploy",
+      "target": "oc://TOOLS.md/tools/deploy",
+      "requirement": "oc://policy.jsonc/tools/requireMetadata",
+      "hasFixHint": true
+    },
+    {
+      "checkId": "policy/tools-missing-risk-level",
+      "severity": "error",
+      "message": "TOOLS.md tool 'deploy' has no explicit risk classification.",
+      "path": "TOOLS.md",
+      "ocPath": "oc://TOOLS.md/tools/deploy",
+      "target": "oc://TOOLS.md/tools/deploy",
+      "requirement": "oc://policy.jsonc/tools/requireMetadata",
+      "hasFixHint": true
+    },
+    {
+      "checkId": "policy/tools-missing-sensitivity-token",
+      "severity": "error",
+      "message": "TOOLS.md tool 'deploy' has no declared artifact sensitivity.",
+      "path": "TOOLS.md",
+      "ocPath": "oc://TOOLS.md/tools/deploy",
+      "target": "oc://TOOLS.md/tools/deploy",
+      "requirement": "oc://policy.jsonc/tools/requireMetadata",
+      "hasFixHint": true
+    }
+  ],
+  "evidenceTools": [
+    {
+      "id": "deploy",
+      "source": "oc://TOOLS.md/tools/deploy",
+      "line": 3
+    }
+  ],
+  "runtimeDecision": "block",
+  "runtimeBlockReason": "Policy requires risk metadata for 'deploy', but TOOLS.md does not declare it.",
+  "runtimeError": null,
+  "ok": true
+}

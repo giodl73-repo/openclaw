@@ -1,0 +1,17 @@
+{
+  "label": "before",
+  "ref": "32f7481787b0",
+  "hasPolicyExtension": false,
+  "hasPolicyDoctorRegister": false,
+  "hasRuntimeToolPolicy": false,
+  "beforeToolCallRunsTrustedPolicies": true,
+  "registeredPolicyChecks": [],
+  "checksRun": 0,
+  "findingCount": 0,
+  "toolFindings": [],
+  "evidenceTools": [],
+  "runtimeDecision": null,
+  "runtimeBlockReason": null,
+  "runtimeError": null,
+  "ok": false
+}
