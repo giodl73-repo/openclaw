@@ -1,0 +1,25 @@
+PR #81896 fresh before/after proof
+
+Behavior: native sessions_spawn cwd should be accepted/forwarded, and inline attachment materialization should use the resolved explicit child workspace instead of the target agent default workspace.
+
+BEFORE upstream/main 77ca3dc99c56:
+sourceParamHasCwd=false
+sourceToolForwardsCwd=false
+materializeStatus=ok
+explicitRootExists=false
+targetRootExists=true
+materializedUnderExplicitCwd=false
+receiptCount=1
+ok=false
+status=0
+
+AFTER PR #81896 head 3246e902cfa20da8a03dca318cb6b4442b9038e5:
+sourceParamHasCwd=true
+sourceToolForwardsCwd=true
+materializeStatus=ok
+explicitRootExists=true
+targetRootExists=false
+materializedUnderExplicitCwd=true
+receiptCount=1
+ok=true
+status=0
