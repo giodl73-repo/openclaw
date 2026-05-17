@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   CORE_HEALTH_CHECKS,
-  TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS,
   registerCoreHealthChecks,
   resetCoreHealthChecksForTest,
 } from "./doctor-core-checks.js";
@@ -69,12 +68,12 @@ describe("registerCoreHealthChecks", () => {
     expect(coreTargets.filter((target) => !registeredIds.has(target))).toEqual([]);
   });
 
-  it("keeps transitional no-op health checks explicit", () => {
+  it("does not keep transitional no-op health checks in the core registry", () => {
     const placeholderIds = CORE_HEALTH_CHECKS.filter((check) =>
       check.description.endsWith("represented in the health registry."),
     ).map((check) => check.id);
 
-    expect(placeholderIds).toEqual([...TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS]);
+    expect(placeholderIds).toEqual([]);
   });
 
   it("shows the repair-capable health check shape with skills readiness", async () => {

@@ -52,12 +52,6 @@ export const doctorHealthConversionRules = [
     rule: "Keep as config-only owner finding.",
   },
   {
-    contributionId: "doctor:structured-health-repairs",
-    conversion: "terminal-side-effect",
-    target: ["doctor-health-repair-runner"],
-    rule: "Delete this bridge after converted checks are registered directly; repair orchestration belongs outside the contribution list.",
-  },
-  {
     contributionId: "doctor:legacy-state",
     conversion: "repair-backed-detect",
     target: ["core/doctor/legacy-state"],
@@ -204,6 +198,12 @@ export const doctorHealthConversionRules = [
     rule: "Prepare shared Gateway status/memory facts before checks; dependent checks must consume facts instead of probing again.",
   },
   {
+    contributionId: "doctor:structured-health-repairs",
+    conversion: "terminal-side-effect",
+    target: ["doctor-health-repair-runner"],
+    rule: "Run the structured repair driver after Gateway facts are prepared so converted runtime checks share the old doctor status probes.",
+  },
+  {
     contributionId: "doctor:whatsapp-responsiveness",
     conversion: "detect-only",
     target: ["core/doctor/whatsapp-responsiveness"],
@@ -250,4 +250,3 @@ export const doctorHealthConversionRules = [
     rule: "Keep final schema validation as a registered core check.",
   },
 ] as const satisfies readonly DoctorHealthConversionRule[];
-

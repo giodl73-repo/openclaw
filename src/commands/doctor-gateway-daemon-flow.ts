@@ -47,6 +47,12 @@ import { resolveGatewayInstallToken } from "./gateway-install-token.js";
 import { formatHealthCheckFailure } from "./health-format.js";
 import { healthCommand } from "./health.js";
 
+export type GatewayDaemonHealthFinding = {
+  severity: "warning" | "error";
+  message: string;
+  fixHint?: string;
+};
+
 async function maybeRepairLaunchAgentBootstrap(params: {
   env: Record<string, string | undefined>;
   title: string;
@@ -109,6 +115,89 @@ function renderBlockingSystemGatewayServices(services: ExtraGatewayService[]): s
     "Run `openclaw gateway status --deep` or `openclaw doctor --deep` to inspect duplicate services.",
     `Set ${SERVICE_REPAIR_POLICY_ENV}=external if a system supervisor owns the gateway lifecycle.`,
   ].join("\n");
+}
+
+export async function detectGatewayDaemonHealth(params: {
+  cfg: OpenClawConfig;
+  healthOk?: boolean;
+  env?: NodeJS.ProcessEnv;
+}): Promise<readonly GatewayDaemonHealthFinding[]> {
+  if (params.healthOk === true) {
+    return [];
+  }
+  if (params.cfg.gateway?.mode === "remote") {
+    return [];
+  }
+  const env = params.env ?? process.env;
+  const findings: GatewayDaemonHealthFinding[] = [];
+  const service = resolveGatewayService();
+  let loaded = false;
+  try {
+    loaded = await service.isLoaded({ env });
+  } catch {
+    loaded = false;
+  }
+
+  if (!loaded) {
+    if (process.platform === "linux") {
+      const systemdAvailable = await isSystemdUserServiceAvailable().catch(() => false);
+      if (!systemdAvailable) {
+        const wsl = await isWSL();
+        findings.push({
+          severity: "warning",
+          message: renderSystemdUnavailableHints({ wsl, kind: "generic_unavailable" }).join("\n"),
+          fixHint:
+            "Install or enable a supported user service manager before installing the gateway service.",
+        });
+        return findings;
+      }
+    }
+    findings.push({
+      severity: "warning",
+      message: "Gateway service not installed.",
+      fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} or ${formatCliCommand("openclaw gateway install")} when you want to install the gateway service.`,
+    });
+    if (process.platform === "linux") {
+      const systemGatewayServices = await findSystemGatewayServices();
+      if (systemGatewayServices.length > 0) {
+        findings.push({
+          severity: "error",
+          message: renderBlockingSystemGatewayServices(systemGatewayServices),
+          fixHint: `Set ${SERVICE_REPAIR_POLICY_ENV}=external if a system supervisor owns the gateway lifecycle.`,
+        });
+      }
+    }
+    return findings;
+  }
+
+  const serviceRuntime = await service.readRuntime(env).catch(() => undefined);
+  const summary = formatGatewayRuntimeSummary(serviceRuntime);
+  const hints = buildGatewayRuntimeHints(serviceRuntime, {
+    platform: process.platform,
+    env,
+  });
+  if (summary || hints.length > 0) {
+    findings.push({
+      severity: "warning",
+      message: [summary ? `Runtime: ${summary}` : null, ...hints].filter(Boolean).join("\n"),
+      fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} if you want OpenClaw to repair the gateway lifecycle.`,
+    });
+  }
+  if (serviceRuntime?.status !== "running") {
+    findings.push({
+      severity: "warning",
+      message: "Gateway service is installed but not running.",
+      fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} or ${formatCliCommand("openclaw gateway restart")}.`,
+    });
+  }
+  if (findings.length === 0 && params.healthOk === false) {
+    findings.push({
+      severity: "warning",
+      message: "Gateway health check failed while the gateway service is installed and running.",
+      fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} to retry gateway health and restart if needed.`,
+    });
+  }
+  return findings;
 }
 
 export async function maybeRepairGatewayDaemon(params: {

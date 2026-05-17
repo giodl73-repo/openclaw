@@ -36,6 +36,12 @@ type DoctorPairingSnapshot = {
   paired: DoctorPairedDevice[];
 };
 
+export type DevicePairingHealthFinding = {
+  severity: "warning" | "error";
+  message: string;
+  fixHint?: string;
+};
+
 type PendingPairingIssue =
   | {
       kind: "first-time";
@@ -512,26 +518,43 @@ export async function noteDevicePairingHealth(params: {
   cfg: OpenClawConfig;
   healthOk: boolean;
 }): Promise<void> {
+  const findings = await detectDevicePairingHealth(params);
+  if (findings.length === 0) {
+    return;
+  }
+  note(findings.map((finding) => finding.message).join("\n"), "Device pairing");
+}
+
+export async function detectDevicePairingHealth(params: {
+  cfg: OpenClawConfig;
+  healthOk: boolean;
+}): Promise<readonly DevicePairingHealthFinding[]> {
   let snapshot: DoctorPairingSnapshot | null;
   try {
     snapshot = await loadDoctorPairingSnapshot(params);
   } catch (error) {
     if (error instanceof JsonFileReadError) {
-      note(formatPairingStoreReadIssue(error), "Device pairing");
-      return;
+      return [
+        {
+          severity: "error",
+          message: formatPairingStoreReadIssue(error).replace(/^- /, ""),
+          fixHint: "Fix the JSON/file permissions, or move the store aside and re-pair devices.",
+        },
+      ];
     }
     throw error;
   }
   if (!snapshot) {
-    return;
+    return [];
   }
   const lines = [
     ...collectPendingPairingIssues(snapshot),
     ...collectPairedRecordIssues(snapshot),
     ...collectLocalDeviceAuthIssues(snapshot),
   ];
-  if (lines.length === 0) {
-    return;
-  }
-  note(lines.join("\n"), "Device pairing");
+  return lines.map((line) => ({
+    severity: "warning",
+    message: line.replace(/^- /, ""),
+    fixHint: `Review with ${formatCliCommand("openclaw devices list")}.`,
+  }));
 }

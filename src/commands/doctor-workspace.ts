@@ -246,7 +246,11 @@ export async function migrateLegacyRootMemoryFile(
   };
 }
 
-export async function noteWorkspaceMemoryHealth(cfg: OpenClawConfig): Promise<void> {
+export async function noteWorkspaceMemoryHealth(
+  cfg: OpenClawConfig,
+  opts?: { noteFn?: typeof note },
+): Promise<void> {
+  const noteFn = opts?.noteFn ?? note;
   try {
     const agentId = resolveDefaultAgentId(cfg);
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
@@ -254,10 +258,10 @@ export async function noteWorkspaceMemoryHealth(cfg: OpenClawConfig): Promise<vo
       await detectRootMemoryFiles(workspaceDir),
     );
     if (rootMemoryWarning) {
-      note(rootMemoryWarning, "Workspace memory");
+      noteFn(rootMemoryWarning, "Workspace memory");
     }
   } catch (err) {
-    note(`Workspace memory audit could not be completed: ${formatErrorMessage(err)}`, "Doctor");
+    noteFn(`Workspace memory audit could not be completed: ${formatErrorMessage(err)}`, "Doctor");
   }
 }
 

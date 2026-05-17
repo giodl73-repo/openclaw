@@ -53,6 +53,13 @@ type MemoryEmbeddingProviderDoctorMetadata = {
   autoSelectPriority?: number;
 };
 
+export type MemoryHealthFinding = {
+  severity: "info" | "warning" | "error";
+  message: string;
+  path?: string;
+  fixHint?: string;
+};
+
 const BUNDLED_MEMORY_EMBEDDING_PROVIDER_DOCTOR_METADATA: MemoryEmbeddingProviderDoctorMetadata[] = [
   {
     providerId: "github-copilot",
@@ -196,7 +203,11 @@ function buildDreamingArtifactIssueNote(audit: DreamingArtifactsAuditSummary): s
   ].join("\n");
 }
 
-export async function noteMemoryRecallHealth(cfg: OpenClawConfig): Promise<void> {
+export async function noteMemoryRecallHealth(
+  cfg: OpenClawConfig,
+  opts?: { noteFn?: typeof note },
+): Promise<void> {
+  const noteFn = opts?.noteFn ?? note;
   try {
     const context = await resolveRuntimeMemoryAuditContext(cfg);
     const workspaceDir = context?.workspaceDir?.trim();
@@ -215,16 +226,38 @@ export async function noteMemoryRecallHealth(cfg: OpenClawConfig): Promise<void>
     });
     const message = buildMemoryRecallIssueNote(audit);
     if (message) {
-      note(message, "Memory search");
+      noteFn(message, "Memory search");
     }
     const dreamingAudit = await auditDreamingArtifacts({ workspaceDir });
     const dreamingMessage = buildDreamingArtifactIssueNote(dreamingAudit);
     if (dreamingMessage) {
-      note(dreamingMessage, "Memory search");
+      noteFn(dreamingMessage, "Memory search");
     }
   } catch (err) {
-    note(`Memory recall audit could not be completed: ${formatErrorMessage(err)}`, "Memory search");
+    noteFn(
+      `Memory recall audit could not be completed: ${formatErrorMessage(err)}`,
+      "Memory search",
+    );
   }
+}
+
+export async function detectMemoryRecallHealth(
+  cfg: OpenClawConfig,
+): Promise<readonly MemoryHealthFinding[]> {
+  const findings: MemoryHealthFinding[] = [];
+  await noteMemoryRecallHealth(cfg, {
+    noteFn: (message) => {
+      const text = String(message);
+      findings.push({
+        severity: text.includes("could not be completed") ? "warning" : "warning",
+        message: text,
+        fixHint: text.includes("Fix:")
+          ? `Run ${formatCliCommand("openclaw doctor --fix")} or ${formatCliCommand("openclaw memory status --fix")}.`
+          : undefined,
+      });
+    },
+  });
+  return findings;
 }
 
 export async function maybeRepairMemoryRecallHealth(params: {
@@ -345,9 +378,15 @@ export async function noteMemorySearchHealth(
       error?: string;
       skipped?: boolean;
     };
+    noteFn?: typeof note;
   },
 ): Promise<void> {
-  await noteWorkspaceMemoryHealth(cfg);
+  const noteFn = opts?.noteFn ?? note;
+  if (opts?.noteFn) {
+    await noteWorkspaceMemoryHealth(cfg, { noteFn });
+  } else {
+    await noteWorkspaceMemoryHealth(cfg);
+  }
 
   const agentId = resolveDefaultAgentId(cfg);
   const agentDir = resolveAgentDir(cfg, agentId);
@@ -355,7 +394,7 @@ export async function noteMemorySearchHealth(
   const hasRemoteApiKey = hasConfiguredMemorySecretInput(resolved?.remote?.apiKey);
 
   if (!resolved) {
-    note("Memory search is explicitly disabled (enabled: false).", "Memory search");
+    noteFn("Memory search is explicitly disabled (enabled: false).", "Memory search");
     return;
   }
 
@@ -369,7 +408,7 @@ export async function noteMemorySearchHealth(
     if (hasActiveAlternateMemoryPluginSlot(cfg)) {
       return;
     }
-    note("No active memory plugin is registered for the current config.", "Memory search");
+    noteFn("No active memory plugin is registered for the current config.", "Memory search");
     return;
   }
   if (backendConfig.backend === "qmd") {
@@ -379,7 +418,7 @@ export async function noteMemorySearchHealth(
       cwd: resolveAgentWorkspaceDir(cfg, agentId),
     });
     if (!qmdCheck.available) {
-      note(
+      noteFn(
         [
           `QMD memory backend is configured, but the qmd binary could not be started (${backendConfig.qmd?.command ?? "qmd"}).`,
           qmdCheck.error ? `Probe error: ${qmdCheck.error}` : null,
@@ -409,7 +448,7 @@ export async function noteMemorySearchHealth(
         // the model download or node-llama-cpp setup may have failed at runtime.
         if (opts?.gatewayMemoryProbe?.checked && !opts.gatewayMemoryProbe.ready) {
           const detail = opts.gatewayMemoryProbe.error?.trim();
-          note(
+          noteFn(
             [
               'Memory search provider is set to "local" and a model path is configured,',
               "but the gateway reports local embeddings are not ready.",
@@ -424,7 +463,7 @@ export async function noteMemorySearchHealth(
         }
         return;
       }
-      note(
+      noteFn(
         [
           'Memory search provider is set to "local" but no local model file was found.',
           "",
@@ -455,7 +494,7 @@ export async function noteMemorySearchHealth(
         return;
       }
       const gatewayProbeWarning = buildGatewayProbeWarning(opts?.gatewayMemoryProbe);
-      note(
+      noteFn(
         [
           gatewayProbeWarning
             ? `Memory search provider "${resolved.provider}" is configured, but the gateway reports embeddings are not ready.`
@@ -474,7 +513,7 @@ export async function noteMemorySearchHealth(
       return;
     }
     if (opts?.gatewayMemoryProbe?.checked && opts.gatewayMemoryProbe.ready) {
-      note(
+      noteFn(
         [
           `Memory search provider is set to "${resolved.provider}" but the API key was not found in the CLI environment.`,
           "The running gateway reports memory embeddings are ready for the default agent.",
@@ -486,7 +525,7 @@ export async function noteMemorySearchHealth(
     }
     const gatewayProbeWarning = buildGatewayProbeWarning(opts?.gatewayMemoryProbe);
     const envVar = resolvePrimaryMemoryProviderEnvVar(resolved.provider);
-    note(
+    noteFn(
       [
         `Memory search provider is set to "${resolved.provider}" but no API key was found.`,
         `Semantic recall will not work without a valid API key.`,
@@ -518,7 +557,7 @@ export async function noteMemorySearchHealth(
   }
 
   if (opts?.gatewayMemoryProbe?.checked && opts.gatewayMemoryProbe.ready) {
-    note(
+    noteFn(
       [
         'Memory search provider is set to "auto" but the API key was not found in the CLI environment.',
         "The running gateway reports memory embeddings are ready for the default agent.",
@@ -530,7 +569,7 @@ export async function noteMemorySearchHealth(
   }
   const gatewayProbeWarning = buildGatewayProbeWarning(opts?.gatewayMemoryProbe);
 
-  note(
+  noteFn(
     [
       "Memory search is enabled, but no embedding provider is ready.",
       "Semantic recall needs at least one embedding provider.",
@@ -546,6 +585,35 @@ export async function noteMemorySearchHealth(
     ].join("\n"),
     "Memory search",
   );
+}
+
+export async function detectMemorySearchHealth(params: {
+  cfg: OpenClawConfig;
+  gatewayMemoryProbe?: {
+    checked: boolean;
+    ready: boolean;
+    error?: string;
+    skipped?: boolean;
+  };
+}): Promise<readonly MemoryHealthFinding[]> {
+  const findings: MemoryHealthFinding[] = [];
+  await noteMemorySearchHealth(params.cfg, {
+    gatewayMemoryProbe: params.gatewayMemoryProbe,
+    noteFn: (message) => {
+      const text = String(message);
+      if (text.includes("Memory search is explicitly disabled")) {
+        return;
+      }
+      findings.push({
+        severity: "warning",
+        message: text,
+        fixHint: text.includes("Fix")
+          ? `Run ${formatCliCommand("openclaw doctor --fix")} or update memory configuration.`
+          : undefined,
+      });
+    },
+  });
+  return findings;
 }
 
 /**

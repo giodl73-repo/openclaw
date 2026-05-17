@@ -39,6 +39,13 @@ type StaleManagedNpmBundledPlugin = {
   version?: string;
 };
 
+export type PluginRegistryHealthFinding = {
+  severity: "warning" | "error";
+  message: string;
+  path?: string;
+  fixHint?: string;
+};
+
 type PluginRegistryDoctorNoteLogger = {
   info: (message: string) => void;
   warn: (message: string) => void;
@@ -287,6 +294,63 @@ export async function maybeRepairManagedNpmOpenClawPeerLinks(
   }
 
   return result.repaired > 0;
+}
+
+export async function detectPluginRegistryHealth(
+  params: Omit<PluginRegistryDoctorRepairParams, "prompter">,
+): Promise<readonly PluginRegistryHealthFinding[]> {
+  const findings: PluginRegistryHealthFinding[] = [];
+  const preflight = preflightPluginRegistryInstallMigration(params);
+  for (const warning of preflight.deprecationWarnings) {
+    findings.push({
+      severity: "warning",
+      message: warning,
+      path: "plugins",
+    });
+  }
+  if (preflight.action === "disabled") {
+    findings.push({
+      severity: "warning",
+      message: `${DISABLE_PLUGIN_REGISTRY_MIGRATION_ENV} is set; plugin registry repair is disabled.`,
+      fixHint: `Unset ${DISABLE_PLUGIN_REGISTRY_MIGRATION_ENV} and rerun ${formatCliCommand("openclaw doctor --fix")}.`,
+    });
+    return findings;
+  }
+  if (preflight.action === "migrate") {
+    findings.push({
+      severity: "warning",
+      message: `Persisted plugin registry is missing or stale: ${shortenHomePath(preflight.filePath)}.`,
+      path: "plugins",
+      fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} to rebuild the plugin registry from enabled plugins.`,
+    });
+  }
+
+  for (const plugin of listStaleManagedNpmBundledPlugins({
+    ...params,
+    prompter: { shouldRepair: false },
+  })) {
+    findings.push({
+      severity: "warning",
+      message: `Managed npm plugin package ${plugin.packageName}${plugin.version ? `@${plugin.version}` : ""} shadows bundled plugin ${plugin.pluginId}.`,
+      path: `plugins.entries.${plugin.pluginId}`,
+      fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} to remove the stale managed npm package and refresh the registry.`,
+    });
+  }
+
+  const npmRoot = resolveManagedPluginNpmRoot({
+    ...params,
+    prompter: { shouldRepair: false },
+  });
+  const audit = await auditOpenClawPeerDependenciesInManagedNpmRoot({ npmRoot });
+  for (const issue of audit.issues) {
+    findings.push({
+      severity: "warning",
+      message: `Managed npm OpenClaw host peer link for ${issue.packageName} needs repair: ${issue.reason}.`,
+      fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} to relink managed npm plugin packages.`,
+    });
+  }
+
+  return findings;
 }
 
 async function loadInstallRecordsWithoutPluginIds(

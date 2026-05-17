@@ -51,6 +51,12 @@ const EXECSTART_REPAIR_CODES = new Set<string>([
   SERVICE_AUDIT_CODES.gatewayEntrypointMismatch,
 ]);
 
+export type GatewayServiceHealthFinding = {
+  severity: "warning" | "error";
+  message: string;
+  fixHint?: string;
+};
+
 function detectGatewayRuntime(programArguments: string[] | undefined): GatewayDaemonRuntime {
   const first = programArguments?.[0];
   if (first) {
@@ -230,6 +236,33 @@ async function filterInactiveExtraGatewayServices(
   return activeOrLegacy;
 }
 
+export async function detectExtraGatewayServiceFindings(params: {
+  deep?: boolean;
+  env?: NodeJS.ProcessEnv;
+}): Promise<readonly GatewayServiceHealthFinding[]> {
+  const detectedExtraServices = await findExtraGatewayServices(params.env ?? process.env, {
+    deep: params.deep,
+  });
+  const extraServices = await filterInactiveExtraGatewayServices(detectedExtraServices);
+  if (extraServices.length === 0) {
+    return [];
+  }
+  const cleanupHints = renderGatewayServiceCleanupHints();
+  return [
+    {
+      severity: "warning",
+      message: [
+        "Other gateway-like services detected:",
+        ...extraServices.map((svc) => `- ${svc.label} (${svc.scope}, ${svc.detail})`),
+      ].join("\n"),
+      fixHint:
+        cleanupHints.length > 0
+          ? cleanupHints.map((hint) => `- ${hint}`).join("\n")
+          : "Run a single gateway per machine unless ports and state directories are intentionally isolated.",
+    },
+  ];
+}
+
 async function cleanupLegacyLaunchdService(params: {
   label: string;
   plistPath: string;
@@ -347,6 +380,139 @@ async function cleanupLegacyLinuxUserServices(
   }
 
   return { removed, failed };
+}
+
+export async function detectGatewayServiceConfigFindings(params: {
+  cfg: OpenClawConfig;
+  mode: "local" | "remote";
+  env?: NodeJS.ProcessEnv;
+}): Promise<readonly GatewayServiceHealthFinding[]> {
+  const env = params.env ?? process.env;
+  if (resolveIsNixMode(env) || params.mode === "remote") {
+    return [];
+  }
+
+  const service = resolveGatewayService();
+  const command = await service.readCommand(env).catch(() => null);
+  if (!command) {
+    return [];
+  }
+
+  const findings: GatewayServiceHealthFinding[] = [];
+  const serviceInstallEnv = buildGatewayServiceRepairEnv(command);
+  const serviceLayout = await summarizeGatewayServiceLayout(command);
+  const sourceCheckoutWarning = serviceLayout?.entrypointSourceCheckout
+    ? [
+        `Gateway service entrypoint resolves to a source checkout: ${serviceLayout.packageRootReal ?? serviceLayout.packageRoot ?? serviceLayout.entrypointReal ?? serviceLayout.entrypoint}.`,
+        "Run `openclaw doctor --fix` from the intended package install, or reinstall the gateway service with `openclaw gateway install --force`.",
+      ].join("\n")
+    : null;
+  const tokenRefConfigured = Boolean(
+    resolveSecretInputRef({
+      value: params.cfg.gateway?.auth?.token,
+      defaults: params.cfg.secrets?.defaults,
+    }).ref,
+  );
+  const gatewayTokenResolution = await resolveGatewayAuthTokenForService(params.cfg, env);
+  if (gatewayTokenResolution.unavailableReason) {
+    findings.push({
+      severity: "warning",
+      message: `Unable to verify gateway service token drift: ${gatewayTokenResolution.unavailableReason}`,
+      fixHint: "Resolve the gateway auth token source, then rerun doctor.",
+    });
+  }
+  const expectedGatewayToken = tokenRefConfigured ? undefined : gatewayTokenResolution.token;
+  const { expectedManagedServiceEnvKeys, expectedPlan, port, runtimeChoice } =
+    await buildGatewayServiceAuditInputs({
+      cfg: params.cfg,
+      command,
+      serviceInstallEnv,
+    });
+  const audit = await auditGatewayServiceConfig({
+    env,
+    command,
+    expectedGatewayToken,
+    expectedManagedServiceEnvKeys,
+    expectedPort: port,
+  });
+  const serviceToken = readEmbeddedGatewayToken(command);
+  if (tokenRefConfigured && serviceToken) {
+    audit.issues.push({
+      code: SERVICE_AUDIT_CODES.gatewayTokenMismatch,
+      message:
+        "Gateway service OPENCLAW_GATEWAY_TOKEN should be unset when gateway.auth.token is SecretRef-managed",
+      detail: "service token is stale",
+      level: "recommended",
+    });
+  }
+
+  const needsNodeRuntime = needsNodeRuntimeMigration(audit.issues);
+  const systemNodeInfo = needsNodeRuntime ? await resolveSystemNodeInfo({ env }) : null;
+  const systemNodePath = systemNodeInfo?.supported ? systemNodeInfo.path : null;
+  if (needsNodeRuntime && !systemNodePath && runtimeChoice !== "node") {
+    const warning = renderSystemNodeWarning(systemNodeInfo);
+    findings.push({
+      severity: "warning",
+      message:
+        warning ??
+        "System Node 22 LTS (22.16+) or Node 24 not found. Install via Homebrew/apt/choco and rerun doctor to migrate off Bun/version managers.",
+      fixHint: "Install a supported system Node runtime, then rerun doctor.",
+    });
+  }
+
+  const expectedRuntimePlan =
+    needsNodeRuntime && systemNodePath
+      ? await buildExpectedGatewayServicePlan({
+          cfg: params.cfg,
+          command,
+          serviceInstallEnv,
+          port,
+          runtime: "node",
+          nodePath: systemNodePath,
+        })
+      : expectedPlan;
+  const expectedEntrypoint = findGatewayEntrypoint(expectedRuntimePlan.programArguments);
+  const currentEntrypoint = findGatewayEntrypoint(command.programArguments);
+  const normalizedExpectedEntrypoint = expectedEntrypoint
+    ? await normalizeExecutablePath(expectedEntrypoint)
+    : null;
+  const normalizedCurrentEntrypoint = currentEntrypoint
+    ? await normalizeExecutablePath(currentEntrypoint)
+    : null;
+  if (
+    normalizedExpectedEntrypoint &&
+    normalizedCurrentEntrypoint &&
+    normalizedExpectedEntrypoint !== normalizedCurrentEntrypoint
+  ) {
+    audit.issues.push({
+      code: SERVICE_AUDIT_CODES.gatewayEntrypointMismatch,
+      message: "Gateway service entrypoint does not match the current install.",
+      detail: `${currentEntrypoint} -> ${expectedEntrypoint}`,
+      level: "recommended",
+    });
+  }
+
+  const hasEntrypointMismatch = audit.issues.some(
+    (issue) => issue.code === SERVICE_AUDIT_CODES.gatewayEntrypointMismatch,
+  );
+  if (sourceCheckoutWarning !== null && !hasEntrypointMismatch) {
+    findings.push({
+      severity: "warning",
+      message: sourceCheckoutWarning,
+      fixHint: "Run `openclaw doctor --fix` from the intended package install.",
+    });
+  }
+  for (const issue of audit.issues) {
+    findings.push({
+      severity: issue.level === "aggressive" ? "error" : "warning",
+      message: issue.detail ? `${issue.message} (${issue.detail})` : issue.message,
+      fixHint:
+        issue.level === "aggressive"
+          ? "Run `openclaw doctor --fix --force` if you want OpenClaw to overwrite custom service edits."
+          : "Run `openclaw doctor --fix` to update the gateway service config.",
+    });
+  }
+  return findings;
 }
 
 export async function maybeRepairGatewayServiceConfig(

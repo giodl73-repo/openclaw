@@ -142,6 +142,12 @@ type AuthIssue = {
   remainingMs?: number;
 };
 
+export type AuthProfileKeychainHealthFinding = {
+  profileId?: string;
+  message: string;
+  fixHint?: string;
+};
+
 export function resolveUnusableProfileHint(params: {
   kind: "cooldown" | "disabled";
   reason?: string;
@@ -223,6 +229,71 @@ async function formatAuthIssueLine(
   const hint = await resolveAuthIssueHint(issue, cfg, store);
   const reason = issue.reasonCode ? ` [${issue.reasonCode}]` : "";
   return `- ${issue.profileId}: ${issue.status}${reason}${remaining}${hint ? ` — ${hint}` : ""}`;
+}
+
+export async function detectAuthProfileKeychainHealth(
+  cfg: OpenClawConfig,
+): Promise<readonly AuthProfileKeychainHealthFinding[]> {
+  if (Object.keys(cfg.auth?.profiles ?? {}).length === 0 && !hasAnyAuthProfileStoreSource()) {
+    return [];
+  }
+  const store = ensureAuthProfileStore(undefined, {
+    allowKeychainPrompt: false,
+  });
+  const findings: AuthProfileKeychainHealthFinding[] = [];
+  const now = Date.now();
+  for (const profileId of Object.keys(store.usageStats ?? {})) {
+    const until = resolveProfileUnusableUntilForDisplay(store, profileId);
+    if (!until || now >= until) {
+      continue;
+    }
+    const stats = store.usageStats?.[profileId];
+    const remaining = formatRemainingShort(until - now);
+    const disabledActive = typeof stats?.disabledUntil === "number" && now < stats.disabledUntil;
+    const kind = disabledActive
+      ? `disabled${stats.disabledReason ? `:${stats.disabledReason}` : ""}`
+      : "cooldown";
+    findings.push({
+      profileId,
+      message: `${profileId}: ${kind} (${remaining})`,
+      fixHint: resolveUnusableProfileHint({
+        kind: disabledActive ? "disabled" : "cooldown",
+        reason: stats?.disabledReason,
+      }),
+    });
+  }
+
+  const summary = buildAuthHealthSummary({
+    store,
+    cfg,
+    warnAfterMs: DEFAULT_OAUTH_WARN_MS,
+  });
+  const issues = summary.profiles.filter(
+    (profile) =>
+      (profile.type === "oauth" || profile.type === "token") &&
+      (profile.status === "expired" ||
+        profile.status === "expiring" ||
+        profile.status === "missing"),
+  );
+  for (const issue of issues) {
+    const line = await formatAuthIssueLine(
+      {
+        profileId: issue.profileId,
+        provider: issue.provider,
+        status: issue.status,
+        reasonCode: issue.reasonCode,
+        remainingMs: issue.remainingMs,
+      },
+      cfg,
+      store,
+    );
+    findings.push({
+      profileId: issue.profileId,
+      message: line.replace(/^- /, ""),
+      fixHint: "Refresh OAuth credentials or update the token for this profile.",
+    });
+  }
+  return findings;
 }
 
 export async function noteAuthProfileHealth(params: {

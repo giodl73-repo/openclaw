@@ -1,7 +1,12 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { scrubDoctorErrorMessage } from "./doctor-error-message.js";
 import { listHealthChecks } from "./health-check-registry.js";
-import type { HealthCheck, HealthFinding, HealthRepairContext } from "./health-checks.js";
+import type {
+  HealthCheck,
+  HealthCheckContext,
+  HealthFinding,
+  HealthRepairContext,
+} from "./health-checks.js";
 
 export interface DoctorRepairRunOptions {
   readonly checks?: readonly HealthCheck[];
@@ -10,9 +15,11 @@ export interface DoctorRepairRunOptions {
 export interface DoctorRepairRunResult {
   readonly config: OpenClawConfig;
   readonly findings: readonly HealthFinding[];
+  readonly unhandledFindings: readonly HealthFinding[];
   readonly remainingFindings: readonly HealthFinding[];
   readonly changes: readonly string[];
   readonly warnings: readonly string[];
+  readonly facts?: HealthCheckContext["facts"];
   readonly checksRun: number;
   readonly checksRepaired: number;
   readonly checksValidated: number;
@@ -24,15 +31,18 @@ export async function runDoctorHealthRepairs(
 ): Promise<DoctorRepairRunResult> {
   const checks = opts.checks ?? listHealthChecks();
   const findings: HealthFinding[] = [];
+  const unhandledFindings: HealthFinding[] = [];
   const remainingFindings: HealthFinding[] = [];
   const changes: string[] = [];
   const warnings: string[] = [];
   let cfg = ctx.cfg;
+  let facts = ctx.facts;
+  let factsChanged = false;
   let checksRepaired = 0;
   let checksValidated = 0;
 
   for (const check of checks) {
-    const detectCtx: HealthRepairContext = { ...ctx, cfg };
+    const detectCtx: HealthRepairContext = { ...ctx, cfg, facts };
     let checkFindings: readonly HealthFinding[];
     try {
       checkFindings = await check.detect(detectCtx);
@@ -41,12 +51,16 @@ export async function runDoctorHealthRepairs(
       continue;
     }
     findings.push(...checkFindings);
-    if (checkFindings.length === 0 || check.repair === undefined) {
+    if (checkFindings.length === 0) {
+      continue;
+    }
+    if (check.repair === undefined) {
+      unhandledFindings.push(...checkFindings.filter((finding) => finding.severity !== "info"));
       continue;
     }
 
     try {
-      const result = await check.repair({ ...ctx, cfg }, checkFindings);
+      const result = await check.repair({ ...ctx, cfg, facts }, checkFindings);
       warnings.push(...(result.warnings ?? []));
       const status = result.status ?? "repaired";
       if (status !== "repaired") {
@@ -56,17 +70,26 @@ export async function runDoctorHealthRepairs(
       if (result.config !== undefined) {
         cfg = result.config;
       }
+      if (result.facts !== undefined) {
+        facts = result.facts;
+        factsChanged = true;
+      }
       changes.push(...result.changes);
       checksRepaired++;
       try {
         const validationFindings = await check.detect(
-          { ...ctx, cfg },
+          { ...ctx, cfg, facts },
           createValidationScope(checkFindings),
         );
         remainingFindings.push(...validationFindings);
         checksValidated++;
         if (validationFindings.length > 0) {
           warnings.push(`${check.id} repair left ${validationFindings.length} finding(s)`);
+          warnings.push(
+            ...validationFindings
+              .filter((finding) => finding.severity !== "info")
+              .map(formatRepairFinding),
+          );
         }
       } catch (err) {
         warnings.push(`${check.id} validation failed: ${scrubDoctorErrorMessage(err)}`);
@@ -79,13 +102,22 @@ export async function runDoctorHealthRepairs(
   return {
     config: cfg,
     findings,
+    unhandledFindings,
     remainingFindings,
     changes,
     warnings,
+    facts: factsChanged ? facts : undefined,
     checksRun: checks.length,
     checksRepaired,
     checksValidated,
   };
+}
+
+function formatRepairFinding(finding: HealthFinding): string {
+  const where = finding.path ?? finding.ocPath;
+  const prefix = where ? `${finding.checkId} ${where}` : finding.checkId;
+  const fix = finding.fixHint !== undefined ? ` Fix: ${finding.fixHint}` : "";
+  return `${prefix}: ${finding.message}${fix}`;
 }
 
 function createValidationScope(findings: readonly HealthFinding[]) {

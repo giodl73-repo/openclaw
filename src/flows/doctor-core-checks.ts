@@ -14,21 +14,6 @@ import type { HealthCheck, HealthFinding } from "./health-checks.js";
 
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
 
-export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
-  "core/doctor/auth-profiles/keychain",
-  "core/doctor/configured-plugin-installs",
-  "core/doctor/plugin-registry",
-  "core/doctor/state-integrity",
-  "core/doctor/gateway-services/extra",
-  "core/doctor/gateway-services/config",
-  "core/doctor/whatsapp-responsiveness",
-  "core/doctor/memory-search",
-  "core/doctor/memory-recall",
-  "core/doctor/memory-gateway-probe",
-  "core/doctor/device-pairing",
-  "core/doctor/gateway-daemon",
-] as const;
-
 export function configValidationIssuesToHealthFindings(
   issues: readonly ConfigValidationIssue[],
 ): readonly HealthFinding[] {
@@ -1174,43 +1159,507 @@ const authProfilesCodexProviderCheck: HealthCheck = {
   },
 };
 
-function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
-  return {
-    id,
-    kind: "core",
-    description,
-    source: "doctor",
-    async detect() {
+const authProfilesKeychainCheck: HealthCheck = {
+  id: "core/doctor/auth-profiles/keychain",
+  kind: "core",
+  description: "Auth profile token and OAuth readiness is reported as structured findings.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectAuthProfileKeychainHealth } = await import("../commands/doctor-auth.js");
+    return (await detectAuthProfileKeychainHealth(ctx.cfg)).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/auth-profiles/keychain",
+        severity: "warning",
+        message: finding.message,
+        source: "auth-profiles",
+        path: finding.profileId ? `auth.profiles.${finding.profileId}` : undefined,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+};
+
+const configuredPluginInstallsCheck: HealthCheck = {
+  id: "core/doctor/configured-plugin-installs",
+  kind: "core",
+  description: "Configured plugin and channel installs are present for the current release.",
+  source: "doctor",
+  async detect(ctx, scope) {
+    if (ctx.sourceConfigValid === false) {
       return [];
-    },
-  };
-}
+    }
+    const { collectReleaseConfiguredPluginIds, shouldRunConfiguredPluginInstallReleaseStep } =
+      await import("../commands/doctor/shared/release-configured-plugin-installs.js");
+    const configured = collectReleaseConfiguredPluginIds({ cfg: ctx.cfg, env: ctx.env });
+    const touchedVersion =
+      ctx.mode === "fix" && scope?.findings && scope.findings.length > 0
+        ? ctx.cfg.meta?.lastTouchedVersion
+        : (ctx.sourceLastTouchedVersion ?? ctx.cfg.meta?.lastTouchedVersion);
+    const shouldRunReleaseStep = shouldRunConfiguredPluginInstallReleaseStep({ touchedVersion });
+    const shouldRunFixRepair =
+      ctx.mode === "fix" && (scope?.findings === undefined || scope.findings.length === 0);
+    if (!shouldRunReleaseStep && !shouldRunFixRepair) {
+      return [];
+    }
+    if (configured.pluginIds.length === 0 && configured.channelIds.length === 0) {
+      return shouldRunReleaseStep
+        ? [
+            {
+              checkId: "core/doctor/configured-plugin-installs",
+              severity: "warning",
+              message: "Configured plugin/channel install release marker needs to be updated.",
+              path: "meta.lastTouchedVersion",
+              fixHint: "Run `openclaw doctor --fix` to mark the release migration complete.",
+            },
+          ]
+        : [];
+    }
+    const labels = [
+      ...configured.pluginIds.map((id) => `plugin:${id}`),
+      ...configured.channelIds.map((id) => `channel:${id}`),
+    ];
+    return [
+      {
+        checkId: "core/doctor/configured-plugin-installs",
+        severity: "warning",
+        message: `Configured plugin/channel install repair needs to run for ${labels.join(", ")}.`,
+        path: "plugins.entries",
+        fixHint: "Run `openclaw doctor --fix` to install missing configured plugins/channels.",
+      },
+    ];
+  },
+  async repair(ctx) {
+    if (ctx.sourceConfigValid === false) {
+      return { status: "skipped", reason: "source config is invalid", changes: [] };
+    }
+    const { VERSION } = await import("../version.js");
+    const { maybeRunConfiguredPluginInstallReleaseStep } =
+      await import("../commands/doctor/shared/release-configured-plugin-installs.js");
+    const result = await maybeRunConfiguredPluginInstallReleaseStep({
+      cfg: ctx.cfg,
+      env: ctx.env,
+      touchedVersion: ctx.sourceLastTouchedVersion ?? ctx.cfg.meta?.lastTouchedVersion,
+    });
+    const madeChanges = result.changes.length > 0;
+    return {
+      config: result.touchedConfig
+        ? {
+            ...ctx.cfg,
+            meta: {
+              ...ctx.cfg.meta,
+              lastTouchedVersion: VERSION,
+              lastTouchedAt: new Date().toISOString(),
+            },
+          }
+        : ctx.cfg,
+      status: result.completed || madeChanges ? "repaired" : "skipped",
+      reason:
+        result.completed || madeChanges
+          ? undefined
+          : "configured plugin install repair did not complete",
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
+const pluginRegistryCheck: HealthCheck = {
+  id: "core/doctor/plugin-registry",
+  kind: "core",
+  description: "Plugin registry state and managed npm peer links are current.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectPluginRegistryHealth } = await import("../commands/doctor-plugin-registry.js");
+    return (
+      await detectPluginRegistryHealth({
+        config: ctx.cfg,
+        env: ctx.env ?? process.env,
+      })
+    ).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/plugin-registry",
+        severity: finding.severity,
+        message: finding.message,
+        source: "plugin-registry",
+        path: finding.path,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { maybeRepairPluginRegistryState } =
+      await import("../commands/doctor-plugin-registry.js");
+    const config = await maybeRepairPluginRegistryState({
+      config: ctx.cfg,
+      env: ctx.env ?? process.env,
+      prompter: { shouldRepair: true },
+    });
+    return {
+      config,
+      changes: [],
+    };
+  },
+};
+
+const stateIntegrityCheck: HealthCheck = {
+  id: "core/doctor/state-integrity",
+  kind: "core",
+  description: "State directories, permissions, and session stores are internally consistent.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectStateIntegrityHealthFindings } =
+      await import("../commands/doctor-state-integrity.js");
+    return (
+      await detectStateIntegrityHealthFindings({
+        cfg: ctx.cfg,
+        configPath: ctx.configPath,
+      })
+    ).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/state-integrity",
+        severity: finding.severity,
+        message: finding.message,
+        source: "state",
+        path: finding.path,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const prompter = ctx.doctor?.prompter;
+    if (prompter === undefined) {
+      return { status: "skipped", reason: "doctor prompter unavailable", changes: [] };
+    }
+    const { noteStateIntegrity } = await import("../commands/doctor-state-integrity.js");
+    await noteStateIntegrity(ctx.cfg, prompter, ctx.configPath);
+    return { changes: [] };
+  },
+};
+
+const gatewayServicesExtraCheck: HealthCheck = {
+  id: "core/doctor/gateway-services/extra",
+  kind: "core",
+  description: "Only the intended Gateway service is active for the current host.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectExtraGatewayServiceFindings } =
+      await import("../commands/doctor-gateway-services.js");
+    return (
+      await detectExtraGatewayServiceFindings({
+        deep: ctx.doctor?.options?.deep,
+        env: ctx.env ?? process.env,
+      })
+    ).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/gateway-services/extra",
+        severity: "warning",
+        message: finding.message,
+        source: "gateway-service",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const prompter = ctx.doctor?.prompter;
+    if (prompter === undefined) {
+      return { status: "skipped", reason: "doctor prompter unavailable", changes: [] };
+    }
+    const { maybeScanExtraGatewayServices } =
+      await import("../commands/doctor-gateway-services.js");
+    await maybeScanExtraGatewayServices(ctx.doctor?.options ?? {}, ctx.runtime, prompter);
+    return { changes: [] };
+  },
+};
+
+const gatewayServicesConfigCheck: HealthCheck = {
+  id: "core/doctor/gateway-services/config",
+  kind: "core",
+  description: "Local Gateway service config matches the current OpenClaw install.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectGatewayServiceConfigFindings } =
+      await import("../commands/doctor-gateway-services.js");
+    return (
+      await detectGatewayServiceConfigFindings({
+        cfg: ctx.cfg,
+        mode: resolveDoctorMode(ctx.cfg),
+        env: ctx.env ?? process.env,
+      })
+    ).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/gateway-services/config",
+        severity: finding.severity,
+        message: finding.message,
+        source: "gateway-service",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const prompter = ctx.doctor?.prompter;
+    if (prompter === undefined) {
+      return { status: "skipped", reason: "doctor prompter unavailable", changes: [] };
+    }
+    const { maybeRepairGatewayServiceConfig } =
+      await import("../commands/doctor-gateway-services.js");
+    await maybeRepairGatewayServiceConfig(
+      ctx.cfg,
+      resolveDoctorMode(ctx.cfg),
+      ctx.runtime,
+      prompter,
+    );
+    return { changes: [] };
+  },
+};
+
+const whatsappResponsivenessCheck: HealthCheck = {
+  id: "core/doctor/whatsapp-responsiveness",
+  kind: "core",
+  description: "WhatsApp responsiveness is not blocked by degraded Gateway/TUI state.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectWhatsappResponsivenessHealth } =
+      await import("../commands/doctor-whatsapp-responsiveness.js");
+    return detectWhatsappResponsivenessHealth({
+      cfg: ctx.cfg,
+      status: ctx.facts?.gatewayStatus,
+    }).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/whatsapp-responsiveness",
+        severity: "warning",
+        message: finding.message,
+        source: "whatsapp",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair() {
+    const { repairWhatsappResponsivenessHealth } =
+      await import("../commands/doctor-whatsapp-responsiveness.js");
+    const result = await repairWhatsappResponsivenessHealth({});
+    return {
+      status: result.failed.length === 0 ? "repaired" : "failed",
+      reason:
+        result.failed.length > 0 ? `failed to stop ${result.failed.length} process(es)` : undefined,
+      changes: result.stopped.map((pid) => `Stopped local TUI client ${pid}.`),
+    };
+  },
+};
+
+const memorySearchCheck: HealthCheck = {
+  id: "core/doctor/memory-search",
+  kind: "core",
+  description: "Memory search has a usable backend and embedding provider.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectMemorySearchHealth } = await import("../commands/doctor-memory-search.js");
+    return (
+      await detectMemorySearchHealth({
+        cfg: ctx.cfg,
+        gatewayMemoryProbe: ctx.facts?.gatewayMemoryProbe ?? {
+          checked: false,
+          ready: false,
+          skipped: true,
+        },
+      })
+    ).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/memory-search",
+        severity: finding.severity,
+        message: finding.message,
+        source: "memory",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const prompter = ctx.doctor?.prompter;
+    if (prompter === undefined) {
+      return { status: "skipped", reason: "doctor prompter unavailable", changes: [] };
+    }
+    const { maybeRepairWorkspaceMemoryHealth } = await import("../commands/doctor-workspace.js");
+    await maybeRepairWorkspaceMemoryHealth({ cfg: ctx.cfg, prompter });
+    return { changes: [] };
+  },
+};
+
+const memoryRecallCheck: HealthCheck = {
+  id: "core/doctor/memory-recall",
+  kind: "core",
+  description: "Memory recall and dreaming artifacts are healthy.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectMemoryRecallHealth } = await import("../commands/doctor-memory-search.js");
+    return (await detectMemoryRecallHealth(ctx.cfg)).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/memory-recall",
+        severity: finding.severity,
+        message: finding.message,
+        source: "memory",
+        path: finding.path,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const prompter = ctx.doctor?.prompter;
+    if (prompter === undefined) {
+      return { status: "skipped", reason: "doctor prompter unavailable", changes: [] };
+    }
+    const { maybeRepairMemoryRecallHealth } = await import("../commands/doctor-memory-search.js");
+    await maybeRepairMemoryRecallHealth({
+      cfg: ctx.cfg,
+      prompter,
+    });
+    return { changes: [] };
+  },
+};
+
+const memoryGatewayProbeCheck: HealthCheck = {
+  id: "core/doctor/memory-gateway-probe",
+  kind: "core",
+  description: "Gateway memory probe reports embeddings ready when checked.",
+  source: "doctor",
+  async detect(ctx) {
+    const probe = ctx.facts?.gatewayMemoryProbe;
+    if (!probe || probe.skipped || probe.ready) {
+      return [];
+    }
+    if (!probe.checked) {
+      return [
+        {
+          checkId: "core/doctor/memory-gateway-probe",
+          severity: "warning",
+          message: "Gateway memory probe was not checked.",
+          source: "memory",
+          fixHint:
+            "Run `openclaw doctor --deep` or `openclaw memory status --deep` to verify memory readiness.",
+        },
+      ];
+    }
+    return [
+      {
+        checkId: "core/doctor/memory-gateway-probe",
+        severity: "warning",
+        message: probe.error
+          ? `Gateway memory probe is not ready: ${probe.error}`
+          : "Gateway memory probe is not ready.",
+        source: "memory",
+        fixHint: "Run `openclaw memory status --deep` for details.",
+      },
+    ];
+  },
+};
+
+const devicePairingCheck: HealthCheck = {
+  id: "core/doctor/device-pairing",
+  kind: "core",
+  description: "Device pairing records and pending requests are consistent.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectDevicePairingHealth } = await import("../commands/doctor-device-pairing.js");
+    return (
+      await detectDevicePairingHealth({
+        cfg: ctx.cfg,
+        healthOk: ctx.facts?.healthOk ?? false,
+      })
+    ).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/device-pairing",
+        severity: finding.severity,
+        message: finding.message,
+        source: "device-pairing",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+};
+
+const gatewayDaemonCheck: HealthCheck = {
+  id: "core/doctor/gateway-daemon",
+  kind: "core",
+  description: "Gateway daemon lifecycle is installed and runnable for local mode.",
+  source: "doctor",
+  async detect(ctx, scope) {
+    const { detectGatewayDaemonHealth } = await import("../commands/doctor-gateway-daemon-flow.js");
+    let healthOk = ctx.facts?.healthOk;
+    if (ctx.mode === "fix" && scope?.findings !== undefined && scope.findings.length > 0) {
+      const { checkGatewayHealth } = await import("../commands/doctor-gateway-health.js");
+      healthOk = (
+        await checkGatewayHealth({
+          runtime: ctx.runtime,
+          cfg: ctx.cfg,
+          timeoutMs: ctx.doctor?.options?.nonInteractive === true ? 3000 : 10000,
+        })
+      ).healthOk;
+    }
+    return (
+      await detectGatewayDaemonHealth({
+        cfg: ctx.cfg,
+        healthOk,
+        env: ctx.env ?? process.env,
+      })
+    ).map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/gateway-daemon",
+        severity: finding.severity,
+        message: finding.message,
+        source: "gateway",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const prompter = ctx.doctor?.prompter;
+    if (prompter === undefined) {
+      return { status: "skipped", reason: "doctor prompter unavailable", changes: [] };
+    }
+    const { maybeRepairGatewayDaemon } = await import("../commands/doctor-gateway-daemon-flow.js");
+    await maybeRepairGatewayDaemon({
+      cfg: ctx.cfg,
+      runtime: ctx.runtime,
+      prompter,
+      options: ctx.doctor?.options ?? {},
+      gatewayDetailsMessage: ctx.facts?.gatewayDetailsMessage ?? "",
+      healthOk: ctx.facts?.healthOk ?? false,
+    });
+    const { checkGatewayHealth, probeGatewayMemoryStatus } =
+      await import("../commands/doctor-gateway-health.js");
+    const { healthOk, status } = await checkGatewayHealth({
+      runtime: ctx.runtime,
+      cfg: ctx.cfg,
+      timeoutMs: ctx.doctor?.options?.nonInteractive === true ? 3000 : 10000,
+    });
+    return {
+      facts: {
+        ...ctx.facts,
+        healthOk,
+        gatewayStatus: status,
+        gatewayMemoryProbe: healthOk
+          ? await probeGatewayMemoryStatus({
+              cfg: ctx.cfg,
+              timeoutMs: ctx.doctor?.options?.nonInteractive === true ? 3000 : 10000,
+            })
+          : { checked: false, ready: false, skipped: false },
+      },
+      changes: [],
+    };
+  },
+};
 
 const convertedWorkflowChecks: readonly HealthCheck[] = [
   authProfilesFlatStoreCheck,
   authProfilesOAuthSidecarCheck,
   authProfilesOAuthIdsCheck,
   authProfilesCodexProviderCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/auth-profiles/keychain",
-    "Auth profile keychain readiness is represented in the health registry.",
-  ),
+  authProfilesKeychainCheck,
   claudeCliCheck,
   gatewayAuthCheck,
   legacyStateCheck,
   legacyPluginManifestCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/configured-plugin-installs",
-    "Configured plugin install release repairs are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/plugin-registry",
-    "Plugin registry checks are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/state-integrity",
-    "State integrity checks are represented in the health registry.",
-  ),
+  configuredPluginInstallsCheck,
+  pluginRegistryCheck,
+  stateIntegrityCheck,
   codexSessionRoutesCheck,
   sessionLocksCheck,
   sessionTranscriptsCheck,
@@ -1220,14 +1669,8 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   sandboxRegistryFilesCheck,
   sandboxImagesCheck,
   sandboxScopeCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/gateway-services/extra",
-    "Extra Gateway service checks are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/gateway-services/config",
-    "Gateway service config checks are represented in the health registry.",
-  ),
+  gatewayServicesExtraCheck,
+  gatewayServicesConfigCheck,
   gatewayPlatformNotesCheck,
   startupChannelMaintenanceCheck,
   securityCheck,
@@ -1237,30 +1680,12 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   systemdLingerCheck,
   bootstrapSizeCheck,
   shellCompletionCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/whatsapp-responsiveness",
-    "WhatsApp responsiveness checks are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/memory-search",
-    "Memory search checks are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/memory-recall",
-    "Memory recall checks are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/memory-gateway-probe",
-    "Memory Gateway probe checks are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/device-pairing",
-    "Device pairing checks are represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/gateway-daemon",
-    "Gateway daemon checks are represented in the health registry.",
-  ),
+  gatewayDaemonCheck,
+  whatsappResponsivenessCheck,
+  memorySearchCheck,
+  memoryRecallCheck,
+  memoryGatewayProbeCheck,
+  devicePairingCheck,
   workspaceSuggestionsCheck,
 ];
 

@@ -46,6 +46,13 @@ type DoctorPrompterLike = {
   note?: typeof note;
 };
 
+export type StateIntegrityHealthFinding = {
+  severity: "warning" | "error";
+  message: string;
+  path?: string;
+  fixHint?: string;
+};
+
 function countLabel(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -1051,6 +1058,29 @@ export async function noteStateIntegrity(
   if (changes.length > 0) {
     noteFn(changes.join("\n"), "Doctor changes");
   }
+}
+
+export async function detectStateIntegrityHealthFindings(params: {
+  cfg: OpenClawConfig;
+  configPath?: string;
+}): Promise<readonly StateIntegrityHealthFinding[]> {
+  const findings: StateIntegrityHealthFinding[] = [];
+  await noteStateIntegrity(
+    params.cfg,
+    {
+      confirmRuntimeRepair: async () => false,
+      note: (message) => {
+        const text = String(message);
+        findings.push({
+          severity: text.includes("CRITICAL") ? "error" : "warning",
+          message: text,
+          fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} to apply safe state repairs.`,
+        });
+      },
+    },
+    params.configPath,
+  );
+  return findings;
 }
 
 export function collectWorkspaceBackupTip(workspaceDir: string): string | null {

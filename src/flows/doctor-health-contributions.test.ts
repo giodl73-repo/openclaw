@@ -127,7 +127,7 @@ describe("doctor health contributions", () => {
     expect(mocks.note).not.toHaveBeenCalled();
   });
 
-  it("stamps release configured plugin installs after repair changes", async () => {
+  it("leaves release configured plugin install stamping to structured repairs", async () => {
     mocks.maybeRunConfiguredPluginInstallReleaseStep.mockResolvedValue({
       changes: ["Installed configured plugin matrix."],
       warnings: [],
@@ -144,16 +144,9 @@ describe("doctor health contributions", () => {
 
     await contribution.run(ctx);
 
-    expect(mocks.maybeRunConfiguredPluginInstallReleaseStep).toHaveBeenCalledWith({
-      cfg: {},
-      env: {},
-      touchedVersion: "2026.4.29",
-    });
-    expect(mocks.note).toHaveBeenCalledWith(
-      "Installed configured plugin matrix.",
-      "Doctor changes",
-    );
-    expect(ctx.cfg.meta?.lastTouchedVersion).toBe("2026.5.2-test");
+    expect(mocks.maybeRunConfiguredPluginInstallReleaseStep).not.toHaveBeenCalled();
+    expect(mocks.note).not.toHaveBeenCalled();
+    expect(ctx.cfg.meta?.lastTouchedVersion).toBeUndefined();
   });
 
   it("checks command owner configuration before final config writes", () => {
@@ -170,12 +163,12 @@ describe("doctor health contributions", () => {
     expect(ids.indexOf("doctor:skills")).toBeLessThan(ids.indexOf("doctor:write-config"));
   });
 
-  it("runs structured repairs before legacy skill repairs and config writes", () => {
+  it("runs structured repairs after prepared gateway facts and before config writes", () => {
     const ids = resolveDoctorHealthContributions().map((entry) => entry.id);
 
     expect(ids.indexOf("doctor:structured-health-repairs")).toBeGreaterThan(-1);
-    expect(ids.indexOf("doctor:structured-health-repairs")).toBeLessThan(
-      ids.indexOf("doctor:skills"),
+    expect(ids.indexOf("doctor:gateway-health")).toBeLessThan(
+      ids.indexOf("doctor:structured-health-repairs"),
     );
     expect(ids.indexOf("doctor:structured-health-repairs")).toBeLessThan(
       ids.indexOf("doctor:write-config"),

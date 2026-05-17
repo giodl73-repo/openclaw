@@ -15,6 +15,11 @@ type ProcessController = {
   kill: (pid: number, signal: ProcessSignal | 0) => boolean;
 };
 
+export type WhatsappResponsivenessHealthFinding = {
+  message: string;
+  fixHint?: string;
+};
+
 const LOCAL_TUI_CMD_RE =
   /(?:^|\s)(?:openclaw-tui|openclaw\s+tui|openclaw\s+chat|openclaw\s+terminal)(?:\s|$)/;
 
@@ -124,6 +129,42 @@ export async function terminateLocalTuiProcesses(params: {
     }
   }
   return { stopped, failed };
+}
+
+export function detectWhatsappResponsivenessHealth(params: {
+  cfg: OpenClawConfig;
+  status?: Pick<StatusSummary, "eventLoop"> | null;
+  listLocalTuiProcesses?: () => LocalTuiProcess[];
+}): readonly WhatsappResponsivenessHealthFinding[] {
+  if (!hasWhatsappEnabled(params.cfg)) {
+    return [];
+  }
+  const tuiProcesses = (params.listLocalTuiProcesses ?? listLocalTuiProcesses)();
+  const gatewayDegraded = params.status?.eventLoop?.degraded === true;
+  if (!gatewayDegraded || tuiProcesses.length === 0) {
+    return [];
+  }
+  return [
+    {
+      message: [
+        "Gateway event loop is degraded while local TUI clients are running.",
+        "WhatsApp replies can queue behind TUI startup/session refresh work.",
+        `Local TUI pids: ${formatPidList(tuiProcesses)}`,
+      ].join("\n"),
+      fixHint: `Close those TUI sessions, or run ${formatCliCommand("openclaw doctor --fix")}.`,
+    },
+  ];
+}
+
+export async function repairWhatsappResponsivenessHealth(params: {
+  listLocalTuiProcesses?: () => LocalTuiProcess[];
+  terminateLocalTuiProcesses?: typeof terminateLocalTuiProcesses;
+}): Promise<{ stopped: number[]; failed: number[] }> {
+  const processes = (params.listLocalTuiProcesses ?? listLocalTuiProcesses)();
+  if (processes.length === 0) {
+    return { stopped: [], failed: [] };
+  }
+  return (params.terminateLocalTuiProcesses ?? terminateLocalTuiProcesses)({ processes });
 }
 
 export async function noteWhatsappResponsivenessHealth(params: {

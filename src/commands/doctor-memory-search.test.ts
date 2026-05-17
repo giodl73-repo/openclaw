@@ -94,7 +94,7 @@ vi.mock("./doctor-workspace.js", async (importOriginal) => {
   };
 });
 
-import { noteMemorySearchHealth } from "./doctor-memory-search.js";
+import { detectMemorySearchHealth, noteMemorySearchHealth } from "./doctor-memory-search.js";
 import { maybeRepairMemoryRecallHealth, noteMemoryRecallHealth } from "./doctor-memory-search.js";
 import { detectLegacyWorkspaceDirs, formatRootMemoryFilesWarning } from "./doctor-workspace.js";
 
@@ -389,6 +389,14 @@ describe("noteMemorySearchHealth", () => {
     expect(checkQmdBinaryAvailability).not.toHaveBeenCalled();
     expect(note).toHaveBeenCalledTimes(1);
     expect(firstNoteMessage()).toContain("No active memory plugin is registered");
+  });
+
+  it("does not turn intentionally disabled memory search into a finding", async () => {
+    resolveMemorySearchConfig.mockReturnValue(null);
+
+    const findings = await detectMemorySearchHealth({ cfg });
+
+    expect(findings).toEqual([]);
   });
 
   it("warns when CLI backend resolution is missing and gateway memory probe is not ready", async () => {

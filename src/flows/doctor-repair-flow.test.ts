@@ -79,8 +79,15 @@ describe("runDoctorHealthRepairs", () => {
 
     expect(result.config).toEqual({});
     expect(result.findings).toHaveLength(1);
+    expect(result.unhandledFindings).toMatchObject([
+      {
+        checkId: "test/legacy-only",
+        severity: "warning",
+      },
+    ]);
     expect(result.remainingFindings).toEqual([]);
     expect(result.changes).toEqual([]);
+    expect(result.warnings).toEqual([]);
     expect(result.checksRepaired).toBe(0);
     expect(result.checksValidated).toBe(0);
   });
@@ -119,7 +126,10 @@ describe("runDoctorHealthRepairs", () => {
         ocPath: "oc://openclaw.json/gateway.mode",
       },
     ]);
-    expect(result.warnings).toEqual(["test/not-fixed repair left 1 finding(s)"]);
+    expect(result.warnings).toEqual([
+      "test/not-fixed repair left 1 finding(s)",
+      "test/not-fixed oc://openclaw.json/gateway.mode: still broken",
+    ]);
   });
 
   it("does not validate skipped or failed repair results", async () => {

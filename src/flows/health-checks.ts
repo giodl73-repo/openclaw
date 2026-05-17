@@ -1,3 +1,5 @@
+import type { DoctorPrompter } from "../commands/doctor-prompter.js";
+import type { StatusSummary } from "../commands/status.types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { RuntimeEnv } from "../runtime.js";
 
@@ -48,11 +50,26 @@ export interface HealthCheckContext {
   readonly cwd?: string;
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly sourceConfigValid?: boolean;
+  readonly sourceLastTouchedVersion?: string;
+  readonly facts?: {
+    readonly gatewayStatus?: StatusSummary;
+    readonly gatewayMemoryProbe?: {
+      readonly checked: boolean;
+      readonly ready: boolean;
+      readonly error?: string;
+      readonly skipped: boolean;
+    };
+    readonly healthOk?: boolean;
+    readonly gatewayDetailsMessage?: string;
+  };
   readonly doctor?: {
     readonly options?: {
       readonly nonInteractive?: boolean;
+      readonly deep?: boolean;
     };
     readonly confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+    readonly prompter?: DoctorPrompter;
   };
 }
 
@@ -64,6 +81,7 @@ export interface HealthRepairResult {
   readonly status?: "repaired" | "skipped" | "failed";
   readonly reason?: string;
   readonly config?: OpenClawConfig;
+  readonly facts?: HealthCheckContext["facts"];
   readonly changes: readonly string[];
   readonly warnings?: readonly string[];
 }
