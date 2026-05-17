@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetCoreHealthChecksForTest } from "../flows/doctor-core-checks.js";
+import { CORE_HEALTH_CHECKS, resetCoreHealthChecksForTest } from "../flows/doctor-core-checks.js";
 import { clearHealthChecksForTest } from "../flows/health-check-registry.js";
 import { runDoctorLintCli } from "./doctor-lint.js";
 
@@ -65,7 +65,7 @@ describe("runDoctorLintCli", () => {
 
       expect(exitCode).toBe(0);
       expect(String(stdout.mock.calls[0]?.[0])).toBe(
-        "doctor --lint: ran 5 check(s), 0 finding(s)\n",
+        `doctor --lint: ran ${CORE_HEALTH_CHECKS.length} check(s), 0 finding(s)\n`,
       );
       expect(String(stdout.mock.calls[1]?.[0])).toBe("  no findings\n");
     } finally {

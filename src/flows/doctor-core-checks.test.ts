@@ -8,6 +8,7 @@ import {
   registerCoreHealthChecks,
   resetCoreHealthChecksForTest,
 } from "./doctor-core-checks.js";
+import { doctorHealthConversionRules } from "./doctor-health-conversion-plan.js";
 import {
   clearHealthChecksForTest,
   listHealthChecks,
@@ -33,13 +34,9 @@ describe("registerCoreHealthChecks", () => {
     registerCoreHealthChecks();
     registerCoreHealthChecks();
 
-    expect(listHealthChecks().map((check) => check.id)).toEqual([
-      "core/doctor/gateway-config",
-      "core/doctor/command-owner",
-      "core/doctor/workspace-status",
-      "core/doctor/skills-readiness",
-      "core/doctor/final-config-validation",
-    ]);
+    expect(listHealthChecks().map((check) => check.id)).toEqual(
+      CORE_HEALTH_CHECKS.map((check) => check.id),
+    );
   });
 
   it("can retry after a duplicate registration failure is cleared", () => {
@@ -57,7 +54,18 @@ describe("registerCoreHealthChecks", () => {
     clearHealthChecksForTest();
     registerCoreHealthChecks();
 
-    expect(listHealthChecks()).toHaveLength(5);
+    expect(listHealthChecks()).toHaveLength(CORE_HEALTH_CHECKS.length);
+  });
+
+  it("registers every core health target named by the doctor conversion inventory", () => {
+    registerCoreHealthChecks();
+
+    const registeredIds = new Set(listHealthChecks().map((check) => check.id));
+    const coreTargets = doctorHealthConversionRules.flatMap((rule) =>
+      rule.target.filter((target) => target.startsWith("core/doctor/")),
+    );
+
+    expect(coreTargets.filter((target) => !registeredIds.has(target))).toEqual([]);
   });
 
   it("shows the repair-capable health check shape with skills readiness", async () => {
