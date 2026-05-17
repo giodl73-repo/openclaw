@@ -167,6 +167,13 @@ export type LegacySandboxRegistryFileHealthFinding = {
   fixHint: string;
 };
 
+export type SandboxScopeHealthFinding = {
+  agentId: string;
+  ignoredOverrides: readonly string[];
+  message: string;
+  path: string;
+};
+
 async function handleMissingSandboxImage(
   params: SandboxImageCheck,
   runtime: RuntimeEnv,
@@ -366,12 +373,14 @@ export async function maybeRepairSandboxRegistryFiles(prompter: DoctorPrompter):
   }
 }
 
-export function noteSandboxScopeWarnings(cfg: OpenClawConfig) {
+export function detectSandboxScopeHealth(
+  cfg: OpenClawConfig,
+): readonly SandboxScopeHealthFinding[] {
   const globalSandbox = cfg.agents?.defaults?.sandbox;
   const agents = Array.isArray(cfg.agents?.list) ? cfg.agents.list : [];
-  const warnings: string[] = [];
+  const findings: SandboxScopeHealthFinding[] = [];
 
-  for (const agent of agents) {
+  for (const [index, agent] of agents.entries()) {
     const agentId = agent.id;
     const agentSandbox = agent.sandbox;
     if (!agentSandbox) {
@@ -401,14 +410,24 @@ export function noteSandboxScopeWarnings(cfg: OpenClawConfig) {
       continue;
     }
 
-    warnings.push(
-      [
-        `- agents.list (id "${agentId}") sandbox ${overrides.join("/")} overrides ignored.`,
-        `  scope resolves to "shared".`,
-      ].join("\n"),
-    );
+    findings.push({
+      agentId,
+      ignoredOverrides: overrides,
+      message: `agents.list (id "${agentId}") sandbox ${overrides.join("/")} overrides ignored; scope resolves to "shared".`,
+      path: `agents.list[${index}].sandbox`,
+    });
   }
 
+  return findings;
+}
+
+export function noteSandboxScopeWarnings(cfg: OpenClawConfig) {
+  const warnings = detectSandboxScopeHealth(cfg).map((finding) =>
+    [
+      `- agents.list (id "${finding.agentId}") sandbox ${finding.ignoredOverrides.join("/")} overrides ignored.`,
+      `  scope resolves to "shared".`,
+    ].join("\n"),
+  );
   if (warnings.length > 0) {
     note(warnings.join("\n"), "Sandbox");
   }

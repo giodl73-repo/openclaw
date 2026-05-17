@@ -24,7 +24,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
   "core/doctor/sandbox/images",
-  "core/doctor/sandbox-scope",
   "core/doctor/gateway-services/extra",
   "core/doctor/gateway-services/config",
   "core/doctor/whatsapp-responsiveness",
@@ -966,6 +965,28 @@ const sandboxRegistryFilesCheck: HealthCheck = {
   },
 };
 
+const sandboxScopeCheck: HealthCheck = {
+  id: "core/doctor/sandbox-scope",
+  kind: "core",
+  description: "Sandbox shared-scope agent overrides are detected.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectSandboxScopeHealth } = await import("../commands/doctor-sandbox.js");
+    const findings = detectSandboxScopeHealth(ctx.cfg);
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/sandbox-scope",
+        severity: "warning",
+        message: finding.message,
+        path: finding.path,
+        source: "openclaw.jsonc",
+        fixHint:
+          "Use a non-shared sandbox scope for agents with sandbox docker/browser/prune overrides, or remove the ignored overrides.",
+      }),
+    );
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -1026,10 +1047,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/sandbox/images",
     "Sandbox image checks are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/sandbox-scope",
-    "Sandbox scope checks are represented in the health registry.",
-  ),
+  sandboxScopeCheck,
   createConvertedWorkflowCheck(
     "core/doctor/gateway-services/extra",
     "Extra Gateway service checks are represented in the health registry.",
