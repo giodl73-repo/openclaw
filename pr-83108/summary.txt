@@ -1,0 +1,4 @@
+before_status=1
+after_status=0
+before_observed=projector.buildResult(...).lastToolError was undefined, so the aborted empty declined native command had no tool error for payload generation.
+after_observed=projector.buildResult(...).lastToolError is {toolName:bash, meta:run tests (workspace), error:codex native tool blocked, mutatingAction:true}; the payload regression emits one visible Bash error payload.
