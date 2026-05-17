@@ -116,49 +116,20 @@ function resolveSandboxBrowserImage(cfg: OpenClawConfig): string {
   return image ? image : DEFAULT_SANDBOX_BROWSER_IMAGE;
 }
 
-function updateSandboxDockerImage(cfg: OpenClawConfig, image: string): OpenClawConfig {
-  return {
-    ...cfg,
-    agents: {
-      ...cfg.agents,
-      defaults: {
-        ...cfg.agents?.defaults,
-        sandbox: {
-          ...cfg.agents?.defaults?.sandbox,
-          docker: {
-            ...cfg.agents?.defaults?.sandbox?.docker,
-            image,
-          },
-        },
-      },
-    },
-  };
-}
-
-function updateSandboxBrowserImage(cfg: OpenClawConfig, image: string): OpenClawConfig {
-  return {
-    ...cfg,
-    agents: {
-      ...cfg.agents,
-      defaults: {
-        ...cfg.agents?.defaults,
-        sandbox: {
-          ...cfg.agents?.defaults?.sandbox,
-          browser: {
-            ...cfg.agents?.defaults?.sandbox?.browser,
-            image,
-          },
-        },
-      },
-    },
-  };
-}
-
 type SandboxImageCheck = {
   kind: string;
   image: string;
   buildScript?: string;
-  updateConfig: (image: string) => void;
+};
+
+export type SandboxImageHealthFinding = {
+  kind: "docker-unavailable" | "missing-image" | "unsupported-browser-backend";
+  message: string;
+  fixHint: string;
+  details?: string;
+  sandboxKind?: string;
+  image?: string;
+  buildScript?: string;
 };
 
 export type LegacySandboxRegistryFileHealthFinding = {
@@ -174,78 +145,10 @@ export type SandboxScopeHealthFinding = {
   path: string;
 };
 
-async function handleMissingSandboxImage(
-  params: SandboxImageCheck,
-  runtime: RuntimeEnv,
-  prompter: DoctorPrompter,
-) {
-  const exists = await dockerImageExists(params.image);
-  if (exists) {
-    return;
-  }
-
-  const buildHint = params.buildScript
-    ? `Build it with ${params.buildScript}.`
-    : "Build or pull it first.";
-  note(`Sandbox ${params.kind} image missing: ${params.image}. ${buildHint}`, "Sandbox");
-
-  let built = false;
-  if (params.buildScript) {
-    const build = await prompter.confirmRuntimeRepair({
-      message: `Build ${params.kind} sandbox image now?`,
-      initialValue: true,
-    });
-    if (build) {
-      built = await runSandboxScript(params.buildScript, runtime);
-    }
-  }
-
-  if (built) {
-    return;
-  }
-}
-
-export async function maybeRepairSandboxImages(
-  cfg: OpenClawConfig,
-  runtime: RuntimeEnv,
-  prompter: DoctorPrompter,
-): Promise<OpenClawConfig> {
+function collectSandboxImageChecks(cfg: OpenClawConfig): SandboxImageCheck[] {
   const sandbox = cfg.agents?.defaults?.sandbox;
-  const mode = sandbox?.mode ?? "off";
-  if (!sandbox || mode === "off") {
-    return cfg;
-  }
-  const backend = resolveSandboxBackend(cfg);
-  if (backend !== "docker") {
-    if (sandbox.browser?.enabled) {
-      note(
-        `Sandbox backend "${backend}" selected. Docker browser health checks are skipped; browser sandbox currently requires the docker backend.`,
-        "Sandbox",
-      );
-    }
-    return cfg;
-  }
-
-  const dockerAvailable = await isDockerAvailable();
-  if (!dockerAvailable) {
-    const lines = [
-      `Sandbox mode is enabled (mode: "${mode}") but Docker is not available.`,
-      "Docker is required for sandbox mode to function.",
-      "Isolated sessions (cron jobs, sub-agents) will fail without Docker.",
-      "",
-      "Options:",
-      "- Install Docker and restart the gateway",
-      "- Disable sandbox mode: openclaw config set agents.defaults.sandbox.mode off",
-    ];
-    note(lines.join("\n"), "Sandbox");
-    return cfg;
-  }
-
-  let next = cfg;
-  const changes: string[] = [];
-
   const dockerImage = resolveSandboxDockerImage(cfg);
-  await handleMissingSandboxImage(
+  const checks: SandboxImageCheck[] = [
     {
       kind: "base",
       image: dockerImage,
@@ -255,36 +158,175 @@ export async function maybeRepairSandboxImages(
           : dockerImage === DEFAULT_SANDBOX_IMAGE
             ? "scripts/sandbox-setup.sh"
             : undefined,
-      updateConfig: (image) => {
-        next = updateSandboxDockerImage(next, image);
-        changes.push(`Updated agents.defaults.sandbox.docker.image → ${image}`);
-      },
     },
-    runtime,
-    prompter,
+  ];
+  if (sandbox?.browser?.enabled) {
+    checks.push({
+      kind: "browser",
+      image: resolveSandboxBrowserImage(cfg),
+      buildScript: "scripts/sandbox-browser-setup.sh",
+    });
+  }
+  return checks;
+}
+
+function formatDockerUnavailableFinding(mode: string): SandboxImageHealthFinding {
+  const lines = [
+    `Sandbox mode is enabled (mode: "${mode}") but Docker is not available.`,
+    "Docker is required for sandbox mode to function.",
+    "Isolated sessions (cron jobs, sub-agents) will fail without Docker.",
+    "",
+    "Options:",
+    "- Install Docker and restart the gateway",
+    "- Disable sandbox mode: openclaw config set agents.defaults.sandbox.mode off",
+  ];
+  return {
+    kind: "docker-unavailable",
+    message: `Sandbox mode is enabled (mode: "${mode}") but Docker is not available.`,
+    fixHint:
+      "Install Docker and restart the gateway, or disable sandbox mode with `openclaw config set agents.defaults.sandbox.mode off`.",
+    details: lines.join("\n"),
+  };
+}
+
+function missingSandboxImageToFinding(check: SandboxImageCheck): SandboxImageHealthFinding {
+  const buildHint = check.buildScript
+    ? `Build it with ${check.buildScript}.`
+    : "Build or pull it first.";
+  return {
+    kind: "missing-image",
+    sandboxKind: check.kind,
+    image: check.image,
+    buildScript: check.buildScript,
+    message: `Sandbox ${check.kind} image missing: ${check.image}.`,
+    fixHint: buildHint,
+    details: `Sandbox ${check.kind} image missing: ${check.image}. ${buildHint}`,
+  };
+}
+
+export async function detectSandboxImageHealth(params: {
+  cfg: OpenClawConfig;
+}): Promise<readonly SandboxImageHealthFinding[]> {
+  const sandbox = params.cfg.agents?.defaults?.sandbox;
+  const mode = sandbox?.mode ?? "off";
+  if (!sandbox || mode === "off") {
+    return [];
+  }
+  const backend = resolveSandboxBackend(params.cfg);
+  if (backend !== "docker") {
+    return sandbox.browser?.enabled
+      ? [
+          {
+            kind: "unsupported-browser-backend",
+            message: `Sandbox backend "${backend}" selected. Docker browser health checks are skipped; browser sandbox currently requires the docker backend.`,
+            fixHint:
+              "Switch agents.defaults.sandbox.backend to docker, or disable agents.defaults.sandbox.browser.enabled.",
+          },
+        ]
+      : [];
+  }
+
+  const dockerAvailable = await isDockerAvailable();
+  if (!dockerAvailable) {
+    return [formatDockerUnavailableFinding(mode)];
+  }
+
+  const findings: SandboxImageHealthFinding[] = [];
+  for (const check of collectSandboxImageChecks(params.cfg)) {
+    if (!(await dockerImageExists(check.image))) {
+      findings.push(missingSandboxImageToFinding(check));
+    }
+  }
+  return findings;
+}
+
+export async function repairSandboxImageHealth(params: {
+  cfg: OpenClawConfig;
+  runtime: RuntimeEnv;
+  confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+}): Promise<{
+  config: OpenClawConfig;
+  changes: string[];
+  warnings: string[];
+  status?: "repaired" | "skipped" | "failed";
+  reason?: string;
+}> {
+  const findings = await detectSandboxImageHealth({ cfg: params.cfg });
+  const buildable = findings.filter(
+    (finding) => finding.kind === "missing-image" && finding.buildScript && finding.sandboxKind,
   );
-
-  if (sandbox.browser?.enabled) {
-    await handleMissingSandboxImage(
-      {
-        kind: "browser",
-        image: resolveSandboxBrowserImage(cfg),
-        buildScript: "scripts/sandbox-browser-setup.sh",
-        updateConfig: (image) => {
-          next = updateSandboxBrowserImage(next, image);
-          changes.push(`Updated agents.defaults.sandbox.browser.image → ${image}`);
-        },
-      },
-      runtime,
-      prompter,
-    );
+  if (buildable.length === 0) {
+    return findings.length === 0
+      ? { config: params.cfg, changes: [], warnings: [] }
+      : {
+          config: params.cfg,
+          changes: [],
+          warnings: [],
+          status: "skipped",
+          reason: "no buildable missing sandbox images",
+        };
   }
 
-  if (changes.length > 0) {
-    note(changes.join("\n"), "Doctor changes");
+  const changes: string[] = [];
+  const warnings: string[] = [];
+  for (const finding of buildable) {
+    if (!finding.buildScript || !finding.sandboxKind || !finding.image) {
+      continue;
+    }
+    if (params.confirm) {
+      const build = await params.confirm({
+        message: `Build ${finding.sandboxKind} sandbox image now?`,
+        initialValue: true,
+      });
+      if (!build) {
+        continue;
+      }
+    }
+    const built = await runSandboxScript(finding.buildScript, params.runtime);
+    if (built) {
+      changes.push(`Built ${finding.sandboxKind} sandbox image ${finding.image}.`);
+    } else {
+      warnings.push(`Failed to build ${finding.sandboxKind} sandbox image ${finding.image}.`);
+    }
   }
 
-  return next;
+  if (warnings.length > 0) {
+    return { config: params.cfg, changes, warnings, status: "failed" };
+  }
+  if (changes.length === 0) {
+    return {
+      config: params.cfg,
+      changes,
+      warnings,
+      status: "skipped",
+      reason: "sandbox image build declined",
+    };
+  }
+  return { config: params.cfg, changes, warnings };
+}
+
+export async function maybeRepairSandboxImages(
+  cfg: OpenClawConfig,
+  runtime: RuntimeEnv,
+  prompter: DoctorPrompter,
+): Promise<OpenClawConfig> {
+  const findings = await detectSandboxImageHealth({ cfg });
+  if (findings.length === 0) {
+    return cfg;
+  }
+  note(findings.map((finding) => finding.details ?? finding.message).join("\n"), "Sandbox");
+  const result = await repairSandboxImageHealth({
+    cfg,
+    runtime,
+    confirm: (params) => prompter.confirmRuntimeRepair(params),
+  });
+  if (result.changes.length > 0) {
+    note(result.changes.join("\n"), "Doctor changes");
+  }
+  if (result.warnings.length > 0) {
+    note(result.warnings.join("\n"), "Doctor warnings");
+  }
+  return result.config;
 }
 
 function formatLegacyRegistryInspectionLine(file: LegacySandboxRegistryInspection): string {

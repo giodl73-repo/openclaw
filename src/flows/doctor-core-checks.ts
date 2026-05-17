@@ -19,7 +19,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
-  "core/doctor/sandbox/images",
   "core/doctor/gateway-services/extra",
   "core/doctor/gateway-services/config",
   "core/doctor/whatsapp-responsiveness",
@@ -961,6 +960,52 @@ const sandboxRegistryFilesCheck: HealthCheck = {
   },
 };
 
+const sandboxImagesCheck: HealthCheck = {
+  id: "core/doctor/sandbox/images",
+  kind: "core",
+  description: "Sandbox image and Docker readiness checks are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectSandboxImageHealth } = await import("../commands/doctor-sandbox.js");
+    const findings = await detectSandboxImageHealth({ cfg: ctx.cfg });
+    return findings.map((finding): HealthFinding => {
+      const healthFinding: {
+        checkId: string;
+        severity: "warning";
+        message: string;
+        source: string;
+        fixHint: string;
+        path?: string;
+      } = {
+        checkId: "core/doctor/sandbox/images",
+        severity: "warning",
+        message: finding.message,
+        source: "sandbox",
+        fixHint: finding.fixHint,
+      };
+      if (finding.image) {
+        healthFinding.path = finding.image;
+      }
+      return healthFinding;
+    });
+  },
+  async repair(ctx) {
+    const { repairSandboxImageHealth } = await import("../commands/doctor-sandbox.js");
+    const result = await repairSandboxImageHealth({
+      cfg: ctx.cfg,
+      runtime: ctx.runtime,
+      confirm: ctx.doctor?.confirm,
+    });
+    return {
+      status: result.status,
+      reason: result.reason,
+      config: result.config,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 const sandboxScopeCheck: HealthCheck = {
   id: "core/doctor/sandbox-scope",
   kind: "core",
@@ -1173,10 +1218,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   legacyCronStoreCheck,
   legacyWhatsAppCrontabCheck,
   sandboxRegistryFilesCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/sandbox/images",
-    "Sandbox image checks are represented in the health registry.",
-  ),
+  sandboxImagesCheck,
   sandboxScopeCheck,
   createConvertedWorkflowCheck(
     "core/doctor/gateway-services/extra",
