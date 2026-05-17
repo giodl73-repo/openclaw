@@ -1,0 +1,8 @@
+detector_present=true
+stale_posix_findings=agent:stale-install,agent:stale-temp
+stale_windows_findings=agent:win-stale
+workspace_false_positive=false
+current_runtime_false_positive=false
+live_bundled_root=/tmp/openclaw-current-runtime/skills
+expected_posix_path=/tmp/openclaw-current-runtime/skills/doctor/SKILL.md
+expected_windows_path=C:\Users\alice\.openclaw\lib\node_modules\openclaw\skills\doctor\SKILL.md

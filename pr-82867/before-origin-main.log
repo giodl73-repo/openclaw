@@ -1,0 +1,5 @@
+detector_present=false
+doctor_contribution_registered=false
+stale_posix_findings=0
+stale_windows_findings=0
+workspace_false_positive=unknown
