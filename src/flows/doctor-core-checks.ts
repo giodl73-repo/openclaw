@@ -16,7 +16,6 @@ const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
 
 export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/auth-profiles/keychain",
-  "core/doctor/auth-profiles/codex-provider",
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
@@ -1109,6 +1108,27 @@ const authProfilesOAuthIdsCheck: HealthCheck = {
   },
 };
 
+const authProfilesCodexProviderCheck: HealthCheck = {
+  id: "core/doctor/auth-profiles/codex-provider",
+  kind: "core",
+  description: "Legacy Codex provider overrides are detected when Codex OAuth is configured.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectLegacyCodexProviderOverrideHealth } = await import("../commands/doctor-auth.js");
+    const findings = detectLegacyCodexProviderOverrideHealth(ctx.cfg);
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/auth-profiles/codex-provider",
+        severity: "warning",
+        message: finding.message,
+        source: "openclaw.jsonc",
+        ocPath: "models.providers.openai-codex",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -1125,13 +1145,10 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   authProfilesFlatStoreCheck,
   authProfilesOAuthSidecarCheck,
   authProfilesOAuthIdsCheck,
+  authProfilesCodexProviderCheck,
   createConvertedWorkflowCheck(
     "core/doctor/auth-profiles/keychain",
     "Auth profile keychain readiness is represented in the health registry.",
-  ),
-  createConvertedWorkflowCheck(
-    "core/doctor/auth-profiles/codex-provider",
-    "Legacy Codex provider overrides are represented in the health registry.",
   ),
   claudeCliCheck,
   gatewayAuthCheck,

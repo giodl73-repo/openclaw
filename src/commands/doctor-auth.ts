@@ -28,6 +28,12 @@ const CODEX_OAUTH_WARNING_TITLE = "Codex OAuth";
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const LEGACY_CODEX_APIS = new Set(["openai-responses", "openai-completions"]);
 
+export type LegacyCodexProviderOverrideHealthFinding = {
+  message: string;
+  fixHint: string;
+  details: string;
+};
+
 function hasConfiguredCodexOAuthProfile(cfg: OpenClawConfig): boolean {
   return Object.values(cfg.auth?.profiles ?? {}).some(
     (profile) => profile.provider === CODEX_PROVIDER_ID && profile.mode === "oauth",
@@ -97,18 +103,35 @@ function buildCodexProviderOverrideWarning(providerOverride: unknown): string {
   return lines.join("\n");
 }
 
-export function noteLegacyCodexProviderOverride(cfg: OpenClawConfig): void {
+export function detectLegacyCodexProviderOverrideHealth(
+  cfg: OpenClawConfig,
+): readonly LegacyCodexProviderOverrideHealthFinding[] {
   const providerOverride = cfg.models?.providers?.[CODEX_PROVIDER_ID];
   if (!providerOverride) {
-    return;
+    return [];
   }
   if (!hasLegacyCodexTransportOverride(providerOverride)) {
-    return;
+    return [];
   }
   if (!hasConfiguredCodexOAuthProfile(cfg) && !hasStoredCodexOAuthProfile()) {
+    return [];
+  }
+  return [
+    {
+      message: `models.providers.${CODEX_PROVIDER_ID} contains a legacy transport override while Codex OAuth is configured.`,
+      fixHint:
+        "Remove or rewrite the legacy OpenAI transport override so the built-in Codex OAuth provider path is used.",
+      details: buildCodexProviderOverrideWarning(providerOverride),
+    },
+  ];
+}
+
+export function noteLegacyCodexProviderOverride(cfg: OpenClawConfig): void {
+  const finding = detectLegacyCodexProviderOverrideHealth(cfg)[0];
+  if (!finding) {
     return;
   }
-  note(buildCodexProviderOverrideWarning(providerOverride), CODEX_OAUTH_WARNING_TITLE);
+  note(finding.details, CODEX_OAUTH_WARNING_TITLE);
 }
 
 type AuthIssue = {
