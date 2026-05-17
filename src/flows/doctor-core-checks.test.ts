@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   CORE_HEALTH_CHECKS,
+  TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS,
   registerCoreHealthChecks,
   resetCoreHealthChecksForTest,
 } from "./doctor-core-checks.js";
@@ -66,6 +67,14 @@ describe("registerCoreHealthChecks", () => {
     );
 
     expect(coreTargets.filter((target) => !registeredIds.has(target))).toEqual([]);
+  });
+
+  it("keeps transitional no-op health checks explicit", () => {
+    const placeholderIds = CORE_HEALTH_CHECKS.filter((check) =>
+      check.description.endsWith("represented in the health registry."),
+    ).map((check) => check.id);
+
+    expect(placeholderIds).toEqual([...TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS]);
   });
 
   it("shows the repair-capable health check shape with skills readiness", async () => {
@@ -147,5 +156,30 @@ metadata: '{"openclaw":{"requires":{"bins":["openclaw-test-missing-skill-bin"]}}
     );
     expect(repaired?.config?.skills?.entries?.["missing-tool"]).toEqual({ enabled: false });
     expect(repaired?.changes).toContain("Disabled unavailable skill missing-tool.");
+  });
+
+  it("converts security doctor warnings into health findings", async () => {
+    const check = CORE_HEALTH_CHECKS.find((entry) => entry.id === "core/doctor/security");
+
+    const findings = await check?.detect({
+      mode: "lint",
+      runtime: { log() {}, error() {}, exit() {} },
+      cfg: {
+        gateway: {
+          bind: "lan",
+          auth: {
+            mode: "none",
+          },
+        },
+      },
+    });
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        checkId: "core/doctor/security",
+        severity: "error",
+        message: expect.stringContaining("Gateway bound"),
+      }),
+    );
   });
 });

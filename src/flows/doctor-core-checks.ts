@@ -14,6 +14,42 @@ import type { HealthCheck, HealthFinding } from "./health-checks.js";
 
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
 
+export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
+  "core/doctor/auth-profiles/flat-store",
+  "core/doctor/auth-profiles/oauth-sidecar",
+  "core/doctor/auth-profiles/oauth-ids",
+  "core/doctor/auth-profiles/keychain",
+  "core/doctor/auth-profiles/codex-provider",
+  "core/doctor/claude-cli",
+  "core/doctor/legacy-plugin-manifests",
+  "core/doctor/configured-plugin-installs",
+  "core/doctor/plugin-registry",
+  "core/doctor/state-integrity",
+  "core/doctor/codex-session-routes",
+  "core/doctor/session-locks",
+  "core/doctor/session-transcripts",
+  "core/doctor/config-audit-scrub",
+  "core/doctor/legacy-cron-store",
+  "core/doctor/legacy-whatsapp-crontab",
+  "core/doctor/sandbox/registry-files",
+  "core/doctor/sandbox/images",
+  "core/doctor/sandbox-scope",
+  "core/doctor/gateway-services/extra",
+  "core/doctor/gateway-services/config",
+  "core/doctor/gateway-services/platform-notes",
+  "core/doctor/startup-channel-maintenance",
+  "core/doctor/browser",
+  "core/doctor/systemd-linger",
+  "core/doctor/shell-completion",
+  "core/doctor/whatsapp-responsiveness",
+  "core/doctor/memory-search",
+  "core/doctor/memory-recall",
+  "core/doctor/memory-gateway-probe",
+  "core/doctor/device-pairing",
+  "core/doctor/gateway-daemon",
+  "core/doctor/workspace-suggestions",
+] as const;
+
 export function configValidationIssuesToHealthFindings(
   issues: readonly ConfigValidationIssue[],
 ): readonly HealthFinding[] {
@@ -276,6 +312,73 @@ const bootstrapSizeCheck: HealthCheck = {
   },
 };
 
+function normalizeDoctorNoteLine(line: string): string {
+  return line.replace(/^- /, "").trim();
+}
+
+function noteTextToFinding(params: {
+  checkId: string;
+  severity: HealthFinding["severity"];
+  text: string;
+}): HealthFinding {
+  const lines = params.text.split("\n");
+  const first = normalizeDoctorNoteLine(lines[0] ?? params.text);
+  const rest = lines.slice(1).join("\n");
+  return {
+    checkId: params.checkId,
+    severity: params.severity,
+    message: first,
+    ...(rest ? { fixHint: rest } : {}),
+  };
+}
+
+const securityCheck: HealthCheck = {
+  id: "core/doctor/security",
+  kind: "core",
+  description: "Security posture checks produce structured findings.",
+  source: "doctor",
+  async detect(ctx) {
+    const { collectSecurityWarnings } = await import("../commands/doctor-security.js");
+    const warnings = await collectSecurityWarnings(ctx.cfg);
+    return warnings.map((warning) =>
+      noteTextToFinding({
+        checkId: "core/doctor/security",
+        severity: warning.includes("CRITICAL") ? "error" : "warning",
+        text: warning,
+      }),
+    );
+  },
+};
+
+const openAIOAuthTlsCheck: HealthCheck = {
+  id: "core/doctor/oauth-tls",
+  kind: "core",
+  description: "OpenAI OAuth TLS prerequisites are satisfied before browser auth.",
+  source: "doctor",
+  async detect(ctx) {
+    const {
+      formatOpenAIOAuthTlsPreflightFix,
+      runOpenAIOAuthTlsPreflight,
+      shouldRunOpenAIOAuthTlsPrerequisites,
+    } = await import("../commands/oauth-tls-preflight.js");
+    if (!shouldRunOpenAIOAuthTlsPrerequisites({ cfg: ctx.cfg, deep: ctx.mode === "doctor" })) {
+      return [];
+    }
+    const result = await runOpenAIOAuthTlsPreflight({ timeoutMs: 4000 });
+    if (result.ok || result.kind !== "tls-cert") {
+      return [];
+    }
+    const fix = formatOpenAIOAuthTlsPreflightFix(result);
+    return [
+      noteTextToFinding({
+        checkId: "core/doctor/oauth-tls",
+        severity: "warning",
+        text: fix,
+      }),
+    ];
+  },
+};
+
 const workspaceStatusCheck: HealthCheck = {
   id: "core/doctor/workspace-status",
   kind: "core",
@@ -478,18 +581,12 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/startup-channel-maintenance",
     "Startup channel maintenance is represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/security",
-    "Security posture checks are represented in the health registry.",
-  ),
+  securityCheck,
   createConvertedWorkflowCheck(
     "core/doctor/browser",
     "Browser readiness checks are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/oauth-tls",
-    "OAuth TLS preflight checks are represented in the health registry.",
-  ),
+  openAIOAuthTlsCheck,
   hooksModelCheck,
   createConvertedWorkflowCheck(
     "core/doctor/systemd-linger",
