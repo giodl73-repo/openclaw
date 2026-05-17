@@ -45,7 +45,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/memory-gateway-probe",
   "core/doctor/device-pairing",
   "core/doctor/gateway-daemon",
-  "core/doctor/workspace-suggestions",
 ] as const;
 
 export function configValidationIssuesToHealthFindings(
@@ -546,6 +545,41 @@ const finalConfigValidationCheck: HealthCheck = {
   },
 };
 
+const workspaceSuggestionsCheck: HealthCheck = {
+  id: "core/doctor/workspace-suggestions",
+  kind: "core",
+  description:
+    "Workspace backup and memory-system suggestions are captured as structured findings.",
+  source: "doctor",
+  async detect(ctx) {
+    const { collectWorkspaceBackupTip } = await import("../commands/doctor-state-integrity.js");
+    const { MEMORY_SYSTEM_PROMPT, shouldSuggestMemorySystem } =
+      await import("../commands/doctor-workspace.js");
+    const workspaceDir = resolveAgentWorkspaceDir(ctx.cfg, resolveDefaultAgentId(ctx.cfg));
+    const findings: HealthFinding[] = [];
+    const backupTip = collectWorkspaceBackupTip(workspaceDir);
+    if (backupTip) {
+      findings.push(
+        noteTextToFinding({
+          checkId: "core/doctor/workspace-suggestions",
+          severity: "info",
+          text: backupTip,
+        }),
+      );
+    }
+    if (await shouldSuggestMemorySystem(workspaceDir)) {
+      findings.push(
+        noteTextToFinding({
+          checkId: "core/doctor/workspace-suggestions",
+          severity: "info",
+          text: MEMORY_SYSTEM_PROMPT,
+        }),
+      );
+    }
+    return findings;
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -687,10 +721,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/gateway-daemon",
     "Gateway daemon checks are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/workspace-suggestions",
-    "Workspace suggestions are represented in the health registry.",
-  ),
+  workspaceSuggestionsCheck,
 ];
 
 let registered = false;

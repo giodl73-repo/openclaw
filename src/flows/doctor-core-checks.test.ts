@@ -182,4 +182,39 @@ metadata: '{"openclaw":{"requires":{"bins":["openclaw-test-missing-skill-bin"]}}
       }),
     );
   });
+
+  it("converts workspace suggestions into info findings", async () => {
+    tmp = await fs.mkdtemp(join(tmpdir(), "openclaw-health-workspace-"));
+    const check = CORE_HEALTH_CHECKS.find(
+      (entry) => entry.id === "core/doctor/workspace-suggestions",
+    );
+
+    const findings = await check?.detect({
+      mode: "lint",
+      runtime: { log() {}, error() {}, exit() {} },
+      cfg: {
+        agents: {
+          defaults: {
+            workspace: tmp,
+          },
+        },
+      },
+      cwd: tmp,
+    });
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        checkId: "core/doctor/workspace-suggestions",
+        severity: "info",
+        message: "Tip: back up the workspace in a private git repo (GitHub or GitLab).",
+      }),
+    );
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        checkId: "core/doctor/workspace-suggestions",
+        severity: "info",
+        message: "Memory system not found in workspace.",
+      }),
+    );
+  });
 });
