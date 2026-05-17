@@ -20,7 +20,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/auth-profiles/oauth-ids",
   "core/doctor/auth-profiles/keychain",
   "core/doctor/auth-profiles/codex-provider",
-  "core/doctor/claude-cli",
   "core/doctor/legacy-plugin-manifests",
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
@@ -38,7 +37,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/gateway-services/config",
   "core/doctor/gateway-services/platform-notes",
   "core/doctor/startup-channel-maintenance",
-  "core/doctor/browser",
   "core/doctor/systemd-linger",
   "core/doctor/shell-completion",
   "core/doctor/whatsapp-responsiveness",
@@ -332,6 +330,67 @@ function noteTextToFinding(params: {
   };
 }
 
+function inferCapturedNoteSeverity(text: string): HealthFinding["severity"] {
+  if (text.includes("CRITICAL")) {
+    return "error";
+  }
+  if (
+    text.includes("- Fix:") ||
+    text.includes("unavailable") ||
+    text.includes("not found") ||
+    text.includes("missing") ||
+    text.includes("not readable") ||
+    text.includes("not writable") ||
+    text.includes("readonly")
+  ) {
+    return "warning";
+  }
+  return "info";
+}
+
+function createNoteCollector(checkId: string): {
+  readonly findings: readonly HealthFinding[];
+  noteFn(message: unknown): void;
+} {
+  const findings: HealthFinding[] = [];
+  return {
+    findings,
+    noteFn(message: unknown) {
+      const text = message instanceof Error ? message.message : String(message ?? "");
+      if (!text.trim()) {
+        return;
+      }
+      const severity = inferCapturedNoteSeverity(text);
+      if (severity === "info") {
+        return;
+      }
+      findings.push(
+        noteTextToFinding({
+          checkId,
+          severity,
+          text,
+        }),
+      );
+    },
+  };
+}
+
+const claudeCliCheck: HealthCheck = {
+  id: "core/doctor/claude-cli",
+  kind: "core",
+  description: "Claude CLI readiness is captured as structured findings.",
+  source: "doctor",
+  async detect(ctx) {
+    const { noteClaudeCliHealth } = await import("../commands/doctor-claude-cli.js");
+    const collector = createNoteCollector("core/doctor/claude-cli");
+    noteClaudeCliHealth(ctx.cfg, {
+      noteFn: collector.noteFn,
+      ...(ctx.cwd ? { workspaceDir: ctx.cwd } : {}),
+    });
+    return collector.findings;
+  },
+};
+
 const securityCheck: HealthCheck = {
   id: "core/doctor/security",
   kind: "core",
@@ -376,6 +435,19 @@ const openAIOAuthTlsCheck: HealthCheck = {
         text: fix,
       }),
     ];
+  },
+};
+
+const browserCheck: HealthCheck = {
+  id: "core/doctor/browser",
+  kind: "core",
+  description: "Browser readiness is captured as structured findings.",
+  source: "doctor",
+  async detect(ctx) {
+    const { noteChromeMcpBrowserReadiness } = await import("../commands/doctor-browser.js");
+    const collector = createNoteCollector("core/doctor/browser");
+    await noteChromeMcpBrowserReadiness(ctx.cfg, { noteFn: collector.noteFn });
+    return collector.findings;
   },
 };
 
@@ -507,10 +579,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/auth-profiles/codex-provider",
     "Legacy Codex provider overrides are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/claude-cli",
-    "Claude CLI readiness is represented in the health registry.",
-  ),
+  claudeCliCheck,
   gatewayAuthCheck,
   legacyStateCheck,
   createConvertedWorkflowCheck(
@@ -582,10 +651,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "Startup channel maintenance is represented in the health registry.",
   ),
   securityCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/browser",
-    "Browser readiness checks are represented in the health registry.",
-  ),
+  browserCheck,
   openAIOAuthTlsCheck,
   hooksModelCheck,
   createConvertedWorkflowCheck(
