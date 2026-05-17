@@ -20,7 +20,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/auth-profiles/oauth-ids",
   "core/doctor/auth-profiles/keychain",
   "core/doctor/auth-profiles/codex-provider",
-  "core/doctor/legacy-plugin-manifests",
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
@@ -897,6 +896,47 @@ const legacyCronStoreCheck: HealthCheck = {
   },
 };
 
+const legacyPluginManifestCheck: HealthCheck = {
+  id: "core/doctor/legacy-plugin-manifests",
+  kind: "core",
+  description: "Legacy plugin manifest contract keys are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectLegacyPluginManifestContractHealth } =
+      await import("../commands/doctor-plugin-manifests.js");
+    const findings = await detectLegacyPluginManifestContractHealth({
+      config: ctx.cfg,
+      env: ctx.env,
+      workspaceDir: ctx.cwd,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/legacy-plugin-manifests",
+        severity: "warning",
+        message: finding.message,
+        source: "plugin-manifest",
+        path: finding.manifestPath,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { repairLegacyPluginManifestContractHealth } =
+      await import("../commands/doctor-plugin-manifests.js");
+    const result = await repairLegacyPluginManifestContractHealth({
+      config: ctx.cfg,
+      env: ctx.env,
+      workspaceDir: ctx.cwd,
+      runtime: ctx.runtime,
+    });
+    return {
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -933,10 +973,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   claudeCliCheck,
   gatewayAuthCheck,
   legacyStateCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/legacy-plugin-manifests",
-    "Legacy plugin manifest contract checks are represented in the health registry.",
-  ),
+  legacyPluginManifestCheck,
   createConvertedWorkflowCheck(
     "core/doctor/configured-plugin-installs",
     "Configured plugin install release repairs are represented in the health registry.",

@@ -299,6 +299,9 @@ async function runLegacyStateHealth(ctx: DoctorHealthFlowContext): Promise<void>
 }
 
 async function runLegacyPluginManifestHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  if (ctx.prompter.shouldRepair) {
+    return;
+  }
   const { maybeRepairLegacyPluginManifestContracts } =
     await import("../commands/doctor-plugin-manifests.js");
   await maybeRepairLegacyPluginManifestContracts({

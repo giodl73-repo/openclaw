@@ -25,6 +25,12 @@ type LegacyManifestContractMigration = {
   changeLines: string[];
 };
 
+export type LegacyPluginManifestContractHealthFinding = {
+  manifestPath: string;
+  message: string;
+  fixHint: string;
+};
+
 const JsonRecordSchema = z.record(z.string(), z.unknown());
 
 function readManifestJson(manifestPath: string): Record<string, unknown> | null {
@@ -150,6 +156,85 @@ export function collectLegacyPluginManifestContractMigrations(params?: {
   return migrations.toSorted((left, right) => left.manifestPath.localeCompare(right.manifestPath));
 }
 
+function collectLegacyPluginManifestContractMigrationsForHealth(params: {
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  manifestRoots?: string[];
+  workspaceDir?: string;
+}): LegacyManifestContractMigration[] {
+  return collectLegacyPluginManifestContractMigrations({
+    ...(params.config ? { config: params.config } : {}),
+    ...(params.env ? { env: params.env } : {}),
+    ...(params.manifestRoots ? { manifestRoots: params.manifestRoots } : {}),
+    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+  });
+}
+
+function legacyPluginManifestMigrationToFinding(
+  migration: LegacyManifestContractMigration,
+): LegacyPluginManifestContractHealthFinding {
+  return {
+    manifestPath: migration.manifestPath,
+    message: [
+      `Legacy plugin manifest capability keys detected in ${shortenHomePath(migration.manifestPath)}.`,
+      ...migration.changeLines,
+    ].join("\n"),
+    fixHint:
+      "Run `openclaw doctor --fix` to rewrite legacy plugin manifest capability keys into contracts.",
+  };
+}
+
+export async function detectLegacyPluginManifestContractHealth(params: {
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  manifestRoots?: string[];
+  workspaceDir?: string;
+}): Promise<readonly LegacyPluginManifestContractHealthFinding[]> {
+  return collectLegacyPluginManifestContractMigrationsForHealth(params).map(
+    legacyPluginManifestMigrationToFinding,
+  );
+}
+
+export async function repairLegacyPluginManifestContractHealth(params: {
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  manifestRoots?: string[];
+  workspaceDir?: string;
+  runtime?: RuntimeEnv;
+}): Promise<{
+  status?: "repaired" | "skipped" | "failed";
+  changes: string[];
+  warnings: string[];
+}> {
+  const migrations = collectLegacyPluginManifestContractMigrationsForHealth(params);
+  if (migrations.length === 0) {
+    return { changes: [], warnings: [] };
+  }
+
+  const changes: string[] = [];
+  const warnings: string[] = [];
+  for (const migration of migrations) {
+    try {
+      fs.writeFileSync(
+        migration.manifestPath,
+        `${JSON.stringify(migration.nextRaw, null, 2)}\n`,
+        "utf-8",
+      );
+      changes.push(...migration.changeLines);
+    } catch (error) {
+      const warning = `Failed to rewrite legacy plugin manifest at ${migration.manifestPath}: ${String(error)}`;
+      warnings.push(warning);
+      params.runtime?.error(warning);
+    }
+  }
+
+  return {
+    status: changes.length === 0 && warnings.length > 0 ? "failed" : "repaired",
+    changes,
+    warnings,
+  };
+}
+
 export async function maybeRepairLegacyPluginManifestContracts(params: {
   config?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
@@ -159,12 +244,7 @@ export async function maybeRepairLegacyPluginManifestContracts(params: {
   prompter: DoctorPrompter;
   note?: typeof note;
 }): Promise<void> {
-  const migrations = collectLegacyPluginManifestContractMigrations({
-    ...(params.config ? { config: params.config } : {}),
-    ...(params.env ? { env: params.env } : {}),
-    ...(params.manifestRoots ? { manifestRoots: params.manifestRoots } : {}),
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
-  });
+  const migrations = collectLegacyPluginManifestContractMigrationsForHealth(params);
   if (migrations.length === 0) {
     return;
   }
@@ -188,23 +268,18 @@ export async function maybeRepairLegacyPluginManifestContracts(params: {
     return;
   }
 
-  const applied: string[] = [];
-  for (const migration of migrations) {
-    try {
-      fs.writeFileSync(
-        migration.manifestPath,
-        `${JSON.stringify(migration.nextRaw, null, 2)}\n`,
-        "utf-8",
-      );
-      applied.push(...migration.changeLines);
-    } catch (error) {
-      params.runtime.error(
-        `Failed to rewrite legacy plugin manifest at ${migration.manifestPath}: ${String(error)}`,
-      );
-    }
-  }
+  const result = await repairLegacyPluginManifestContractHealth({
+    ...(params.config ? { config: params.config } : {}),
+    ...(params.env ? { env: params.env } : {}),
+    ...(params.manifestRoots ? { manifestRoots: params.manifestRoots } : {}),
+    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+    runtime: params.runtime,
+  });
 
-  if (applied.length > 0) {
-    emitNote(applied.join("\n"), "Doctor changes");
+  if (result.changes.length > 0) {
+    emitNote(result.changes.join("\n"), "Doctor changes");
+  }
+  if (result.warnings.length > 0) {
+    emitNote(result.warnings.join("\n"), "Doctor warnings");
   }
 }
