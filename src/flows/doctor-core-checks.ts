@@ -29,7 +29,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/session-transcripts",
   "core/doctor/config-audit-scrub",
   "core/doctor/legacy-cron-store",
-  "core/doctor/legacy-whatsapp-crontab",
   "core/doctor/sandbox/registry-files",
   "core/doctor/sandbox/images",
   "core/doctor/sandbox-scope",
@@ -437,6 +436,28 @@ const openAIOAuthTlsCheck: HealthCheck = {
   },
 };
 
+const legacyWhatsAppCrontabCheck: HealthCheck = {
+  id: "core/doctor/legacy-whatsapp-crontab",
+  kind: "core",
+  description: "Legacy WhatsApp crontab health entries are detected as structured findings.",
+  source: "doctor",
+  async detect() {
+    const { collectLegacyWhatsAppCrontabHealthWarning } =
+      await import("../commands/doctor-cron.js");
+    const warning = await collectLegacyWhatsAppCrontabHealthWarning();
+    if (!warning) {
+      return [];
+    }
+    return [
+      noteTextToFinding({
+        checkId: "core/doctor/legacy-whatsapp-crontab",
+        severity: "warning",
+        text: warning,
+      }),
+    ];
+  },
+};
+
 const browserCheck: HealthCheck = {
   id: "core/doctor/browser",
   kind: "core",
@@ -652,10 +673,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/legacy-cron-store",
     "Legacy cron store checks are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/legacy-whatsapp-crontab",
-    "Legacy WhatsApp crontab checks are represented in the health registry.",
-  ),
+  legacyWhatsAppCrontabCheck,
   createConvertedWorkflowCheck(
     "core/doctor/sandbox/registry-files",
     "Sandbox registry file checks are represented in the health registry.",
