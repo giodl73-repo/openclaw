@@ -248,6 +248,7 @@ async function runStructuredHealthRepairs(ctx: DoctorHealthFlowContext): Promise
     cfg: ctx.cfg,
     cwd: workspaceDir,
     configPath: ctx.configPath,
+    env: ctx.env ?? process.env,
     doctor: {
       options: ctx.options,
       confirm: (params) => ctx.prompter.confirm(params),
@@ -509,6 +510,9 @@ async function runHooksModelHealth(ctx: DoctorHealthFlowContext): Promise<void> 
 }
 
 async function runSystemdLingerHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  if (ctx.prompter.shouldRepair) {
+    return;
+  }
   if (
     ctx.options.nonInteractive === true ||
     process.platform !== "linux" ||
@@ -517,12 +521,13 @@ async function runSystemdLingerHealth(ctx: DoctorHealthFlowContext): Promise<voi
     return;
   }
   const { resolveGatewayService } = await import("../daemon/service.js");
-  const { ensureSystemdUserLingerInteractive } = await import("../commands/systemd-linger.js");
+  const { SYSTEMD_GATEWAY_LINGER_REASON, ensureSystemdUserLingerInteractive } =
+    await import("../commands/systemd-linger.js");
   const { note } = await import("../terminal/note.js");
   const service = resolveGatewayService();
   let loaded = false;
   try {
-    loaded = await service.isLoaded({ env: process.env });
+    loaded = await service.isLoaded({ env: ctx.env ?? process.env });
   } catch {
     loaded = false;
   }
@@ -535,8 +540,8 @@ async function runSystemdLingerHealth(ctx: DoctorHealthFlowContext): Promise<voi
       confirm: async (p) => ctx.prompter.confirm(p),
       note,
     },
-    reason:
-      "Gateway runs as a systemd user service. Without lingering, systemd stops the user session on logout/idle and kills the Gateway.",
+    env: ctx.env ?? process.env,
+    reason: SYSTEMD_GATEWAY_LINGER_REASON,
     requireConfirm: true,
   });
 }

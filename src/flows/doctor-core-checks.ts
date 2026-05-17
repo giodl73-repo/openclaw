@@ -34,7 +34,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/sandbox-scope",
   "core/doctor/gateway-services/extra",
   "core/doctor/gateway-services/config",
-  "core/doctor/systemd-linger",
   "core/doctor/whatsapp-responsiveness",
   "core/doctor/memory-search",
   "core/doctor/memory-recall",
@@ -671,6 +670,64 @@ const startupChannelMaintenanceCheck: HealthCheck = {
   },
 };
 
+const systemdLingerCheck: HealthCheck = {
+  id: "core/doctor/systemd-linger",
+  kind: "core",
+  description: "systemd user linger status is detected and repairable for local Gateway.",
+  source: "doctor",
+  async detect(ctx) {
+    if (
+      ctx.doctor?.options?.nonInteractive === true ||
+      process.platform !== "linux" ||
+      resolveDoctorMode(ctx.cfg) !== "local"
+    ) {
+      return [];
+    }
+    const { resolveGatewayService } = await import("../daemon/service.js");
+    const service = resolveGatewayService();
+    let loaded = false;
+    try {
+      loaded = await service.isLoaded({ env: ctx.env ?? process.env });
+    } catch {
+      loaded = false;
+    }
+    if (!loaded) {
+      return [];
+    }
+    const { SYSTEMD_GATEWAY_LINGER_REASON, detectSystemdUserLingerFindings } =
+      await import("../commands/systemd-linger.js");
+    const findings = await detectSystemdUserLingerFindings({
+      env: ctx.env,
+      reason: SYSTEMD_GATEWAY_LINGER_REASON,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/systemd-linger",
+        severity: "warning",
+        message: finding.message,
+        source: "systemd",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { SYSTEMD_GATEWAY_LINGER_REASON, repairSystemdUserLingerFinding } =
+      await import("../commands/systemd-linger.js");
+    const result = await repairSystemdUserLingerFinding({
+      runtime: ctx.runtime,
+      env: ctx.env,
+      confirm: ctx.doctor?.confirm,
+      reason: SYSTEMD_GATEWAY_LINGER_REASON,
+      requireConfirm: true,
+    });
+    return {
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -770,10 +827,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   browserCheck,
   openAIOAuthTlsCheck,
   hooksModelCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/systemd-linger",
-    "systemd linger checks are represented in the health registry.",
-  ),
+  systemdLingerCheck,
   bootstrapSizeCheck,
   shellCompletionCheck,
   createConvertedWorkflowCheck(

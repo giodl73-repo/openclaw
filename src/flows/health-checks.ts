@@ -47,6 +47,7 @@ export interface HealthCheckContext {
   readonly cfg: OpenClawConfig;
   readonly cwd?: string;
   readonly configPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
   readonly doctor?: {
     readonly options?: {
       readonly nonInteractive?: boolean;
