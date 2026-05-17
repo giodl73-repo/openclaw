@@ -47,6 +47,12 @@ export interface HealthCheckContext {
   readonly cfg: OpenClawConfig;
   readonly cwd?: string;
   readonly configPath?: string;
+  readonly doctor?: {
+    readonly options?: {
+      readonly nonInteractive?: boolean;
+    };
+    readonly confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+  };
 }
 
 export interface HealthRepairContext extends Omit<HealthCheckContext, "mode"> {

@@ -36,7 +36,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/gateway-services/config",
   "core/doctor/startup-channel-maintenance",
   "core/doctor/systemd-linger",
-  "core/doctor/shell-completion",
   "core/doctor/whatsapp-responsiveness",
   "core/doctor/memory-search",
   "core/doctor/memory-recall",
@@ -619,6 +618,31 @@ const workspaceSuggestionsCheck: HealthCheck = {
   },
 };
 
+const shellCompletionCheck: HealthCheck = {
+  id: "core/doctor/shell-completion",
+  kind: "core",
+  description: "Shell completion status is detected and repairable through cached completion.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectShellCompletionHealth } = await import("../commands/doctor-completion.js");
+    return detectShellCompletionHealth(ctx.doctor?.options);
+  },
+  async repair(ctx) {
+    const { repairShellCompletionHealth } = await import("../commands/doctor-completion.js");
+    const result = await repairShellCompletionHealth({
+      options: ctx.doctor?.options,
+      deps: {
+        confirm: ctx.doctor?.confirm,
+      },
+    });
+    return {
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -726,10 +750,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "systemd linger checks are represented in the health registry.",
   ),
   bootstrapSizeCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/shell-completion",
-    "Shell completion checks are represented in the health registry.",
-  ),
+  shellCompletionCheck,
   createConvertedWorkflowCheck(
     "core/doctor/whatsapp-responsiveness",
     "WhatsApp responsiveness checks are represented in the health registry.",

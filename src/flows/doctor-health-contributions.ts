@@ -248,6 +248,10 @@ async function runStructuredHealthRepairs(ctx: DoctorHealthFlowContext): Promise
     cfg: ctx.cfg,
     cwd: workspaceDir,
     configPath: ctx.configPath,
+    doctor: {
+      options: ctx.options,
+      confirm: (params) => ctx.prompter.confirm(params),
+    },
   });
   ctx.cfg = result.config;
   if (result.changes.length > 0) {
