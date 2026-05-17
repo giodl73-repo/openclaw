@@ -1,0 +1,34 @@
+--- before upstream/main with regression proof ---
+{
+  "ids": [
+    "fusion"
+  ],
+  "defaultId": "fusion",
+  "enabledAccountIds": [],
+  "enabledTokenSources": [],
+  "enabledTokens": []
+}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
+  [
+-   'default',
+    'fusion'
+  ]
+
+    at file:///root/src/openclaw-branches/base/[eval1]:12:8
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: [ 'fusion' ],
+  expected: [ 'default', 'fusion' ],
+  operator: 'deepStrictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.15.0
+before_status=1
