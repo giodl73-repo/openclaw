@@ -1,0 +1,37 @@
+{
+  "commit": "44c3d8ea2efd01d04b7ef861b54a5a46a05f4dfa",
+  "label": "before-main",
+  "scenario": "Real production path: CodexAppServerEventProjector handles item/commandExecution declined native bash event, then buildEmbeddedRunPayloads prepares the external-channel reply payload for an interrupted empty turn.",
+  "inputEvent": {
+    "methodSequence": [
+      "item/started",
+      "item/completed",
+      "turn/completed"
+    ],
+    "completedItem": {
+      "type": "commandExecution",
+      "id": "cmd-declined-native-bash",
+      "command": "pnpm test extensions/codex",
+      "cwd": "/workspace/openclaw",
+      "processId": null,
+      "source": "agent",
+      "status": "declined",
+      "commandActions": [],
+      "aggregatedOutput": null,
+      "exitCode": null,
+      "durationMs": 1
+    }
+  },
+  "projectedAttempt": {
+    "aborted": true,
+    "assistantTexts": [],
+    "toolMetas": [
+      {
+        "toolName": "bash",
+        "meta": "run tests (in /workspace/openclaw)"
+      }
+    ],
+    "lastToolError": null
+  },
+  "externalChannelPayloads": []
+}

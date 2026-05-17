@@ -1,4 +1,15 @@
-before_status=1
-after_status=0
-before_observed=projector.buildResult(...).lastToolError was undefined, so the aborted empty declined native command had no tool error for payload generation.
-after_observed=projector.buildResult(...).lastToolError is {toolName:bash, meta:run tests (workspace), error:codex native tool blocked, mutatingAction:true}; the payload regression emits one visible Bash error payload.
+PR #83108 real behavior proof
+Scenario: production Codex app-server projector receives a declined native bash commandExecution item, then the production external-channel payload builder prepares the reply for an interrupted empty turn.
+
+before-main @ 44c3d8ea2efd01d04b7ef861b54a5a46a05f4dfa
+  projectedAttempt.aborted: true
+  projectedAttempt.lastToolError: null
+  externalChannelPayloads.length: 0
+  externalChannelPayloads[0]: <none>
+
+after-pr-83108 @ 2b15eb6588464298b7441d5d0a26a89270b68ace
+  projectedAttempt.aborted: true
+  projectedAttempt.lastToolError: {"toolName":"bash","meta":"run tests (in /workspace/openclaw)","error":"codex native tool blocked","mutatingAction":true}
+  externalChannelPayloads.length: 1
+  externalChannelPayloads[0].isError: true
+  externalChannelPayloads[0].text: "⚠️ 🛠️ run tests (in /workspace/openclaw) failed"
