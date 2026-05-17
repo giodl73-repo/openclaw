@@ -23,6 +23,20 @@ type CronDoctorOutcome = {
   warnings: string[];
 };
 
+type LegacyCronStoreInspection = {
+  storePath: string;
+  rawJobs: Array<Record<string, unknown>>;
+  legacyWebhook?: string;
+  previewLines: string[];
+  normalizedMutated: boolean;
+};
+
+export type LegacyCronStoreHealthFinding = {
+  checkId: "core/doctor/legacy-cron-store";
+  message: string;
+  fixHint: string;
+};
+
 type CrontabReader = () => Promise<{ stdout?: unknown; stderr?: unknown }>;
 
 const execFileAsync = promisify(execFile);
@@ -329,18 +343,15 @@ export async function noteLegacyWhatsAppCrontabHealthCheck(
   }
 }
 
-export async function maybeRepairLegacyCronStore(params: {
+async function inspectLegacyCronStore(params: {
   cfg: OpenClawConfig;
-  options: DoctorOptions;
-  prompter: Pick<DoctorPrompter, "confirm">;
-}) {
+}): Promise<LegacyCronStoreInspection | null> {
   const storePath = resolveCronStorePath(params.cfg.cron?.store);
   const store = await loadCronStore(storePath);
   const rawJobs = (store.jobs ?? []) as unknown as Array<Record<string, unknown>>;
   if (rawJobs.length === 0) {
-    return;
+    return null;
   }
-  noteCronModelOverrides({ cfg: params.cfg, jobs: rawJobs, storePath });
 
   const normalized = normalizeStoredCronJobs(rawJobs);
   const legacyWebhook = normalizeOptionalString(params.cfg.cron?.webhook);
@@ -357,52 +368,128 @@ export async function maybeRepairLegacyCronStore(params: {
       `- ${pluralize(dreamingStaleCount, "managed dreaming job")} still has the legacy heartbeat-coupled shape`,
     );
   }
-  if (previewLines.length === 0) {
-    return;
+
+  return {
+    storePath,
+    rawJobs,
+    legacyWebhook,
+    previewLines,
+    normalizedMutated: normalized.mutated,
+  };
+}
+
+function legacyCronStoreInspectionToFinding(
+  inspection: LegacyCronStoreInspection,
+): LegacyCronStoreHealthFinding | null {
+  if (inspection.previewLines.length === 0) {
+    return null;
+  }
+  return {
+    checkId: "core/doctor/legacy-cron-store",
+    message: [
+      `Legacy cron job storage detected at ${shortenHomePath(inspection.storePath)}.`,
+      ...inspection.previewLines,
+    ].join("\n"),
+    fixHint: `Repair with ${formatCliCommand("openclaw doctor --fix")} to normalize the store before the next scheduler run.`,
+  };
+}
+
+export async function detectLegacyCronStoreHealth(params: {
+  cfg: OpenClawConfig;
+}): Promise<readonly LegacyCronStoreHealthFinding[]> {
+  const inspection = await inspectLegacyCronStore({ cfg: params.cfg });
+  const finding = inspection ? legacyCronStoreInspectionToFinding(inspection) : null;
+  return finding ? [finding] : [];
+}
+
+export async function repairLegacyCronStoreHealth(params: {
+  cfg: OpenClawConfig;
+  confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+}): Promise<{
+  status?: "repaired" | "skipped" | "failed";
+  changes: string[];
+  warnings: string[];
+}> {
+  const inspection = await inspectLegacyCronStore({ cfg: params.cfg });
+  if (!inspection || inspection.previewLines.length === 0) {
+    return { changes: [], warnings: [] };
   }
 
-  note(
-    [
-      `Legacy cron job storage detected at ${shortenHomePath(storePath)}.`,
-      ...previewLines,
-      `Repair with ${formatCliCommand("openclaw doctor --fix")} to normalize the store before the next scheduler run.`,
-    ].join("\n"),
-    "Cron",
-  );
-
-  const shouldRepair = await params.prompter.confirm({
+  if (!params.confirm) {
+    return {
+      status: "skipped",
+      changes: [],
+      warnings: ["Legacy cron jobs need repair, but no confirmation handler is available."],
+    };
+  }
+  const shouldRepair = await params.confirm({
     message: "Repair legacy cron jobs now?",
     initialValue: true,
   });
   if (!shouldRepair) {
-    return;
+    return { status: "skipped", changes: [], warnings: [] };
   }
 
   const notifyMigration = migrateLegacyNotifyFallback({
-    jobs: rawJobs,
-    legacyWebhook,
+    jobs: inspection.rawJobs,
+    legacyWebhook: inspection.legacyWebhook,
   });
-  const dreamingMigration = migrateLegacyDreamingPayloadShape(rawJobs);
-  const changed = normalized.mutated || notifyMigration.changed || dreamingMigration.changed;
+  const dreamingMigration = migrateLegacyDreamingPayloadShape(inspection.rawJobs);
+  const changed =
+    inspection.normalizedMutated || notifyMigration.changed || dreamingMigration.changed;
   if (!changed && notifyMigration.warnings.length === 0) {
-    return;
+    return { changes: [], warnings: [] };
   }
 
+  const changes: string[] = [];
   if (changed) {
-    await saveCronStore(storePath, {
+    await saveCronStore(inspection.storePath, {
       version: 1,
-      jobs: rawJobs as unknown as CronJob[],
+      jobs: inspection.rawJobs as unknown as CronJob[],
     });
-    note(`Cron store normalized at ${shortenHomePath(storePath)}.`, "Doctor changes");
+    changes.push(`Cron store normalized at ${shortenHomePath(inspection.storePath)}.`);
     if (dreamingMigration.rewrittenCount > 0) {
-      note(
+      changes.push(
         `Rewrote ${pluralize(dreamingMigration.rewrittenCount, "managed dreaming job")} to run as an isolated agent turn so dreaming no longer requires heartbeat.`,
-        "Doctor changes",
       );
     }
   }
 
-  if (notifyMigration.warnings.length > 0) {
-    note(notifyMigration.warnings.join("\n"), "Doctor warnings");
+  return {
+    changes,
+    warnings: notifyMigration.warnings,
+  };
+}
+
+export async function maybeRepairLegacyCronStore(params: {
+  cfg: OpenClawConfig;
+  options: DoctorOptions;
+  prompter: Pick<DoctorPrompter, "confirm">;
+}) {
+  const inspection = await inspectLegacyCronStore({ cfg: params.cfg });
+  if (!inspection) {
+    return;
+  }
+  noteCronModelOverrides({
+    cfg: params.cfg,
+    jobs: inspection.rawJobs,
+    storePath: inspection.storePath,
+  });
+
+  const finding = legacyCronStoreInspectionToFinding(inspection);
+  if (!finding) {
+    return;
+  }
+  note(`${finding.message}\n${finding.fixHint}`, "Cron");
+
+  const result = await repairLegacyCronStoreHealth({
+    cfg: params.cfg,
+    confirm: (confirmParams) => params.prompter.confirm(confirmParams),
+  });
+  if (result.changes.length > 0) {
+    note(result.changes.join("\n"), "Doctor changes");
+  }
+  if (result.warnings.length > 0) {
+    note(result.warnings.join("\n"), "Doctor warnings");
   }
 }

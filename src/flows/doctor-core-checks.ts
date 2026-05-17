@@ -24,7 +24,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
-  "core/doctor/legacy-cron-store",
   "core/doctor/sandbox/registry-files",
   "core/doctor/sandbox/images",
   "core/doctor/sandbox-scope",
@@ -864,6 +863,40 @@ const sessionTranscriptsCheck: HealthCheck = {
   },
 };
 
+const legacyCronStoreCheck: HealthCheck = {
+  id: "core/doctor/legacy-cron-store",
+  kind: "core",
+  description: "Legacy cron store entries are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectLegacyCronStoreHealth } = await import("../commands/doctor-cron.js");
+    const findings = await detectLegacyCronStoreHealth({
+      cfg: ctx.cfg,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/legacy-cron-store",
+        severity: "warning",
+        message: finding.message,
+        source: "cron-store",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { repairLegacyCronStoreHealth } = await import("../commands/doctor-cron.js");
+    const result = await repairLegacyCronStoreHealth({
+      cfg: ctx.cfg,
+      confirm: ctx.doctor?.confirm,
+    });
+    return {
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -920,10 +953,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   sessionLocksCheck,
   sessionTranscriptsCheck,
   configAuditScrubCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/legacy-cron-store",
-    "Legacy cron store checks are represented in the health registry.",
-  ),
+  legacyCronStoreCheck,
   legacyWhatsAppCrontabCheck,
   createConvertedWorkflowCheck(
     "core/doctor/sandbox/registry-files",

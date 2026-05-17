@@ -417,6 +417,9 @@ async function runLegacyCronHealth(ctx: DoctorHealthFlowContext): Promise<void> 
   const { maybeRepairLegacyCronStore, noteLegacyWhatsAppCrontabHealthCheck } =
     await import("../commands/doctor-cron.js");
   await noteLegacyWhatsAppCrontabHealthCheck();
+  if (ctx.prompter.shouldRepair) {
+    return;
+  }
   await maybeRepairLegacyCronStore({
     cfg: ctx.cfg,
     options: ctx.options,
