@@ -1,0 +1,29 @@
+PR #82840 Signal group ID case preservation proof
+
+Behavior or issue addressed:
+Signal group auto-replies can fail when OpenClaw lowercases case-sensitive Signal group IDs.
+
+Real environment tested:
+OpenClaw checkout in WSL Ubuntu-24.04 at branch fix-signal-group-id-case-82827, with artifact generation on Windows via Python/Pillow.
+
+Exact steps or command run after this patch:
+- pnpm exec vitest run src/routing/resolve-route.test.ts src/routing/session-key.continuity.test.ts src/config/sessions/store.session-key-normalization.test.ts src/config/sessions/explicit-session-key-normalization.test.ts extensions/signal/src/normalize.test.ts --reporter=dot
+- pnpm check:changed
+- source before/after proof comparing upstream/main with this branch
+
+Evidence after fix:
+- Before key: agent:main:signal:group:vwatodkf2hc8zdos76q9tb0+5bi522e03qldaq/9ypg=
+- After key:  agent:main:signal:group:VWATOdKF2hc8zdOS76q9tb0+5BI522e03QLDAq/9yPg=
+- before_peer_lowercase_status=0
+- before_route_lowercase_status=0
+- before_store_lowercase_status=0
+- after_helper_status=0
+- after_peer_preserve_status=0
+- after_route_preserve_status=0
+- after_store_preserve_status=0
+
+Observed result after fix:
+The mixed-case Signal group ID remains exact in route session keys and store key normalization.
+
+What was not tested:
+No live Signal daemon delivery was run because this environment does not have the user's Signal account/group credentials; the proof exercises the real OpenClaw routing/session/store code path that corrupted the target before delivery.
