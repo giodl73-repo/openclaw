@@ -24,7 +24,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
-  "core/doctor/codex-session-routes",
   "core/doctor/session-locks",
   "core/doctor/session-transcripts",
   "core/doctor/legacy-cron-store",
@@ -762,6 +761,45 @@ const configAuditScrubCheck: HealthCheck = {
   },
 };
 
+const codexSessionRoutesCheck: HealthCheck = {
+  id: "core/doctor/codex-session-routes",
+  kind: "core",
+  description: "Legacy Codex session model/provider pins are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { maybeRepairCodexSessionRoutes } =
+      await import("../commands/doctor/shared/codex-route-warnings.js");
+    const result = await maybeRepairCodexSessionRoutes({
+      cfg: ctx.cfg,
+      env: ctx.env,
+      shouldRepair: false,
+    });
+    return result.warnings.map(
+      (warning): HealthFinding => ({
+        checkId: "core/doctor/codex-session-routes",
+        severity: "warning",
+        message: warning,
+        source: "session-store",
+        fixHint:
+          "Run `openclaw doctor --fix` to rewrite stale session model/provider pins across all agent session stores.",
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { maybeRepairCodexSessionRoutes } =
+      await import("../commands/doctor/shared/codex-route-warnings.js");
+    const result = await maybeRepairCodexSessionRoutes({
+      cfg: ctx.cfg,
+      env: ctx.env,
+      shouldRepair: true,
+    });
+    return {
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -814,10 +852,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/state-integrity",
     "State integrity checks are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/codex-session-routes",
-    "Codex session route checks are represented in the health registry.",
-  ),
+  codexSessionRoutesCheck,
   createConvertedWorkflowCheck(
     "core/doctor/session-locks",
     "Session lock checks are represented in the health registry.",

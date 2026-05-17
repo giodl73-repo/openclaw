@@ -361,13 +361,16 @@ async function runStateIntegrityHealth(ctx: DoctorHealthFlowContext): Promise<vo
 }
 
 async function runCodexSessionRouteHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  if (ctx.prompter.shouldRepair) {
+    return;
+  }
   const { maybeRepairCodexSessionRoutes } =
     await import("../commands/doctor/shared/codex-route-warnings.js");
   const { note } = await import("../terminal/note.js");
   const result = await maybeRepairCodexSessionRoutes({
     cfg: ctx.cfg,
     env: ctx.env ?? process.env,
-    shouldRepair: ctx.prompter.shouldRepair,
+    shouldRepair: false,
   });
   if (result.changes.length > 0) {
     note(result.changes.join("\n"), "Doctor changes");
