@@ -161,6 +161,12 @@ type SandboxImageCheck = {
   updateConfig: (image: string) => void;
 };
 
+export type LegacySandboxRegistryFileHealthFinding = {
+  registryPath: string;
+  message: string;
+  fixHint: string;
+};
+
 async function handleMissingSandboxImage(
   params: SandboxImageCheck,
   runtime: RuntimeEnv,
@@ -294,9 +300,48 @@ function formatLegacyRegistryMigrationLine(result: LegacySandboxRegistryMigratio
   return "";
 }
 
+function legacySandboxRegistryInspectionToFinding(
+  file: LegacySandboxRegistryInspection,
+): LegacySandboxRegistryFileHealthFinding | null {
+  if (!file.exists) {
+    return null;
+  }
+  return {
+    registryPath: file.registryPath,
+    message: [
+      "Legacy sandbox registry file detected.",
+      formatLegacyRegistryInspectionLine(file),
+    ].join("\n"),
+    fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} to migrate it to sharded registry files.`,
+  };
+}
+
+export async function detectLegacySandboxRegistryFileHealth(): Promise<
+  readonly LegacySandboxRegistryFileHealthFinding[]
+> {
+  return (await inspectLegacySandboxRegistryFiles())
+    .map(legacySandboxRegistryInspectionToFinding)
+    .filter((finding): finding is LegacySandboxRegistryFileHealthFinding => finding !== null);
+}
+
+export async function repairLegacySandboxRegistryFileHealth(): Promise<{
+  status?: "repaired" | "skipped" | "failed";
+  changes: string[];
+  warnings: string[];
+}> {
+  const changes = (await migrateLegacySandboxRegistryFiles())
+    .filter((result) => result.status !== "missing")
+    .map(formatLegacyRegistryMigrationLine)
+    .filter((line) => line.length > 0);
+  return {
+    changes,
+    warnings: [],
+  };
+}
+
 export async function maybeRepairSandboxRegistryFiles(prompter: DoctorPrompter): Promise<void> {
-  const legacyFiles = (await inspectLegacySandboxRegistryFiles()).filter((file) => file.exists);
-  if (legacyFiles.length === 0) {
+  const findings = await detectLegacySandboxRegistryFileHealth();
+  if (findings.length === 0) {
     return;
   }
 
@@ -304,7 +349,7 @@ export async function maybeRepairSandboxRegistryFiles(prompter: DoctorPrompter):
     note(
       [
         "Legacy sandbox registry files detected.",
-        ...legacyFiles.map(formatLegacyRegistryInspectionLine),
+        ...findings.map((finding) => finding.message.split("\n").slice(1).join("\n")),
         `Run ${formatCliCommand("openclaw doctor --fix")} to migrate them to sharded registry files.`,
       ].join("\n"),
       "Sandbox",
@@ -312,12 +357,12 @@ export async function maybeRepairSandboxRegistryFiles(prompter: DoctorPrompter):
     return;
   }
 
-  const results = (await migrateLegacySandboxRegistryFiles())
-    .filter((result) => result.status !== "missing")
-    .map(formatLegacyRegistryMigrationLine)
-    .filter((line) => line.length > 0);
-  if (results.length > 0) {
-    note(results.join("\n"), "Doctor changes");
+  const result = await repairLegacySandboxRegistryFileHealth();
+  if (result.changes.length > 0) {
+    note(result.changes.join("\n"), "Doctor changes");
+  }
+  if (result.warnings.length > 0) {
+    note(result.warnings.join("\n"), "Doctor warnings");
   }
 }
 

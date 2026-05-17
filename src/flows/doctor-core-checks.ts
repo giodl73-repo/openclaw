@@ -23,7 +23,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
-  "core/doctor/sandbox/registry-files",
   "core/doctor/sandbox/images",
   "core/doctor/sandbox-scope",
   "core/doctor/gateway-services/extra",
@@ -937,6 +936,36 @@ const legacyPluginManifestCheck: HealthCheck = {
   },
 };
 
+const sandboxRegistryFilesCheck: HealthCheck = {
+  id: "core/doctor/sandbox/registry-files",
+  kind: "core",
+  description: "Legacy sandbox registry files are detected and repairable.",
+  source: "doctor",
+  async detect() {
+    const { detectLegacySandboxRegistryFileHealth } = await import("../commands/doctor-sandbox.js");
+    const findings = await detectLegacySandboxRegistryFileHealth();
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/sandbox/registry-files",
+        severity: "warning",
+        message: finding.message,
+        source: "sandbox-registry",
+        path: finding.registryPath,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair() {
+    const { repairLegacySandboxRegistryFileHealth } = await import("../commands/doctor-sandbox.js");
+    const result = await repairLegacySandboxRegistryFileHealth();
+    return {
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -992,10 +1021,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   configAuditScrubCheck,
   legacyCronStoreCheck,
   legacyWhatsAppCrontabCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/sandbox/registry-files",
-    "Sandbox registry file checks are represented in the health registry.",
-  ),
+  sandboxRegistryFilesCheck,
   createConvertedWorkflowCheck(
     "core/doctor/sandbox/images",
     "Sandbox image checks are represented in the health registry.",

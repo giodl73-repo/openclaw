@@ -433,7 +433,9 @@ async function runLegacyCronHealth(ctx: DoctorHealthFlowContext): Promise<void> 
 async function runSandboxHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { maybeRepairSandboxImages, maybeRepairSandboxRegistryFiles, noteSandboxScopeWarnings } =
     await import("../commands/doctor-sandbox.js");
-  await maybeRepairSandboxRegistryFiles(ctx.prompter);
+  if (!ctx.prompter.shouldRepair) {
+    await maybeRepairSandboxRegistryFiles(ctx.prompter);
+  }
   ctx.cfg = await maybeRepairSandboxImages(ctx.cfg, ctx.runtime, ctx.prompter);
   noteSandboxScopeWarnings(ctx.cfg);
 }
