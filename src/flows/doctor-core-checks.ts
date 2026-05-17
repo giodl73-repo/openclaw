@@ -27,7 +27,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/codex-session-routes",
   "core/doctor/session-locks",
   "core/doctor/session-transcripts",
-  "core/doctor/config-audit-scrub",
   "core/doctor/legacy-cron-store",
   "core/doctor/sandbox/registry-files",
   "core/doctor/sandbox/images",
@@ -728,6 +727,41 @@ const systemdLingerCheck: HealthCheck = {
   },
 };
 
+const configAuditScrubCheck: HealthCheck = {
+  id: "core/doctor/config-audit-scrub",
+  kind: "core",
+  description: "Config audit log entries are scrubbed through the current argv redactor.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectConfigAuditScrubFindings } =
+      await import("../commands/doctor-config-audit-scrub.js");
+    const findings = await detectConfigAuditScrubFindings({
+      env: ctx.env,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/config-audit-scrub",
+        severity: "warning",
+        message: finding.message,
+        source: "config-audit.jsonl",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { repairConfigAuditScrubFindings } =
+      await import("../commands/doctor-config-audit-scrub.js");
+    const result = await repairConfigAuditScrubFindings({
+      env: ctx.env,
+    });
+    return {
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -792,10 +826,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/session-transcripts",
     "Session transcript checks are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/config-audit-scrub",
-    "Config audit scrub checks are represented in the health registry.",
-  ),
+  configAuditScrubCheck,
   createConvertedWorkflowCheck(
     "core/doctor/legacy-cron-store",
     "Legacy cron store checks are represented in the health registry.",

@@ -388,8 +388,14 @@ async function runSessionTranscriptsHealth(ctx: DoctorHealthFlowContext): Promis
 }
 
 async function runConfigAuditScrubHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  if (ctx.prompter.shouldRepair) {
+    return;
+  }
   const { maybeScrubConfigAuditLog } = await import("../commands/doctor-config-audit-scrub.js");
-  await maybeScrubConfigAuditLog({ shouldRepair: ctx.prompter.shouldRepair });
+  await maybeScrubConfigAuditLog({
+    shouldRepair: false,
+    env: ctx.env ?? process.env,
+  });
 }
 
 async function runLegacyCronHealth(ctx: DoctorHealthFlowContext): Promise<void> {
