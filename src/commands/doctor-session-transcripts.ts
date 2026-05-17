@@ -27,6 +27,13 @@ type TranscriptRepairResult = {
   reason?: string;
 };
 
+export type SessionTranscriptHealthFinding = {
+  checkId: "core/doctor/session-transcripts";
+  message: string;
+  brokenCount: number;
+  fixHint: string;
+};
+
 function parseTranscriptEntries(raw: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   for (const line of raw.split(/\r?\n/)) {
@@ -246,22 +253,22 @@ async function listSessionTranscriptFiles(sessionDirs: string[]): Promise<string
   return files.toSorted((a, b) => a.localeCompare(b));
 }
 
-export async function noteSessionTranscriptHealth(params?: {
+export async function collectSessionTranscriptHealth(params?: {
   shouldRepair?: boolean;
+  env?: NodeJS.ProcessEnv;
   sessionDirs?: string[];
-}) {
+}): Promise<{
+  broken: TranscriptRepairResult[];
+  repairedCount: number;
+  noteLines: string[];
+}> {
   const shouldRepair = params?.shouldRepair === true;
   let sessionDirs = params?.sessionDirs;
-  try {
-    sessionDirs ??= await resolveAgentSessionDirs(resolveStateDir(process.env));
-  } catch (err) {
-    note(`- Failed to inspect session transcripts: ${String(err)}`, "Session transcripts");
-    return;
-  }
+  sessionDirs ??= await resolveAgentSessionDirs(resolveStateDir(params?.env ?? process.env));
 
   const files = await listSessionTranscriptFiles(sessionDirs);
   if (files.length === 0) {
-    return;
+    return { broken: [], repairedCount: 0, noteLines: [] };
   }
 
   const results: TranscriptRepairResult[] = [];
@@ -270,7 +277,7 @@ export async function noteSessionTranscriptHealth(params?: {
   }
   const broken = results.filter((result) => result.broken);
   if (broken.length === 0) {
-    return;
+    return { broken: [], repairedCount: 0, noteLines: [] };
   }
 
   const repairedCount = broken.filter((result) => result.repaired).length;
@@ -291,5 +298,63 @@ export async function noteSessionTranscriptHealth(params?: {
     lines.push(`- Repaired ${repairedCount} transcript file${repairedCount === 1 ? "" : "s"}.`);
   }
 
-  note(lines.join("\n"), "Session transcripts");
+  return { broken, repairedCount, noteLines: lines };
+}
+
+export async function detectSessionTranscriptHealthFindings(params?: {
+  env?: NodeJS.ProcessEnv;
+  sessionDirs?: string[];
+}): Promise<readonly SessionTranscriptHealthFinding[]> {
+  const result = await collectSessionTranscriptHealth({
+    env: params?.env,
+    sessionDirs: params?.sessionDirs,
+  });
+  if (result.broken.length === 0) {
+    return [];
+  }
+  return [
+    {
+      checkId: "core/doctor/session-transcripts",
+      brokenCount: result.broken.length,
+      message: result.noteLines.join("\n"),
+      fixHint: 'Run "openclaw doctor --fix" to rewrite affected files to their active branch.',
+    },
+  ];
+}
+
+export async function repairSessionTranscriptHealthFindings(params?: {
+  env?: NodeJS.ProcessEnv;
+  sessionDirs?: string[];
+}): Promise<{ changes: string[]; warnings: string[] }> {
+  const result = await collectSessionTranscriptHealth({
+    shouldRepair: true,
+    env: params?.env,
+    sessionDirs: params?.sessionDirs,
+  });
+  return {
+    changes:
+      result.repairedCount > 0
+        ? [
+            `Repaired ${result.repairedCount} transcript file${
+              result.repairedCount === 1 ? "" : "s"
+            }.`,
+          ]
+        : [],
+    warnings: [],
+  };
+}
+
+export async function noteSessionTranscriptHealth(params?: {
+  shouldRepair?: boolean;
+  env?: NodeJS.ProcessEnv;
+  sessionDirs?: string[];
+}) {
+  try {
+    const result = await collectSessionTranscriptHealth(params);
+    if (result.noteLines.length > 0) {
+      note(result.noteLines.join("\n"), "Session transcripts");
+    }
+  } catch (err) {
+    note(`- Failed to inspect session transcripts: ${String(err)}`, "Session transcripts");
+  }
 }

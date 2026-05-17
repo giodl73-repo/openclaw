@@ -24,7 +24,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
-  "core/doctor/session-transcripts",
   "core/doctor/legacy-cron-store",
   "core/doctor/sandbox/registry-files",
   "core/doctor/sandbox/images",
@@ -831,6 +830,40 @@ const sessionLocksCheck: HealthCheck = {
   },
 };
 
+const sessionTranscriptsCheck: HealthCheck = {
+  id: "core/doctor/session-transcripts",
+  kind: "core",
+  description: "Broken prompt-rewrite transcript branches are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectSessionTranscriptHealthFindings } =
+      await import("../commands/doctor-session-transcripts.js");
+    const findings = await detectSessionTranscriptHealthFindings({
+      env: ctx.env,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/session-transcripts",
+        severity: "warning",
+        message: finding.message,
+        source: "session-transcripts",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { repairSessionTranscriptHealthFindings } =
+      await import("../commands/doctor-session-transcripts.js");
+    const result = await repairSessionTranscriptHealthFindings({
+      env: ctx.env,
+    });
+    return {
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -885,10 +918,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
   ),
   codexSessionRoutesCheck,
   sessionLocksCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/session-transcripts",
-    "Session transcript checks are represented in the health registry.",
-  ),
+  sessionTranscriptsCheck,
   configAuditScrubCheck,
   createConvertedWorkflowCheck(
     "core/doctor/legacy-cron-store",
