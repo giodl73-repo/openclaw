@@ -15,7 +15,6 @@ import type { HealthCheck, HealthFinding } from "./health-checks.js";
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
 
 export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
-  "core/doctor/auth-profiles/flat-store",
   "core/doctor/auth-profiles/oauth-sidecar",
   "core/doctor/auth-profiles/oauth-ids",
   "core/doctor/auth-profiles/keychain",
@@ -987,6 +986,43 @@ const sandboxScopeCheck: HealthCheck = {
   },
 };
 
+const authProfilesFlatStoreCheck: HealthCheck = {
+  id: "core/doctor/auth-profiles/flat-store",
+  kind: "core",
+  description: "Legacy flat auth profile stores are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectLegacyFlatAuthProfileHealth } =
+      await import("../commands/doctor-auth-flat-profiles.js");
+    const findings = await detectLegacyFlatAuthProfileHealth({
+      cfg: ctx.cfg,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/auth-profiles/flat-store",
+        severity: "warning",
+        message: finding.message,
+        source: "auth-profiles",
+        path: finding.authPath,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { repairLegacyFlatAuthProfileHealth } =
+      await import("../commands/doctor-auth-flat-profiles.js");
+    const result = await repairLegacyFlatAuthProfileHealth({
+      cfg: ctx.cfg,
+      confirm: ctx.doctor?.confirm,
+    });
+    return {
+      config: result.config,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -1000,10 +1036,7 @@ function createConvertedWorkflowCheck(id: string, description: string): HealthCh
 }
 
 const convertedWorkflowChecks: readonly HealthCheck[] = [
-  createConvertedWorkflowCheck(
-    "core/doctor/auth-profiles/flat-store",
-    "Legacy flat auth profile stores are represented in the health registry.",
-  ),
+  authProfilesFlatStoreCheck,
   createConvertedWorkflowCheck(
     "core/doctor/auth-profiles/oauth-sidecar",
     "Legacy OAuth sidecar profiles are represented in the health registry.",

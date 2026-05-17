@@ -48,6 +48,12 @@ export type LegacyFlatAuthProfileRepairResult = {
   warnings: string[];
 };
 
+export type LegacyFlatAuthProfileHealthFinding = {
+  authPath: string;
+  message: string;
+  fixHint: string;
+};
+
 const UNSAFE_LEGACY_AUTH_PROFILE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -302,58 +308,73 @@ function removeAwsSdkProfileMarkers(raw: Record<string, unknown>, profileIds: st
   }
 }
 
-export async function maybeRepairLegacyFlatAuthProfileStores(params: {
-  cfg: OpenClawConfig;
-  prompter: DoctorPrompter;
-  now?: () => number;
-}): Promise<LegacyFlatAuthProfileRepairResult> {
-  const now = params.now ?? Date.now;
-  const legacyStores = listAuthProfileRepairCandidates(params.cfg)
-    .map(resolveLegacyFlatStore)
-    .filter((entry): entry is LegacyFlatAuthProfileStore => entry !== null);
-  const awsSdkMarkerStores = listAuthProfileRepairCandidates(params.cfg)
-    .map(resolveAwsSdkAuthProfileMarkerStore)
-    .filter((entry): entry is AwsSdkAuthProfileMarkerStore => entry !== null);
+function detectLegacyFlatAuthProfileStores(cfg: OpenClawConfig): {
+  legacyStores: LegacyFlatAuthProfileStore[];
+  awsSdkMarkerStores: AwsSdkAuthProfileMarkerStore[];
+} {
+  return {
+    legacyStores: listAuthProfileRepairCandidates(cfg)
+      .map(resolveLegacyFlatStore)
+      .filter((entry): entry is LegacyFlatAuthProfileStore => entry !== null),
+    awsSdkMarkerStores: listAuthProfileRepairCandidates(cfg)
+      .map(resolveAwsSdkAuthProfileMarkerStore)
+      .filter((entry): entry is AwsSdkAuthProfileMarkerStore => entry !== null),
+  };
+}
 
-  const result: LegacyFlatAuthProfileRepairResult = {
+function legacyFlatAuthProfileStoresToFindings(params: {
+  legacyStores: readonly LegacyFlatAuthProfileStore[];
+  awsSdkMarkerStores: readonly AwsSdkAuthProfileMarkerStore[];
+}): LegacyFlatAuthProfileHealthFinding[] {
+  return [
+    ...params.legacyStores.map((entry) => ({
+      authPath: entry.authPath,
+      message: `${shortenHomePath(entry.authPath)} uses the legacy flat auth profile format.`,
+      fixHint:
+        "Run `openclaw doctor --fix` to rewrite this store to the canonical version/profiles shape with a backup.",
+    })),
+    ...params.awsSdkMarkerStores.map((entry) => ({
+      authPath: entry.authPath,
+      message: `${shortenHomePath(entry.authPath)} contains aws-sdk profile markers that belong in openclaw.json auth.profiles.`,
+      fixHint:
+        "Run `openclaw doctor --fix` to move AWS SDK profile routing metadata to config with a backup.",
+    })),
+  ];
+}
+
+export async function detectLegacyFlatAuthProfileHealth(params: {
+  cfg: OpenClawConfig;
+}): Promise<readonly LegacyFlatAuthProfileHealthFinding[]> {
+  return legacyFlatAuthProfileStoresToFindings(detectLegacyFlatAuthProfileStores(params.cfg));
+}
+
+export async function repairLegacyFlatAuthProfileHealth(params: {
+  cfg: OpenClawConfig;
+  confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+  now?: () => number;
+}): Promise<LegacyFlatAuthProfileRepairResult & { config: OpenClawConfig }> {
+  const now = params.now ?? Date.now;
+  const { legacyStores, awsSdkMarkerStores } = detectLegacyFlatAuthProfileStores(params.cfg);
+  const result: LegacyFlatAuthProfileRepairResult & { config: OpenClawConfig } = {
     detected: [
       ...legacyStores.map((entry) => entry.authPath),
       ...awsSdkMarkerStores.map((entry) => entry.authPath),
     ],
     changes: [],
     warnings: [],
+    config: params.cfg,
   };
   if (legacyStores.length === 0 && awsSdkMarkerStores.length === 0) {
     return result;
   }
-
-  const noteLines = [
-    ...legacyStores.map(
-      (entry) => `- ${shortenHomePath(entry.authPath)} uses the legacy flat auth profile format.`,
-    ),
-    ...awsSdkMarkerStores.map(
-      (entry) =>
-        `- ${shortenHomePath(entry.authPath)} contains aws-sdk profile markers that belong in openclaw.json auth.profiles.`,
-    ),
-  ];
-  if (legacyStores.length > 0) {
-    noteLines.push(
-      `- The gateway expects the canonical version/profiles store; ${formatCliCommand("openclaw doctor --fix")} rewrites this legacy shape with a backup.`,
-    );
-  }
-  if (awsSdkMarkerStores.length > 0) {
-    noteLines.push(
-      `- AWS SDK profile markers are routing metadata, not stored credentials; ${formatCliCommand("openclaw doctor --fix")} moves them to config with a backup.`,
-    );
-  }
-  note(noteLines.join("\n"), "Auth profiles");
-
-  const shouldRepair = await params.prompter.confirmAutoFix({
-    message: "Repair legacy auth-profiles.json files now?",
-    initialValue: true,
-  });
-  if (!shouldRepair) {
-    return result;
+  if (params.confirm) {
+    const shouldRepair = await params.confirm({
+      message: "Repair legacy auth-profiles.json files now?",
+      initialValue: true,
+    });
+    if (!shouldRepair) {
+      return result;
+    }
   }
 
   for (const entry of legacyStores) {
@@ -394,6 +415,58 @@ export async function maybeRepairLegacyFlatAuthProfileStores(params: {
     }
   }
   clearRuntimeAuthProfileStoreSnapshots();
+  return result;
+}
+
+export async function maybeRepairLegacyFlatAuthProfileStores(params: {
+  cfg: OpenClawConfig;
+  prompter: DoctorPrompter;
+  now?: () => number;
+}): Promise<LegacyFlatAuthProfileRepairResult> {
+  const { legacyStores, awsSdkMarkerStores } = detectLegacyFlatAuthProfileStores(params.cfg);
+
+  const result: LegacyFlatAuthProfileRepairResult = {
+    detected: [
+      ...legacyStores.map((entry) => entry.authPath),
+      ...awsSdkMarkerStores.map((entry) => entry.authPath),
+    ],
+    changes: [],
+    warnings: [],
+  };
+  if (legacyStores.length === 0 && awsSdkMarkerStores.length === 0) {
+    return result;
+  }
+
+  const noteLines = legacyFlatAuthProfileStoresToFindings({
+    legacyStores,
+    awsSdkMarkerStores,
+  }).map((finding) => `- ${finding.message}`);
+  if (legacyStores.length > 0) {
+    noteLines.push(
+      `- The gateway expects the canonical version/profiles store; ${formatCliCommand("openclaw doctor --fix")} rewrites this legacy shape with a backup.`,
+    );
+  }
+  if (awsSdkMarkerStores.length > 0) {
+    noteLines.push(
+      `- AWS SDK profile markers are routing metadata, not stored credentials; ${formatCliCommand("openclaw doctor --fix")} moves them to config with a backup.`,
+    );
+  }
+  note(noteLines.join("\n"), "Auth profiles");
+
+  const shouldRepair = await params.prompter.confirmAutoFix({
+    message: "Repair legacy auth-profiles.json files now?",
+    initialValue: true,
+  });
+  if (!shouldRepair) {
+    return result;
+  }
+
+  const repaired = await repairLegacyFlatAuthProfileHealth({
+    cfg: params.cfg,
+    now: params.now,
+  });
+  result.changes.push(...repaired.changes);
+  result.warnings.push(...repaired.warnings);
   if (result.changes.length > 0) {
     note(result.changes.map((change) => `- ${change}`).join("\n"), "Doctor changes");
   }

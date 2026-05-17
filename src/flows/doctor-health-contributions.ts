@@ -133,10 +133,12 @@ async function runAuthProfileHealth(ctx: DoctorHealthFlowContext): Promise<void>
     await import("../commands/doctor-auth.js");
   const { buildGatewayConnectionDetails } = await import("../gateway/call.js");
   const { note } = await import("../terminal/note.js");
-  await maybeRepairLegacyFlatAuthProfileStores({
-    cfg: ctx.cfg,
-    prompter: ctx.prompter,
-  });
+  if (!ctx.prompter.shouldRepair) {
+    await maybeRepairLegacyFlatAuthProfileStores({
+      cfg: ctx.cfg,
+      prompter: ctx.prompter,
+    });
+  }
   await maybeRepairLegacyOAuthSidecarProfiles({
     cfg: ctx.cfg,
     prompter: ctx.prompter,
