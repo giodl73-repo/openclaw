@@ -70,6 +70,13 @@ export type LegacyOAuthSidecarRepairResult = {
   warnings: string[];
 };
 
+export type LegacyOAuthSidecarHealthFinding = {
+  kind: "profile-store" | "unreferenced-sidecar";
+  path: string;
+  message: string;
+  fixHint?: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -489,21 +496,69 @@ function backupLegacyOAuthSidecarStore(authPath: string, now: () => number): str
   return backupPath;
 }
 
-export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
-  cfg: OpenClawConfig;
-  prompter: Pick<DoctorPrompter, "confirmAutoFix">;
-  now?: () => number;
-  emitNotes?: boolean;
-  env?: NodeJS.ProcessEnv;
-}): Promise<LegacyOAuthSidecarRepairResult> {
-  const now = params.now ?? Date.now;
-  const emitNotes = params.emitNotes !== false;
-  const env = params.env ?? process.env;
-  const stores = listAuthProfileRepairCandidates(params.cfg, env)
+function detectLegacyOAuthSidecarStores(
+  cfg: OpenClawConfig,
+  env: NodeJS.ProcessEnv,
+): {
+  stores: LegacyOAuthSidecarStore[];
+  unreferencedSidecars: LegacyOAuthUnreferencedSidecar[];
+} {
+  const stores = listAuthProfileRepairCandidates(cfg, env)
     .map(resolveLegacyOAuthSidecarStore)
     .filter((entry): entry is LegacyOAuthSidecarStore => entry !== null);
   const referencedRefIds = new Set(stores.flatMap((entry) => entry.profiles.map((p) => p.ref.id)));
-  const unreferencedSidecars = listUnreferencedLegacyOAuthSidecars(referencedRefIds, env);
+  return {
+    stores,
+    unreferencedSidecars: listUnreferencedLegacyOAuthSidecars(referencedRefIds, env),
+  };
+}
+
+function legacyOAuthSidecarsToFindings(params: {
+  stores: readonly LegacyOAuthSidecarStore[];
+  unreferencedSidecars: readonly LegacyOAuthUnreferencedSidecar[];
+  includeUnreferenced: boolean;
+}): LegacyOAuthSidecarHealthFinding[] {
+  return [
+    ...params.stores.map((entry) => ({
+      kind: "profile-store" as const,
+      path: entry.authPath,
+      message: `${shortenHomePath(entry.authPath)} has legacy sidecar-backed Codex OAuth profiles.`,
+      fixHint:
+        "Run `openclaw doctor --fix` to migrate active profiles back to inline OAuth credentials and remove migrated sidecar files.",
+    })),
+    ...(params.includeUnreferenced
+      ? params.unreferencedSidecars.map((entry) => ({
+          kind: "unreferenced-sidecar" as const,
+          path: entry.sidecarPath,
+          message: `${shortenHomePath(entry.sidecarPath)} is an unreferenced legacy Codex OAuth sidecar credential file.`,
+          fixHint:
+            "OpenClaw leaves unreferenced sidecars in place because external agent directories outside this scan may still reference them.",
+        }))
+      : []),
+  ];
+}
+
+export async function detectLegacyOAuthSidecarHealth(params: {
+  cfg: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  includeUnreferenced?: boolean;
+}): Promise<readonly LegacyOAuthSidecarHealthFinding[]> {
+  const env = params.env ?? process.env;
+  return legacyOAuthSidecarsToFindings({
+    ...detectLegacyOAuthSidecarStores(params.cfg, env),
+    includeUnreferenced: params.includeUnreferenced === true,
+  });
+}
+
+export async function repairLegacyOAuthSidecarHealth(params: {
+  cfg: OpenClawConfig;
+  confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+  now?: () => number;
+  env?: NodeJS.ProcessEnv;
+}): Promise<LegacyOAuthSidecarRepairResult> {
+  const now = params.now ?? Date.now;
+  const env = params.env ?? process.env;
+  const { stores, unreferencedSidecars } = detectLegacyOAuthSidecarStores(params.cfg, env);
 
   const result: LegacyOAuthSidecarRepairResult = {
     detected: [
@@ -517,31 +572,14 @@ export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
     return result;
   }
 
-  if (emitNotes) {
-    note(
-      [
-        ...stores.map(
-          (entry) =>
-            `- ${shortenHomePath(entry.authPath)} has legacy sidecar-backed Codex OAuth profiles.`,
-        ),
-        ...(unreferencedSidecars.length > 0
-          ? [
-              `- Found ${unreferencedSidecars.length} unreferenced legacy Codex OAuth sidecar credential file${unreferencedSidecars.length === 1 ? "" : "s"}.`,
-              `- Unreferenced sidecar files are left in place because external agent directories outside this scan may still reference them.`,
-            ]
-          : []),
-        `- ${formatCliCommand("openclaw doctor --fix")} migrates active profiles back to inline OAuth credentials and removes only sidecar files it successfully migrated.`,
-      ].join("\n"),
-      "Auth profiles",
-    );
-  }
-
-  const shouldRepair = await params.prompter.confirmAutoFix({
-    message: "Migrate legacy sidecar-backed Codex OAuth credentials now?",
-    initialValue: true,
-  });
-  if (!shouldRepair) {
-    return result;
+  if (params.confirm) {
+    const shouldRepair = await params.confirm({
+      message: "Migrate legacy sidecar-backed Codex OAuth credentials now?",
+      initialValue: true,
+    });
+    if (!shouldRepair) {
+      return result;
+    }
   }
 
   const migratedSidecarsByRefId = new Map<string, string>();
@@ -617,6 +655,67 @@ export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
   if (result.changes.length > 0) {
     clearRuntimeAuthProfileStoreSnapshots();
   }
+  return result;
+}
+
+export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
+  cfg: OpenClawConfig;
+  prompter: Pick<DoctorPrompter, "confirmAutoFix">;
+  now?: () => number;
+  emitNotes?: boolean;
+  env?: NodeJS.ProcessEnv;
+}): Promise<LegacyOAuthSidecarRepairResult> {
+  const emitNotes = params.emitNotes !== false;
+  const env = params.env ?? process.env;
+  const { stores, unreferencedSidecars } = detectLegacyOAuthSidecarStores(params.cfg, env);
+
+  const result: LegacyOAuthSidecarRepairResult = {
+    detected: [
+      ...stores.map((entry) => entry.authPath),
+      ...unreferencedSidecars.map((entry) => entry.sidecarPath),
+    ],
+    changes: [],
+    warnings: [],
+  };
+  if (stores.length === 0 && unreferencedSidecars.length === 0) {
+    return result;
+  }
+
+  if (emitNotes) {
+    note(
+      [
+        ...legacyOAuthSidecarsToFindings({
+          stores,
+          unreferencedSidecars,
+          includeUnreferenced: false,
+        }).map((finding) => `- ${finding.message}`),
+        ...(unreferencedSidecars.length > 0
+          ? [
+              `- Found ${unreferencedSidecars.length} unreferenced legacy Codex OAuth sidecar credential file${unreferencedSidecars.length === 1 ? "" : "s"}.`,
+              `- Unreferenced sidecar files are left in place because external agent directories outside this scan may still reference them.`,
+            ]
+          : []),
+        `- ${formatCliCommand("openclaw doctor --fix")} migrates active profiles back to inline OAuth credentials and removes only sidecar files it successfully migrated.`,
+      ].join("\n"),
+      "Auth profiles",
+    );
+  }
+
+  const shouldRepair = await params.prompter.confirmAutoFix({
+    message: "Migrate legacy sidecar-backed Codex OAuth credentials now?",
+    initialValue: true,
+  });
+  if (!shouldRepair) {
+    return result;
+  }
+
+  const repaired = await repairLegacyOAuthSidecarHealth({
+    cfg: params.cfg,
+    now: params.now,
+    env,
+  });
+  result.changes.push(...repaired.changes);
+  result.warnings.push(...repaired.warnings);
   if (emitNotes && result.changes.length > 0) {
     note(result.changes.map((change) => `- ${change}`).join("\n"), "Doctor changes");
   }
@@ -626,7 +725,7 @@ export async function maybeRepairLegacyOAuthSidecarProfiles(params: {
   return result;
 }
 
-export const __testing = {
+export const doctorAuthOAuthSidecarTesting = {
   buildLegacyOAuthSecretAad,
   buildLegacyOAuthSecretKey,
 };

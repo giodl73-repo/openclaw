@@ -7,7 +7,10 @@ import {
   createOpenClawTestState,
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
-import { __testing, maybeRepairLegacyOAuthSidecarProfiles } from "./doctor-auth-oauth-sidecar.js";
+import {
+  doctorAuthOAuthSidecarTesting,
+  maybeRepairLegacyOAuthSidecarProfiles,
+} from "./doctor-auth-oauth-sidecar.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
 
 const states: OpenClawTestState[] = [];
@@ -54,11 +57,11 @@ function encryptLegacySidecarMaterial(params: {
   const iv = Buffer.alloc(12, 7);
   const cipher = createCipheriv(
     "aes-256-gcm",
-    __testing.buildLegacyOAuthSecretKey(params.seed),
+    doctorAuthOAuthSidecarTesting.buildLegacyOAuthSecretKey(params.seed),
     iv,
   );
   cipher.setAAD(
-    __testing.buildLegacyOAuthSecretAad({
+    doctorAuthOAuthSidecarTesting.buildLegacyOAuthSecretAad({
       ref: params.ref,
       profileId: params.profileId,
       provider: params.provider,

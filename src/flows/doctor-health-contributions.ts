@@ -139,10 +139,12 @@ async function runAuthProfileHealth(ctx: DoctorHealthFlowContext): Promise<void>
       prompter: ctx.prompter,
     });
   }
-  await maybeRepairLegacyOAuthSidecarProfiles({
-    cfg: ctx.cfg,
-    prompter: ctx.prompter,
-  });
+  if (!ctx.prompter.shouldRepair) {
+    await maybeRepairLegacyOAuthSidecarProfiles({
+      cfg: ctx.cfg,
+      prompter: ctx.prompter,
+    });
+  }
   ctx.cfg = await maybeRepairLegacyOAuthProfileIds(ctx.cfg, ctx.prompter);
   await noteAuthProfileHealth({
     cfg: ctx.cfg,

@@ -15,7 +15,6 @@ import type { HealthCheck, HealthFinding } from "./health-checks.js";
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
 
 export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
-  "core/doctor/auth-profiles/oauth-sidecar",
   "core/doctor/auth-profiles/oauth-ids",
   "core/doctor/auth-profiles/keychain",
   "core/doctor/auth-profiles/codex-provider",
@@ -1023,6 +1022,55 @@ const authProfilesFlatStoreCheck: HealthCheck = {
   },
 };
 
+const authProfilesOAuthSidecarCheck: HealthCheck = {
+  id: "core/doctor/auth-profiles/oauth-sidecar",
+  kind: "core",
+  description: "Legacy OAuth sidecar profile stores are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectLegacyOAuthSidecarHealth } =
+      await import("../commands/doctor-auth-oauth-sidecar.js");
+    const findings = await detectLegacyOAuthSidecarHealth({
+      cfg: ctx.cfg,
+      env: ctx.env,
+      includeUnreferenced: ctx.mode !== "fix",
+    });
+    return findings.map((finding): HealthFinding => {
+      const healthFinding: {
+        checkId: string;
+        severity: "info" | "warning";
+        message: string;
+        source: string;
+        path: string;
+        fixHint?: string;
+      } = {
+        checkId: "core/doctor/auth-profiles/oauth-sidecar",
+        severity: finding.kind === "unreferenced-sidecar" ? "info" : "warning",
+        message: finding.message,
+        source: "auth-profiles",
+        path: finding.path,
+      };
+      if (finding.fixHint) {
+        healthFinding.fixHint = finding.fixHint;
+      }
+      return healthFinding;
+    });
+  },
+  async repair(ctx) {
+    const { repairLegacyOAuthSidecarHealth } =
+      await import("../commands/doctor-auth-oauth-sidecar.js");
+    const result = await repairLegacyOAuthSidecarHealth({
+      cfg: ctx.cfg,
+      confirm: ctx.doctor?.confirm,
+      env: ctx.env,
+    });
+    return {
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -1037,10 +1085,7 @@ function createConvertedWorkflowCheck(id: string, description: string): HealthCh
 
 const convertedWorkflowChecks: readonly HealthCheck[] = [
   authProfilesFlatStoreCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/auth-profiles/oauth-sidecar",
-    "Legacy OAuth sidecar profiles are represented in the health registry.",
-  ),
+  authProfilesOAuthSidecarCheck,
   createConvertedWorkflowCheck(
     "core/doctor/auth-profiles/oauth-ids",
     "Legacy OAuth profile ids are represented in the health registry.",
