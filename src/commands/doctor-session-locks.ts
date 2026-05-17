@@ -5,27 +5,18 @@ import {
   type SessionLockOwnerProcessArgsReader,
 } from "../agents/session-write-lock.js";
 import { resolveStateDir } from "../config/paths.js";
+import { formatDurationCompact } from "../infra/format-time/format-duration.js";
 import { note } from "../terminal/note.js";
 import { shortenHomePath } from "../utils.js";
 
 const DEFAULT_STALE_MS = 30 * 60 * 1000;
+const SESSION_LOCKS_CHECK_ID = "core/doctor/session-locks";
 
 function formatAge(ageMs: number | null): string {
   if (ageMs === null) {
     return "unknown";
   }
-  const seconds = Math.floor(ageMs / 1000);
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes < 60) {
-    return `${minutes}m${remainingSeconds}s`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h${remainingMinutes}m`;
+  return ageMs <= 0 ? "0s" : (formatDurationCompact(ageMs) ?? "unknown");
 }
 
 function formatLockLine(lock: SessionLockInspection): string {
@@ -39,23 +30,30 @@ function formatLockLine(lock: SessionLockInspection): string {
   return `- ${shortenHomePath(lock.lockPath)} ${pidStatus} ${ageStatus} ${staleStatus}${removedStatus}`;
 }
 
-export async function noteSessionLockHealth(params?: {
+export type SessionLockHealthFinding = {
+  checkId: typeof SESSION_LOCKS_CHECK_ID;
+  message: string;
+  staleCount: number;
+  fixHint: string;
+};
+
+export async function collectSessionLockHealth(params?: {
   shouldRepair?: boolean;
+  env?: NodeJS.ProcessEnv;
   staleMs?: number;
   readOwnerProcessArgs?: SessionLockOwnerProcessArgsReader;
-}) {
+}): Promise<{
+  locks: SessionLockInspection[];
+  staleCount: number;
+  removedCount: number;
+  noteLines: string[];
+}> {
   const shouldRepair = params?.shouldRepair === true;
   const staleMs = params?.staleMs ?? DEFAULT_STALE_MS;
-  let sessionDirs: string[] = [];
-  try {
-    sessionDirs = await resolveAgentSessionDirs(resolveStateDir(process.env));
-  } catch (err) {
-    note(`- Failed to inspect session lock files: ${String(err)}`, "Session locks");
-    return;
-  }
+  const sessionDirs = await resolveAgentSessionDirs(resolveStateDir(params?.env ?? process.env));
 
   if (sessionDirs.length === 0) {
-    return;
+    return { locks: [], staleCount: 0, removedCount: 0, noteLines: [] };
   }
 
   const allLocks: SessionLockInspection[] = [];
@@ -70,7 +68,7 @@ export async function noteSessionLockHealth(params?: {
   }
 
   if (allLocks.length === 0) {
-    return;
+    return { locks: [], staleCount: 0, removedCount: 0, noteLines: [] };
   }
 
   const staleCount = allLocks.filter((lock) => lock.stale).length;
@@ -90,5 +88,68 @@ export async function noteSessionLockHealth(params?: {
     );
   }
 
-  note(lines.join("\n"), "Session locks");
+  return { locks: allLocks, staleCount, removedCount, noteLines: lines };
+}
+
+export async function detectSessionLockHealthFindings(params?: {
+  env?: NodeJS.ProcessEnv;
+  staleMs?: number;
+  readOwnerProcessArgs?: SessionLockOwnerProcessArgsReader;
+}): Promise<readonly SessionLockHealthFinding[]> {
+  const result = await collectSessionLockHealth({
+    env: params?.env,
+    staleMs: params?.staleMs,
+    readOwnerProcessArgs: params?.readOwnerProcessArgs,
+  });
+  if (result.staleCount === 0) {
+    return [];
+  }
+  return [
+    {
+      checkId: SESSION_LOCKS_CHECK_ID,
+      staleCount: result.staleCount,
+      message: result.noteLines.join("\n"),
+      fixHint: 'Run "openclaw doctor --fix" to remove stale lock files automatically.',
+    },
+  ];
+}
+
+export async function repairSessionLockHealthFindings(params?: {
+  env?: NodeJS.ProcessEnv;
+  staleMs?: number;
+  readOwnerProcessArgs?: SessionLockOwnerProcessArgsReader;
+}): Promise<{ changes: string[]; warnings: string[] }> {
+  const result = await collectSessionLockHealth({
+    shouldRepair: true,
+    env: params?.env,
+    staleMs: params?.staleMs,
+    readOwnerProcessArgs: params?.readOwnerProcessArgs,
+  });
+  return {
+    changes:
+      result.removedCount > 0
+        ? [
+            `Removed ${result.removedCount} stale session lock file${
+              result.removedCount === 1 ? "" : "s"
+            }.`,
+          ]
+        : [],
+    warnings: [],
+  };
+}
+
+export async function noteSessionLockHealth(params?: {
+  shouldRepair?: boolean;
+  env?: NodeJS.ProcessEnv;
+  staleMs?: number;
+  readOwnerProcessArgs?: SessionLockOwnerProcessArgsReader;
+}) {
+  try {
+    const result = await collectSessionLockHealth(params);
+    if (result.noteLines.length > 0) {
+      note(result.noteLines.join("\n"), "Session locks");
+    }
+  } catch (err) {
+    note(`- Failed to inspect session lock files: ${String(err)}`, "Session locks");
+  }
 }

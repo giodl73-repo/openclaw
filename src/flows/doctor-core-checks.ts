@@ -24,7 +24,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/configured-plugin-installs",
   "core/doctor/plugin-registry",
   "core/doctor/state-integrity",
-  "core/doctor/session-locks",
   "core/doctor/session-transcripts",
   "core/doctor/legacy-cron-store",
   "core/doctor/sandbox/registry-files",
@@ -800,6 +799,38 @@ const codexSessionRoutesCheck: HealthCheck = {
   },
 };
 
+const sessionLocksCheck: HealthCheck = {
+  id: "core/doctor/session-locks",
+  kind: "core",
+  description: "Stale session lock files are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectSessionLockHealthFindings } = await import("../commands/doctor-session-locks.js");
+    const findings = await detectSessionLockHealthFindings({
+      env: ctx.env,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/session-locks",
+        severity: "warning",
+        message: finding.message,
+        source: "session-locks",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { repairSessionLockHealthFindings } = await import("../commands/doctor-session-locks.js");
+    const result = await repairSessionLockHealthFindings({
+      env: ctx.env,
+    });
+    return {
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -853,10 +884,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "State integrity checks are represented in the health registry.",
   ),
   codexSessionRoutesCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/session-locks",
-    "Session lock checks are represented in the health registry.",
-  ),
+  sessionLocksCheck,
   createConvertedWorkflowCheck(
     "core/doctor/session-transcripts",
     "Session transcript checks are represented in the health registry.",
