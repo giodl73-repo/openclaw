@@ -145,7 +145,9 @@ async function runAuthProfileHealth(ctx: DoctorHealthFlowContext): Promise<void>
       prompter: ctx.prompter,
     });
   }
-  ctx.cfg = await maybeRepairLegacyOAuthProfileIds(ctx.cfg, ctx.prompter);
+  if (!ctx.prompter.shouldRepair) {
+    ctx.cfg = await maybeRepairLegacyOAuthProfileIds(ctx.cfg, ctx.prompter);
+  }
   await noteAuthProfileHealth({
     cfg: ctx.cfg,
     prompter: ctx.prompter,

@@ -15,7 +15,6 @@ import type { HealthCheck, HealthFinding } from "./health-checks.js";
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
 
 export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
-  "core/doctor/auth-profiles/oauth-ids",
   "core/doctor/auth-profiles/keychain",
   "core/doctor/auth-profiles/codex-provider",
   "core/doctor/configured-plugin-installs",
@@ -1071,6 +1070,45 @@ const authProfilesOAuthSidecarCheck: HealthCheck = {
   },
 };
 
+const authProfilesOAuthIdsCheck: HealthCheck = {
+  id: "core/doctor/auth-profiles/oauth-ids",
+  kind: "core",
+  description: "Legacy OAuth profile ids are detected and repairable.",
+  source: "doctor",
+  async detect(ctx) {
+    const { detectLegacyOAuthProfileIdHealth } =
+      await import("../commands/doctor-auth-legacy-oauth.js");
+    const findings = await detectLegacyOAuthProfileIdHealth({
+      cfg: ctx.cfg,
+      env: ctx.env,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/auth-profiles/oauth-ids",
+        severity: "warning",
+        message: finding.message,
+        source: "openclaw.jsonc",
+        ocPath: `auth.profiles.${finding.fromProfileId}`,
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const { repairLegacyOAuthProfileIdHealth } =
+      await import("../commands/doctor-auth-legacy-oauth.js");
+    const result = await repairLegacyOAuthProfileIdHealth({
+      cfg: ctx.cfg,
+      confirm: ctx.doctor?.confirm,
+      env: ctx.env,
+    });
+    return {
+      config: result.config,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -1086,10 +1124,7 @@ function createConvertedWorkflowCheck(id: string, description: string): HealthCh
 const convertedWorkflowChecks: readonly HealthCheck[] = [
   authProfilesFlatStoreCheck,
   authProfilesOAuthSidecarCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/auth-profiles/oauth-ids",
-    "Legacy OAuth profile ids are represented in the health registry.",
-  ),
+  authProfilesOAuthIdsCheck,
   createConvertedWorkflowCheck(
     "core/doctor/auth-profiles/keychain",
     "Auth profile keychain readiness is represented in the health registry.",

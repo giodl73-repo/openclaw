@@ -117,6 +117,8 @@ describe("maybeRepairLegacyOAuthProfileIds", () => {
     ]);
     repairMocks.repairOAuthProfileIdMismatch.mockReturnValue({
       migrated: true,
+      fromProfileId: "anthropic:default",
+      toProfileId: "anthropic:user@example.com",
       changes: ["Auth: migrate anthropic:default → anthropic:user@example.com"],
       config: {
         auth: {
@@ -201,6 +203,8 @@ describe("maybeRepairLegacyOAuthProfileIds", () => {
     ]);
     repairMocks.repairOAuthProfileIdMismatch.mockReturnValue({
       migrated: true,
+      fromProfileId: "anthropic:default",
+      toProfileId: "anthropic:user@example.com",
       changes: ["Auth: migrate anthropic:default to anthropic:user@example.com"],
       config: { auth: { profiles: {} } },
     });
