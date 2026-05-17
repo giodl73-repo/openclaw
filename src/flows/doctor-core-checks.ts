@@ -34,7 +34,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/sandbox-scope",
   "core/doctor/gateway-services/extra",
   "core/doctor/gateway-services/config",
-  "core/doctor/startup-channel-maintenance",
   "core/doctor/systemd-linger",
   "core/doctor/whatsapp-responsiveness",
   "core/doctor/memory-search",
@@ -643,6 +642,35 @@ const shellCompletionCheck: HealthCheck = {
   },
 };
 
+const startupChannelMaintenanceCheck: HealthCheck = {
+  id: "core/doctor/startup-channel-maintenance",
+  kind: "core",
+  description: "Channel plugin startup maintenance runs through structured doctor repair.",
+  source: "doctor",
+  async detect(ctx, scope) {
+    if (ctx.mode !== "fix" || scope?.findings !== undefined) {
+      return [];
+    }
+    return [
+      {
+        checkId: "core/doctor/startup-channel-maintenance",
+        severity: "info",
+        message: "Channel plugin startup maintenance should run during doctor repair.",
+      },
+    ];
+  },
+  async repair(ctx) {
+    const { maybeRunDoctorStartupChannelMaintenance } =
+      await import("./doctor-startup-channel-maintenance.js");
+    await maybeRunDoctorStartupChannelMaintenance({
+      cfg: ctx.cfg,
+      runtime: ctx.runtime,
+      shouldRepair: true,
+    });
+    return { changes: [] };
+  },
+};
+
 function createConvertedWorkflowCheck(id: string, description: string): HealthCheck {
   return {
     id,
@@ -737,10 +765,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "Gateway service config checks are represented in the health registry.",
   ),
   gatewayPlatformNotesCheck,
-  createConvertedWorkflowCheck(
-    "core/doctor/startup-channel-maintenance",
-    "Startup channel maintenance is represented in the health registry.",
-  ),
+  startupChannelMaintenanceCheck,
   securityCheck,
   browserCheck,
   openAIOAuthTlsCheck,

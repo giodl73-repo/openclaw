@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { CORE_HEALTH_CHECKS } from "./doctor-core-checks.js";
 import { maybeRunDoctorStartupChannelMaintenance } from "./doctor-startup-channel-maintenance.js";
 
 describe("doctor startup channel maintenance", () => {
@@ -64,5 +65,48 @@ describe("doctor startup channel maintenance", () => {
     });
 
     expect(calls).toStrictEqual([]);
+  });
+
+  it("runs startup migration through the structured repair check", async () => {
+    const check = CORE_HEALTH_CHECKS.find(
+      (entry) => entry.id === "core/doctor/startup-channel-maintenance",
+    );
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    const findings = await check?.detect({
+      mode: "fix",
+      runtime,
+      cfg: {},
+    });
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        checkId: "core/doctor/startup-channel-maintenance",
+      }),
+    );
+    await expect(
+      check?.detect(
+        {
+          mode: "fix",
+          runtime,
+          cfg: {},
+        },
+        { findings },
+      ),
+    ).resolves.toEqual([]);
+    await expect(
+      check?.repair?.(
+        {
+          mode: "fix",
+          runtime,
+          cfg: {},
+        },
+        findings ?? [],
+      ),
+    ).resolves.toEqual({ changes: [] });
   });
 });

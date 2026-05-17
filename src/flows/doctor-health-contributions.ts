@@ -431,6 +431,9 @@ async function runGatewayServicesHealth(ctx: DoctorHealthFlowContext): Promise<v
 }
 
 async function runStartupChannelMaintenanceHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  if (ctx.prompter.shouldRepair) {
+    return;
+  }
   const { maybeRunDoctorStartupChannelMaintenance } =
     await import("./doctor-startup-channel-maintenance.js");
   await maybeRunDoctorStartupChannelMaintenance({
@@ -557,6 +560,9 @@ async function runBootstrapSizeHealth(ctx: DoctorHealthFlowContext): Promise<voi
 }
 
 async function runShellCompletionHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  if (ctx.prompter.shouldRepair) {
+    return;
+  }
   const { doctorShellCompletion } = await import("../commands/doctor-completion.js");
   await doctorShellCompletion(ctx.runtime, ctx.prompter, {
     nonInteractive: ctx.options.nonInteractive,
