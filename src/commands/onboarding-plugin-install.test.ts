@@ -48,6 +48,7 @@ vi.mock("../plugins/clawhub.js", () => ({
   CLAWHUB_INSTALL_ERROR_CODE: {
     PACKAGE_NOT_FOUND: "package_not_found",
     VERSION_NOT_FOUND: "version_not_found",
+    ARTIFACT_DOWNLOAD_UNAVAILABLE: "artifact_download_unavailable",
   },
   installPluginFromClawHub,
 }));
@@ -765,6 +766,54 @@ describe("ensureOnboardingPluginInstalled", () => {
       ok: false,
       code: "package_not_found",
       error: "Package not found on ClawHub.",
+    });
+    installPluginFromNpmSpec.mockResolvedValueOnce({
+      ok: true,
+      pluginId: "demo-plugin",
+      targetDir: "/tmp/demo-plugin",
+      version: "2026.5.2",
+      npmResolution: {
+        name: "@openclaw/demo-plugin",
+        version: "2026.5.2",
+        resolvedSpec: "@openclaw/demo-plugin@2026.5.2",
+        resolvedAt: "2026-05-01T00:00:00.000Z",
+      },
+    });
+
+    const result = await ensureOnboardingPluginInstalled({
+      cfg: {},
+      entry: {
+        pluginId: "demo-plugin",
+        label: "Demo Plugin",
+        install: {
+          clawhubSpec: "clawhub:demo-plugin@2026.5.2",
+          npmSpec: "@openclaw/demo-plugin@2026.5.2",
+          defaultChoice: "clawhub",
+        },
+      },
+      prompter: {
+        select: vi.fn(async () => "clawhub"),
+        confirm: vi.fn(async () => true),
+        note: vi.fn(async () => {}),
+        progress: vi.fn(() => ({ update: vi.fn(), stop: vi.fn() })),
+      } as never,
+      runtime: {} as never,
+      promptInstall: false,
+    });
+
+    const [npmCall] = readFirstMockCall(installPluginFromNpmSpec, "installPluginFromNpmSpec") as [
+      NpmSpecInstallCall,
+    ];
+    expect(npmCall.spec).toBe("@openclaw/demo-plugin@2026.5.2");
+    expect(npmCall.expectedPluginId).toBe("demo-plugin");
+    expect(result.installed).toBe(true);
+  });
+
+  it("falls back from ClawHub to npm when the artifact download is unavailable", async () => {
+    installPluginFromClawHub.mockResolvedValueOnce({
+      ok: false,
+      code: "artifact_download_unavailable",
+      error: "ClawHub artifact download is not available yet.",
     });
     installPluginFromNpmSpec.mockResolvedValueOnce({
       ok: true,

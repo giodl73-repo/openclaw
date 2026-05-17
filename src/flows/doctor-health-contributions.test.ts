@@ -203,10 +203,22 @@ describe("doctor health contributions", () => {
       shouldSkipLegacyUpdateDoctorConfigWrite({
         env: {
           OPENCLAW_UPDATE_IN_PROGRESS: "1",
+          OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR: "1",
           OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
         },
       }),
     ).toBe(false);
+  });
+
+  it("skips writes when older update parents only advertise doctor-write support", () => {
+    expect(
+      shouldSkipLegacyUpdateDoctorConfigWrite({
+        env: {
+          OPENCLAW_UPDATE_IN_PROGRESS: "1",
+          OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
+        },
+      }),
+    ).toBe(true);
   });
 
   it("treats falsey update env values as normal writes", () => {
@@ -253,6 +265,7 @@ describe("doctor health contributions", () => {
     it("allows config size drops when OPENCLAW_UPDATE_IN_PROGRESS=1", async () => {
       const ctx = buildWriteConfigCtx({
         OPENCLAW_UPDATE_IN_PROGRESS: "1",
+        OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR: "1",
         OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
       });
       await writeConfigContribution.run(ctx);
@@ -268,6 +281,7 @@ describe("doctor health contributions", () => {
     it("skips plugin schema validation during update doctor writes", async () => {
       const ctx = buildWriteConfigCtx({
         OPENCLAW_UPDATE_IN_PROGRESS: "1",
+        OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR: "1",
         OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
       });
       await writeConfigContribution.run(ctx);
@@ -296,6 +310,7 @@ describe("doctor health contributions", () => {
       vi.mocked(fs.existsSync).mockImplementation((value) => String(value).endsWith(".pre-update"));
       const ctx = buildWriteConfigCtx({
         OPENCLAW_UPDATE_IN_PROGRESS: "1",
+        OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR: "1",
         OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
       });
 

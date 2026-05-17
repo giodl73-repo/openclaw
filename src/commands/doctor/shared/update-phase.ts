@@ -19,6 +19,14 @@ export const UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV =
  * convergence (post-core wins). This lets a parent process re-enter doctor
  * with both flags set and still get repair behavior.
  *
+ * Older package-update parents set only OPENCLAW_UPDATE_IN_PROGRESS (and may
+ * set OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE) and then run their
+ * own stale post-core convergence code. Treat the candidate doctor as
+ * repair-capable in that legacy handoff so it can pre-install/repair plugins
+ * with current fallback logic before control returns to the old parent. New
+ * parents explicitly set OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR,
+ * so they still defer package-manager repairs to their updated post-core pass.
+ *
  * NOTE: only consumers that route through this helper observe the
  * "post-core wins" semantics. Files that still read
  * `OPENCLAW_UPDATE_IN_PROGRESS` directly (`commands/doctor-update.ts`,
@@ -47,8 +55,7 @@ export function isUpdatePackageSwapInProgress(env: NodeJS.ProcessEnv): boolean {
 export function shouldDeferConfiguredPluginInstallRepair(env: NodeJS.ProcessEnv): boolean {
   return (
     isUpdatePackageSwapInProgress(env) &&
-    (isTruthyEnvValue(env[UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR_ENV]) ||
-      isTruthyEnvValue(env[UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV]))
+    isTruthyEnvValue(env[UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR_ENV])
   );
 }
 

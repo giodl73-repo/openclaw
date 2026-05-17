@@ -116,6 +116,7 @@ vi.mock("../../../plugins/clawhub.js", () => ({
   CLAWHUB_INSTALL_ERROR_CODE: {
     PACKAGE_NOT_FOUND: "package_not_found",
     VERSION_NOT_FOUND: "version_not_found",
+    ARTIFACT_DOWNLOAD_UNAVAILABLE: "artifact_download_unavailable",
   },
   installPluginFromClawHub: mocks.installPluginFromClawHub,
 }));
@@ -344,6 +345,47 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       ok: false,
       code: "package_not_found",
       error: "Package not found on ClawHub.",
+    });
+    mocks.listChannelPluginCatalogEntries.mockReturnValue([
+      {
+        id: "matrix",
+        pluginId: "matrix",
+        meta: { label: "Matrix" },
+        install: {
+          clawhubSpec: "clawhub:@openclaw/plugin-matrix@stable",
+          npmSpec: "@openclaw/plugin-matrix@1.2.3",
+        },
+        trustedSourceLinkedOfficialInstall: true,
+      },
+    ]);
+
+    const { repairMissingPluginInstallsForIds } =
+      await import("./missing-configured-plugin-install.js");
+    const result = await repairMissingPluginInstallsForIds({
+      cfg: {},
+      pluginIds: [],
+      channelIds: ["matrix"],
+      env: {},
+    });
+
+    expectRecordFields(mockCallArg(mocks.installPluginFromNpmSpec), {
+      spec: "@openclaw/plugin-matrix@1.2.3",
+      expectedPluginId: "matrix",
+      trustedSourceLinkedOfficialInstall: true,
+    });
+    expect(result.changes).toEqual([
+      'ClawHub clawhub:@openclaw/plugin-matrix@stable unavailable for "matrix"; falling back to npm @openclaw/plugin-matrix@1.2.3.',
+      'Installed missing configured plugin "matrix" from @openclaw/plugin-matrix@1.2.3.',
+    ]);
+    expect(result.warnings).toStrictEqual([]);
+  });
+
+  it("falls back to npm when a ClawHub package artifact is temporarily unavailable", async () => {
+    mocks.installPluginFromClawHub.mockResolvedValueOnce({
+      ok: false,
+      code: "artifact_download_unavailable",
+      error:
+        'ClawHub artifact download for "@openclaw/plugin-matrix@1.2.3" is not available yet.',
     });
     mocks.listChannelPluginCatalogEntries.mockReturnValue([
       {
@@ -1020,6 +1062,58 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       env: {
         OPENCLAW_UPDATE_IN_PROGRESS: "1",
         OPENCLAW_UPDATE_POST_CORE_CONVERGENCE: "1",
+      },
+    });
+
+    expect(mocks.updateNpmInstalledPlugins).toHaveBeenCalledTimes(1);
+    expect(result.warnings).toEqual([]);
+    expect(result.changes[0]).toBe('Repaired missing configured plugin "discord".');
+    expectRecordFields(result.records.discord, {
+      source: "npm",
+      installPath: "/repaired/discord",
+    });
+  });
+
+  it("repairs missing external payload during legacy update handoff", async () => {
+    const records = {
+      discord: {
+        source: "npm",
+        spec: "@openclaw/discord",
+        installPath: "/missing/discord",
+      },
+    };
+    mocks.loadInstalledPluginIndexInstallRecords.mockResolvedValue(records);
+    mocks.listChannelPluginCatalogEntries.mockReturnValue([
+      {
+        id: "discord",
+        pluginId: "discord",
+        meta: { label: "Discord" },
+        install: { npmSpec: "@openclaw/discord" },
+      },
+    ]);
+    mocks.updateNpmInstalledPlugins.mockResolvedValue({
+      config: {
+        plugins: {
+          installs: { discord: { source: "npm", installPath: "/repaired/discord" } },
+        },
+      },
+      changed: true,
+      outcomes: [{ pluginId: "discord", status: "updated", message: "ok" }],
+    });
+
+    const { repairMissingConfiguredPluginInstalls } =
+      await import("./missing-configured-plugin-install.js");
+    const result = await repairMissingConfiguredPluginInstalls({
+      cfg: {
+        plugins: {
+          entries: { discord: { enabled: true } },
+        },
+        channels: {
+          discord: { enabled: true },
+        },
+      },
+      env: {
+        OPENCLAW_UPDATE_IN_PROGRESS: "1",
       },
     });
 

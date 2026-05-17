@@ -47,6 +47,7 @@ export const CLAWHUB_INSTALL_ERROR_CODE = {
   PRIVATE_PACKAGE: "private_package",
   INCOMPATIBLE_PLUGIN_API: "incompatible_plugin_api",
   INCOMPATIBLE_GATEWAY: "incompatible_gateway",
+  ARTIFACT_DOWNLOAD_UNAVAILABLE: "artifact_download_unavailable",
   MISSING_ARCHIVE_INTEGRITY: "missing_archive_integrity",
   ARCHIVE_INTEGRITY_MISMATCH: "archive_integrity_mismatch",
 } as const;
@@ -1147,6 +1148,9 @@ export async function installPluginFromClawHub(
             version: versionState.version,
           })
         : formatErrorMessage(error),
+      expectedClawPackSha256 && error instanceof ClawHubRequestError
+        ? CLAWHUB_INSTALL_ERROR_CODE.ARTIFACT_DOWNLOAD_UNAVAILABLE
+        : undefined,
     );
   }
   try {

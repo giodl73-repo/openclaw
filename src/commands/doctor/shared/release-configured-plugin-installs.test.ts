@@ -331,7 +331,7 @@ describe("configured plugin install release step", () => {
     expect(result.completed).toBe(true);
   });
 
-  it("does not stamp config during update-time deferred install repair", async () => {
+  it("does not stamp config during current-parent update-time deferred install repair", async () => {
     mocks.repairMissingPluginInstallsForIds.mockResolvedValue({
       changes: [
         'Skipped package-manager repair for configured plugin "codex" during package update; rerun "openclaw doctor --fix" after the update completes.',
@@ -374,9 +374,9 @@ describe("configured plugin install release step", () => {
     });
   });
 
-  it("defers package-manager plugin repair when an older updater supports post-doctor config writes", async () => {
+  it("allows legacy update handoff doctor to repair installs before the old parent resumes", async () => {
     mocks.repairMissingPluginInstallsForIds.mockResolvedValue({
-      changes: [],
+      changes: ['Installed missing configured plugin "discord".'],
       warnings: [],
     });
 
@@ -398,15 +398,17 @@ describe("configured plugin install release step", () => {
       },
     });
 
-    expect(readOnlyMissingPluginInstallRepairCall().env).toEqual({
+    const repairCall = readOnlyMissingPluginInstallRepairCall();
+    expect(repairCall.pluginIds).toEqual(["discord"]);
+    expect(repairCall.env).toEqual({
       OPENCLAW_UPDATE_IN_PROGRESS: "1",
       OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
     });
     expect(result).toEqual({
-      changes: [],
+      changes: ['Installed missing configured plugin "discord".'],
       warnings: [],
-      completed: false,
-      touchedConfig: false,
+      completed: true,
+      touchedConfig: true,
     });
   });
 

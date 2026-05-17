@@ -49,8 +49,8 @@ function resolveDoctorMode(cfg: OpenClawConfig): DoctorFlowMode {
   return cfg.gateway?.mode === "remote" ? "remote" : "local";
 }
 
-const UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV =
-  "OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE";
+const UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR_ENV =
+  "OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR";
 
 function isTruthyEnvValue(value: string | undefined): boolean {
   if (!value) {
@@ -66,7 +66,7 @@ export function shouldSkipLegacyUpdateDoctorConfigWrite(params: {
   if (!isTruthyEnvValue(params.env.OPENCLAW_UPDATE_IN_PROGRESS)) {
     return false;
   }
-  if (isTruthyEnvValue(params.env[UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV])) {
+  if (isTruthyEnvValue(params.env[UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR_ENV])) {
     return false;
   }
   return true;
