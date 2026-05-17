@@ -34,7 +34,6 @@ export const TRANSITIONAL_DOCTOR_HEALTH_PLACEHOLDER_IDS = [
   "core/doctor/sandbox-scope",
   "core/doctor/gateway-services/extra",
   "core/doctor/gateway-services/config",
-  "core/doctor/gateway-services/platform-notes",
   "core/doctor/startup-channel-maintenance",
   "core/doctor/systemd-linger",
   "core/doctor/shell-completion",
@@ -458,6 +457,25 @@ const legacyWhatsAppCrontabCheck: HealthCheck = {
   },
 };
 
+const gatewayPlatformNotesCheck: HealthCheck = {
+  id: "core/doctor/gateway-services/platform-notes",
+  kind: "core",
+  description: "Gateway platform notes are captured as structured findings.",
+  source: "doctor",
+  async detect(ctx) {
+    const { collectMacGatewayPlatformWarnings } =
+      await import("../commands/doctor-platform-notes.js");
+    const warnings = await collectMacGatewayPlatformWarnings(ctx.cfg);
+    return warnings.map((warning) =>
+      noteTextToFinding({
+        checkId: "core/doctor/gateway-services/platform-notes",
+        severity: "warning",
+        text: warning,
+      }),
+    );
+  },
+};
+
 const browserCheck: HealthCheck = {
   id: "core/doctor/browser",
   kind: "core",
@@ -694,10 +712,7 @@ const convertedWorkflowChecks: readonly HealthCheck[] = [
     "core/doctor/gateway-services/config",
     "Gateway service config checks are represented in the health registry.",
   ),
-  createConvertedWorkflowCheck(
-    "core/doctor/gateway-services/platform-notes",
-    "Gateway platform service notes are represented in the health registry.",
-  ),
+  gatewayPlatformNotesCheck,
   createConvertedWorkflowCheck(
     "core/doctor/startup-channel-maintenance",
     "Startup channel maintenance is represented in the health registry.",
