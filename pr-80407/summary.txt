@@ -1,0 +1,9 @@
+PR #80407 deterministic before/after proof
+
+Title: Policy: add conformance system with channel checks
+Branch: policy-channels-consumer
+Head: c0049af62d51c96e54ffc44a6b717b30383fef60
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-80407-policy-channel-conformance-before-after-proof.png
