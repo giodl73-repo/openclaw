@@ -1,0 +1,9 @@
+PR #83314 deterministic before/after proof
+
+Title: fix(migrate): count hidden config conflicts in preview
+Branch: fix-migrate-hidden-conflict-count-83284
+Head: 484e0456d143d1c4be42113f46d3195715d04ac5
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83314-fix-migrate-count-hidden-config-conflicts-in-pre-before-after-proof.png

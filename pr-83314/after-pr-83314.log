@@ -1,0 +1,10 @@
+RUN  v4.1.6 /root/src/openclaw-branches/fix-migrate-hidden-conflict-count-83284
+
+✓ unit-fast  ../../src/commands/migrate/output.test.ts (9 tests) 4ms
+
+Test Files  1 passed (1)
+Tests  9 passed (9)
+
+[check:changed] src/commands/migrate/output.test.ts: core test
+[check:changed] src/commands/migrate/output.ts: core production
+Import cycle check: 0 runtime value cycle(s).
