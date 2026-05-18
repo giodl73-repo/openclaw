@@ -1,0 +1,12 @@
+Real behavior proof - Behavior or issue addressed: per-agent agents.list[].subagents.model should accept the same model object shape as agents.defaults.subagents.model, including timeoutMs. - Real environment tested: WSL Ubuntu OpenClaw worktree at /root/src/openclaw-branches/fix-subagent-model-timeout-83291. - Exact steps or command run after this patch: CI=1 node scripts/run-vitest.mjs src/config/schema.test.ts and pnpm check:changed. - Evidence after fix (terminal capture):  RUN  v4.1.6 /root/src/openclaw-branches/fix-subagent-model-timeout-83291  ✓ runtime-config  ../../src/config/schema.test.ts (40 tests) 1274ms  Test Files  1 passed (1) Tests  40 passed (40)  [check:changed] src/config/schema.test.ts: core test [check:changed] src/config/zod-schema.agent-runtime.ts: core production Import cycle check: 0 runtime value cycle(s).  - Observed result after fix: OpenClawSchema.parse accepts agents.list[0].subagents.model with { primary: "openai/gpt-5.5", timeoutMs: 30000 } and preserves the parsed shape. - What was not tested: live agent runtime execution with that timeout value. - Before evidence (terminal/code capture from origin/main):  src/config/zod-schema.agent-runtime.ts before this patch defined per-agent subagent model inline as:   z.union([     z.string(),     z.object({       primary: z.string().optional(),       fallbacks: z.array(z.string()).optional(),     }).strict(),   ])  That strict object omitted timeoutMs, while defaults already used AgentModelSchema.
+
+RUN  v4.1.6 /root/src/openclaw-branches/fix-subagent-model-timeout-83291
+
+✓ runtime-config  ../../src/config/schema.test.ts (40 tests) 1274ms
+
+Test Files  1 passed (1)
+Tests  40 passed (40)
+
+[check:changed] src/config/schema.test.ts: core test
+[check:changed] src/config/zod-schema.agent-runtime.ts: core production
+Import cycle check: 0 runtime value cycle(s).

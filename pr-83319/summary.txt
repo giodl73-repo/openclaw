@@ -1,0 +1,9 @@
+PR #83319 deterministic before/after proof
+
+Title: fix(config): allow subagent model timeouts per agent
+Branch: fix-subagent-model-timeout-83291
+Head: 4e135719855df7590177e5aaa21857d770cda7b1
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83319-fix-config-allow-subagent-model-timeouts-per-age-before-after-proof.png

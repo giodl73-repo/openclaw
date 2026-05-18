@@ -1,0 +1,10 @@
+src/config/zod-schema.agent-runtime.ts before this patch defined per-agent subagent model inline as:
+  z.union([
+    z.string(),
+    z.object({
+      primary: z.string().optional(),
+      fallbacks: z.array(z.string()).optional(),
+    }).strict(),
+  ])
+
+That strict object omitted `timeoutMs`, while defaults already used AgentModelSchema.
