@@ -1,0 +1,2 @@
+tmp=$(mktemp -d)
+OPENCLAW_HOME="$tmp/.openclaw" pnpm openclaw doctor --lint --only core/doctor/workspace-suggestions

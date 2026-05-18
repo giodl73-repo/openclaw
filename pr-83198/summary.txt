@@ -1,0 +1,9 @@
+PR #83198 deterministic before/after proof
+
+Title: Doctor: convert read-only health checks
+Branch: doctor-detection-conversion-plan
+Head: 12b8beee6735b0defa34e71b3c0cc1425a21e09d
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83198-doctor-convert-read-only-health-checks-before-after-proof.png
