@@ -1,0 +1,5 @@
+CI=1 node scripts/run-vitest.mjs extensions/browser/src/doctor-browser.test.ts src/commands/doctor-browser.facade.test.ts src/commands/doctor/repair-sequencing.test.ts
+CI=1 node scripts/run-vitest.mjs extensions/browser/src/browser/chrome.internal.test.ts extensions/browser/src/browser/profiles-service.test.ts extensions/browser/src/browser/server.agent-contract-core.test.ts
+pnpm exec oxfmt --check --threads=1 extensions/browser/browser-doctor.ts extensions/browser/src/doctor-browser.ts extensions/browser/src/doctor-browser.test.ts src/commands/doctor-browser.ts src/commands/doctor-browser.facade.test.ts src/commands/doctor/repair-sequencing.ts src/commands/doctor/repair-sequencing.test.ts
+git diff --check
+pnpm check:changed

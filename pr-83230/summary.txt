@@ -1,0 +1,9 @@
+PR #83230 deterministic before/after proof
+
+Title: fix(doctor): archive legacy clawd browser profile residue
+Branch: fix-browser-clawd-profile-residue-45404
+Head: e7b14660e1d2f2f4d9db96b898523062b737f502
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83230-fix-doctor-archive-legacy-clawd-browser-profile--before-after-proof.png

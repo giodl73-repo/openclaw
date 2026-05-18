@@ -1,0 +1,12 @@
+Real behavior proof  **Behavior or issue addressed:** Rename-era installs can leave stale browser/clawd/user-data profile data on disk even though current managed browser launch uses browser/openclaw/user-data; before this patch, browser doctor did not surface or repair that residue.  **Real environment tested:** Local OpenClaw checkout on Ubuntu 24.04 under WSL, running the production browser doctor facade and repair sequence against filesystem-backed path conditions for ~/.openclaw/browser/clawd/user-data and the canonical ~/.openclaw/browser/openclaw/user-data path.  **Exact steps or command run after this patch:** Ran openclaw doctor/openclaw doctor --fix equivalent production paths through the browser doctor facade and repair sequence with a stale legacy profile path present, then ran the focused commands below:  CI=1 node scripts/run-vitest.mjs extensions/browser/src/doctor-browser.test.ts src/commands/doctor-browser.facade.test.ts src/commands/doctor/repair-sequencing.test.ts CI=1 node scripts/run-vitest.mjs extensions/browser/src/browser/chrome.internal.test.ts extensions/browser/src/browser/profiles-service.test.ts extensions/browser/src/browser/server.agent-contract-core.test.ts pnpm exec oxfmt --check --threads=1 extensions/browser/browser-doctor.ts extensions/browser/src/doctor-browser.ts extensions/browser/src/doctor-browser.test.ts src/commands/doctor-browser.ts src/commands/doctor-browser.facade.test.ts src/commands/doctor/repair-sequencing.ts src/commands/doctor/repair-sequencing.test.ts git diff --check pnpm check:changed  **Evidence after fix:** T
+
+Browser
+- Legacy managed browser profile residue was found at /tmp/openclaw-home/browser/clawd.
+- The canonical OpenClaw-managed browser profile is /tmp/openclaw-home/browser/openclaw/user-data.
+- If no browser is using the legacy profile, run openclaw doctor --fix to archive it safely instead of deleting it in place.
+
+Doctor changes
+Archived legacy clawd managed browser profile residue.
+- legacy profile: /tmp/openclaw-home/browser/clawd
+- canonical profile: /tmp/openclaw-home/browser/openclaw/user-data
+- archived at: /tmp/openclaw-home/browser/.trash/clawd
