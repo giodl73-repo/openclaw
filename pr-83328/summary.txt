@@ -1,0 +1,9 @@
+PR #83328 deterministic before/after proof
+
+Title: fix(doctor): include channel model provider repairs
+Branch: fix-channel-model-provider-repair-83288
+Head: 7b61cf59b2c5527ba062fd16bf5eb552b624a338
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83328-fix-doctor-include-channel-model-provider-repair-before-after-proof.png

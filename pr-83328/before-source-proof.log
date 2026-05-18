@@ -1,0 +1,6 @@
+src/commands/doctor/shared/release-configured-plugin-installs.ts before this patch explicitly excluded channel overrides:
+  for (const { value } of collectConfiguredModelRefs(cfg, {
+    includeChannelModelOverrides: false,
+  })) {
+
+A provider used only in channels.modelByChannel was therefore invisible to configured provider repair.

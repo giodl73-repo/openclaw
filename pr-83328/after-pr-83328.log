@@ -1,0 +1,10 @@
+RUN  v4.1.6 /root/src/openclaw-branches/fix-channel-model-provider-repair-83288
+
+✓ commands  ../../src/commands/doctor/shared/release-configured-plugin-installs.test.ts (16 tests) 839ms
+
+Test Files  1 passed (1)
+Tests  16 passed (16)
+
+[check:changed] src/commands/doctor/shared/release-configured-plugin-installs.test.ts: core test
+[check:changed] src/commands/doctor/shared/release-configured-plugin-installs.ts: core production
+Import cycle check: 0 runtime value cycle(s).
