@@ -1,0 +1,10 @@
+RUN  v4.1.6 /root/src/openclaw-branches/fix-legacy-web-search-preserve-records-83287
+
+✓ unit-fast  ../../src/commands/doctor/shared/legacy-web-search-migrate.test.ts (3 tests) 4ms
+
+Test Files  1 passed (1)
+Tests  3 passed (3)
+
+[check:changed] src/commands/doctor/shared/legacy-web-search-migrate.test.ts: core test
+[check:changed] src/commands/doctor/shared/legacy-web-search-migrate.ts: core production
+Import cycle check: 0 runtime value cycle(s).

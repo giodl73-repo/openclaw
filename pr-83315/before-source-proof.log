@@ -1,0 +1,8 @@
+src/commands/doctor/shared/legacy-web-search-migrate.ts before this patch only copied modern scoped records or non-record values:
+  if (MODERN_SCOPED_WEB_SEARCH_KEYS.has(key) || !isRecord(value)) {
+    nextSearch[key] = value;
+  }
+
+An unrelated record-valued key such as:
+  customSearch: { endpoint: "https://search.example.test", mode: "strict" }
+was omitted from the migrated search config.

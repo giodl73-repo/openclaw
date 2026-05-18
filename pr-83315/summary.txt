@@ -1,0 +1,9 @@
+PR #83315 deterministic before/after proof
+
+Title: fix(doctor): preserve unknown web search records
+Branch: fix-legacy-web-search-preserve-records-83287
+Head: b8c885e8203524eee9f2f991435a2a7ad9d9cbd1
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83315-fix-doctor-preserve-unknown-web-search-records-before-after-proof.png
