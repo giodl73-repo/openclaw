@@ -1,0 +1,77 @@
+--- before_origin_main ---
+worktree=/tmp/openclaw-pr83310-before-main
+commit=5434769e47e6
+command=node --import tsx /tmp/pr83310-timeout-proof.mjs
+{
+  "command": "node --import tsx /tmp/pr83310-timeout-proof.mjs",
+  "observed": [
+    {
+      "input": "1.5",
+      "expected": "<undefined/null>",
+      "actual": 1000,
+      "kind": "reject fractional seconds"
+    },
+    {
+      "input": "10abc",
+      "expected": "<undefined/null>",
+      "actual": 10000,
+      "kind": "reject suffixed numeric prefix"
+    },
+    {
+      "input": "0",
+      "expected": "<undefined/null>",
+      "actual": "<undefined/null>",
+      "kind": "reject zero seconds"
+    },
+    {
+      "input": "-1",
+      "expected": "<undefined/null>",
+      "actual": "<undefined/null>",
+      "kind": "reject negative seconds"
+    },
+    {
+      "input": " 10 ",
+      "expected": 10000,
+      "actual": 10000,
+      "kind": "accept trimmed positive integer"
+    },
+    {
+      "input": "001",
+      "expected": 1000,
+      "actual": 1000,
+      "kind": "accept leading-zero positive integer"
+    },
+    {
+      "input": "<undefined>",
+      "expected": "<undefined/null>",
+      "actual": "<undefined/null>",
+      "kind": "missing timeout uses default"
+    }
+  ],
+  "errors": [
+    "--timeout must be a positive integer (seconds)",
+    "--timeout must be a positive integer (seconds)"
+  ],
+  "exits": [
+    1,
+    1
+  ]
+}
+ASSERTION FAILED: --timeout must reject partial numeric strings and non-positive values.
+{
+  "failures": [
+    {
+      "input": "1.5",
+      "expected": "<undefined/null>",
+      "actual": 1000,
+      "kind": "reject fractional seconds"
+    },
+    {
+      "input": "10abc",
+      "expected": "<undefined/null>",
+      "actual": 10000,
+      "kind": "reject suffixed numeric prefix"
+    }
+  ]
+}
+before_origin_main_status=1

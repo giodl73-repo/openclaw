@@ -1,0 +1,9 @@
+PR #83310 deterministic before/after proof
+
+Behavior: update --timeout rejects values that are not complete positive integer seconds.
+
+Before origin/main status: 1
+After PR #83310 status: 0
+
+Before result: origin/main accepted partial numeric prefixes such as 1.5 => 1000ms and 10abc => 10000ms, so the regression proof failed.
+After result: PR head rejects 1.5, 10abc, 0, and -1 with the invalid-timeout path while accepting complete positive integer strings.
