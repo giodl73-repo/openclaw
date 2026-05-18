@@ -1,0 +1,8 @@
+--- before HEAD^ ---
+validation_ok=true
+doctor_groups_warning=<none>
+doctor_has_shape_hint=false
+--- after fix ---
+validation_ok=true
+doctor_groups_warning=- channels.telegram.groups has invalid Telegram groups shape (array); expected an object map keyed by Telegram group/chat id, not an array, string, or null.
+doctor_has_shape_hint=true

@@ -1,0 +1,9 @@
+PR #83260 deterministic before/after proof
+
+Title: Improve Telegram groups config shape diagnostics
+Branch: fix-telegram-groups-diagnostic-83083
+Head: 1b0eb4982544d09ae26dee0c5582baf65806940c
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83260-improve-telegram-groups-config-shape-diagnostics-before-after-proof.png
