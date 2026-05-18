@@ -1,0 +1,11 @@
+RUN  v4.1.6 /root/src/openclaw-branches/fix-migrate-provider-options-83285
+
+✓ commands  ../../src/commands/migrate/providers.test.ts (2 tests) 10ms
+
+Test Files  1 passed (1)
+Tests  2 passed (2)
+
+[check:changed] src/commands/migrate/apply.ts: core production
+[check:changed] src/commands/migrate/providers.test.ts: core test
+[check:changed] src/commands/migrate/providers.ts: core production
+Import cycle check: 0 runtime value cycle(s).

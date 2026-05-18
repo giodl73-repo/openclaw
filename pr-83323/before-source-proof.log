@@ -1,0 +1,8 @@
+src/commands/migrate/providers.ts before this patch checked only raw opts.provider:
+  if (opts.provider === "codex" && opts.verifyPluginApps === true) { ... }
+  if (opts.provider === "codex" && opts.configPatchMode) { ... }
+
+src/commands/migrate/apply.ts called:
+  providerOptions: buildMigrationProviderOptions(params.opts)
+
+When the apply path had resolved providerId="codex" but opts.provider was undefined, Codex-only providerOptions were omitted.
