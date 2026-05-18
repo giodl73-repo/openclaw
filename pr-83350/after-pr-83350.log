@@ -1,0 +1,8 @@
+==> [published-upgrade-survivor] command: ... pnpm test:docker:published-upgrade-survivor
+Installing baseline package: openclaw@2026.5.16-beta.4
+Updating baseline openclaw@2026.5.16-beta.4 to candidate tarball:/tmp/openclaw-current.tgz (2026.5.17)
+Upgrade survivor summary: /tmp/openclaw-upgrade-survivor-artifacts/summary.json
+{
+  "status": "passed",
+  "baseline": { "spec": "openclaw@2026.5.16-beta.4", "version": "2026.5.16-beta.4" }
+}
