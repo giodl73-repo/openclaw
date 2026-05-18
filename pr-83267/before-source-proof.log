@@ -1,0 +1,3 @@
+node --import tsx <provider-timeout-overlay-proof>
+CI=1 node scripts/run-vitest.mjs src/config/config-misc.test.ts src/config/schema.test.ts src/config/schema.help.quality.test.ts src/agents/pi-embedded-runner/model.test.ts src/agents/models-config.providers.google-antigravity.test.ts src/agents/models-config.providers.implicit.discovery-scope.test.ts src/agents/models-config.providers.normalize-keys.test.ts
+pnpm check:changed

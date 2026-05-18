@@ -1,0 +1,9 @@
+PR #83267 deterministic before/after proof
+
+Title: fix(config): allow bundled provider timeout overlays
+Branch: fix-provider-timeout-overlay-83201
+Head: 441ef66496d51fef159952c675d4b332419102f1
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83267-fix-config-allow-bundled-provider-timeout-overla-before-after-proof.png

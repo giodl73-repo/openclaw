@@ -1,0 +1,34 @@
+Real behavior proof  **Behavior or issue addressed:** A documented config such as models.providers.openai.timeoutSeconds = 600 was rejected at startup because the validator required models.providers.openai.baseUrl and models.providers.openai.models, even though the entry is only tuning a bundled provider.  **Real environment tested:** Local OpenClaw checkout on Ubuntu 24.04 under WSL, running production config validation and model resolution against real config objects.  **Exact steps or command run after this patch:** Ran a source-level before/after probe against origin/main and this PR head, then ran focused validation and changed-file checks:  node --import tsx <provider-timeout-overlay-proof> CI=1 node scripts/run-vitest.mjs src/config/config-misc.test.ts src/config/schema.test.ts src/config/schema.help.quality.test.ts src/agents/pi-embedded-runner/model.test.ts src/agents/models-config.providers.google-antigravity.test.ts src/agents/models-config.providers.implicit.discovery-scope.test.ts src/agents/models-config.providers.normalize-keys.test.ts pnpm check:changed  **Evidence after fix:** The before/after probe shows the bundled openai overlay now validates, while an unknown custom provider with only timeoutSeconds still fails:  before_status=10 {   "overlay": {     "ok": false,     "issues": [       "models.providers.openai.baseUrl: Invalid input: expected string, received undefined",       "models.providers.openai.models: Invalid input: expected array, received undefined"     ]   },   "custom": {     "ok": false,     "issues": [       "models.providers.custom.baseUrl: Invalid input: expected string, received undefined",       "models.providers.custom.models: Invalid input: expected array, received undefined
+
+before_status=10
+{
+  "overlay": {
+    "ok": false,
+    "issues": [
+      "models.providers.openai.baseUrl: Invalid input: expected string, received undefined",
+      "models.providers.openai.models: Invalid input: expected array, received undefined"
+    ]
+  },
+  "custom": {
+    "ok": false,
+    "issues": [
+      "models.providers.custom.baseUrl: Invalid input: expected string, received undefined",
+      "models.providers.custom.models: Invalid input: expected array, received undefined"
+    ]
+  }
+}
+---
+after_status=0
+{
+  "overlay": {
+    "ok": true,
+    "issues": []
+  },
+  "custom": {
+    "ok": false,
+    "issues": [
+      "models.providers.custom.baseUrl: custom model providers must declare baseUrl; provider overlays without baseUrl are only supported for bundled providers",
+      "models.providers.custom.models: custom model providers must declare models; provider overlays without models are only supported for bundled providers"
+    ]
+  }
+}
