@@ -1,0 +1,8 @@
+src/commands/export-trajectory.ts before this patch decoded every request with:
+  sessionKey: readOptionalString(request.sessionKey) ?? "",
+...
+and merged decoded values after direct opts:
+  ...opts,
+  ...decodeExportTrajectoryRequest(encoded),
+
+An encoded request without sessionKey therefore overwrote a direct sessionKey with "".

@@ -1,0 +1,10 @@
+RUN  v4.1.6 /root/src/openclaw-branches/fix-export-trajectory-request-83282
+
+✓ commands  ../../src/commands/export-trajectory.test.ts (4 tests) 125ms
+
+Test Files  1 passed (1)
+Tests  4 passed (4)
+
+[check:changed] src/commands/export-trajectory.test.ts: core test
+[check:changed] src/commands/export-trajectory.ts: core production
+Import cycle check: 0 runtime value cycle(s).
