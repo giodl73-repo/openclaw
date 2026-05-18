@@ -1,9 +1,9 @@
-PR #80407 deterministic before/after proof
+PR #80407 refreshed deterministic proof
 
 Title: Policy: add conformance system with channel checks
 Branch: policy-channels-consumer
-Head: c0049af62d51c96e54ffc44a6b717b30383fef60
+Head: 0fb828e20e4bf417de6aff47b6f294b8d7a94e4f
 
-This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+This artifact replaces the stale selector-specific repair proof. Current proof uses doctor --fix --yes --non-interactive, verifies policy check attestation output, and verifies after-repair detection is clean.
 
-Image: pr-80407-policy-channel-conformance-before-after-proof.png
+Image: pr-80407-policy-channel-conformance-current-proof.svg

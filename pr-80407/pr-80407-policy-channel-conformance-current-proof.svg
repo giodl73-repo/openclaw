@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1220" height="784" viewBox="0 0 1220 784">
+<rect width="100%" height="100%" fill="#101418"/>
+<rect x="24" y="24" width="1172" height="52" rx="8" fill="#1f2933"/>
+<text x="44" y="58" font-family="Consolas, monospace" font-size="24" fill="#f8fafc">PR #80407 current policy channel proof</text>
+<text x="44" y="104" font-family="Consolas, monospace" font-size="14" fill="#94a3b8">Repair command is selector-free; policy check uses read-only config snapshot; attestation hashes emitted.</text>
+<text x="44" y="138" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">PR #80407 refreshed deterministic proof</text>
+<text x="44" y="156" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb"></text>
+<text x="44" y="174" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">Title: Policy: add conformance system with channel checks</text>
+<text x="44" y="192" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">Branch: policy-channels-consumer</text>
+<text x="44" y="210" font-family="Consolas, monospace" font-size="14" fill="#dbeafe">Head: 0fb828e20e4bf417de6aff47b6f294b8d7a94e4f</text>
+<text x="44" y="228" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb"></text>
+<text x="44" y="246" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">This artifact replaces the stale selector-specific repair proof. Current proof uses doctor --fix --yes --non</text>
+<text x="44" y="264" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">  -interactive, verifies policy check attestation output, and verifies after-repair detection is clean.</text>
+<text x="44" y="282" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb"></text>
+<text x="44" y="300" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">Image: pr-80407-policy-channel-conformance-current-proof.svg</text>
+<text x="44" y="318" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb"></text>
+<text x="44" y="336" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">--- after-pr-80407.log ---</text>
+<text x="44" y="354" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">PR #80407 current-head behavior proof</text>
+<text x="44" y="372" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb"></text>
+<text x="44" y="390" font-family="Consolas, monospace" font-size="14" fill="#dbeafe">Head: 0fb828e20e4bf417de6aff47b6f294b8d7a94e4f</text>
+<text x="44" y="408" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">Environment: local Windows OpenClaw source checkout, temporary OPENCLAW_CONFIG_PATH and workspace.</text>
+<text x="44" y="426" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb"></text>
+<text x="44" y="444" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">Command contract exercised by this proof:</text>
+<text x="44" y="462" font-family="Consolas, monospace" font-size="14" fill="#dbeafe">- openclaw policy check --json</text>
+<text x="44" y="480" font-family="Consolas, monospace" font-size="14" fill="#dbeafe">- openclaw doctor --lint --only policy/channels-denied-provider --json</text>
+<text x="44" y="498" font-family="Consolas, monospace" font-size="14" fill="#fde68a">- openclaw doctor --fix --yes --non-interactive</text>
+<text x="44" y="516" font-family="Consolas, monospace" font-size="14" fill="#dbeafe">- openclaw policy check --json</text>
+<text x="44" y="534" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb"></text>
+<text x="44" y="552" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">Result JSON from direct policy/doctor engine invocation:</text>
+<text x="44" y="570" font-family="Consolas, monospace" font-size="14" fill="#dbeafe">{   "commandContract": [     "openclaw policy check --json",     "openclaw doctor --lint --only policy/chann</text>
+<text x="44" y="588" font-family="Consolas, monospace" font-size="14" fill="#fde68a">  els-denied-provider --json",     "openclaw doctor --fix --yes --non-interactive",     "openclaw policy che</text>
+<text x="44" y="606" font-family="Consolas, monospace" font-size="14" fill="#bbf7d0">  ck --json"   ],   "policyCheckExit": 1,   "policyFinding": {     "checkId": "policy/channels-denied-provid</text>
+<text x="44" y="624" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">  er",     "target": "oc://openclaw.config/channels/telegram",     "requirement": "oc://policy.jsonc/channel</text>
+<text x="44" y="642" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">  s/denyRules/#0"   },   "attestation": {     "policyHash": "sha256:f7bea32f53401bb152a32836107514220ab6282b</text>
+<text x="44" y="660" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">  5f5c7149787f4c5ee3c685bb",     "workspaceHash": "sha256:0d04c22ef8d33df373c72534e7f2fa49749678ad0cad1e691d</text>
+<text x="44" y="678" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">  c1fba7ac8e1ef5",     "findingsHash": "sha256:66792d3024b94eeea5769cb13fc07cebad84247704006fa05928741676011</text>
+<text x="44" y="696" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">  936",     "attestationHash": "sha256:a4017655d256e46086d52fc4a9985c1e3cb9d5d031971ee1af574c281d771b31",   </text>
+<text x="44" y="714" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">    "checkedAtIsMetadata": true   },   "lintFindingCount": 1,   "repairChanges": [     "Disabled channels.te</text>
+<text x="44" y="732" font-family="Consolas, monospace" font-size="14" fill="#bbf7d0">  legram.enabled for policy conformance."   ],   "repairedTelegramEnabled": false,   "afterRepairFindingCoun</text>
+<text x="44" y="750" font-family="Consolas, monospace" font-size="14" fill="#e5e7eb">  t": 0 }</text>
+</svg>
