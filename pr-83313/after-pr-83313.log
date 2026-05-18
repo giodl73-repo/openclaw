@@ -1,0 +1,10 @@
+RUN  v4.1.6 /root/src/openclaw-branches/fix-whatsapp-tui-process-match-83283
+
+✓ commands  ../../src/commands/doctor-whatsapp-responsiveness.test.ts (4 tests) 102ms
+
+Test Files  1 passed (1)
+Tests  4 passed (4)
+
+[check:changed] src/commands/doctor-whatsapp-responsiveness.test.ts: core test
+[check:changed] src/commands/doctor-whatsapp-responsiveness.ts: core production
+Import cycle check: 0 runtime value cycle(s).

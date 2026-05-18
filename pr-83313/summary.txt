@@ -1,0 +1,9 @@
+PR #83313 deterministic before/after proof
+
+Title: fix(doctor): anchor WhatsApp TUI process matching
+Branch: fix-whatsapp-tui-process-match-83283
+Head: 26354e3f24c58818bb604efc342beb0f7998bffc
+
+This artifact renders the current PR Real behavior proof into a PNG with raw before/source and after/PR-head logs attached. The source text comes from the PR proof section and the linked command outputs already used to satisfy the Real behavior proof gate.
+
+Image: pr-83313-fix-doctor-anchor-whatsapp-tui-process-matching-before-after-proof.png

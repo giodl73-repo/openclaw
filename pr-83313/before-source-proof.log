@@ -1,0 +1,6 @@
+src/commands/doctor-whatsapp-responsiveness.ts before this patch used a broad command-line regex:
+  /(?:^|\s)(?:openclaw-tui|openclaw\s+tui|openclaw\s+chat|openclaw\s+terminal)(?:\s|$)/
+
+That matched unrelated argv text such as:
+  helper --note 'openclaw tui'
+  openclaw-helper openclaw terminal
