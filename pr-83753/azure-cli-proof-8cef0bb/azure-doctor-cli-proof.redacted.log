@@ -1,0 +1,531 @@
+PR 83753 Azure doctor CLI proof
+head=8cef0bb2833a683b1f681aa72defc10812c852bb
+date=2026-05-19T04:08:51+00:00
+kernel=Linux pr83753proof 6.17.0-1013-azure #13~24.04.1-Ubuntu SMP Wed Apr 15 16:52:17 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+node=v22.22.2
+pnpm=11.1.0
+systemd=systemd 255 (255.4-1ubuntu8.15)
+proof_home=<PROOF_HOME>
+
+===== shell completion lint before fix =====
+2026-05-19T04:08:52+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<PROOF_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/shell-completion --json 
+{"ok":false,"checksRun":1,"checksSkipped":19,"findings":[{"checkId":"core/doctor/shell-completion","severity":"warning","message":"Your bash profile uses slow dynamic completion (source <(...)).","path":"shellCompletion.bash","fixHint":"Run `openclaw doctor --fix` to upgrade to cached completion."}]}
+EXIT_CODE=1
+
+===== shell completion doctor fix =====
+2026-05-19T04:08:53+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<PROOF_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --fix --yes 
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+██░▄▄▄░██░▄▄░██░▄▄▄██░▀██░██░▄▄▀██░████░▄▄▀██░███░██
+██░███░██░▀▀░██░▄▄▄██░█░█░██░█████░████░▀▀░██░█░█░██
+██░▀▀▀░██░█████░▀▀▀██░██▄░██░▀▀▄██░▀▀░█░██░██▄▀▄▀▄██
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                       OPENCLAW                       
+ 
+┌  OpenClaw doctor
+│
+◇  UI ───────────────────────────────╮
+│                                    │
+│  - Control UI assets are missing.  │
+│  - Run: pnpm ui:build              │
+│                                    │
+├────────────────────────────────────╯
+│
+◇  UI ─────────────────────────────────────────────────────╮
+│                                                          │
+│  Building Control UI assets... (this may take a moment)  │
+│                                                          │
+├──────────────────────────────────────────────────────────╯
+│
+◇  UI ─────────────────╮
+│                      │
+│  UI build complete.  │
+│                      │
+├──────────────────────╯
+│
+◇  Gateway ──────────────────────────────────────────────────────────╮
+│                                                                    │
+│  gateway.mode is unset; gateway start will be blocked.             │
+│  Fix: run openclaw configure and set Gateway mode (local/remote).  │
+│  Or set directly: openclaw config set gateway.mode local           │
+│  Missing config: run openclaw setup first.                         │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway auth ──────────────────────────────────────────────────╮
+│                                                                 │
+│  Gateway auth is off or missing a token. Token auth is now the  │
+│  recommended default (including loopback).                      │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway auth ──────────────╮
+│                             │
+│  Gateway token configured.  │
+│                             │
+├─────────────────────────────╯
+│
+◇  Command owner ─────────────────────────────────────────────────────────╮
+│                                                                         │
+│  No command owner is configured.                                        │
+│  A command owner is the human operator account allowed to run           │
+│  owner-only commands and approve dangerous actions, including           │
+│  /diagnostics, /export-trajectory, /config, and exec approvals.         │
+│  DM pairing only lets someone talk to the bot; it does not make that    │
+│  sender the owner for privileged commands.                              │
+│  Fix: set commands.ownerAllowFrom to your channel user id, for example  │
+│  openclaw config set commands.ownerAllowFrom '["telegram:123456789"]'   │
+│  Restart the gateway after changing this if it is already running.      │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────╯
+│
+◇  Plugin registry ─────────────────────────────────────────╮
+│                                                           │
+│  Plugin registry rebuilt: 49/51 enabled plugins indexed.  │
+│                                                           │
+├───────────────────────────────────────────────────────────╯
+│
+◇  State integrity ────────────────────────────────────────────────────────╮
+│                                                                          │
+│  - OAuth dir not present ($OPENCLAW_HOME/.openclaw/state/credentials).   │
+│    Skipping create because no WhatsApp/pairing channel config is         │
+│    active.                                                               │
+│  - CRITICAL: Session store dir missing                                   │
+│    ($OPENCLAW_HOME/.openclaw/state/agents/main/sessions).                │
+│  - Multiple state directories detected. This can split session history.  │
+│    - $OPENCLAW_HOME/.openclaw                                            │
+│    Active state dir: $OPENCLAW_HOME/.openclaw/state                      │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────╯
+│
+◇  Doctor changes ────────────────────────────────────────╮
+│                                                         │
+│  - Created Session store dir:                           │
+│    $OPENCLAW_HOME/.openclaw/state/agents/main/sessions  │
+│                                                         │
+├─────────────────────────────────────────────────────────╯
+│
+◇  Security ─────────────────────────────────╮
+│                                            │
+│  - No channel security warnings detected.  │
+│  - Run: openclaw security audit --deep     │
+│                                            │
+├────────────────────────────────────────────╯
+│
+◇  Skills status ────────────╮
+│                            │
+│  Eligible: 15              │
+│  Missing requirements: 46  │
+│  Blocked by allowlist: 0   │
+│                            │
+├────────────────────────────╯
+│
+◇  Plugins ──────╮
+│                │
+│  Loaded: 69    │
+│  Imported: 0   │
+│  Disabled: 54  │
+│  Errors: 0     │
+│                │
+├────────────────╯
+│
+◇  Skills ─────────────────────────────────────────────────────────────────╮
+│                                                                          │
+│  Some skills are allowed for this agent but are not usable in the        │
+│  current runtime environment.                                            │
+│  - 1password: bins: op                                                   │
+│    install option: Install 1Password CLI (brew)                          │
+│  - apple-notes: bins: memo; os: darwin                                   │
+│  - apple-reminders: bins: remindctl; os: darwin                          │
+│  - bear-notes: bins: grizzly; os: darwin                                 │
+│  - blogwatcher: bins: blogwatcher                                        │
+│    install option: Install blogwatcher (go)                              │
+│  - blucli: bins: blu                                                     │
+│    install option: Install blucli (go)                                   │
+│  - camsnap: bins: camsnap                                                │
+│    install option: Install camsnap (brew)                                │
+│  - clawhub: bins: clawhub                                                │
+│    install option: Install clawhub (npm)                                 │
+│  - coding-agent: any bins: claude, codex, opencode, pi; config:          │
+│    skills.entries.coding-agent.enabled                                   │
+│    install option: Install @anthropic-ai/claude-code (npm)               │
+│  - discord: config: channels.discord.token                               │
+│  - eightctl: bins: eightctl                                              │
+│    install option: Install eightctl (go)                                 │
+│  - gemini: bins: gemini                                                  │
+│    install option: Install Gemini CLI (brew)                             │
+│  - gh-issues: bins: gh                                                   │
+│    install option: Install GitHub CLI (brew)                             │
+│  - gifgrep: bins: gifgrep                                                │
+│    install option: Install gifgrep (go)                                  │
+│  - github: bins: gh                                                      │
+│    install option: Install GitHub CLI (brew)                             │
+│  - gog: bins: gog                                                        │
+│    install option: Install gog (brew)                                    │
+│  - goplaces: bins: goplaces; env: GOOGLE_PLACES_API_KEY                  │
+│    install option: Install goplaces (brew)                               │
+│  - himalaya: bins: himalaya                                              │
+│    install option: Install Himalaya (brew)                               │
+│  - imsg: bins: imsg; os: darwin                                          │
+│  - mcporter: bins: mcporter                                              │
+│    install option: Install mcporter (npm)                                │
+│  - model-usage: bins: codexbar; os: darwin                               │
+│  - nano-pdf: bins: nano-pdf                                              │
+│    install option: Install nano-pdf (uv)                                 │
+│  - obsidian: bins: obsidian                                              │
+│  - openai-whisper: bins: whisper                                         │
+│    install option: Install OpenAI Whisper (brew)                         │
+│  - openai-whisper-api: env: OPENAI_API_KEY                               │
+│    install option: Install curl (brew)                                   │
+│  - openhue: bins: openhue                                                │
+│    install option: Install OpenHue CLI (brew)                            │
+│  - oracle: bins: oracle                                                  │
+│    install option: Install @steipete/oracle (npm)                        │
+│  - ordercli: bins: ordercli                                              │
+│    install option: Install ordercli (go)                                 │
+│  - peekaboo: bins: peekaboo; os: darwin                                  │
+│  - qqbot-channel: config: channels.qqbot                                 │
+│  - qqbot-media: config: channels.qqbot                                   │
+│  - qqbot-remind: config: channels.qqbot                                  │
+│  - sag: bins: sag; env: ELEVENLABS_API_KEY                               │
+│    install option: Install sag (brew)                                    │
+│  - session-logs: bins: rg                                                │
+│    install option: Install jq (brew)                                     │
+│  - sherpa-onnx-tts: env: SHERPA_ONNX_RUNTIME_DIR, SHERPA_ONNX_MODEL_DIR  │
+│    install option: Download sherpa-onnx runtime (Linux x64)              │
+│    install option: Download Piper en_US lessac (high)                    │
+│  - slack: config: channels.slack                                         │
+│  - songsee: bins: songsee                                                │
+│    install option: Install songsee (brew)                                │
+│  - sonoscli: bins: sonos                                                 │
+│    install option: Install sonoscli (go)                                 │
+│  - spotify-player: any bins: spogo, spotify_player                       │
+│    install option: Install spogo (brew)                                  │
+│  - summarize: bins: summarize                                            │
+│    install option: Install summarize (brew)                              │
+│  - things-mac: bins: things; os: darwin                                  │
+│  - trello: env: TRELLO_API_KEY, TRELLO_TOKEN                             │
+│    install option: Install jq (brew)                                     │
+│  - video-frames: bins: ffmpeg                                            │
+│    install option: Install ffmpeg (brew)                                 │
+│  - voice-call: config: plugins.entries.voice-call.enabled                │
+│  - wacli: bins: wacli                                                    │
+│    install option: Install wacli (go)                                    │
+│  - xurl: bins: xurl                                                      │
+│    install option: Install xurl (brew)                                   │
+│  Disable unused skills: openclaw doctor --fix                            │
+│  Inspect details: openclaw skills check --agent <id> or openclaw skills  │
+│  info <name> --agent <id>                                                │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────╯
+│
+◇  Doctor changes ────────────────╮
+│                                 │
+│  - Disabled 1password           │
+│  - Disabled apple-notes         │
+│  - Disabled apple-reminders     │
+│  - Disabled bear-notes          │
+│  - Disabled blogwatcher         │
+│  - Disabled blucli              │
+│  - Disabled camsnap             │
+│  - Disabled clawhub             │
+│  - Disabled coding-agent        │
+│  - Disabled discord             │
+│  - Disabled eightctl            │
+│  - Disabled gemini              │
+│  - Disabled gh-issues           │
+│  - Disabled gifgrep             │
+│  - Disabled github              │
+│  - Disabled gog                 │
+│  - Disabled goplaces            │
+│  - Disabled himalaya            │
+│  - Disabled imsg                │
+│  - Disabled mcporter            │
+│  - Disabled model-usage         │
+│  - Disabled nano-pdf            │
+│  - Disabled obsidian            │
+│  - Disabled openai-whisper      │
+│  - Disabled openai-whisper-api  │
+│  - Disabled openhue             │
+│  - Disabled oracle              │
+│  - Disabled ordercli            │
+│  - Disabled peekaboo            │
+│  - Disabled qqbot-channel       │
+│  - Disabled qqbot-media         │
+│  - Disabled qqbot-remind        │
+│  - Disabled sag                 │
+│  - Disabled session-logs        │
+│  - Disabled sherpa-onnx-tts     │
+│  - Disabled slack               │
+│  - Disabled songsee             │
+│  - Disabled sonoscli            │
+│  - Disabled spotify-player      │
+│  - Disabled summarize           │
+│  - Disabled things-mac          │
+│  - Disabled trello              │
+│  - Disabled video-frames        │
+│  - Disabled voice-call          │
+│  - Disabled wacli               │
+│  - Disabled xurl                │
+│                                 │
+├─────────────────────────────────╯
+│
+◇  Doctor changes ─────────────────────────────────────────────────────────╮
+│                                                                          │
+│  Shell completion upgraded. Restart your shell or run: source ~/.bashrc  │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway ──────────────╮
+│                        │
+│  Gateway not running.  │
+│                        │
+├────────────────────────╯
+│
+◇  Gateway connection ───────────────────────────────────────────────╮
+│                                                                    │
+│  Gateway target: ws://127.0.0.1:18789                              │
+│  Source: local loopback                                            │
+│  Config: <PROOF_HOME>/.openclaw/state/openclaw.json  │
+│  Bind: loopback                                                    │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway ────────────────────────╮
+│                                  │
+│  Gateway service not installed.  │
+│                                  │
+├──────────────────────────────────╯
+│
+◇  Gateway ───────────────────────────────────────────────────────────╮
+│                                                                     │
+│  Run openclaw gateway install when you want to install the gateway  │
+│  service.                                                           │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────╯
+Updated config: $OPENCLAW_HOME/.openclaw/state/openclaw.json
+│
+└  Doctor complete.
+
+EXIT_CODE=0
+
+===== shell completion lint after fix =====
+2026-05-19T04:09:22+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<PROOF_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/shell-completion --json 
+{"ok":true,"checksRun":1,"checksSkipped":19,"findings":[]}
+EXIT_CODE=0
+--- .bashrc after shell completion repair ---
+# disposable PR 83753 shell profile
+
+# OpenClaw Completion
+[ -f "<PROOF_HOME>/.openclaw/state/completions/openclaw.bash" ] && source "<PROOF_HOME>/.openclaw/state/completions/openclaw.bash"
+--- completion cache files ---
+openclaw.bash
+openclaw.fish
+openclaw.ps1
+openclaw.zsh
+
+===== systemd user manager status =====
+2026-05-19T04:11:40+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ systemctl --user status --no-pager 
+● pr83753proof
+    State: running
+    Units: 182 loaded (incl. loaded aliases)
+     Jobs: 0 queued
+   Failed: 0 units
+    Since: Tue 2026-05-19 04:11:39 UTC; 769ms ago
+  systemd: 255.4-1ubuntu8.15
+   CGroup: /user.slice/user-1000.slice/user@1000.service
+           └─init.scope
+             ├─5554 /usr/lib/systemd/systemd --user
+             └─5555 "(sd-pam)"
+EXIT_CODE=0
+
+===== systemd disposable unit enabled =====
+2026-05-19T04:11:40+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ systemctl --user is-enabled openclaw-gateway-pr83753.service 
+enabled
+EXIT_CODE=0
+
+===== systemd linger before fix =====
+2026-05-19T04:11:40+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ loginctl show-user azureuser -p Linger 
+Linger=no
+EXIT_CODE=0
+
+===== systemd linger lint before fix =====
+2026-05-19T04:11:40+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<AZURE_USER_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state OPENCLAW_SYSTEMD_UNIT=openclaw-gateway-pr83753 SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/systemd-linger --json 
+{"ok":false,"checksRun":1,"checksSkipped":19,"findings":[{"checkId":"core/doctor/systemd-linger","severity":"warning","message":"Gateway runs as a systemd user service. Without lingering, systemd stops the user session on logout/idle and kills the Gateway.","source":"systemd","fixHint":"Run manually: sudo loginctl enable-linger azureuser"}]}
+EXIT_CODE=1
+
+===== systemd linger doctor fix =====
+2026-05-19T04:11:41+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<AZURE_USER_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state OPENCLAW_SYSTEMD_UNIT=openclaw-gateway-pr83753 SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --fix --yes 
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+██░▄▄▄░██░▄▄░██░▄▄▄██░▀██░██░▄▄▀██░████░▄▄▀██░███░██
+██░███░██░▀▀░██░▄▄▄██░█░█░██░█████░████░▀▀░██░█░█░██
+██░▀▀▀░██░█████░▀▀▀██░██▄░██░▀▀▄██░▀▀░█░██░██▄▀▄▀▄██
+▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                       OPENCLAW                       
+ 
+┌  OpenClaw doctor
+│
+◇  Gateway ──────────────────────────────────────────────────────────╮
+│                                                                    │
+│  gateway.mode is unset; gateway start will be blocked.             │
+│  Fix: run openclaw configure and set Gateway mode (local/remote).  │
+│  Or set directly: openclaw config set gateway.mode local           │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────╯
+│
+◇  Command owner ─────────────────────────────────────────────────────────╮
+│                                                                         │
+│  No command owner is configured.                                        │
+│  A command owner is the human operator account allowed to run           │
+│  owner-only commands and approve dangerous actions, including           │
+│  /diagnostics, /export-trajectory, /config, and exec approvals.         │
+│  DM pairing only lets someone talk to the bot; it does not make that    │
+│  sender the owner for privileged commands.                              │
+│  Fix: set commands.ownerAllowFrom to your channel user id, for example  │
+│  openclaw config set commands.ownerAllowFrom '["telegram:123456789"]'   │
+│  Restart the gateway after changing this if it is already running.      │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────╯
+│
+◇  Plugin registry ────────────────────────────────────────────╮
+│                                                              │
+│  Plugin registry refreshed: 69/123 enabled plugins indexed.  │
+│                                                              │
+├──────────────────────────────────────────────────────────────╯
+│
+◇  State integrity ────────────────────────────────────────────────────────╮
+│                                                                          │
+│  - OAuth dir not present ($OPENCLAW_HOME/.openclaw/state/credentials).   │
+│    Skipping create because no WhatsApp/pairing channel config is         │
+│    active.                                                               │
+│  - Multiple state directories detected. This can split session history.  │
+│    - $OPENCLAW_HOME/.openclaw                                            │
+│    Active state dir: $OPENCLAW_HOME/.openclaw/state                      │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway service config ────────────────────────────────────────────────────╮
+│                                                                             │
+│  - Service command does not include the gateway subcommand                  │
+│  - Gateway service PATH is not set; the daemon should use a minimal         │
+│    PATH.                                                                    │
+│  - Missing systemd After=network-online.target                              │
+│    (<AZURE_USER_HOME>/.config/systemd/user/openclaw-gateway-pr83753.service)  │
+│  - Missing systemd Wants=network-online.target                              │
+│    (<AZURE_USER_HOME>/.config/systemd/user/openclaw-gateway-pr83753.service)  │
+│  - RestartSec does not match the recommended 5s                             │
+│    (<AZURE_USER_HOME>/.config/systemd/user/openclaw-gateway-pr83753.service)  │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway service config ─────────────────────────────────────────────╮
+│                                                                      │
+│  Custom or unexpected service edits detected. Rerun with --force to  │
+│  overwrite.                                                          │
+│                                                                      │
+├──────────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway service config ──────────────────────────────────────────────╮
+│                                                                       │
+│  Run `openclaw gateway install --force` when you want to replace the  │
+│  gateway service definition.                                          │
+│                                                                       │
+├───────────────────────────────────────────────────────────────────────╯
+│
+◇  Security ─────────────────────────────────╮
+│                                            │
+│  - No channel security warnings detected.  │
+│  - Run: openclaw security audit --deep     │
+│                                            │
+├────────────────────────────────────────────╯
+│
+◇  Doctor changes ───────────────────────────╮
+│                                            │
+│  Enabled systemd lingering for azureuser.  │
+│                                            │
+├────────────────────────────────────────────╯
+│
+◇  Skills status ───────────╮
+│                           │
+│  Eligible: 15             │
+│  Missing requirements: 0  │
+│  Blocked by allowlist: 0  │
+│                           │
+├───────────────────────────╯
+│
+◇  Plugins ──────╮
+│                │
+│  Loaded: 69    │
+│  Imported: 0   │
+│  Disabled: 54  │
+│  Errors: 0     │
+│                │
+├────────────────╯
+│
+◇  Doctor changes ────────────────────────────────────────────────╮
+│                                                                 │
+│  Shell completion installed. Restart your shell or run: source  │
+│  ~/.bashrc                                                      │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway ──────────────╮
+│                        │
+│  Gateway not running.  │
+│                        │
+├────────────────────────╯
+│
+◇  Gateway connection ───────────────────────────────────────────────╮
+│                                                                    │
+│  Gateway target: ws://127.0.0.1:18789                              │
+│  Source: local loopback                                            │
+│  Config: <PROOF_HOME>/.openclaw/state/openclaw.json  │
+│  Bind: loopback                                                    │
+│                                                                    │
+├────────────────────────────────────────────────────────────────────╯
+│
+◇  Gateway ───────────────────────────────────────────────────────────────╮
+│                                                                         │
+│  Runtime: stopped (state inactive, sub dead, last exit 0, reason 0)     │
+│  Service is loaded but not running (likely exited immediately).         │
+│  File logs: /tmp/openclaw/openclaw-2026-05-19.log                       │
+│  Logs: journalctl --user -u openclaw-gateway.service -n 200 --no-pager  │
+│  Restart attempts:                                                      │
+│  <PROOF_HOME>/.openclaw/state/logs/gateway-restart.log    │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────╯
+Restarted systemd service: openclaw-gateway-pr83753.service
+│
+└  Doctor complete.
+
+EXIT_CODE=0
+
+===== systemd linger after fix =====
+2026-05-19T04:11:58+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ loginctl show-user azureuser -p Linger 
+Linger=yes
+EXIT_CODE=0
+
+===== systemd linger lint after fix =====
+2026-05-19T04:11:58+00:00
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<AZURE_USER_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state OPENCLAW_SYSTEMD_UNIT=openclaw-gateway-pr83753 SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/systemd-linger --json 
+{"ok":true,"checksRun":1,"checksSkipped":19,"findings":[]}
+EXIT_CODE=0
+--- summary ---
+shell completion lint before fix exit=1 expected=1
+shell completion doctor fix exit=0 expected=0
+shell completion lint after fix exit=0 expected=0
+systemd user manager status exit=0 expected=0
+systemd disposable unit enabled exit=0 expected=0
+systemd linger before fix exit=0 expected=0
+systemd linger lint before fix exit=1 expected=1
+systemd linger doctor fix exit=0 expected=0
+systemd linger after fix exit=0 expected=0
+systemd linger lint after fix exit=0 expected=0

@@ -1,0 +1,10 @@
+shell completion lint before fix exit=1 expected=1
+shell completion doctor fix exit=0 expected=0
+shell completion lint after fix exit=0 expected=0
+systemd user manager status exit=0 expected=0
+systemd disposable unit enabled exit=0 expected=0
+systemd linger before fix exit=0 expected=0
+systemd linger lint before fix exit=1 expected=1
+systemd linger doctor fix exit=0 expected=0
+systemd linger after fix exit=0 expected=0
+systemd linger lint after fix exit=0 expected=0

@@ -1,0 +1,45 @@
+===== shell completion lint before fix =====
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<PROOF_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/shell-completion --json 
+{"ok":false,"checksRun":1,"checksSkipped":19,"findings":[{"checkId":"core/doctor/shell-completion","severity":"warning","message":"Your bash profile uses slow dynamic completion (source <(...)).","path":"shellCompletion.bash","fixHint":"Run `openclaw doctor --fix` to upgrade to cached completion."}]}
+EXIT_CODE=1
+===== shell completion doctor fix =====
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<PROOF_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --fix --yes 
+│  Disable unused skills: openclaw doctor --fix                            │
+│  Shell completion upgraded. Restart your shell or run: source ~/.bashrc  │
+EXIT_CODE=0
+===== shell completion lint after fix =====
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<PROOF_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/shell-completion --json 
+{"ok":true,"checksRun":1,"checksSkipped":19,"findings":[]}
+EXIT_CODE=0
+===== systemd user manager status =====
+EXIT_CODE=0
+===== systemd disposable unit enabled =====
+EXIT_CODE=0
+===== systemd linger before fix =====
+Linger=no
+EXIT_CODE=0
+===== systemd linger lint before fix =====
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<AZURE_USER_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state OPENCLAW_SYSTEMD_UNIT=openclaw-gateway-pr83753 SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/systemd-linger --json 
+{"ok":false,"checksRun":1,"checksSkipped":19,"findings":[{"checkId":"core/doctor/systemd-linger","severity":"warning","message":"Gateway runs as a systemd user service. Without lingering, systemd stops the user session on logout/idle and kills the Gateway.","source":"systemd","fixHint":"Run manually: sudo loginctl enable-linger azureuser"}]}
+EXIT_CODE=1
+===== systemd linger doctor fix =====
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<AZURE_USER_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state OPENCLAW_SYSTEMD_UNIT=openclaw-gateway-pr83753 SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --fix --yes 
+│  Enabled systemd lingering for azureuser.  │
+EXIT_CODE=0
+===== systemd linger after fix =====
+Linger=yes
+EXIT_CODE=0
+===== systemd linger lint after fix =====
+azureuser@pr83753proof:<AZURE_USER_HOME>/openclaw-pr83753$ env HOME=<AZURE_USER_HOME> OPENCLAW_HOME=<PROOF_HOME> OPENCLAW_STATE_DIR=<PROOF_HOME>/.openclaw/state OPENCLAW_SYSTEMD_UNIT=openclaw-gateway-pr83753 SHELL=/bin/bash node <AZURE_USER_HOME>/openclaw-pr83753/openclaw.mjs doctor --lint --only core/doctor/systemd-linger --json 
+{"ok":true,"checksRun":1,"checksSkipped":19,"findings":[]}
+EXIT_CODE=0
+shell completion lint before fix exit=1 expected=1
+shell completion doctor fix exit=0 expected=0
+shell completion lint after fix exit=0 expected=0
+systemd user manager status exit=0 expected=0
+systemd disposable unit enabled exit=0 expected=0
+systemd linger before fix exit=0 expected=0
+systemd linger lint before fix exit=1 expected=1
+systemd linger doctor fix exit=0 expected=0
+systemd linger after fix exit=0 expected=0
+systemd linger lint after fix exit=0 expected=0
