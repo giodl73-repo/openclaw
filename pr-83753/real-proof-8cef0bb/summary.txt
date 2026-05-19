@@ -1,0 +1,7 @@
+doctor completion + systemd linger tests exit=0
+startup channel + browser residue tests exit=0
+core checks tests exit=0
+health contributions tests exit=0
+repair flow dry-run diff tests exit=0
+changed file format check exit=0
+core test tsgo exit=0

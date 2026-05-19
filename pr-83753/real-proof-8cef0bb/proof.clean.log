@@ -1,0 +1,677 @@
+
+===== doctor completion + systemd linger tests =====
+2026-05-18T20:08:04.3511784-07:00
+PS> node scripts/run-vitest.mjs src/commands/doctor-completion.test.ts src/commands/systemd-linger.test.ts --reporter=verbose
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+
+ RUN  v4.1.6 C:/tmp/openclaw-pr-83753-review
+
+ ✓ |commands| ../../src/commands/doctor-completion.test.ts > shell completion health > detects slow dynamic completion profiles 139ms
+ ✓ |commands| ../../src/commands/doctor-completion.test.ts > shell completion health > detects missing completion cache for installed profiles 0ms
+ ✓ |commands| ../../src/commands/doctor-completion.test.ts > shell completion health > keeps missing optional completion quiet in non-interactive mode 0ms
+ ✓ |commands| ../../src/commands/doctor-completion.test.ts > shell completion health > repairs missing completion cache without prompting 2ms
+ ✓ |commands| ../../src/commands/doctor-completion.test.ts > shell completion health > repairs slow dynamic completion profiles and clears the next detection 1ms
+ ✓ |commands| ../../src/commands/doctor-completion.test.ts > shell completion health > prompts before installing optional completion 1ms
+ ✓ |commands| ../../src/commands/systemd-linger.test.ts > systemd linger health > detects disabled linger for systemd user services 19ms
+ ✓ |commands| ../../src/commands/systemd-linger.test.ts > systemd linger health > repairs disabled linger and clears the next detection 2ms
+ ✓ |commands| ../../src/commands/systemd-linger.test.ts > systemd linger health > falls back to sudo prompt when direct linger enable fails 1ms
+ ✓ |commands| ../../src/commands/systemd-linger.test.ts > systemd linger health > skips repair when the user declines the confirmation 1ms
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  20:10:15
+   Duration  1.03s (transform 1.13s, setup 825ms, import 478ms, tests 169ms, environment 0ms)
+
+EXIT_CODE=0
+
+===== startup channel + browser residue tests =====
+2026-05-18T20:10:20.0900214-07:00
+PS> node scripts/run-vitest.mjs src/flows/doctor-startup-channel-maintenance.test.ts src/flows/doctor-core-browser-residue-check.test.ts --reporter=verbose
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+
+ RUN  v4.1.6 C:/tmp/openclaw-pr-83753-review
+
+ ✓ |unit-fast| ../../src/flows/doctor-startup-channel-maintenance.test.ts > doctor startup channel maintenance > runs Matrix startup migration during repair flows 7ms
+ ✓ |unit-fast| ../../src/flows/doctor-startup-channel-maintenance.test.ts > doctor startup channel maintenance > skips startup migration outside repair flows 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-startup-channel-maintenance.test.ts > doctor startup channel maintenance > runs startup migration through the structured repair check 6ms
+ ✓ |unit| ../../src/flows/doctor-core-browser-residue-check.test.ts > browser clawd profile residue health check > reports legacy clawd profile residue through doctor lint 206ms
+ ✓ |unit| ../../src/flows/doctor-core-browser-residue-check.test.ts > browser clawd profile residue health check > archives legacy clawd profile residue through structured repair and clears detection 3ms
+ ✓ |unit| ../../src/flows/doctor-core-browser-residue-check.test.ts > browser clawd profile residue health check > supports dry-run repair without archiving the profile 1ms
+
+ Test Files  2 passed (2)
+      Tests  6 passed (6)
+   Start at  20:12:32
+   Duration  3.76s (transform 5.11s, setup 600ms, import 5.95s, tests 231ms, environment 0ms)
+
+EXIT_CODE=0
+
+===== core checks tests =====
+2026-05-18T20:12:37.3980727-07:00
+PS> node scripts/run-vitest.mjs src/flows/doctor-core-checks.test.ts --reporter=verbose
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+
+ RUN  v4.1.6 C:/tmp/openclaw-pr-83753-review
+
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > registers the built-in health checks once 84ms
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > can retry after a duplicate registration failure is cleared 1ms
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > registers only implemented core health targets from the doctor conversion inventory 1ms
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > shows the repair-capable health check shape with skills readiness 3946ms
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > converts security doctor warnings into health findings 3304ms
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > converts workspace suggestions into info findings 13118ms
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > keeps optional shell completion installs out of doctor lint 1ms
+ ✓ |unit| ../../src/flows/doctor-core-checks.test.ts > registerCoreHealthChecks > previews converted side-effect repairs as effects without fake diffs 1ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  20:14:49
+   Duration  22.38s (transform 10.85s, setup 387ms, import 1.34s, tests 20.46s, environment 0ms)
+
+EXIT_CODE=0
+
+===== health contributions tests =====
+2026-05-18T20:15:13.9879650-07:00
+PS> node scripts/run-vitest.mjs src/flows/doctor-health-contributions.test.ts --reporter=verbose
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+
+ RUN  v4.1.6 C:/tmp/openclaw-pr-83753-review
+
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > runs release configured plugin install repair before plugin registry and final config writes 2ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > keeps release configured plugin installs repair-only 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > stamps release configured plugin installs after repair changes 2ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > keeps legacy parent writable release repairs old-parent-readable 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > checks command owner configuration before final config writes 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > checks skill readiness before final config writes 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > keeps converted structured repairs at their original contribution positions 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > runs structured systemd linger repair at the systemd contribution position 1607ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > runs structured startup channel maintenance repair at its contribution position 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > previews startup channel maintenance during positional dry-run without side effects 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > runs structured browser residue repair at the browser contribution position 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > passes dry-run and diff into positional structured repairs before doctor exposes the flags 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > runs structured shell completion repair at the shell contribution position 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > previews shell completion during positional dry-run without installing completion 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > previews systemd linger during positional dry-run without enabling linger 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > skips doctor config writes under legacy update parents 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > keeps doctor writes outside legacy update writable 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > keeps current update parents writable 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > treats falsey update env values as normal writes 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > allows config size drops when OPENCLAW_UPDATE_IN_PROGRESS=1 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > skips plugin schema validation during update doctor writes 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > preserves source config version for legacy parent writable update doctor writes 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > does not preserve source config version for explicit deferral update doctors 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > keeps plugin schema validation for ordinary doctor writes 1ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > points update-time config rewrites at the pre-update backup 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > skips plugin schema validation for final validation during update doctor runs 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > keeps plugin schema validation for ordinary doctor final validation 0ms
+ ✓ |unit-fast| ../../src/flows/doctor-health-contributions.test.ts > doctor health contributions > config size drops during update > allows allowConfigSizeDrop when not in update 0ms
+
+ Test Files  1 passed (1)
+      Tests  28 passed (28)
+   Start at  20:17:13
+   Duration  1.95s (transform 1.27s, setup 0ms, import 158ms, tests 1.62s, environment 0ms)
+
+EXIT_CODE=0
+
+===== repair flow dry-run diff tests =====
+2026-05-18T20:17:15.6589889-07:00
+PS> node scripts/run-vitest.mjs src/flows/doctor-repair-flow.test.ts --reporter=verbose
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `externalize-deps`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+[PLUGIN_TIMINGS] Your build spent significant time in plugin `inject-file-scope-variables`. See https://rolldown.rs/options/checks#plugintimings for more details.
+
+
+ RUN  v4.1.6 C:/tmp/openclaw-pr-83753-review
+
+ ✓ |unit| ../../src/flows/doctor-repair-flow.test.ts > runDoctorHealthRepairs > repairs modern checks and threads updated config 99ms
+ ✓ |unit| ../../src/flows/doctor-repair-flow.test.ts > runDoctorHealthRepairs > leaves non-repairable checks for legacy doctor behavior 1ms
+ ✓ |unit| ../../src/flows/doctor-repair-flow.test.ts > runDoctorHealthRepairs > reports repair validation findings that remain after repair 0ms
+ ✓ |unit| ../../src/flows/doctor-repair-flow.test.ts > runDoctorHealthRepairs > does not validate skipped or failed repair results 0ms
+ ✓ |unit| ../../src/flows/doctor-repair-flow.test.ts > runDoctorHealthRepairs > supports dry-run repairs without applying returned config or validating 0ms
+ ✓ |unit| ../../src/flows/doctor-repair-flow.test.ts > runDoctorHealthRepairs > passes diff false and true through the repair API 0ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  20:19:41
+   Duration  777ms (transform 514ms, setup 438ms, import 21ms, tests 103ms, environment 0ms)
+
+EXIT_CODE=0
+
+===== changed file format check =====
+2026-05-18T20:19:44.3976869-07:00
+PS> node node_modules\oxfmt\bin\oxfmt --check --threads=1 src\commands\doctor-completion.test.ts src\commands\doctor.types.ts src\flows\doctor-core-checks.ts src\flows\doctor-core-checks.test.ts src\flows\doctor-core-browser-residue-check.test.ts src\flows\doctor-health-contributions.ts src\flows\doctor-health-contributions.test.ts src\flows\doctor-repair-flow.test.ts src\flows\doctor-startup-channel-maintenance.test.ts
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 35ms on 9 files using 1 threads.
+EXIT_CODE=0
+
+===== core test tsgo =====
+2026-05-18T20:19:46.8228037-07:00
+PS> node node_modules\@typescript\native-preview\bin\tsgo.js -p test/tsconfig/tsconfig.core.test.json --incremental false --pretty false
+EXIT_CODE=0
+

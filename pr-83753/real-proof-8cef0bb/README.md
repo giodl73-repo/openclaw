@@ -1,0 +1,58 @@
+# PR 83753 Real Behavior Proof
+
+Head tested: 8cef0bb2833a683b1f681aa72defc10812c852bb
+Worktree: C:\tmp\openclaw-pr-83753-review
+Captured: 2026-05-18T20:20:59.6585879-07:00
+
+This artifact is the raw command transcript for the focused tests/checks used as proof for PR 83753. The commands below were executed after the latest branch push.
+
+## Summary
+
+doctor completion + systemd linger tests exit=0
+startup channel + browser residue tests exit=0
+core checks tests exit=0
+health contributions tests exit=0
+repair flow dry-run diff tests exit=0
+changed file format check exit=0
+core test tsgo exit=0
+
+
+## Output Excerpt
+
+``text
+===== doctor completion + systemd linger tests =====
+PS> node scripts/run-vitest.mjs src/commands/doctor-completion.test.ts src/commands/systemd-linger.test.ts --reporter=verbose
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+EXIT_CODE=0
+===== startup channel + browser residue tests =====
+PS> node scripts/run-vitest.mjs src/flows/doctor-startup-channel-maintenance.test.ts src/flows/doctor-core-browser-residue-check.test.ts --reporter=verbose
+ Test Files  2 passed (2)
+      Tests  6 passed (6)
+EXIT_CODE=0
+===== core checks tests =====
+PS> node scripts/run-vitest.mjs src/flows/doctor-core-checks.test.ts --reporter=verbose
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+EXIT_CODE=0
+===== health contributions tests =====
+PS> node scripts/run-vitest.mjs src/flows/doctor-health-contributions.test.ts --reporter=verbose
+ Test Files  1 passed (1)
+      Tests  28 passed (28)
+EXIT_CODE=0
+===== repair flow dry-run diff tests =====
+PS> node scripts/run-vitest.mjs src/flows/doctor-repair-flow.test.ts --reporter=verbose
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+EXIT_CODE=0
+===== changed file format check =====
+PS> node node_modules\oxfmt\bin\oxfmt --check --threads=1 src\commands\doctor-completion.test.ts src\commands\doctor.types.ts src\flows\doctor-core-checks.ts src\flows\doctor-core-checks.test.ts src\flows\doctor-core-browser-residue-check.test.ts src\flows\doctor-health-contributions.ts src\flows\doctor-health-contributions.test.ts src\flows\doctor-repair-flow.test.ts src\flows\doctor-startup-channel-maintenance.test.ts
+All matched files use the correct format.
+EXIT_CODE=0
+===== core test tsgo =====
+PS> node node_modules\@typescript\native-preview\bin\tsgo.js -p test/tsconfig/tsconfig.core.test.json --incremental false --pretty false
+EXIT_CODE=0
+``
+
+Full raw transcript: proof.clean.log
+Original colored transcript: proof.log
