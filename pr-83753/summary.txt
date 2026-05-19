@@ -1,0 +1,28 @@
+PR 83753 isomorphism proof
+Head SHA: 8cef0bb283
+
+Goal: prove converted doctor repairs preserve the legacy contribution slots while moving to detect -> repair -> detect validation.
+
+Focused proof after patch:
+- node scripts/run-vitest.mjs src/commands/doctor-completion.test.ts src/commands/systemd-linger.test.ts --reporter=verbose
+  Result: 2 files, 10 tests passed.
+- node scripts/run-vitest.mjs src/flows/doctor-startup-channel-maintenance.test.ts src/flows/doctor-core-browser-residue-check.test.ts --reporter=verbose
+  Result: 2 files, 6 tests passed.
+- node scripts/run-vitest.mjs src/flows/doctor-core-checks.test.ts --reporter=verbose
+  Result: 1 file, 8 tests passed.
+- node scripts/run-vitest.mjs src/flows/doctor-health-contributions.test.ts --reporter=verbose
+  Result: 1 file, 28 tests passed.
+- node scripts/run-vitest.mjs src/flows/doctor-repair-flow.test.ts --reporter=verbose
+  Result: 1 file, 6 tests passed.
+- node node_modules\oxfmt\bin\oxfmt --check --threads=1 <changed files>
+  Result: all matched files use correct format.
+- node node_modules\@typescript\native-preview\bin\tsgo.js -p test/tsconfig/tsconfig.core.test.json --incremental false --pretty false
+  Result: exited 0.
+
+Coverage added:
+- shell completion: missing cache and slow dynamic profile now prove detect -> repair -> clean detection.
+- systemd linger: existing disabled linger repair still proves repair then clean detect; contribution position remains covered.
+- startup maintenance: structured check now proves detect -> repair -> scoped detect, and preserves env handoff.
+- browser residue: structured repair now proves archive then clean detect, plus dry-run has effects and no fake diffs.
+- positional doctor repairs: startup, browser, shell, and systemd run from their original contribution positions.
+- dryRun/diff readiness: repair API tests diff false and true; side-effect repairs return effects and intentionally empty diffs.

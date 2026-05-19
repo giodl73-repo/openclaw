@@ -1,0 +1,6 @@
+OpenClaw PR 83753 proof image source
+
+HEAD: 8cef0bb283
+Tests: focused doctor repair contract suites passed in split runs, 58 total test cases across the seven focused files.
+Type: tsgo core test config exited 0.
+Format: oxfmt check passed on changed files.
