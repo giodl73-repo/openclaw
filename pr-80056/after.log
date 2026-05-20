@@ -1,6 +1,6 @@
 {
   "label": "after",
-  "ref": "7e988b3404ee921dcc18debba623e26c4b9b0e94",
+  "ref": "634956d85a93d64e4c65b6525ce5355bf3c6ed92",
   "policyBaseMerged": true,
   "hasPolicyPlugin": true,
   "hasChannelPolicyChecks": true,
@@ -13,6 +13,11 @@
     "policy/tools-unknown-sensitivity-token"
   ],
   "docsListAllToolChecks": true,
+  "usesOcPathParseMd": true,
+  "ocPathApiPackageExport": true,
+  "multilineToolMetadataParsed": true,
+  "doctorMultilineMetadataCovered": true,
+  "runtimeMultilineCriticalApprovalCovered": true,
   "runtimeToolPolicyExists": true,
   "runtimeBlocksMissingMetadata": true,
   "runtimeBlocksMissingOwner": true,
@@ -20,5 +25,5 @@
   "runtimeApprovalMetadataCovered": true,
   "approvalMetadataPersisted": true,
   "approvalMetadataBroadcastCovered": true,
-  "focusedTests": "6 files / 105 tests passed on current head"
+  "focusedTests": "policy/runtime/doctor/CLI, gateway approval consumers, import boundaries, oc-path parser tests, extensions tsgo, and git diff --check passed on current head"
 }

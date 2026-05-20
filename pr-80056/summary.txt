@@ -11,10 +11,15 @@ hasRuntimeToolPolicy=false
 approvalRequestAcceptsMetadata=false
 registeredToolChecks=[]
 
-AFTER PR #80056 (7e988b3404ee):
+AFTER PR #80056 (634956d85a93):
 hasToolMetadataChecks=true
 registeredToolChecks=["policy/tools-missing-owner","policy/tools-missing-risk-level","policy/tools-missing-sensitivity-token","policy/tools-unknown-risk-level","policy/tools-unknown-sensitivity-token"]
 docsListAllToolChecks=true
+usesOcPathParseMd=true
+ocPathApiPackageExport=true
+multilineToolMetadataParsed=true
+doctorMultilineMetadataCovered=true
+runtimeMultilineCriticalApprovalCovered=true
 runtimeToolPolicyExists=true
 runtimeBlocksMissingMetadata=true
 runtimeBlocksMissingOwner=true
@@ -22,10 +27,22 @@ runtimeBlocksUnknownRisk=true
 runtimeApprovalMetadataCovered=true
 approvalMetadataPersisted=true
 approvalMetadataBroadcastCovered=true
-focusedTests=6 files / 105 tests passed on current head
+focusedTests=policy/runtime/doctor/CLI, gateway approval consumers, import boundaries, oc-path parser tests, extensions tsgo, and git diff --check passed on current head
 
-Exact local proof command run after docs fix:
-node scripts/run-vitest.mjs src/gateway/server-methods/plugin-approval.test.ts extensions/policy/src/runtime-tool-policy.test.ts extensions/policy/src/doctor/register.test.ts extensions/policy/src/cli.test.ts src/flows/bundled-health-checks.test.ts --reporter=dot
-Result: 6 files passed, 105 tests passed.
+Exact local proof commands run after multiline metadata + oc-path API fix:
+node scripts/run-vitest.mjs extensions/policy/src/runtime-tool-policy.test.ts extensions/policy/src/doctor/register.test.ts extensions/policy/src/cli.test.ts --reporter=dot
+Result: 3 files passed, 44 tests passed.
+
+node scripts/run-vitest.mjs src/gateway/server-methods/plugin-approval.test.ts src/flows/bundled-health-checks.test.ts --reporter=dot
+Result: 3 files passed, 63 tests passed.
+
+node scripts/run-vitest.mjs test/extension-import-boundaries.test.ts --reporter=dot
+Result: 1 file passed, 6 tests passed.
+
+node scripts/run-vitest.mjs extensions/oc-path/src/oc-path/tests/parse.test.ts extensions/oc-path/src/oc-path/tests/scenarios/h2-block-split.test.ts --reporter=dot
+Result: 2 files passed, 34 tests passed.
+
+node scripts/run-tsgo.mjs -p test/tsconfig/tsconfig.extensions.test.json --incremental --tsBuildInfoFile .artifacts/tsgo-cache/test-extensions-policy-oc-path-api.tsbuildinfo
+Result: passed.
 
 git diff --check passed. Full docs formatter currently reports an unrelated docs/reference/templates/CLAUDE.md formatting issue on this checkout; docs/cli/policy.md was formatted by the docs formatter and this PR only changes the policy table.
