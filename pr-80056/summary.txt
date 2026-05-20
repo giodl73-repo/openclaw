@@ -11,7 +11,7 @@ hasRuntimeToolPolicy=false
 approvalRequestAcceptsMetadata=false
 registeredToolChecks=[]
 
-AFTER PR #80056 (634956d85a93):
+AFTER PR #80056 (5d9d7a7eb9):
 hasToolMetadataChecks=true
 registeredToolChecks=["policy/tools-missing-owner","policy/tools-missing-risk-level","policy/tools-missing-sensitivity-token","policy/tools-unknown-risk-level","policy/tools-unknown-sensitivity-token"]
 docsListAllToolChecks=true
@@ -27,7 +27,7 @@ runtimeBlocksUnknownRisk=true
 runtimeApprovalMetadataCovered=true
 approvalMetadataPersisted=true
 approvalMetadataBroadcastCovered=true
-focusedTests=policy/runtime/doctor/CLI, gateway approval consumers, import boundaries, oc-path parser tests, extensions tsgo, and git diff --check passed on current head
+focusedTests=policy/runtime/doctor/CLI including unparseable policy check JSON, gateway approval consumers, import boundaries, oc-path parser tests, extensions tsgo, and git diff --check passed on current head
 
 Exact local proof commands run after multiline metadata + oc-path API fix:
 node scripts/run-vitest.mjs extensions/policy/src/runtime-tool-policy.test.ts extensions/policy/src/doctor/register.test.ts extensions/policy/src/cli.test.ts --reporter=dot
