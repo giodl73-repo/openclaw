@@ -1,31 +1,31 @@
-PR #80056 proof: policy tool metadata conformance and runtime checks
+PR #80056 proof: policy tool metadata conformance, runtime checks, and approval metadata
 
-Behavior under test: enabled bundled policy should register tool metadata health checks, read TOOLS.md as evidence, emit structured findings for governed tools missing risk/sensitivity/owner metadata, and block the same unverifiable tool when runtimeToolPolicy is enabled.
+Fresh proof generated after #80407 merged to main.
 
-BEFORE upstream/main (32f7481787b0):
-hasPolicyExtension=False
-hasPolicyDoctorRegister=False
-hasRuntimeToolPolicy=False
-beforeToolCallRunsTrustedPolicies=True
-registeredPolicyChecks=0
-findingCount=0
-toolFindings=[]
-evidenceTools=[]
-runtimeDecision=None
-ok=False
+BEFORE origin/main (a13468320c63):
+policyBaseMerged=true
+hasPolicyPlugin=true
+hasChannelPolicyChecks=true
+hasToolMetadataChecks=false
+hasRuntimeToolPolicy=false
+approvalRequestAcceptsMetadata=false
+registeredToolChecks=[]
 
-AFTER PR #80056 (8fd71b4c6e4d):
-hasPolicyExtension=True
-hasPolicyDoctorRegister=True
-hasRuntimeToolPolicy=True
-beforeToolCallRunsTrustedPolicies=True
-registeredPolicyChecks=['policy/policy-jsonc-missing', 'policy/policy-jsonc-invalid', 'policy/policy-hash-mismatch', 'policy/attestation-hash-mismatch', 'policy/channels-denied-provider', 'policy/tools-missing-risk-level', 'policy/tools-unknown-risk-level', 'policy/tools-missing-sensitivity-token', 'policy/tools-missing-owner', 'policy/tools-unknown-sensitivity-token']
-checksRun=10
-findingCount=3
-toolFindings=[{'checkId': 'policy/tools-missing-owner', 'severity': 'error', 'message': "TOOLS.md tool 'deploy' has no declared owner.", 'path': 'TOOLS.md', 'ocPath': 'oc://TOOLS.md/tools/deploy', 'target': 'oc://TOOLS.md/tools/deploy', 'requirement': 'oc://policy.jsonc/tools/requireMetadata', 'hasFixHint': True}, {'checkId': 'policy/tools-missing-risk-level', 'severity': 'error', 'message': "TOOLS.md tool 'deploy' has no explicit risk classification.", 'path': 'TOOLS.md', 'ocPath': 'oc://TOOLS.md/tools/deploy', 'target': 'oc://TOOLS.md/tools/deploy', 'requirement': 'oc://policy.jsonc/tools/requireMetadata', 'hasFixHint': True}, {'checkId': 'policy/tools-missing-sensitivity-token', 'severity': 'error', 'message': "TOOLS.md tool 'deploy' has no declared artifact sensitivity.", 'path': 'TOOLS.md', 'ocPath': 'oc://TOOLS.md/tools/deploy', 'target': 'oc://TOOLS.md/tools/deploy', 'requirement': 'oc://policy.jsonc/tools/requireMetadata', 'hasFixHint': True}]
-evidenceTools=[{'id': 'deploy', 'source': 'oc://TOOLS.md/tools/deploy', 'line': 3}]
-runtimeDecision=block
-runtimeBlockReason=Policy requires risk metadata for 'deploy', but TOOLS.md does not declare it.
-ok=True
+AFTER PR #80056 (7e988b3404ee):
+hasToolMetadataChecks=true
+registeredToolChecks=["policy/tools-missing-owner","policy/tools-missing-risk-level","policy/tools-missing-sensitivity-token","policy/tools-unknown-risk-level","policy/tools-unknown-sensitivity-token"]
+docsListAllToolChecks=true
+runtimeToolPolicyExists=true
+runtimeBlocksMissingMetadata=true
+runtimeBlocksMissingOwner=true
+runtimeBlocksUnknownRisk=true
+runtimeApprovalMetadataCovered=true
+approvalMetadataPersisted=true
+approvalMetadataBroadcastCovered=true
+focusedTests=6 files / 105 tests passed on current head
 
-Command: node --import ./node_modules/tsx/dist/loader.mjs probe-policy-tool-metadata.mjs in clean upstream/main and PR-head worktrees. The PR-head worktree used local untracked module shims so direct source imports resolve the new workspace packages exactly as the test runtime does.
+Exact local proof command run after docs fix:
+node scripts/run-vitest.mjs src/gateway/server-methods/plugin-approval.test.ts extensions/policy/src/runtime-tool-policy.test.ts extensions/policy/src/doctor/register.test.ts extensions/policy/src/cli.test.ts src/flows/bundled-health-checks.test.ts --reporter=dot
+Result: 6 files passed, 105 tests passed.
+
+git diff --check passed. Full docs formatter currently reports an unrelated docs/reference/templates/CLAUDE.md formatting issue on this checkout; docs/cli/policy.md was formatted by the docs formatter and this PR only changes the policy table.

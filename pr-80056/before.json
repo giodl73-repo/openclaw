@@ -1,17 +1,11 @@
 {
   "label": "before",
-  "ref": "32f7481787b0",
-  "hasPolicyExtension": false,
-  "hasPolicyDoctorRegister": false,
+  "ref": "a13468320c63573917c185db278f3d4e13389a78",
+  "policyBaseMerged": true,
+  "hasPolicyPlugin": true,
+  "hasChannelPolicyChecks": true,
+  "hasToolMetadataChecks": false,
   "hasRuntimeToolPolicy": false,
-  "beforeToolCallRunsTrustedPolicies": true,
-  "registeredPolicyChecks": [],
-  "checksRun": 0,
-  "findingCount": 0,
-  "toolFindings": [],
-  "evidenceTools": [],
-  "runtimeDecision": null,
-  "runtimeBlockReason": null,
-  "runtimeError": null,
-  "ok": false
+  "approvalRequestAcceptsMetadata": false,
+  "registeredToolChecks": []
 }
