@@ -1,16 +1,16 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { readConfigFileSnapshot } from "../config/config.js";
 import { registerBundledHealthChecks } from "../flows/bundled-health-checks.js";
-import {
-  configValidationIssuesToHealthFindings,
-  registerCoreHealthChecks,
-} from "../flows/doctor-core-checks.js";
+import { configValidationIssuesToHealthFindings } from "../flows/doctor-core-checks.js";
+import { resolveDoctorContributionHealthChecks } from "../flows/doctor-health-contributions.js";
 import {
   exitCodeFromFindings,
   runDoctorLintChecks,
   type DoctorLintRunOptions,
 } from "../flows/doctor-lint-flow.js";
+import { HealthCheckRegistrationError, listHealthChecks } from "../flows/health-check-registry.js";
 import {
+  type HealthCheck,
   healthFindingMeetsSeverity,
   parseHealthFindingSeverity,
   type HealthCheckContext,
@@ -37,8 +37,6 @@ export async function runDoctorLintCli(
   runtime: RuntimeEnv,
   opts: DoctorLintCliOptions,
 ): Promise<number> {
-  registerCoreHealthChecks();
-
   const sevMin =
     opts.severityMin === undefined ? "info" : parseHealthFindingSeverity(opts.severityMin);
   if (sevMin === null) {
@@ -74,8 +72,12 @@ export async function runDoctorLintCli(
     ...(snapshot.path !== undefined ? { configPath: snapshot.path } : {}),
   };
   registerBundledHealthChecks({ cfg: snapshot.config, cwd: ctx.cwd });
+  const coreChecks = await resolveDoctorContributionHealthChecks();
+  const extensionChecks = listHealthChecks().filter((check) => check.kind !== "core");
+  assertNoHealthCheckIdCollisions(coreChecks, extensionChecks);
 
   const runOpts: DoctorLintRunOptions = {
+    checks: [...coreChecks, ...extensionChecks],
     ...(opts.skipIds && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
     ...(opts.onlyIds && opts.onlyIds.length > 0 ? { onlyIds: opts.onlyIds } : {}),
   };
@@ -109,6 +111,18 @@ export async function runDoctorLintCli(
   }
 
   return exitCodeFromFindings(result.findings, sevMin);
+}
+
+function assertNoHealthCheckIdCollisions(
+  coreChecks: readonly HealthCheck[],
+  extensionChecks: readonly HealthCheck[],
+): void {
+  const coreIds = new Set(coreChecks.map((check) => check.id));
+  for (const check of extensionChecks) {
+    if (coreIds.has(check.id)) {
+      throw new HealthCheckRegistrationError(check.id);
+    }
+  }
 }
 
 function writeJsonResult(result: {
