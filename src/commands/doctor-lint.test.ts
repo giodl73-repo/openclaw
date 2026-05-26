@@ -121,7 +121,7 @@ describe("runDoctorLintCli", () => {
     try {
       const exitCode = await runDoctorLintCli(runtime, {
         json: true,
-        onlyIds: ["core/doctor/session-locks"],
+        onlyIds: ["core/doctor/not-a-check"],
       });
 
       expect(exitCode).toBe(1);
@@ -133,7 +133,7 @@ describe("runDoctorLintCli", () => {
           {
             checkId: "core/doctor/lint-selection",
             severity: "error",
-            path: "core/doctor/session-locks",
+            path: "core/doctor/not-a-check",
           },
         ],
       });
