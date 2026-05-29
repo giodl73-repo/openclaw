@@ -18,14 +18,14 @@ report drift through `doctor --lint`. The final conformance signal is a clean
 instead of creating a separate health gate.
 
 Policy currently manages configured channels, MCP servers, model providers,
-network SSRF posture, ingress/channel access posture, Gateway exposure posture, agent workspace posture,
+network SSRF posture, ingress/channel access posture, Gateway exposure posture, feed catalog source posture, agent workspace posture,
 data-handling posture, OpenClaw config secret provider/auth profile posture, and governed tool
 declarations. For example, IT or a workspace operator can record that Telegram
 is not an approved channel provider, restrict MCP servers and model refs to
 approved entries, require private-network fetch/browser access to remain
 disabled, require direct-message session isolation and channel ingress posture
 to stay within reviewed bounds, require Gateway bind/auth/HTTP exposure to stay within reviewed
-bounds, require agent workspace access and tool denies to stay in a reviewed
+bounds, require feed sources to remain approved and pinned, require agent workspace access and tool denies to stay in a reviewed
 posture, require OpenClaw config SecretRefs to use managed providers, require
 config auth profiles to carry provider/mode metadata, require governed tools to
 carry risk and sensitivity metadata, require sensitive logging redaction, deny
@@ -53,7 +53,7 @@ doctor can report the missing artifact.
 
 Policy is authored, not generated from the user's current settings. A minimal
 policy for channels, MCP servers, model providers, network posture, ingress/channel access, Gateway
-exposure, agent workspace posture, configured sandbox runtime posture, OpenClaw
+exposure, feed catalog source posture, agent workspace posture, configured sandbox runtime posture, OpenClaw
 data-handling posture, config secret provider/auth profile posture, and tool metadata looks like this:
 
 ```jsonc
@@ -112,6 +112,13 @@ data-handling posture, config secret provider/auth profile posture, and tool met
     "http": {
       "denyEndpoints": ["chatCompletions", "responses"],
       "requireUrlAllowlists": true,
+    },
+  },
+  "feeds": {
+    "sources": {
+      "require": ["company-approved"],
+      "requirePinned": true,
+      "allowUnsigned": false,
     },
   },
   "agents": {
@@ -360,6 +367,17 @@ Every scope present in `policy.jsonc` must be valid and enforceable.
 | `gateway.http.denyEndpoints`            | Gateway HTTP API endpoints                     | Deny endpoint ids such as `chatCompletions` or `responses`.  |
 | `gateway.http.requireUrlAllowlists`     | Gateway HTTP URL-fetch inputs                  | Set to `true` to require URL allowlists on URL-fetch inputs. |
 
+#### Feed catalog sources
+
+| Policy field                  | Observed state                                   | Use when                                                       |
+| ----------------------------- | ------------------------------------------------ | -------------------------------------------------------------- |
+| `feeds.sources.require`       | `plugins.entries.feeds.config.sources[].id`      | Require specific feed source ids to be configured and enabled. |
+| `feeds.sources.requirePinned` | Feed source `trust` and `integrity` declarations | Set to `true` to require enabled feed sources to be pinned.    |
+| `feeds.sources.allowUnsigned` | Feed source `trust` declarations                 | Set to `false` to reject enabled sources using unsigned trust. |
+
+Feed policy observes only configured source declarations. It does not fetch
+feed documents, install entries, or enforce install decisions at runtime.
+
 #### Agent workspace
 
 | Policy field                     | Observed state                                                                        | Use when                                                                                                            |
@@ -591,6 +609,16 @@ Example JSON output:
         "value": false
       }
     ],
+    "feeds": [
+      {
+        "id": "company-approved",
+        "source": "oc://openclaw.config/plugins/entries/feeds/config/sources/#0",
+        "enabled": true,
+        "url": "https://feeds.example.com#0123456789ab",
+        "trust": "pinned",
+        "integrityPresent": true
+      }
+    ],
     "gatewayExposure": [
       {
         "id": "gateway-bind",
@@ -740,6 +768,9 @@ Policy currently verifies:
 | `policy/gateway-remote-enabled`                          | Gateway remote mode is active when policy denies it.                              |
 | `policy/gateway-http-endpoint-enabled`                   | A Gateway HTTP API endpoint is enabled while denied by policy.                    |
 | `policy/gateway-http-url-fetch-unrestricted`             | Gateway HTTP URL-fetch input lacks a required URL allowlist.                      |
+| `policy/feeds-required-source-missing`                   | A required feed source id is not configured and enabled.                          |
+| `policy/feeds-source-unpinned`                           | An enabled feed source is not pinned when policy requires pinned feeds.           |
+| `policy/feeds-source-unsigned`                           | An enabled feed source uses unsigned trust when policy denies unsigned feeds.     |
 | `policy/agents-workspace-access-denied`                  | Agent sandbox mode or workspace access is outside the policy allowlist.           |
 | `policy/agents-tool-not-denied`                          | An agent or default config does not deny a tool required by policy.               |
 | `policy/tools-profile-unapproved`                        | A configured global or per-agent tool profile is outside the allowlist.           |
