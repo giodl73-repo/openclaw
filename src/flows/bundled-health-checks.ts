@@ -6,17 +6,23 @@ import { loadBundledPluginPublicArtifactModuleSync } from "../plugins/public-sur
 import { registerHealthCheck } from "./health-check-registry.js";
 
 type BundledHealthApi = {
+  registerFeedsDoctorChecks?: (host: { registerHealthCheck: typeof registerHealthCheck }) => void;
   registerPolicyDoctorChecks?: (host: { registerHealthCheck: typeof registerHealthCheck }) => void;
 };
 
 export function registerBundledHealthChecks(params: { cfg: OpenClawConfig; cwd?: string }): void {
-  if (!shouldRegisterPolicyHealth(params)) {
-    return;
+  if (shouldRegisterFeedsHealth(params)) {
+    loadBundledPluginPublicArtifactModuleSync<BundledHealthApi>({
+      dirName: "feeds",
+      artifactBasename: "api.js",
+    }).registerFeedsDoctorChecks?.({ registerHealthCheck });
   }
-  loadBundledPluginPublicArtifactModuleSync<BundledHealthApi>({
-    dirName: "policy",
-    artifactBasename: "api.js",
-  }).registerPolicyDoctorChecks?.({ registerHealthCheck });
+  if (shouldRegisterPolicyHealth(params)) {
+    loadBundledPluginPublicArtifactModuleSync<BundledHealthApi>({
+      dirName: "policy",
+      artifactBasename: "api.js",
+    }).registerPolicyDoctorChecks?.({ registerHealthCheck });
+  }
 }
 
 function shouldRegisterPolicyHealth(params: { cfg: OpenClawConfig; cwd?: string }): boolean {
@@ -28,6 +34,23 @@ function shouldRegisterPolicyHealth(params: { cfg: OpenClawConfig; cwd?: string 
   if (
     !passesManifestOwnerBasePolicy({
       plugin: { id: "policy" },
+      normalizedConfig: normalizePluginsConfig(params.cfg.plugins),
+    })
+  ) {
+    return false;
+  }
+  return entry.enabled === true || config.enabled === true;
+}
+
+function shouldRegisterFeedsHealth(params: { cfg: OpenClawConfig; cwd?: string }): boolean {
+  const entry = params.cfg.plugins?.entries?.feeds;
+  const config = readRecord(entry?.config) ?? {};
+  if (entry === undefined || entry.enabled === false || config.enabled === false) {
+    return false;
+  }
+  if (
+    !passesManifestOwnerBasePolicy({
+      plugin: { id: "feeds" },
       normalizedConfig: normalizePluginsConfig(params.cfg.plugins),
     })
   ) {

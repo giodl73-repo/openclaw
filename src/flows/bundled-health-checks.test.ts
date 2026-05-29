@@ -5,10 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerBundledHealthChecks } from "./bundled-health-checks.js";
 
 const mocks = vi.hoisted(() => ({
+  registerFeedsDoctorChecks: vi.fn(),
   registerPolicyDoctorChecks: vi.fn(),
-  loadBundledPluginPublicArtifactModuleSync: vi.fn(() => ({
-    registerPolicyDoctorChecks: mocks.registerPolicyDoctorChecks,
-  })),
+  loadBundledPluginPublicArtifactModuleSync: vi.fn((params: { dirName: string }) =>
+    params.dirName === "feeds"
+      ? {
+          registerFeedsDoctorChecks: mocks.registerFeedsDoctorChecks,
+        }
+      : {
+          registerPolicyDoctorChecks: mocks.registerPolicyDoctorChecks,
+        },
+  ),
 }));
 
 vi.mock("../plugins/public-surface-loader.js", () => ({
@@ -32,6 +39,21 @@ describe("registerBundledHealthChecks", () => {
     registerBundledHealthChecks({ cfg: {}, cwd: workspaceDir });
 
     expect(mocks.loadBundledPluginPublicArtifactModuleSync).not.toHaveBeenCalled();
+  });
+
+  it("loads bundled feeds health checks when feeds extension is enabled", () => {
+    registerBundledHealthChecks({
+      cfg: { plugins: { entries: { feeds: { enabled: true } } } },
+      cwd: workspaceDir,
+    });
+
+    expect(mocks.loadBundledPluginPublicArtifactModuleSync).toHaveBeenCalledWith({
+      dirName: "feeds",
+      artifactBasename: "api.js",
+    });
+    expect(mocks.registerFeedsDoctorChecks).toHaveBeenCalledWith({
+      registerHealthCheck: expect.any(Function),
+    });
   });
 
   it("loads bundled policy health checks when policy extension is enabled", () => {
@@ -66,11 +88,34 @@ describe("registerBundledHealthChecks", () => {
     expect(mocks.loadBundledPluginPublicArtifactModuleSync).not.toHaveBeenCalled();
   });
 
+  it("honors explicit feeds disablement", () => {
+    registerBundledHealthChecks({
+      cfg: { plugins: { entries: { feeds: { enabled: true, config: { enabled: false } } } } },
+      cwd: workspaceDir,
+    });
+
+    expect(mocks.loadBundledPluginPublicArtifactModuleSync).not.toHaveBeenCalled();
+  });
+
   it("honors plugin control-plane disablement for policy checks", () => {
     for (const plugins of [
       { enabled: false, entries: { policy: { enabled: true } } },
       { deny: ["policy"], entries: { policy: { enabled: true } } },
       { allow: ["telegram"], entries: { policy: { enabled: true } } },
+    ]) {
+      vi.clearAllMocks();
+
+      registerBundledHealthChecks({ cfg: { plugins }, cwd: workspaceDir });
+
+      expect(mocks.loadBundledPluginPublicArtifactModuleSync).not.toHaveBeenCalled();
+    }
+  });
+
+  it("honors plugin control-plane disablement for feeds checks", () => {
+    for (const plugins of [
+      { enabled: false, entries: { feeds: { enabled: true } } },
+      { deny: ["feeds"], entries: { feeds: { enabled: true } } },
+      { allow: ["telegram"], entries: { feeds: { enabled: true } } },
     ]) {
       vi.clearAllMocks();
 
