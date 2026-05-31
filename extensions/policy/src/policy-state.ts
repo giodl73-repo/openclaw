@@ -49,6 +49,7 @@ export type PolicyEvidence = {
   readonly ingress?: readonly PolicyIngressEvidence[];
   readonly gatewayExposure?: readonly PolicyGatewayExposureEvidence[];
   readonly feeds?: readonly PolicyFeedSourceEvidence[];
+  readonly feedSearch?: PolicyFeedSearchEvidence;
   readonly agentWorkspace?: readonly PolicyAgentWorkspaceEvidence[];
   readonly dataHandling?: readonly PolicyDataHandlingEvidence[];
   readonly secrets?: readonly PolicySecretEvidence[];
@@ -163,6 +164,12 @@ export type PolicyFeedSourceEvidence = {
   readonly url?: string;
   readonly trust?: string;
   readonly integrityPresent?: boolean;
+};
+
+export type PolicyFeedSearchEvidence = {
+  readonly source: string;
+  readonly default?: boolean;
+  readonly sourceIds?: readonly string[];
 };
 
 export type PolicyGatewayExposureEvidence = {
@@ -354,7 +361,9 @@ export function collectPolicyEvidence(
     ...(options.includeGatewayExposure === false
       ? {}
       : { gatewayExposure: scanPolicyGatewayExposure(cfg) }),
-    ...(options.includeFeeds === false ? {} : { feeds: scanPolicyFeeds(cfg) }),
+    ...(options.includeFeeds === false
+      ? {}
+      : { feeds: scanPolicyFeeds(cfg), feedSearch: scanPolicyFeedSearch(cfg) }),
     ...(options.includeAgentWorkspace === false
       ? {}
       : { agentWorkspace: scanPolicyAgentWorkspace(cfg) }),
@@ -547,15 +556,7 @@ export function scanPolicyFeeds(cfg: Record<string, unknown>): readonly PolicyFe
   const entries = isRecord(plugins.entries) ? plugins.entries : {};
   const feeds = isRecord(entries.feeds) ? entries.feeds : {};
   const config = isRecord(feeds.config) ? feeds.config : {};
-  const allow = readStringArray(plugins.allow);
-  const deny = readStringArray(plugins.deny);
-  if (
-    plugins.enabled === false ||
-    feeds.enabled === false ||
-    config.enabled === false ||
-    deny.includes("feeds") ||
-    (allow.length > 0 && !allow.includes("feeds"))
-  ) {
+  if (!feedPluginEnabledForPolicy(plugins, feeds, config)) {
     return [];
   }
   const sources = Array.isArray(config.sources) ? config.sources : [];
@@ -598,6 +599,36 @@ export function scanPolicyFeeds(cfg: Record<string, unknown>): readonly PolicyFe
     })
     .filter((entry): entry is PolicyFeedSourceEvidence => entry !== undefined)
     .toSorted((a, b) => a.id.localeCompare(b.id) || a.source.localeCompare(b.source));
+}
+
+export function scanPolicyFeedSearch(
+  cfg: Record<string, unknown>,
+): PolicyFeedSearchEvidence | undefined {
+  const plugins = isRecord(cfg.plugins) ? cfg.plugins : {};
+  const entries = isRecord(plugins.entries) ? plugins.entries : {};
+  const feeds = isRecord(entries.feeds) ? entries.feeds : {};
+  const config = isRecord(feeds.config) ? feeds.config : {};
+  if (!feedPluginEnabledForPolicy(plugins, feeds, config)) {
+    return undefined;
+  }
+  const search = isRecord(config.search) ? config.search : undefined;
+  if (search === undefined) {
+    return undefined;
+  }
+  const evidence: {
+    source: string;
+    default?: boolean;
+    sourceIds?: readonly string[];
+  } = {
+    source: "oc://openclaw.config/plugins/entries/feeds/config/search",
+  };
+  if (typeof search.default === "boolean") {
+    evidence.default = search.default;
+  }
+  if (Array.isArray(search.sources)) {
+    evidence.sourceIds = search.sources.filter((id): id is string => typeof id === "string");
+  }
+  return evidence;
 }
 
 export function scanPolicyGatewayExposure(
@@ -2809,4 +2840,20 @@ function stableJson(value: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function feedPluginEnabledForPolicy(
+  plugins: Record<string, unknown>,
+  feeds: Record<string, unknown>,
+  config: Record<string, unknown>,
+): boolean {
+  const allow = readStringArray(plugins.allow);
+  const deny = readStringArray(plugins.deny);
+  return (
+    plugins.enabled !== false &&
+    feeds.enabled !== false &&
+    config.enabled !== false &&
+    !deny.includes("feeds") &&
+    (allow.length === 0 || allow.includes("feeds"))
+  );
 }

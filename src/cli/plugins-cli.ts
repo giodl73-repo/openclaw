@@ -19,6 +19,8 @@ export type PluginMarketplaceListOptions = {
 export type PluginSearchOptions = {
   json?: boolean;
   limit?: number;
+  catalogFeeds?: boolean;
+  feedSource?: string[];
 };
 
 export type PluginUninstallOptions = {
@@ -61,6 +63,10 @@ const loadPluginsAuthoringCommands = createModuleLoader(
   () => import("./plugins-authoring-command.js"),
 );
 
+function collectFeedSource(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
 export function registerPluginsCli(program: Command) {
   const plugins = program
     .command("plugins")
@@ -88,6 +94,8 @@ export function registerPluginsCli(program: Command) {
     .argument("[query...]", "Search query")
     .option("--limit <n>", "Max results", (value) => parseStrictPositiveIntOption(value, "--limit"))
     .option("--json", "Print JSON", false)
+    .option("--catalog-feeds", "Search configured catalog feeds instead of ClawHub", false)
+    .option("--feed-source <id>", "Search one configured feed source id", collectFeedSource, [])
     .action(async (queryParts: string[], opts: PluginSearchOptions) => {
       const { runPluginsSearchCommand } = await import("./plugins-search-command.js");
       await runPluginsSearchCommand(queryParts, opts);
