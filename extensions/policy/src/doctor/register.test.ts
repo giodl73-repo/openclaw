@@ -205,6 +205,12 @@ describe("registerPolicyDoctorChecks", () => {
         selectors: ["agentIds"],
       },
       {
+        path: "sandbox.allowModes",
+        strictness: "allowlist-subset",
+        emptyList: "disabled",
+        selectors: ["agentIds"],
+      },
+      {
         path: "sandbox.allowBackends",
         strictness: "allowlist-subset",
         emptyList: "disabled",
@@ -999,6 +1005,11 @@ describe("registerPolicyDoctorChecks", () => {
       "sandbox unsupported key",
       { sandbox: { requireModes: ["all"] } },
       "oc://policy.jsonc/sandbox/requireModes",
+    ],
+    [
+      "sandbox allowModes unsupported value",
+      { sandbox: { allowModes: ["host"] } },
+      "oc://policy.jsonc/sandbox/allowModes/#0",
     ],
     [
       "sandbox containers unsupported key",
@@ -5886,6 +5897,70 @@ describe("registerPolicyDoctorChecks", () => {
         }),
       ]),
     );
+  });
+
+  it("allows policy to pin agents to approved sandbox modes", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      agents: {
+        defaults: { sandbox: { mode: "off" } },
+        list: [
+          { id: "hosted", sandbox: { mode: "off" } },
+          { id: "sandboxed", sandbox: { mode: "all" } },
+        ],
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        scopes: {
+          hosted: {
+            agentIds: ["hosted"],
+            sandbox: { allowModes: ["off"] },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runPolicyChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("reports agent-scoped sandbox modes outside allowModes", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      agents: {
+        list: [{ id: "hosted", sandbox: { mode: "all" } }],
+      },
+    } as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        scopes: {
+          hosted: {
+            agentIds: ["hosted"],
+            sandbox: { allowModes: ["off"] },
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await runPolicyChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/sandbox-mode-unapproved",
+        ocPath: "oc://openclaw.config/agents/list/#0/sandbox/mode",
+        requirement: "oc://policy.jsonc/scopes/hosted/sandbox/allowModes",
+      }),
+    ]);
   });
 
   it("does not apply sandbox overlays from invalid scoped policy", async () => {
