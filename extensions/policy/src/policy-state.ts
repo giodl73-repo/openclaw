@@ -42,6 +42,7 @@ export type PolicyEvidence = {
   readonly channels: readonly PolicyChannelEvidence[];
   readonly tools?: readonly PolicyToolEvidence[];
   readonly toolPosture?: readonly PolicyToolPostureEvidence[];
+  readonly pluginInventory?: readonly PolicyPluginEvidence[];
   readonly sandboxPosture?: readonly PolicySandboxPostureEvidence[];
   readonly mcpServers: readonly PolicyMcpServerEvidence[];
   readonly modelProviders: readonly PolicyModelProviderEvidence[];
@@ -84,13 +85,17 @@ export type PolicyToolEvidence = {
 export type PolicyToolPostureEvidence = {
   readonly id: string;
   readonly kind:
+    | "agentToAgentAllow"
+    | "agentToAgentEnabled"
     | "allow"
     | "alsoAllow"
     | "deny"
     | "elevatedAllowFrom"
+    | "elevatedDefault"
     | "elevatedEnabled"
     | "execAsk"
     | "execHost"
+    | "execSafeBinTrustedDirs"
     | "execSecurity"
     | "fsWorkspaceOnly"
     | "profile";
@@ -100,6 +105,12 @@ export type PolicyToolPostureEvidence = {
   readonly value?: boolean | string;
   readonly entries?: readonly string[];
   readonly explicit?: boolean;
+};
+
+export type PolicyPluginEvidence = {
+  readonly id: string;
+  readonly source: string;
+  readonly enabled?: boolean;
 };
 
 export type PolicySandboxPostureEvidence = {
@@ -315,6 +326,7 @@ export function collectPolicyEvidence(
     readonly includeAgentWorkspace?: boolean;
     readonly includeDataHandling?: boolean;
     readonly includeToolPosture?: boolean;
+    readonly includePluginInventory?: boolean;
     readonly includeSandboxPosture?: boolean;
     readonly includeSecrets?: boolean;
     readonly includeAuthProfiles?: boolean;
@@ -331,6 +343,7 @@ export function collectPolicyEvidence(
     readonly includeAgentWorkspace?: boolean;
     readonly includeDataHandling?: boolean;
     readonly includeToolPosture?: boolean;
+    readonly includePluginInventory?: boolean;
     readonly includeSandboxPosture?: boolean;
     readonly includeSecrets?: boolean;
     readonly includeAuthProfiles?: boolean;
@@ -347,6 +360,7 @@ export function collectPolicyEvidence(
     readonly includeAgentWorkspace?: boolean;
     readonly includeDataHandling?: boolean;
     readonly includeToolPosture?: boolean;
+    readonly includePluginInventory?: boolean;
     readonly includeSandboxPosture?: boolean;
     readonly includeSecrets?: boolean;
     readonly includeAuthProfiles?: boolean;
@@ -369,6 +383,9 @@ export function collectPolicyEvidence(
       : { agentWorkspace: scanPolicyAgentWorkspace(cfg) }),
     ...(options.includeDataHandling === false ? {} : { dataHandling: scanPolicyDataHandling(cfg) }),
     ...(options.includeToolPosture === false ? {} : { toolPosture: scanPolicyToolPosture(cfg) }),
+    ...(options.includePluginInventory === false
+      ? {}
+      : { pluginInventory: scanPolicyPluginInventory(cfg) }),
     ...(options.includeSandboxPosture === false
       ? {}
       : { sandboxPosture: scanPolicySandboxPosture(cfg) }),
@@ -660,6 +677,20 @@ export function scanPolicyChannels(cfg: Record<string, unknown>): readonly Polic
       }
       return entry;
     });
+}
+
+export function scanPolicyPluginInventory(
+  cfg: Record<string, unknown>,
+): readonly PolicyPluginEvidence[] {
+  const plugins = isRecord(cfg.plugins) ? cfg.plugins : {};
+  const entries = isRecord(plugins.entries) ? plugins.entries : {};
+  return Object.entries(entries)
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .map(([id, value]) => ({
+      id,
+      source: `oc://openclaw.config/plugins/entries/${ocPathSegment(id)}`,
+      ...(isRecord(value) && typeof value.enabled === "boolean" ? { enabled: value.enabled } : {}),
+    }));
 }
 
 export function scanPolicyMcpServers(
@@ -1036,6 +1067,13 @@ export function scanPolicyToolPosture(
     sourceBase: "oc://openclaw.config/tools",
     inheritedSourceBase: "oc://openclaw.config/tools",
   });
+  pushElevatedDefaultPosture(entries, {
+    id: "agents-defaults",
+    scope: "global",
+    source: "oc://openclaw.config/agents/defaults/elevatedDefault",
+    value: readString(defaults.elevatedDefault) ?? "on",
+    explicit: readString(defaults.elevatedDefault) !== undefined,
+  });
 
   const list = Array.isArray(agents.list) ? agents.list : [];
   list.forEach((agent, index) => {
@@ -1054,6 +1092,19 @@ export function scanPolicyToolPosture(
       inheritedSandbox: defaultSandbox,
       sourceBase: `oc://openclaw.config/agents/list/#${index}/tools`,
       inheritedSourceBase: "oc://openclaw.config/tools",
+    });
+    const localElevatedDefault = readString(agent.elevatedDefault);
+    const inheritedElevatedDefault = readString(defaults.elevatedDefault);
+    pushElevatedDefaultPosture(entries, {
+      id: agentId ?? `agent-${index}`,
+      scope: "agent",
+      agentId,
+      source:
+        localElevatedDefault === undefined && inheritedElevatedDefault !== undefined
+          ? "oc://openclaw.config/agents/defaults/elevatedDefault"
+          : `oc://openclaw.config/agents/list/#${index}/elevatedDefault`,
+      value: localElevatedDefault ?? inheritedElevatedDefault ?? "on",
+      explicit: localElevatedDefault !== undefined || inheritedElevatedDefault !== undefined,
     });
   });
 
@@ -1546,7 +1597,30 @@ function pushToolPostureEvidence(
   pushToolPostureList(entries, params, "deny");
   pushToolFsPosture(entries, params);
   pushToolExecPosture(entries, params);
+  pushToolAgentToAgentPosture(entries, params);
   pushToolElevatedPosture(entries, params);
+}
+
+function pushElevatedDefaultPosture(
+  entries: PolicyToolPostureEvidence[],
+  params: {
+    readonly id: string;
+    readonly scope: "global" | "agent";
+    readonly agentId?: string;
+    readonly source: string;
+    readonly value: string;
+    readonly explicit: boolean;
+  },
+): void {
+  entries.push({
+    id: `${params.id}-elevatedDefault`,
+    kind: "elevatedDefault",
+    source: params.source,
+    scope: params.scope,
+    ...(params.agentId === undefined ? {} : { agentId: params.agentId }),
+    value: params.value,
+    explicit: params.explicit,
+  });
 }
 
 function pushToolFsPosture(entries: PolicyToolPostureEvidence[], params: ToolPostureParams): void {
@@ -1604,6 +1678,62 @@ function pushToolExecPosture(
     value: localAsk ?? inheritedAsk ?? "off",
     explicit: localAsk !== undefined || inheritedAsk !== undefined,
     inherited: localAsk === undefined && inheritedAsk !== undefined,
+  });
+
+  pushToolPostureStringList(entries, params, {
+    suffix: "exec/safeBinTrustedDirs",
+    kind: "execSafeBinTrustedDirs",
+    local: localExec.safeBinTrustedDirs,
+    inherited: inheritedExec.safeBinTrustedDirs,
+  });
+}
+
+function pushToolAgentToAgentPosture(
+  entries: PolicyToolPostureEvidence[],
+  params: ToolPostureParams,
+): void {
+  const localA2A = isRecord(params.tools.agentToAgent) ? params.tools.agentToAgent : {};
+  const inheritedA2A = isRecord(params.inheritedTools.agentToAgent)
+    ? params.inheritedTools.agentToAgent
+    : {};
+  const localEnabled = readBoolean(localA2A.enabled);
+  const inheritedEnabled = readBoolean(inheritedA2A.enabled);
+  pushToolPostureValue(entries, params, {
+    suffix: "agentToAgent/enabled",
+    kind: "agentToAgentEnabled",
+    value: localEnabled ?? inheritedEnabled ?? false,
+    explicit: localEnabled !== undefined || inheritedEnabled !== undefined,
+    inherited: localEnabled === undefined && inheritedEnabled !== undefined,
+  });
+  pushToolPostureStringList(entries, params, {
+    suffix: "agentToAgent/allow",
+    kind: "agentToAgentAllow",
+    local: localA2A.allow,
+    inherited: inheritedA2A.allow,
+  });
+}
+
+function pushToolPostureStringList(
+  entries: PolicyToolPostureEvidence[],
+  params: ToolPostureParams,
+  entry: {
+    readonly suffix: string;
+    readonly kind: PolicyToolPostureEvidence["kind"];
+    readonly local: unknown;
+    readonly inherited: unknown;
+  },
+): void {
+  const localEntries = readStringArray(entry.local);
+  const inheritedEntries = readStringArray(entry.inherited);
+  const inherited = localEntries.length === 0 && inheritedEntries.length > 0;
+  entries.push({
+    id: `${params.id}-${entry.suffix.replaceAll("/", "-")}`,
+    kind: entry.kind,
+    source: `${inherited ? params.inheritedSourceBase : params.sourceBase}/${entry.suffix}`,
+    scope: params.scope,
+    ...(params.agentId === undefined ? {} : { agentId: params.agentId }),
+    entries: [...inheritedEntries, ...localEntries],
+    explicit: localEntries.length > 0 || inheritedEntries.length > 0,
   });
 }
 

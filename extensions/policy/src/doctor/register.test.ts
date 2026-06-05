@@ -190,6 +190,28 @@ describe("registerPolicyDoctorChecks", () => {
         emptyList: "disabled",
         selectors: ["agentIds"],
       },
+      {
+        path: "tools.exec.allowSafeBinDirs",
+        strictness: "allowlist-subset",
+        emptyList: "disabled",
+        selectors: ["agentIds"],
+      },
+      {
+        path: "tools.agentToAgent.requireEnabled",
+        strictness: "requires-true",
+        selectors: ["agentIds"],
+      },
+      {
+        path: "tools.agentToAgent.allow.expected",
+        strictness: "exact-list",
+        emptyList: "meaningful",
+        selectors: ["agentIds"],
+      },
+      {
+        path: "tools.elevated.requireDefaultOff",
+        strictness: "requires-true",
+        selectors: ["agentIds"],
+      },
       { path: "tools.elevated.allow", strictness: "requires-false", selectors: ["agentIds"] },
       {
         path: "tools.alsoAllow.expected",
@@ -555,6 +577,8 @@ describe("registerPolicyDoctorChecks", () => {
       "policy/channels-denied-provider",
       "policy/mcp-denied-server",
       "policy/mcp-unapproved-server",
+      "policy/plugins-denied",
+      "policy/plugins-unapproved",
       "policy/models-denied-provider",
       "policy/models-unapproved-provider",
       "policy/network-private-access-enabled",
@@ -574,9 +598,14 @@ describe("registerPolicyDoctorChecks", () => {
       "policy/agents-tool-not-denied",
       "policy/tools-profile-unapproved",
       "policy/tools-fs-workspace-only-required",
+      "policy/tools-agent-to-agent-disabled",
+      "policy/tools-agent-to-agent-allow-missing",
+      "policy/tools-agent-to-agent-allow-unexpected",
+      "policy/tools-elevated-default-on",
       "policy/tools-exec-security-unapproved",
       "policy/tools-exec-ask-unapproved",
       "policy/tools-exec-host-unapproved",
+      "policy/tools-exec-safebin-dir-unapproved",
       "policy/tools-elevated-enabled",
       "policy/tools-also-allow-missing",
       "policy/tools-also-allow-unexpected",
@@ -1001,6 +1030,12 @@ describe("registerPolicyDoctorChecks", () => {
       { agents: { workspace: { denyTools: ["exec", "browser"] } } },
       "oc://policy.jsonc/agents/workspace/denyTools/#1",
     ],
+    ["plugins allow invalid", { plugins: { allow: "discord" } }, "oc://policy.jsonc/plugins/allow"],
+    [
+      "tools agentToAgent requireEnabled invalid",
+      { tools: { agentToAgent: { requireEnabled: "true" } } },
+      "oc://policy.jsonc/tools/agentToAgent/requireEnabled",
+    ],
     [
       "sandbox unsupported key",
       { sandbox: { requireModes: ["all"] } },
@@ -1360,6 +1395,7 @@ describe("registerPolicyDoctorChecks", () => {
           includeAgentWorkspace: false,
           includeDataHandling: false,
           includeToolPosture: false,
+          includePluginInventory: false,
           includeSandboxPosture: false,
           includeSecrets: false,
           includeAuthProfiles: false,
@@ -1394,6 +1430,7 @@ describe("registerPolicyDoctorChecks", () => {
           includeAgentWorkspace: false,
           includeDataHandling: false,
           includeToolPosture: false,
+          includePluginInventory: false,
           includeSandboxPosture: false,
           includeSecrets: false,
           includeAuthProfiles: false,
@@ -1440,6 +1477,7 @@ describe("registerPolicyDoctorChecks", () => {
           includeAgentWorkspace: false,
           includeDataHandling: false,
           includeToolPosture: false,
+          includePluginInventory: false,
           includeSandboxPosture: false,
           includeSecrets: false,
           includeAuthProfiles: false,
@@ -1472,6 +1510,7 @@ describe("registerPolicyDoctorChecks", () => {
       includeAgentWorkspace: false,
       includeDataHandling: false,
       includeToolPosture: false,
+      includePluginInventory: false,
       includeSandboxPosture: false,
       includeSecrets: false,
       includeAuthProfiles: false,
@@ -1968,6 +2007,66 @@ describe("registerPolicyDoctorChecks", () => {
         ocPath: "oc://TOOLS.md/tools/deploy",
       }),
     ]);
+  });
+
+  it("reports enabled plugins outside policy allow and deny lists", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      plugins: {
+        entries: {
+          policy: { enabled: true },
+          discord: { enabled: true },
+          voice: { enabled: false },
+          acpx: { enabled: true },
+        },
+      },
+    } as unknown as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        plugins: { allow: ["policy", "discord"], deny: ["acpx"] },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+    const evidence = collectPolicyEvidence(cfg as unknown as Record<string, unknown>);
+
+    expect(evidence.pluginInventory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "acpx",
+          source: "oc://openclaw.config/plugins/entries/acpx",
+          enabled: true,
+        }),
+        expect.objectContaining({
+          id: "voice",
+          enabled: false,
+        }),
+      ]),
+    );
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          checkId: "policy/plugins-denied",
+          ocPath: "oc://openclaw.config/plugins/entries/acpx",
+          requirement: "oc://policy.jsonc/plugins/deny",
+        }),
+        expect.objectContaining({
+          checkId: "policy/plugins-unapproved",
+          ocPath: "oc://openclaw.config/plugins/entries/acpx",
+          requirement: "oc://policy.jsonc/plugins/allow",
+        }),
+      ]),
+    );
+    expect(result.findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ocPath: "oc://openclaw.config/plugins/entries/voice" }),
+      ]),
+    );
   });
 
   it("reports model providers denied by policy", async () => {
@@ -6319,6 +6418,97 @@ describe("registerPolicyDoctorChecks", () => {
           checkId: "policy/tools-required-deny-missing",
           ocPath: "oc://openclaw.config/agents/list/#0/tools/deny",
         }),
+      ]),
+    );
+  });
+
+  it("reports P2 config coverage drift for tools policy", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      tools: {
+        agentToAgent: { enabled: false, allow: ["main", "ops"] },
+        exec: { safeBinTrustedDirs: ["/opt/bin", "/tmp/bin"] },
+      },
+      agents: {
+        defaults: { elevatedDefault: "on" },
+        list: [
+          {
+            id: "worker",
+            elevatedDefault: "off",
+            tools: {
+              agentToAgent: { enabled: true, allow: ["main"] },
+              exec: { safeBinTrustedDirs: ["/opt/bin"] },
+            },
+          },
+        ],
+      },
+    } as unknown as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        tools: {
+          elevated: { requireDefaultOff: true },
+          agentToAgent: { requireEnabled: true, allow: { expected: ["main"] } },
+          exec: { allowSafeBinDirs: ["/opt/bin"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+    const evidence = collectPolicyEvidence(cfg as unknown as Record<string, unknown>);
+
+    expect(evidence.toolPosture).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "agents-defaults-elevatedDefault",
+          kind: "elevatedDefault",
+          value: "on",
+          source: "oc://openclaw.config/agents/defaults/elevatedDefault",
+        }),
+        expect.objectContaining({
+          id: "tools-agentToAgent-enabled",
+          kind: "agentToAgentEnabled",
+          value: false,
+          source: "oc://openclaw.config/tools/agentToAgent/enabled",
+        }),
+        expect.objectContaining({
+          id: "tools-exec-safeBinTrustedDirs",
+          kind: "execSafeBinTrustedDirs",
+          entries: ["/opt/bin", "/tmp/bin"],
+        }),
+      ]),
+    );
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          checkId: "policy/tools-elevated-default-on",
+          ocPath: "oc://openclaw.config/agents/defaults/elevatedDefault",
+          requirement: "oc://policy.jsonc/tools/elevated/requireDefaultOff",
+        }),
+        expect.objectContaining({
+          checkId: "policy/tools-agent-to-agent-disabled",
+          ocPath: "oc://openclaw.config/tools/agentToAgent/enabled",
+          requirement: "oc://policy.jsonc/tools/agentToAgent/requireEnabled",
+        }),
+        expect.objectContaining({
+          checkId: "policy/tools-agent-to-agent-allow-unexpected",
+          ocPath: "oc://openclaw.config/tools/agentToAgent/allow",
+          requirement: "oc://policy.jsonc/tools/agentToAgent/allow/expected",
+        }),
+        expect.objectContaining({
+          checkId: "policy/tools-exec-safebin-dir-unapproved",
+          ocPath: "oc://openclaw.config/tools/exec/safeBinTrustedDirs",
+          requirement: "oc://policy.jsonc/tools/exec/allowSafeBinDirs",
+        }),
+      ]),
+    );
+    expect(result.findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ocPath: "oc://openclaw.config/agents/list/#0/elevatedDefault" }),
       ]),
     );
   });

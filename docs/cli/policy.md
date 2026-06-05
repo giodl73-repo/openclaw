@@ -196,7 +196,8 @@ policy. `agents.workspace.denyTools` supports `exec`, `process`, `write`,
 and `group:runtime` covers shell/process tools. Tool posture policy observes
 `tools.profile`, `tools.allow`, `tools.alsoAllow`, `tools.deny`,
 `tools.fs.workspaceOnly`, `tools.exec.security`, `tools.exec.ask`,
-`tools.exec.host`, `tools.elevated.enabled`, and the same per-agent
+`tools.exec.host`, `tools.exec.safeBinTrustedDirs`,
+`tools.agentToAgent`, `agents.*.elevatedDefault`, `tools.elevated.enabled`, and the same per-agent
 `agents.list[].tools.*` overrides. Exec approval policy reads the named
 `exec-approvals.json` product artifact only when an `execApprovals` rule is
 present; evidence records defaults, per-agent posture, and allowlist patterns
@@ -336,6 +337,13 @@ Every scope present in `policy.jsonc` must be valid and enforceable.
 | ------------------- | ------------------- | ---------------------------------------------------------- |
 | `mcp.servers.allow` | `mcp.servers.*` ids | Require every configured MCP server to be in an allowlist. |
 | `mcp.servers.deny`  | `mcp.servers.*` ids | Deny specific configured MCP server ids.                   |
+
+#### Plugins
+
+| Policy field    | Observed state          | Use when                                            |
+| --------------- | ----------------------- | --------------------------------------------------- |
+| `plugins.allow` | `plugins.entries.*` ids | Require every enabled plugin to be in an allowlist. |
+| `plugins.deny`  | `plugins.entries.*` ids | Deny specific enabled plugin ids.                   |
 
 #### Model providers
 
@@ -502,16 +510,20 @@ allow only reviewed exec approval posture for selected agents:
 
 #### Tool posture
 
-| Policy field                    | Observed state                                              | Use when                                                                                                 |
-| ------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `tools.profiles.allow`          | `tools.profile` and `agents.list[].tools.profile`           | Allow only tool profile ids such as `minimal`, `messaging`, or `coding`.                                 |
-| `tools.fs.requireWorkspaceOnly` | `tools.fs.workspaceOnly` and per-agent `tools.fs` overrides | Set to `true` to require workspace-only filesystem tool posture.                                         |
-| `tools.exec.allowSecurity`      | `tools.exec.security` and per-agent exec security           | Allow only exec security modes such as `deny` or `allowlist`.                                            |
-| `tools.exec.requireAsk`         | `tools.exec.ask` and per-agent exec ask mode                | Require approval posture such as `always`.                                                               |
-| `tools.exec.allowHosts`         | `tools.exec.host` and per-agent exec host routing           | Allow only exec host routing modes such as `sandbox`.                                                    |
-| `tools.elevated.allow`          | `tools.elevated.enabled` and per-agent elevated posture     | Set to `false` to require elevated tool mode to stay disabled.                                           |
-| `tools.alsoAllow.expected`      | `tools.alsoAllow` and per-agent `tools.alsoAllow`           | Require exact `alsoAllow` entries and report missing or unexpected additive tool grants.                 |
-| `tools.denyTools`               | `tools.deny` and `agents.list[].tools.deny`                 | Require configured tool deny lists to include tool ids or groups such as `group:runtime` and `group:fs`. |
+| Policy field                        | Observed state                                              | Use when                                                                                                 |
+| ----------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `tools.profiles.allow`              | `tools.profile` and `agents.list[].tools.profile`           | Allow only tool profile ids such as `minimal`, `messaging`, or `coding`.                                 |
+| `tools.fs.requireWorkspaceOnly`     | `tools.fs.workspaceOnly` and per-agent `tools.fs` overrides | Set to `true` to require workspace-only filesystem tool posture.                                         |
+| `tools.exec.allowSecurity`          | `tools.exec.security` and per-agent exec security           | Allow only exec security modes such as `deny` or `allowlist`.                                            |
+| `tools.exec.requireAsk`             | `tools.exec.ask` and per-agent exec ask mode                | Require approval posture such as `always`.                                                               |
+| `tools.exec.allowHosts`             | `tools.exec.host` and per-agent exec host routing           | Allow only exec host routing modes such as `sandbox`.                                                    |
+| `tools.exec.allowSafeBinDirs`       | `tools.exec.safeBinTrustedDirs` and per-agent exec config   | Allow only reviewed safe-bin trusted directories.                                                        |
+| `tools.agentToAgent.requireEnabled` | `tools.agentToAgent.enabled` and per-agent tool config      | Set to `true` to require agent-to-agent tools to stay enabled where expected.                            |
+| `tools.agentToAgent.allow.expected` | `tools.agentToAgent.allow` and per-agent tool config        | Require exact agent-to-agent target allowlists and report missing or unexpected targets.                 |
+| `tools.elevated.requireDefaultOff`  | `agents.defaults.elevatedDefault` and per-agent defaults    | Set to `true` to require elevated output defaults to stay `off`.                                         |
+| `tools.elevated.allow`              | `tools.elevated.enabled` and per-agent elevated posture     | Set to `false` to require elevated tool mode to stay disabled.                                           |
+| `tools.alsoAllow.expected`          | `tools.alsoAllow` and per-agent `tools.alsoAllow`           | Require exact `alsoAllow` entries and report missing or unexpected additive tool grants.                 |
+| `tools.denyTools`                   | `tools.deny` and `agents.list[].tools.deny`                 | Require configured tool deny lists to include tool ids or groups such as `group:runtime` and `group:fs`. |
 
 Run policy-only checks during authoring:
 

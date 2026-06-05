@@ -20,6 +20,7 @@ import {
   type PolicyEvidence,
   type PolicyExecApprovalEvidence,
   type PolicyIngressEvidence,
+  type PolicyPluginEvidence,
   type PolicySandboxPostureEvidence,
   type PolicyToolPostureEvidence,
 } from "../policy-state.js";
@@ -43,6 +44,8 @@ const CHECK_IDS = {
   policyDeniedModelProvider: "policy/models-denied-provider",
   policyUnapprovedModelProvider: "policy/models-unapproved-provider",
   policyPrivateNetworkAccess: "policy/network-private-access-enabled",
+  policyPluginsDenied: "policy/plugins-denied",
+  policyPluginsUnapproved: "policy/plugins-unapproved",
   policyIngressDmPolicyUnapproved: "policy/ingress-dm-policy-unapproved",
   policyIngressDmScopeUnapproved: "policy/ingress-dm-scope-unapproved",
   policyIngressOpenGroupsDenied: "policy/ingress-open-groups-denied",
@@ -57,11 +60,16 @@ const CHECK_IDS = {
   policyGatewayHttpUrlFetchUnrestricted: "policy/gateway-http-url-fetch-unrestricted",
   policyAgentsWorkspaceAccessDenied: "policy/agents-workspace-access-denied",
   policyAgentsToolNotDenied: "policy/agents-tool-not-denied",
+  policyToolsAgentToAgentDisabled: "policy/tools-agent-to-agent-disabled",
+  policyToolsAgentToAgentAllowMissing: "policy/tools-agent-to-agent-allow-missing",
+  policyToolsAgentToAgentAllowUnexpected: "policy/tools-agent-to-agent-allow-unexpected",
+  policyToolsElevatedDefaultOn: "policy/tools-elevated-default-on",
   policyToolsElevatedEnabled: "policy/tools-elevated-enabled",
   policyToolsAlsoAllowMissing: "policy/tools-also-allow-missing",
   policyToolsAlsoAllowUnexpected: "policy/tools-also-allow-unexpected",
   policyToolsExecAskUnapproved: "policy/tools-exec-ask-unapproved",
   policyToolsExecHostUnapproved: "policy/tools-exec-host-unapproved",
+  policyToolsExecSafeBinDirUnapproved: "policy/tools-exec-safebin-dir-unapproved",
   policyToolsExecSecurityUnapproved: "policy/tools-exec-security-unapproved",
   policyToolsFsWorkspaceOnlyRequired: "policy/tools-fs-workspace-only-required",
   policyToolsProfileUnapproved: "policy/tools-profile-unapproved",
@@ -111,6 +119,8 @@ export const POLICY_CHECK_IDS = [
   CHECK_IDS.policyDeniedModelProvider,
   CHECK_IDS.policyUnapprovedModelProvider,
   CHECK_IDS.policyPrivateNetworkAccess,
+  CHECK_IDS.policyPluginsDenied,
+  CHECK_IDS.policyPluginsUnapproved,
   CHECK_IDS.policyIngressDmPolicyUnapproved,
   CHECK_IDS.policyIngressDmScopeUnapproved,
   CHECK_IDS.policyIngressOpenGroupsDenied,
@@ -127,9 +137,14 @@ export const POLICY_CHECK_IDS = [
   CHECK_IDS.policyAgentsToolNotDenied,
   CHECK_IDS.policyToolsProfileUnapproved,
   CHECK_IDS.policyToolsFsWorkspaceOnlyRequired,
+  CHECK_IDS.policyToolsAgentToAgentDisabled,
+  CHECK_IDS.policyToolsAgentToAgentAllowMissing,
+  CHECK_IDS.policyToolsAgentToAgentAllowUnexpected,
+  CHECK_IDS.policyToolsElevatedDefaultOn,
   CHECK_IDS.policyToolsExecSecurityUnapproved,
   CHECK_IDS.policyToolsExecAskUnapproved,
   CHECK_IDS.policyToolsExecHostUnapproved,
+  CHECK_IDS.policyToolsExecSafeBinDirUnapproved,
   CHECK_IDS.policyToolsElevatedEnabled,
   CHECK_IDS.policyToolsAlsoAllowMissing,
   CHECK_IDS.policyToolsAlsoAllowUnexpected,
@@ -287,6 +302,21 @@ export const POLICY_RULE_METADATA = [
     caseSensitive: true,
   },
   {
+    policyPath: ["plugins", "allow"],
+    strictness: "allowlist-subset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policyPluginsUnapproved],
+    emptyList: "disabled",
+    caseSensitive: true,
+  },
+  {
+    policyPath: ["plugins", "deny"],
+    strictness: "denylist-superset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policyPluginsDenied],
+    caseSensitive: true,
+  },
+  {
     policyPath: ["models", "providers", "allow"],
     strictness: "allowlist-subset",
     valueType: "string-list",
@@ -422,6 +452,39 @@ export const POLICY_RULE_METADATA = [
     checkIds: [CHECK_IDS.policyToolsExecHostUnapproved],
     emptyList: "disabled",
     allowedValues: ["auto", "sandbox", "gateway", "node"],
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["tools", "exec", "allowSafeBinDirs"],
+    strictness: "allowlist-subset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policyToolsExecSafeBinDirUnapproved],
+    emptyList: "disabled",
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["tools", "agentToAgent", "requireEnabled"],
+    strictness: "requires-true",
+    valueType: "boolean",
+    checkIds: [CHECK_IDS.policyToolsAgentToAgentDisabled],
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["tools", "agentToAgent", "allow", "expected"],
+    strictness: "exact-list",
+    valueType: "string-list",
+    checkIds: [
+      CHECK_IDS.policyToolsAgentToAgentAllowMissing,
+      CHECK_IDS.policyToolsAgentToAgentAllowUnexpected,
+    ],
+    emptyList: "meaningful",
+    scopeSelectors: ["agentIds"],
+  },
+  {
+    policyPath: ["tools", "elevated", "requireDefaultOff"],
+    strictness: "requires-true",
+    valueType: "boolean",
+    checkIds: [CHECK_IDS.policyToolsElevatedDefaultOn],
     scopeSelectors: ["agentIds"],
   },
   {
@@ -601,6 +664,7 @@ const SUPPORTED_POLICY_SECTIONS = [
   "ingress",
   "mcp",
   "models",
+  "plugins",
   "network",
   "sandbox",
   "scopes",
@@ -666,6 +730,8 @@ export function registerPolicyDoctorChecks(host?: PolicyDoctorRegistrationHost):
   registerHealthCheck(policyChannelsDeniedProviderCheck);
   registerHealthCheck(policyMcpDeniedServerCheck);
   registerHealthCheck(policyMcpUnapprovedServerCheck);
+  registerHealthCheck(policyPluginsDeniedCheck);
+  registerHealthCheck(policyPluginsUnapprovedCheck);
   registerHealthCheck(policyModelsDeniedProviderCheck);
   registerHealthCheck(policyModelsUnapprovedProviderCheck);
   registerHealthCheck(policyNetworkPrivateAccessCheck);
@@ -685,9 +751,14 @@ export function registerPolicyDoctorChecks(host?: PolicyDoctorRegistrationHost):
   registerHealthCheck(policyAgentsToolNotDeniedCheck);
   registerHealthCheck(policyToolsProfileUnapprovedCheck);
   registerHealthCheck(policyToolsFsWorkspaceOnlyRequiredCheck);
+  registerHealthCheck(policyToolsAgentToAgentDisabledCheck);
+  registerHealthCheck(policyToolsAgentToAgentAllowMissingCheck);
+  registerHealthCheck(policyToolsAgentToAgentAllowUnexpectedCheck);
+  registerHealthCheck(policyToolsElevatedDefaultOnCheck);
   registerHealthCheck(policyToolsExecSecurityUnapprovedCheck);
   registerHealthCheck(policyToolsExecAskUnapprovedCheck);
   registerHealthCheck(policyToolsExecHostUnapprovedCheck);
+  registerHealthCheck(policyToolsExecSafeBinDirUnapprovedCheck);
   registerHealthCheck(policyToolsElevatedEnabledCheck);
   registerHealthCheck(policyToolsAlsoAllowMissingCheck);
   registerHealthCheck(policyToolsAlsoAllowUnexpectedCheck);
@@ -831,6 +902,26 @@ const policyMcpUnapprovedServerCheck: HealthCheck = {
   source: "policy",
   async detect(ctx) {
     return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyUnapprovedMcpServer);
+  },
+};
+
+const policyPluginsDeniedCheck: HealthCheck = {
+  id: CHECK_IDS.policyPluginsDenied,
+  kind: "plugin",
+  description: "Configured enabled plugins are not denied by policy.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyPluginsDenied);
+  },
+};
+
+const policyPluginsUnapprovedCheck: HealthCheck = {
+  id: CHECK_IDS.policyPluginsUnapproved,
+  kind: "plugin",
+  description: "Configured enabled plugins match policy allow rules.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyPluginsUnapproved);
   },
 };
 
@@ -1030,6 +1121,52 @@ const policyToolsFsWorkspaceOnlyRequiredCheck: HealthCheck = {
   },
 };
 
+const policyToolsAgentToAgentDisabledCheck: HealthCheck = {
+  id: CHECK_IDS.policyToolsAgentToAgentDisabled,
+  kind: "plugin",
+  description: "Agent-to-agent tools are enabled when policy requires them.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyToolsAgentToAgentDisabled);
+  },
+};
+
+const policyToolsAgentToAgentAllowMissingCheck: HealthCheck = {
+  id: CHECK_IDS.policyToolsAgentToAgentAllowMissing,
+  kind: "plugin",
+  description: "Agent-to-agent allowlists include policy expected entries.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(
+      await evaluatePolicy(ctx),
+      CHECK_IDS.policyToolsAgentToAgentAllowMissing,
+    );
+  },
+};
+
+const policyToolsAgentToAgentAllowUnexpectedCheck: HealthCheck = {
+  id: CHECK_IDS.policyToolsAgentToAgentAllowUnexpected,
+  kind: "plugin",
+  description: "Agent-to-agent allowlists match policy expected entries.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(
+      await evaluatePolicy(ctx),
+      CHECK_IDS.policyToolsAgentToAgentAllowUnexpected,
+    );
+  },
+};
+
+const policyToolsElevatedDefaultOnCheck: HealthCheck = {
+  id: CHECK_IDS.policyToolsElevatedDefaultOn,
+  kind: "plugin",
+  description: "Agent elevated defaults stay off when policy requires it.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyToolsElevatedDefaultOn);
+  },
+};
+
 const policyToolsExecSecurityUnapprovedCheck: HealthCheck = {
   id: CHECK_IDS.policyToolsExecSecurityUnapproved,
   kind: "plugin",
@@ -1057,6 +1194,19 @@ const policyToolsExecHostUnapprovedCheck: HealthCheck = {
   source: "policy",
   async detect(ctx) {
     return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyToolsExecHostUnapproved);
+  },
+};
+
+const policyToolsExecSafeBinDirUnapprovedCheck: HealthCheck = {
+  id: CHECK_IDS.policyToolsExecSafeBinDirUnapproved,
+  kind: "plugin",
+  description: "Exec safe-bin trusted directories match policy allow rules.",
+  source: "policy",
+  async detect(ctx) {
+    return findingsForCheck(
+      await evaluatePolicy(ctx),
+      CHECK_IDS.policyToolsExecSafeBinDirUnapproved,
+    );
   },
 };
 
@@ -1460,6 +1610,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
     includeGatewayExposure: false,
     includeAgentWorkspace: false,
     includeToolPosture: false,
+    includePluginInventory: false,
     includeSandboxPosture: false,
     includeSecrets: false,
     includeAuthProfiles: false,
@@ -1556,6 +1707,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
   const includeDataHandling = policyHasDataHandlingRules(policy);
   const includeSandboxPosture = policyHasSandboxPostureRules(policy);
   const includeExecApprovals = policyHasExecApprovalsRules(policy);
+  const includePluginInventory = policyHasPluginInventoryRules(policy);
   const execApprovalsFile = includeExecApprovals ? await readExecApprovalsFile(ctx) : undefined;
   if (requiredMetadata.size > 0) {
     const toolsFile = await readWorkspaceFile(ctx, "TOOLS.md");
@@ -1566,6 +1718,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       includeAgentWorkspace,
       includeDataHandling,
       includeToolPosture: policyHasToolPostureRules(policy),
+      includePluginInventory,
       includeSandboxPosture,
       includeSecrets,
       includeAuthProfiles,
@@ -1579,6 +1732,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       includeAgentWorkspace,
       includeDataHandling,
       includeToolPosture: policyHasToolPostureRules(policy),
+      includePluginInventory,
       includeSandboxPosture,
       includeSecrets,
       includeAuthProfiles,
@@ -1590,6 +1744,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
     ...policyContainerShapeFindings(policy, policyFile.displayName, policyFile.ocDocName),
     ...channelFindings(policy, policyFile.displayName, policyFile.ocDocName, evidence),
     ...mcpServerFindings(policy, policyFile.ocDocName, evidence),
+    ...pluginInventoryFindings(policy, policyFile.ocDocName, evidence),
     ...modelProviderFindings(policy, policyFile.ocDocName, evidence),
     ...networkFindings(policy, policyFile.ocDocName, evidence),
     ...ingressFindings(policy, policyFile.displayName, policyFile.ocDocName, evidence),
@@ -1874,6 +2029,41 @@ export function policyContainerShapeFindings(
           `Remove channels.${unsupportedChannelKey} or use channels.denyRules.`,
         ),
       ];
+    }
+  }
+  if (policy.plugins !== undefined && !isRecord(policy.plugins)) {
+    return [
+      policyShapeFinding(
+        policyPath,
+        `oc://${policyDocName}/plugins`,
+        `${policyPath} plugins must be an object.`,
+        `Fix ${policyPath} so plugins is an object.`,
+      ),
+    ];
+  }
+  if (isRecord(policy.plugins)) {
+    const unsupportedPluginsKey = unsupportedPolicyKey(policy.plugins, ["allow", "deny"]);
+    if (unsupportedPluginsKey !== undefined) {
+      return [
+        policyShapeFinding(
+          policyPath,
+          `oc://${policyDocName}/plugins/${ocPathSegment(unsupportedPluginsKey)}`,
+          `${policyPath} plugins.${unsupportedPluginsKey} is not supported in plugins policy.`,
+          `Remove plugins.${unsupportedPluginsKey} or use plugins.allow/plugins.deny.`,
+        ),
+      ];
+    }
+    for (const key of ["allow", "deny"] as const) {
+      const finding = policyStringArrayPropertyShapeFinding(policy.plugins[key], {
+        policyDocName,
+        policyPath,
+        property: `plugins.${key}`,
+        target: `plugins/${key}`,
+        valueName: "plugin id",
+      });
+      if (finding !== undefined) {
+        return [finding];
+      }
     }
   }
   if (policy.mcp !== undefined && !isRecord(policy.mcp)) {
@@ -2757,7 +2947,15 @@ function scopedToolsPolicyShapeFinding(
     readonly propertyPrefix: string;
   },
 ): HealthFinding | undefined {
-  const allowedTopLevel = new Set(["profiles", "fs", "exec", "elevated", "alsoAllow", "denyTools"]);
+  const allowedTopLevel = new Set([
+    "profiles",
+    "fs",
+    "exec",
+    "agentToAgent",
+    "elevated",
+    "alsoAllow",
+    "denyTools",
+  ]);
   const unsupportedTopLevel = Object.keys(value).find((key) => !allowedTopLevel.has(key));
   if (unsupportedTopLevel !== undefined) {
     return policyShapeFinding(
@@ -2770,8 +2968,9 @@ function scopedToolsPolicyShapeFinding(
   for (const [section, allowedKeys] of [
     ["profiles", ["allow"]],
     ["fs", ["requireWorkspaceOnly"]],
-    ["exec", ["allowSecurity", "requireAsk", "allowHosts"]],
-    ["elevated", ["allow"]],
+    ["exec", ["allowSecurity", "requireAsk", "allowHosts", "allowSafeBinDirs"]],
+    ["agentToAgent", ["requireEnabled", "allow"]],
+    ["elevated", ["allow", "requireDefaultOff"]],
     ["alsoAllow", ["expected"]],
   ] as const) {
     const sectionValue = value[section];
@@ -2885,6 +3084,7 @@ function toolPosturePolicyShapeFinding(
   const propertyPrefix = params.propertyPrefix ?? "tools";
   const allowedTopLevel = [
     "alsoAllow",
+    "agentToAgent",
     "denyTools",
     "elevated",
     "exec",
@@ -2901,7 +3101,14 @@ function toolPosturePolicyShapeFinding(
       `Remove ${propertyPrefix}.${unsupportedTopLevel} or use a supported tools policy rule.`,
     );
   }
-  for (const section of ["profiles", "fs", "exec", "elevated", "alsoAllow"] as const) {
+  for (const section of [
+    "profiles",
+    "fs",
+    "exec",
+    "agentToAgent",
+    "elevated",
+    "alsoAllow",
+  ] as const) {
     if (tools[section] !== undefined && !isRecord(tools[section])) {
       return policyShapeFinding(
         params.policyPath,
@@ -2956,6 +3163,7 @@ function toolPosturePolicyShapeFinding(
   const exec = isRecord(tools.exec) ? tools.exec : {};
   const unsupportedExecKey = unsupportedPolicyKey(exec, [
     "allowHosts",
+    "allowSafeBinDirs",
     "allowSecurity",
     "requireAsk",
   ]);
@@ -2971,10 +3179,11 @@ function toolPosturePolicyShapeFinding(
     ["allowSecurity", SUPPORTED_TOOL_EXEC_SECURITY, "exec security mode"],
     ["requireAsk", SUPPORTED_TOOL_EXEC_ASK, "exec ask mode"],
     ["allowHosts", SUPPORTED_TOOL_EXEC_HOST, "exec host"],
+    ["allowSafeBinDirs", undefined, "safe-bin trusted directory"],
   ] as const;
   for (const [key, supported, valueName] of execLists) {
     const finding = policyStringArrayPropertyShapeFinding(exec[key], {
-      allowed: supported,
+      ...(supported === undefined ? {} : { allowed: supported }),
       policyDocName: params.policyDocName,
       policyPath: params.policyPath,
       property: `${propertyPrefix}.exec.${key}`,
@@ -2986,14 +3195,64 @@ function toolPosturePolicyShapeFinding(
     }
   }
 
+  const agentToAgent = isRecord(tools.agentToAgent) ? tools.agentToAgent : {};
+  const unsupportedA2AKey = unsupportedPolicyKey(agentToAgent, ["requireEnabled", "allow"]);
+  if (unsupportedA2AKey !== undefined) {
+    return policyShapeFinding(
+      params.policyPath,
+      `oc://${params.policyDocName}/${targetPrefix}/agentToAgent/${ocPathSegment(unsupportedA2AKey)}`,
+      `${params.policyPath} ${propertyPrefix}.agentToAgent.${unsupportedA2AKey} is not supported in tools policy.`,
+      `Remove ${propertyPrefix}.agentToAgent.${unsupportedA2AKey} or use a supported agent-to-agent policy rule.`,
+    );
+  }
+  if (
+    agentToAgent.requireEnabled !== undefined &&
+    typeof agentToAgent.requireEnabled !== "boolean"
+  ) {
+    return policyShapeFinding(
+      params.policyPath,
+      `oc://${params.policyDocName}/${targetPrefix}/agentToAgent/requireEnabled`,
+      `${params.policyPath} ${propertyPrefix}.agentToAgent.requireEnabled must be a boolean.`,
+      `Set ${propertyPrefix}.agentToAgent.requireEnabled to true or false.`,
+    );
+  }
+  const a2aAllow = isRecord(agentToAgent.allow) ? agentToAgent.allow : {};
+  const unsupportedA2AAllowKey = unsupportedPolicyKey(a2aAllow, ["expected"]);
+  if (unsupportedA2AAllowKey !== undefined) {
+    return policyShapeFinding(
+      params.policyPath,
+      `oc://${params.policyDocName}/${targetPrefix}/agentToAgent/allow/${ocPathSegment(unsupportedA2AAllowKey)}`,
+      `${params.policyPath} ${propertyPrefix}.agentToAgent.allow.${unsupportedA2AAllowKey} is not supported in tools policy.`,
+      `Use ${propertyPrefix}.agentToAgent.allow.expected or remove the unsupported rule.`,
+    );
+  }
+  const a2aAllowExpectedFinding = policyStringArrayPropertyShapeFinding(a2aAllow.expected, {
+    policyDocName: params.policyDocName,
+    policyPath: params.policyPath,
+    property: `${propertyPrefix}.agentToAgent.allow.expected`,
+    target: `${targetPrefix}/agentToAgent/allow/expected`,
+    valueName: "agent-to-agent target",
+  });
+  if (a2aAllowExpectedFinding !== undefined) {
+    return a2aAllowExpectedFinding;
+  }
+
   const elevated = isRecord(tools.elevated) ? tools.elevated : {};
-  const unsupportedElevatedKey = unsupportedPolicyKey(elevated, ["allow"]);
+  const unsupportedElevatedKey = unsupportedPolicyKey(elevated, ["allow", "requireDefaultOff"]);
   if (unsupportedElevatedKey !== undefined) {
     return policyShapeFinding(
       params.policyPath,
       `oc://${params.policyDocName}/${targetPrefix}/elevated/${ocPathSegment(unsupportedElevatedKey)}`,
       `${params.policyPath} ${propertyPrefix}.elevated.${unsupportedElevatedKey} is not supported in tools policy.`,
       `Remove ${propertyPrefix}.elevated.${unsupportedElevatedKey} or use ${propertyPrefix}.elevated.allow.`,
+    );
+  }
+  if (elevated.requireDefaultOff !== undefined && typeof elevated.requireDefaultOff !== "boolean") {
+    return policyShapeFinding(
+      params.policyPath,
+      `oc://${params.policyDocName}/${targetPrefix}/elevated/requireDefaultOff`,
+      `${params.policyPath} ${propertyPrefix}.elevated.requireDefaultOff must be a boolean.`,
+      `Set ${propertyPrefix}.elevated.requireDefaultOff to true or false.`,
     );
   }
   if (elevated.allow !== undefined && typeof elevated.allow !== "boolean") {
@@ -3610,6 +3869,68 @@ function mcpServerFindings(
   }
 
   return findings;
+}
+
+function pluginInventoryFindings(
+  policy: unknown,
+  policyDocName: string,
+  evidence: PolicyEvidence,
+): readonly HealthFinding[] {
+  if (!isRecord(policy) || !isRecord(policy.plugins)) {
+    return [];
+  }
+  const findings: HealthFinding[] = [];
+  const allowed = new Set(readStringList(policy.plugins, ["allow"], { lowercase: false }));
+  const denied = new Set(readStringList(policy.plugins, ["deny"], { lowercase: false }));
+  for (const entry of enabledPluginEvidence(evidence)) {
+    if (denied.has(entry.id)) {
+      findings.push(
+        pluginInventoryFinding(entry, {
+          checkId: CHECK_IDS.policyPluginsDenied,
+          message: `Plugin '${entry.id}' is denied by policy.`,
+          requirement: `oc://${policyDocName}/plugins/deny`,
+          fixHint: "Disable or remove the denied plugin, or update policy after review.",
+        }),
+      );
+    }
+    if (allowed.size > 0 && !allowed.has(entry.id)) {
+      findings.push(
+        pluginInventoryFinding(entry, {
+          checkId: CHECK_IDS.policyPluginsUnapproved,
+          message: `Plugin '${entry.id}' is not in the policy allowlist.`,
+          requirement: `oc://${policyDocName}/plugins/allow`,
+          fixHint: "Add the plugin id to plugins.allow or disable the plugin after review.",
+        }),
+      );
+    }
+  }
+  return findings;
+}
+
+function enabledPluginEvidence(evidence: PolicyEvidence): readonly PolicyPluginEvidence[] {
+  return (evidence.pluginInventory ?? []).filter((entry) => entry.enabled !== false);
+}
+
+function pluginInventoryFinding(
+  entry: PolicyPluginEvidence,
+  params: {
+    readonly checkId: (typeof POLICY_CHECK_IDS)[number];
+    readonly message: string;
+    readonly requirement: string;
+    readonly fixHint: string;
+  },
+): HealthFinding {
+  return {
+    checkId: params.checkId,
+    severity: "error",
+    message: params.message,
+    source: "policy",
+    path: "openclaw config",
+    ocPath: entry.source,
+    target: entry.source,
+    requirement: params.requirement,
+    fixHint: params.fixHint,
+  };
 }
 
 function modelProviderFindings(
@@ -4995,6 +5316,20 @@ function toolPostureFindingsForRule(
       evidence,
       evidenceFilter,
     ),
+    ...toolAgentToAgentFindings(
+      toolsPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
+    ...toolElevatedDefaultFindings(
+      toolsPolicy,
+      policyDocName,
+      requirementBase,
+      evidence,
+      evidenceFilter,
+    ),
     ...toolElevatedFindings(toolsPolicy, policyDocName, requirementBase, evidence, evidenceFilter),
     ...toolAlsoAllowExpectedFindings(
       toolsPolicy,
@@ -5092,7 +5427,53 @@ function toolExecPostureFindings(
       settingLabel: "exec host",
       evidenceFilter,
     }),
+    ...toolListAllowFindings(toolsPolicy, policyDocName, requirementBase, evidence, {
+      checkId: CHECK_IDS.policyToolsExecSafeBinDirUnapproved,
+      kind: "execSafeBinTrustedDirs",
+      policyPath: ["exec", "allowSafeBinDirs"],
+      requirementPath: "exec/allowSafeBinDirs",
+      settingLabel: "safe-bin trusted directory",
+      evidenceFilter,
+    }),
   ];
+}
+
+function toolListAllowFindings(
+  toolsPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  params: {
+    readonly checkId: (typeof POLICY_CHECK_IDS)[number];
+    readonly kind: PolicyToolPostureEvidence["kind"];
+    readonly policyPath: readonly string[];
+    readonly requirementPath: string;
+    readonly settingLabel: string;
+    readonly evidenceFilter: (entry: PolicyToolPostureEvidence) => boolean;
+  },
+): readonly HealthFinding[] {
+  const allowed = readStringList(toolsPolicy, params.policyPath);
+  if (allowed.length === 0) {
+    return [];
+  }
+  const allowedSet = normalizedStringSet(allowed);
+  const findings: HealthFinding[] = [];
+  for (const entry of toolPostureEntries(evidence, params.kind).filter(params.evidenceFilter)) {
+    for (const actual of normalizedStringSet(entry.entries ?? [])) {
+      if (allowedSet.has(actual)) {
+        continue;
+      }
+      findings.push(
+        toolPostureFinding(entry, {
+          checkId: params.checkId,
+          message: `${toolPostureLabel(entry)} includes unapproved ${params.settingLabel} '${actual}'.`,
+          requirement: `oc://${policyDocName}/${requirementBase}/${params.requirementPath}`,
+          fixHint: "Remove the unapproved entry or update policy after review.",
+        }),
+      );
+    }
+  }
+  return findings;
 }
 
 function toolStringPostureAllowFindings(
@@ -5124,6 +5505,94 @@ function toolStringPostureAllowFindings(
         fixHint: "Adjust the configured tool posture or update policy after review.",
       });
     });
+}
+
+function toolAgentToAgentFindings(
+  toolsPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicyToolPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  const findings: HealthFinding[] = [];
+  if (readPolicyBoolean(toolsPolicy, ["agentToAgent", "requireEnabled"]) === true) {
+    findings.push(
+      ...toolPostureEntries(evidence, "agentToAgentEnabled")
+        .filter(evidenceFilter)
+        .filter((entry) => entry.value !== true)
+        .map(
+          (entry): HealthFinding =>
+            toolPostureFinding(entry, {
+              checkId: CHECK_IDS.policyToolsAgentToAgentDisabled,
+              message: `${toolPostureLabel(entry)} disables agent-to-agent tools.`,
+              requirement: `oc://${policyDocName}/${requirementBase}/agentToAgent/requireEnabled`,
+              fixHint: "Set tools.agentToAgent.enabled=true or update policy after review.",
+            }),
+        ),
+    );
+  }
+  if (isRecord(toolsPolicy.agentToAgent) && isRecord(toolsPolicy.agentToAgent.allow)) {
+    const expected = normalizedStringSet(
+      readStringList(toolsPolicy, ["agentToAgent", "allow", "expected"]),
+    );
+    for (const entry of toolPostureEntries(evidence, "agentToAgentAllow").filter(evidenceFilter)) {
+      const actual = normalizedStringSet(entry.entries ?? []);
+      for (const expectedTarget of expected) {
+        if (actual.has(expectedTarget)) {
+          continue;
+        }
+        findings.push(
+          toolPostureFinding(entry, {
+            checkId: CHECK_IDS.policyToolsAgentToAgentAllowMissing,
+            message: `${toolPostureLabel(entry)} is missing expected agent-to-agent target '${expectedTarget}'.`,
+            requirement: `oc://${policyDocName}/${requirementBase}/agentToAgent/allow/expected`,
+            fixHint:
+              "Add the expected tools.agentToAgent.allow entry or update policy after review.",
+          }),
+        );
+      }
+      for (const actualTarget of actual) {
+        if (expected.has(actualTarget)) {
+          continue;
+        }
+        findings.push(
+          toolPostureFinding(entry, {
+            checkId: CHECK_IDS.policyToolsAgentToAgentAllowUnexpected,
+            message: `${toolPostureLabel(entry)} has unexpected agent-to-agent target '${actualTarget}'.`,
+            requirement: `oc://${policyDocName}/${requirementBase}/agentToAgent/allow/expected`,
+            fixHint:
+              "Remove the unexpected tools.agentToAgent.allow entry or update policy after review.",
+          }),
+        );
+      }
+    }
+  }
+  return findings;
+}
+
+function toolElevatedDefaultFindings(
+  toolsPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicyToolPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  if (readPolicyBoolean(toolsPolicy, ["elevated", "requireDefaultOff"]) !== true) {
+    return [];
+  }
+  return toolPostureEntries(evidence, "elevatedDefault")
+    .filter(evidenceFilter)
+    .filter((entry) => entry.value !== "off")
+    .map(
+      (entry): HealthFinding =>
+        toolPostureFinding(entry, {
+          checkId: CHECK_IDS.policyToolsElevatedDefaultOn,
+          message: `${toolPostureLabel(entry)} has elevated default '${entry.value ?? ""}'.`,
+          requirement: `oc://${policyDocName}/${requirementBase}/elevated/requireDefaultOff`,
+          fixHint:
+            "Set agents.defaults.elevatedDefault or agents.list[].elevatedDefault to off, or update policy after review.",
+        }),
+    );
 }
 
 function toolElevatedFindings(
@@ -6152,6 +6621,14 @@ function policyHasAuthProfileRules(policy: unknown): boolean {
   );
 }
 
+function policyHasPluginInventoryRules(policy: unknown): boolean {
+  return (
+    isRecord(policy) &&
+    isRecord(policy.plugins) &&
+    (policy.plugins.allow !== undefined || policy.plugins.deny !== undefined)
+  );
+}
+
 function policyHasIngressRules(policy: unknown): boolean {
   if (!isRecord(policy)) {
     return false;
@@ -6294,8 +6771,13 @@ function toolPosturePolicyHasRules(value: unknown): boolean {
     (isRecord(tools.exec) &&
       (tools.exec.allowSecurity !== undefined ||
         tools.exec.requireAsk !== undefined ||
-        tools.exec.allowHosts !== undefined)) ||
-    (isRecord(tools.elevated) && tools.elevated.allow !== undefined) ||
+        tools.exec.allowHosts !== undefined ||
+        tools.exec.allowSafeBinDirs !== undefined)) ||
+    (isRecord(tools.agentToAgent) &&
+      (tools.agentToAgent.requireEnabled !== undefined ||
+        (isRecord(tools.agentToAgent.allow) && tools.agentToAgent.allow.expected !== undefined))) ||
+    (isRecord(tools.elevated) &&
+      (tools.elevated.allow !== undefined || tools.elevated.requireDefaultOff !== undefined)) ||
     (isRecord(tools.alsoAllow) && tools.alsoAllow.expected !== undefined) ||
     tools.denyTools !== undefined
   );
