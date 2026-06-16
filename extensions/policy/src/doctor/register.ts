@@ -231,6 +231,15 @@ const SANDBOX_POLICY_RULE_METADATA = [
     scopeSelectors: ["agentIds"],
   },
   {
+    policyPath: ["sandbox", "allowModes"],
+    strictness: "allowlist-subset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policySandboxModeUnapproved],
+    emptyList: "disabled",
+    allowedValues: ["off", "non-main", "all"],
+    scopeSelectors: ["agentIds"],
+  },
+  {
     policyPath: ["sandbox", "allowBackends"],
     strictness: "allowlist-subset",
     valueType: "string-list",
@@ -3052,6 +3061,7 @@ function sandboxPolicyShapeFinding(
   }
   const unsupportedTopLevel = unsupportedPolicyKey(value, [
     "requireMode",
+    "allowModes",
     "allowBackends",
     "containers",
     "browser",
@@ -3074,6 +3084,17 @@ function sandboxPolicyShapeFinding(
   });
   if (modeFinding !== undefined) {
     return modeFinding;
+  }
+  const allowModesFinding = policyStringArrayPropertyShapeFinding(value.allowModes, {
+    allowed: SUPPORTED_SANDBOX_MODES,
+    policyDocName: params.policyDocName,
+    policyPath: params.policyPath,
+    property: `${propertyPrefix}.allowModes`,
+    target: `${targetPrefix}/allowModes`,
+    valueName: "sandbox mode",
+  });
+  if (allowModesFinding !== undefined) {
+    return allowModesFinding;
   }
   const backendFinding = policyStringArrayPropertyShapeFinding(value.allowBackends, {
     policyDocName: params.policyDocName,
@@ -5468,22 +5489,24 @@ function sandboxModeFindings(
   evidence: PolicyEvidence,
   evidenceFilter: (entry: PolicySandboxPostureEvidence) => boolean,
 ): readonly HealthFinding[] {
-  const allowed = new Set(readStringList(sandboxPolicy, ["requireMode"]));
-  if (allowed.size === 0) {
-    return [];
-  }
-  return sandboxPostureEntries(evidence, "mode")
-    .filter(evidenceFilter)
-    .filter((entry) => typeof entry.value === "string" && !allowed.has(entry.value.toLowerCase()))
-    .map((entry) =>
-      sandboxPostureFinding(entry, {
-        checkId: CHECK_IDS.policySandboxModeUnapproved,
-        message: `${sandboxPostureLabel(entry)} uses unapproved sandbox mode '${entry.value ?? ""}'.`,
-        requirement: `oc://${policyDocName}/${requirementBase}/requireMode`,
-        fixHint:
-          "Set agents.defaults.sandbox.mode or agents.list[].sandbox.mode to an approved value.",
-      }),
-    );
+  return (["requireMode", "allowModes"] as const).flatMap((modeRuleKey) => {
+    const allowed = new Set(readStringList(sandboxPolicy, [modeRuleKey]));
+    if (allowed.size === 0) {
+      return [];
+    }
+    return sandboxPostureEntries(evidence, "mode")
+      .filter(evidenceFilter)
+      .filter((entry) => typeof entry.value === "string" && !allowed.has(entry.value.toLowerCase()))
+      .map((entry) =>
+        sandboxPostureFinding(entry, {
+          checkId: CHECK_IDS.policySandboxModeUnapproved,
+          message: `${sandboxPostureLabel(entry)} uses unapproved sandbox mode '${entry.value ?? ""}'.`,
+          requirement: `oc://${policyDocName}/${requirementBase}/${modeRuleKey}`,
+          fixHint:
+            "Set agents.defaults.sandbox.mode or agents.list[].sandbox.mode to an approved value.",
+        }),
+      );
+  });
 }
 
 function sandboxBackendFindings(
@@ -6217,6 +6240,7 @@ function sandboxPosturePolicyHasRules(value: unknown): boolean {
   const browser = isRecord(sandbox.browser) ? sandbox.browser : undefined;
   return (
     sandbox.requireMode !== undefined ||
+    sandbox.allowModes !== undefined ||
     sandbox.allowBackends !== undefined ||
     (containers !== undefined &&
       SANDBOX_CONTAINER_POLICY_RULES.some((rule) => containers[rule.key] !== undefined)) ||
