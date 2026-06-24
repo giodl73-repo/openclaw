@@ -15,6 +15,16 @@ import type {
 
 type ManifestKey = typeof MANIFEST_KEY;
 
+class HostedCatalogSnapshotWriteError extends Error {
+  readonly originalError: unknown;
+
+  constructor(originalError: unknown) {
+    super("hosted catalog snapshot write failed");
+    this.name = "HostedCatalogSnapshotWriteError";
+    this.originalError = originalError;
+  }
+}
+
 export type OfficialExternalProviderAuthChoice = {
   method?: string;
   choiceId?: string;
@@ -416,13 +426,9 @@ export function validateOfficialExternalPluginCatalogEntrySourceRefs(
   const configuredSourceRefs = getOfficialExternalPluginCatalogSourceRefs(params?.catalogConfig);
   const errors: string[] = [];
   let candidates = getFeedEntryInstallCandidates(entry);
-  if (params?.requireManifestInstallSourceRef) {
+  if (candidates.length === 0 && params?.requireManifestInstallSourceRef) {
     const manifestCandidate = getManifestInstallSourceRefCandidate(entry);
-    if (manifestCandidate) {
-      candidates = [manifestCandidate];
-    } else {
-      candidates = [{}];
-    }
+    candidates = manifestCandidate ? [manifestCandidate] : [{}];
   }
   for (const candidate of candidates) {
     const sourceRef = normalizeOptionalString(candidate.sourceRef);
@@ -700,6 +706,7 @@ export async function loadHostedOfficialExternalPluginCatalogEntries(params?: {
   ifModifiedSince?: string;
   expectedSha256?: string;
   offline?: boolean;
+  requireSnapshotWrite?: boolean;
   snapshotStore?: HostedOfficialExternalPluginCatalogSnapshotStore | null;
   env?: NodeJS.ProcessEnv;
   stateDir?: string;
@@ -840,7 +847,11 @@ export async function loadHostedOfficialExternalPluginCatalogEntries(params?: {
         metadata,
         savedAt: (params?.now?.() ?? new Date()).toISOString(),
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        if (params?.requireSnapshotWrite) {
+          throw new HostedCatalogSnapshotWriteError(err);
+        }
+      });
     return {
       source: "hosted",
       entries: dedupeOfficialExternalPluginCatalogEntries(entries),
@@ -848,6 +859,9 @@ export async function loadHostedOfficialExternalPluginCatalogEntries(params?: {
       metadata,
     };
   } catch (err) {
+    if (err instanceof HostedCatalogSnapshotWriteError) {
+      throw err.originalError;
+    }
     return await snapshotOrBundledFallbackResult({
       error: err,
       snapshotStore,
@@ -882,10 +896,22 @@ function formatFeedInstallCandidateSpec(
   return `${packageName}@${version}`;
 }
 
-function getPreferredFeedEntryInstallCandidate(
-  entry: OfficialExternalPluginCatalogEntry,
-): OfficialExternalPluginCatalogInstallCandidate | undefined {
-  const candidates = getFeedEntryInstallCandidates(entry).filter((candidate) =>
+function getFeedEntryCandidateSourceType(
+  candidate: OfficialExternalPluginCatalogInstallCandidate,
+  config?: OfficialExternalPluginCatalogProfileConfig,
+): OfficialExternalPluginCatalogSourceProfile["type"] | undefined {
+  const sourceRef = normalizeOptionalString(candidate.sourceRef);
+  if (!sourceRef) {
+    return undefined;
+  }
+  return resolveOfficialExternalPluginCatalogProfileConfig(config).sources[sourceRef]?.type;
+}
+
+function getPreferredFeedEntryInstallCandidate(params: {
+  entry: OfficialExternalPluginCatalogEntry;
+  catalogConfig?: OfficialExternalPluginCatalogProfileConfig;
+}): OfficialExternalPluginCatalogInstallCandidate | undefined {
+  const candidates = getFeedEntryInstallCandidates(params.entry).filter((candidate) =>
     Boolean(normalizeOptionalString(candidate.package)),
   );
   return (
@@ -898,14 +924,18 @@ function getPreferredFeedEntryInstallCandidate(
       (candidate) =>
         normalizeOptionalString(candidate.sourceRef) ===
         DEFAULT_OFFICIAL_EXTERNAL_PLUGIN_CATALOG_NPM_SOURCE_REF,
+    ) ??
+    candidates.find((candidate) =>
+      Boolean(getFeedEntryCandidateSourceType(candidate, params.catalogConfig)),
     )
   );
 }
 
-function resolveFeedEntryInstallCandidate(
-  entry: OfficialExternalPluginCatalogEntry,
-): PluginPackageInstall | null {
-  const candidate = getPreferredFeedEntryInstallCandidate(entry);
+function resolveFeedEntryInstallCandidate(params: {
+  entry: OfficialExternalPluginCatalogEntry;
+  catalogConfig?: OfficialExternalPluginCatalogProfileConfig;
+}): PluginPackageInstall | null {
+  const candidate = getPreferredFeedEntryInstallCandidate(params);
   if (!candidate) {
     return null;
   }
@@ -913,9 +943,9 @@ function resolveFeedEntryInstallCandidate(
   if (!spec) {
     return null;
   }
-  const sourceRef = normalizeOptionalString(candidate.sourceRef);
+  const sourceType = getFeedEntryCandidateSourceType(candidate, params.catalogConfig);
   const expectedIntegrity = normalizeOptionalString(candidate.integrity);
-  if (sourceRef === DEFAULT_OFFICIAL_EXTERNAL_PLUGIN_CATALOG_CLAWHUB_SOURCE_REF) {
+  if (sourceType === "clawhub") {
     return {
       clawhubSpec: `clawhub:${spec}`,
       npmSpec: spec,
@@ -923,7 +953,7 @@ function resolveFeedEntryInstallCandidate(
       ...(expectedIntegrity ? { expectedIntegrity } : {}),
     };
   }
-  if (sourceRef === DEFAULT_OFFICIAL_EXTERNAL_PLUGIN_CATALOG_NPM_SOURCE_REF) {
+  if (sourceType === "npm") {
     return {
       npmSpec: spec,
       defaultChoice: "npm",
@@ -987,18 +1017,34 @@ export function resolveOfficialExternalPluginLabel(
 
 export function resolveOfficialExternalPluginInstall(
   entry: OfficialExternalPluginCatalogEntry,
+  params?: { catalogConfig?: OfficialExternalPluginCatalogProfileConfig },
 ): PluginPackageInstall | null {
   const manifest = getOfficialExternalPluginCatalogManifest(entry);
   const install = manifest?.install;
   const clawhubSpec = normalizeOptionalString(install?.clawhubSpec);
-  const npmSpec = normalizeOptionalString(install?.npmSpec) ?? normalizeOptionalString(entry.name);
+  const manifestNpmSpec = normalizeOptionalString(install?.npmSpec);
   const localPath = normalizeOptionalString(install?.localPath);
-  if (!clawhubSpec && !npmSpec && !localPath) {
-    return resolveFeedEntryInstallCandidate(entry);
+  const candidateInstall = resolveFeedEntryInstallCandidate({
+    entry,
+    catalogConfig: params?.catalogConfig,
+  });
+  if (candidateInstall) {
+    return {
+      ...candidateInstall,
+      ...(install?.minHostVersion ? { minHostVersion: install.minHostVersion } : {}),
+      ...(install?.expectedIntegrity && !candidateInstall.expectedIntegrity
+        ? { expectedIntegrity: install.expectedIntegrity }
+        : {}),
+      ...(install?.allowInvalidConfigRecovery === true ? { allowInvalidConfigRecovery: true } : {}),
+    };
   }
+  const npmSpec = manifestNpmSpec ?? normalizeOptionalString(entry.name);
   const defaultChoice =
     normalizeDefaultChoice(install?.defaultChoice) ??
     (npmSpec ? "npm" : clawhubSpec ? "clawhub" : localPath ? "local" : undefined);
+  if (!clawhubSpec && !npmSpec && !localPath) {
+    return null;
+  }
   return {
     ...(clawhubSpec ? { clawhubSpec } : {}),
     ...(npmSpec ? { npmSpec } : {}),

@@ -17,13 +17,6 @@ describe("OpenClawSchema marketplaces config", () => {
         feeds: {
           "clawhub-public": {
             url: "https://clawhub.ai/v1/feeds/plugins",
-            refresh: {
-              onStartup: "if-stale",
-              interval: "6h",
-              jitter: "10m",
-              timeout: "10s",
-              maxStale: "7d",
-            },
             verification: { mode: "unsigned" },
           },
           acme: {
@@ -72,7 +65,7 @@ describe("OpenClawSchema marketplaces config", () => {
     }
   });
 
-  it("rejects auth and signed verification until loader enforcement exists", () => {
+  it("rejects refresh, auth, and signed verification until loader enforcement exists", () => {
     expect(
       OpenClawSchema.safeParse({
         marketplaces: {
@@ -80,6 +73,18 @@ describe("OpenClawSchema marketplaces config", () => {
             acme: {
               url: "https://packages.acme.example/openclaw/feed",
               auth: { scheme: "bearer", secret: "token" },
+            },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      OpenClawSchema.safeParse({
+        marketplaces: {
+          feeds: {
+            acme: {
+              url: "https://packages.acme.example/openclaw/feed",
+              refresh: { onStartup: "if-stale" },
             },
           },
         },

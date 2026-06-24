@@ -77,7 +77,7 @@ describe("plugins marketplace refresh", () => {
 
     expect(mocks.loadConfiguredHostedOfficialExternalPluginCatalogEntries).toHaveBeenCalledWith(
       config,
-      { feedProfile: "acme", expectedSha256: "feed-sha" },
+      { feedProfile: "acme", expectedSha256: "feed-sha", requireSnapshotWrite: true },
     );
     expect(mocks.defaultRuntime.writeJson).toHaveBeenCalledWith({
       source: "hosted",

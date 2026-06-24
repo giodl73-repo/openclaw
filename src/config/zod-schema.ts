@@ -493,16 +493,6 @@ function isHttpsUrl(value: string): boolean {
   }
 }
 
-const MarketplaceRefreshSchema = z
-  .object({
-    onStartup: z.union([z.literal("never"), z.literal("always"), z.literal("if-stale")]).optional(),
-    interval: z.string().optional(),
-    jitter: z.string().optional(),
-    timeout: z.string().optional(),
-    maxStale: z.string().optional(),
-  })
-  .strict();
-
 const MarketplaceVerificationSchema = z
   .object({
     mode: z.literal("unsigned"),
@@ -515,7 +505,6 @@ const MarketplaceFeedProfileSchema = z
       .string()
       .url()
       .refine((value) => isHttpsUrl(value), "Expected https:// URL"),
-    refresh: MarketplaceRefreshSchema.optional(),
     verification: MarketplaceVerificationSchema.optional(),
   })
   .strict();

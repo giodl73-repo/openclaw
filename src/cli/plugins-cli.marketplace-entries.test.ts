@@ -52,6 +52,7 @@ describe("plugins marketplace entries", () => {
     const config = {
       marketplaces: {
         feeds: { acme: { url: "https://packages.acme.example/openclaw/feed" } },
+        sources: { "acme-npm": { type: "npm" as const } },
       },
     };
     mocks.getRuntimeConfig.mockReturnValue(config);
@@ -62,9 +63,11 @@ describe("plugins marketplace entries", () => {
           name: "@acme/calendar",
           version: "1.2.3",
           kind: "plugin",
+          install: {
+            candidates: [{ sourceRef: "acme-npm", package: "@acme/calendar", version: "1.2.3" }],
+          },
           openclaw: {
             plugin: { id: "acme-calendar", label: "Acme Calendar" },
-            install: { npmSpec: "@acme/calendar@1.2.3", defaultChoice: "npm" },
           },
         },
       ],
@@ -123,7 +126,14 @@ describe("plugins marketplace entries", () => {
       entries: [
         {
           name: "@openclaw/acpx",
-          openclaw: { plugin: { id: "acpx", label: "ACP" } },
+          openclaw: {
+            plugin: { id: "acpx", label: "ACP" },
+            install: {
+              clawhubSpec: "clawhub:@openclaw/acpx",
+              npmSpec: "@openclaw/acpx",
+              defaultChoice: "npm",
+            },
+          },
         },
       ],
       error: "hosted catalog feed offline mode",
@@ -135,6 +145,8 @@ describe("plugins marketplace entries", () => {
     const output = mocks.defaultRuntime.log.mock.calls.map(([value]) => String(value)).join("\n");
     expect(output).toContain("bundled fallback");
     expect(output).toContain("acpx");
+    expect(output).toContain("@openclaw/acpx");
+    expect(output).not.toContain("clawhub:@openclaw/acpx");
     expect(output).toContain("hosted catalog feed offline mode");
     expect(mocks.defaultRuntime.exit).not.toHaveBeenCalled();
   });

@@ -514,6 +514,9 @@ function buildMarketplaceRefreshPayload(
 }
 
 function formatMarketplaceEntryInstall(entry: MarketplaceEntryPayload): string | undefined {
+  if (entry.install?.defaultChoice === "npm") {
+    return entry.install.npmSpec ?? entry.install.clawhubSpec ?? entry.install.localPath;
+  }
   return entry.install?.clawhubSpec ?? entry.install?.npmSpec ?? entry.install?.localPath;
 }
 
@@ -560,7 +563,9 @@ export async function runPluginMarketplaceEntriesCommand(
   const summary = buildMarketplaceRefreshPayload(result);
   const entries: MarketplaceEntryPayload[] = result.entries.map((entry) => {
     const id = catalog.resolveOfficialExternalPluginId(entry);
-    const install = catalog.resolveOfficialExternalPluginInstall(entry) ?? undefined;
+    const install =
+      catalog.resolveOfficialExternalPluginInstall(entry, { catalogConfig: cfg.marketplaces }) ??
+      undefined;
     const payload: MarketplaceEntryPayload = {
       label: catalog.resolveOfficialExternalPluginLabel(entry),
     };
@@ -627,6 +632,7 @@ export async function runPluginMarketplaceRefreshCommand(
     ...(opts.feedProfile ? { feedProfile: opts.feedProfile } : {}),
     ...(opts.feedUrl ? { feedUrl: opts.feedUrl } : {}),
     ...(opts.expectedSha256 ? { expectedSha256: opts.expectedSha256 } : {}),
+    requireSnapshotWrite: true,
   });
   const payload = buildMarketplaceRefreshPayload(result);
 

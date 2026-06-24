@@ -12,8 +12,6 @@ export const FIELD_HELP: Record<string, string> = {
     "Named marketplace feed profiles. The default public profile can be used as shipped, and deployments can add or override profiles to point OpenClaw at their effective feed endpoint.",
   "marketplaces.feeds.*.url":
     "HTTPS URL for the marketplace feed profile. Remote feed documents cannot introduce new registry domains or credentials; they only reference locally configured sources by name.",
-  "marketplaces.feeds.*.refresh":
-    "Lifecycle-owned refresh preferences for this feed, such as startup behavior, interval, jitter, timeout, and max-stale windows. These settings are parsed now and used by the scheduled refresh implementation later.",
   "marketplaces.feeds.*.verification":
     "Feed authenticity policy. This slice accepts only unsigned HTTPS feeds; signed verification is added when envelope enforcement is wired.",
   "marketplaces.sources":

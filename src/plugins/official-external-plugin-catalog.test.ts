@@ -439,7 +439,7 @@ describe("official external plugin catalog", () => {
         catalogConfig,
         requireManifestInstallSourceRef: true,
       }),
-    ).toEqual(["feed install candidate is missing sourceRef"]);
+    ).toEqual([]);
     expect(
       validateOfficialExternalPluginCatalogEntrySourceRefs(knownManifestSourceRef, {
         catalogConfig,
@@ -455,7 +455,10 @@ describe("official external plugin catalog", () => {
     });
 
     expect(result.source).toBe("hosted");
-    expect(result.entries.map((entry) => entry.name)).toEqual(["@acme/known-manifest-source-ref"]);
+    expect(result.entries.map((entry) => entry.name)).toEqual([
+      "@acme/top-level-candidate-only",
+      "@acme/known-manifest-source-ref",
+    ]);
   });
 
   it("filters hosted feed entries that reference unknown local source profiles", async () => {
@@ -481,12 +484,25 @@ describe("official external plugin catalog", () => {
       install: { candidates: [{ package: "@openclaw/source-ref-missing" }] },
       openclaw: { plugin: { id: "source-ref-missing" } },
     };
+    const manifestInstallWithoutSourceRef = {
+      name: "@openclaw/source-ref-manifest-missing",
+      kind: "plugin",
+      install: {
+        candidates: [
+          { sourceRef: "public-clawhub", package: "@openclaw/source-ref-manifest-missing" },
+        ],
+      },
+      openclaw: {
+        plugin: { id: "source-ref-manifest-missing" },
+        install: { npmSpec: "@openclaw/source-ref-manifest-missing" },
+      },
+    };
     const body = JSON.stringify({
       schemaVersion: 1,
       id: "openclaw-official-external-plugins",
       generatedAt: "2026-06-22T00:00:00.000Z",
       sequence: 10,
-      entries: [knownEntry, unknownEntry, missingEntry],
+      entries: [knownEntry, unknownEntry, missingEntry, manifestInstallWithoutSourceRef],
     });
 
     expect(validateOfficialExternalPluginCatalogEntrySourceRefs(knownEntry)).toEqual([]);
@@ -497,12 +513,16 @@ describe("official external plugin catalog", () => {
       "feed install candidate is missing sourceRef",
     ]);
     expect(
+      validateOfficialExternalPluginCatalogEntrySourceRefs(manifestInstallWithoutSourceRef),
+    ).toEqual([]);
+    expect(
       filterOfficialExternalPluginCatalogEntriesBySourceRefs([
         knownEntry,
         unknownEntry,
         missingEntry,
+        manifestInstallWithoutSourceRef,
       ]).map((entry) => entry.name),
-    ).toEqual(["@openclaw/source-ref-known"]);
+    ).toEqual(["@openclaw/source-ref-known", "@openclaw/source-ref-manifest-missing"]);
 
     const result = await loadHostedOfficialExternalPluginCatalogEntries({
       fetchImpl: vi.fn(async () => new Response(body, { status: 200 })),
@@ -510,7 +530,10 @@ describe("official external plugin catalog", () => {
     });
 
     expect(result.source).toBe("hosted");
-    expect(result.entries.map((entry) => entry.name)).toEqual(["@openclaw/source-ref-known"]);
+    expect(result.entries.map((entry) => entry.name)).toEqual([
+      "@openclaw/source-ref-known",
+      "@openclaw/source-ref-manifest-missing",
+    ]);
   });
 
   it("falls back to the bundled catalog when hosted feed validation fails", async () => {
@@ -595,6 +618,38 @@ describe("official external plugin catalog", () => {
       metadata: { etag: '"fresh"' },
     });
     expect(snapshot?.metadata.checksum).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it("fails explicit refreshes when required snapshot persistence fails", async () => {
+    const body = JSON.stringify({
+      schemaVersion: 1,
+      id: "openclaw-official-external-plugins",
+      generatedAt: "2026-06-22T00:00:00.000Z",
+      sequence: 4,
+      entries: [
+        {
+          name: "@openclaw/snapshot-write-fail-proof",
+          kind: "plugin",
+          openclaw: { plugin: { id: "snapshot-write-fail-proof" } },
+        },
+      ],
+    });
+    const snapshotStore = {
+      read: vi.fn(async () => null),
+      write: vi.fn(async () => {
+        throw new Error("state database is read-only");
+      }),
+    };
+
+    await expect(
+      loadHostedOfficialExternalPluginCatalogEntries({
+        snapshotStore,
+        requireSnapshotWrite: true,
+        fetchImpl: vi.fn(async () => new Response(body, { status: 200 })),
+      }),
+    ).rejects.toThrow("state database is read-only");
+
+    expect(snapshotStore.write).toHaveBeenCalledTimes(1);
   });
 
   it("reads the latest accepted snapshot in offline mode without fetching", async () => {
@@ -982,6 +1037,63 @@ describe("official external plugin catalog", () => {
     if (oversized.source === "bundled-fallback") {
       expect(oversized.error).toContain("exceeds 4 bytes");
     }
+  });
+
+  it("prefers feed install candidates before legacy install metadata", () => {
+    expect(
+      resolveOfficialExternalPluginInstall({
+        name: "@legacy/plain-package",
+        kind: "plugin",
+        install: {
+          candidates: [
+            {
+              sourceRef: "public-clawhub",
+              package: "@openclaw/candidate-package",
+              version: "1.2.3",
+              integrity: "sha256:candidate",
+            },
+          ],
+        },
+        openclaw: {
+          plugin: { id: "candidate-package" },
+          install: {
+            npmSpec: "@legacy/plain-package",
+            minHostVersion: ">=2026.6.1",
+            expectedIntegrity: "sha256:manifest",
+            allowInvalidConfigRecovery: true,
+          },
+        },
+      }),
+    ).toEqual({
+      clawhubSpec: "clawhub:@openclaw/candidate-package@1.2.3",
+      npmSpec: "@openclaw/candidate-package@1.2.3",
+      defaultChoice: "clawhub",
+      expectedIntegrity: "sha256:candidate",
+      minHostVersion: ">=2026.6.1",
+      allowInvalidConfigRecovery: true,
+    });
+
+    expect(
+      resolveOfficialExternalPluginInstall(
+        {
+          name: "@acme/private-package",
+          kind: "plugin",
+          install: {
+            candidates: [
+              { sourceRef: "acme-npm", package: "@acme/private-package", version: "4.5.6" },
+            ],
+          },
+        },
+        { catalogConfig: { sources: { "acme-npm": { type: "npm" } } } },
+      ),
+    ).toEqual({
+      npmSpec: "@acme/private-package@4.5.6",
+      defaultChoice: "npm",
+    });
+
+    expect(
+      resolveOfficialExternalPluginInstall({ id: "metadata-only", title: "Metadata only" }),
+    ).toBeNull();
   });
 
   it("lists the externalized provider and capability plugins with install metadata", () => {

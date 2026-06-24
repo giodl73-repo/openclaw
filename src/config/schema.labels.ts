@@ -8,7 +8,6 @@ export const FIELD_LABELS: Record<string, string> = {
   marketplaces: "Marketplaces",
   "marketplaces.feeds": "Marketplace Feeds",
   "marketplaces.feeds.*.url": "Marketplace Feed URL",
-  "marketplaces.feeds.*.refresh": "Marketplace Feed Refresh",
   "marketplaces.feeds.*.verification": "Marketplace Feed Verification",
   "marketplaces.sources": "Marketplace Sources",
   "marketplaces.sources.*.type": "Marketplace Source Type",
