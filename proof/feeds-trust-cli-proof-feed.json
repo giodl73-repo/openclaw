@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "payloadType": "openclaw.official-external-plugin-catalog-feed.v1",
+  "payload": "eyJzY2hlbWFWZXJzaW9uIjoyLCJpZCI6InByb29mLXNpZ25lZC1mZWVkIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA3LTAxVDAwOjAwOjAwLjAwMFoiLCJzZXF1ZW5jZSI6MjYwNzAxLCJlbnRyaWVzIjpbeyJpZCI6InByb29mLWNhbGVuZGFyLWhlbHBlciIsInRpdGxlIjoiUHJvb2YgQ2FsZW5kYXIgSGVscGVyIiwia2luZCI6InBsdWdpbiIsInN0YXRlIjoiYXZhaWxhYmxlIiwicHVibGlzaGVyIjp7ImlkIjoiY2xhd2h1Yi1wcm9vZiIsInRydXN0Ijoib2ZmaWNpYWwifSwiaW5zdGFsbCI6eyJjYW5kaWRhdGVzIjpbeyJzb3VyY2VSZWYiOiJwcm9vZi1jbGF3aHViIiwicGFja2FnZSI6InByb29mLWNhbGVuZGFyLWhlbHBlciIsInZlcnNpb24iOiIxLjAuMCIsImludGVncml0eSI6InNoYTI1NjowMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIn1dfX1dfQ",
+  "signatures": [
+    {
+      "keyId": "clawhub-proof-root",
+      "algorithm": "ed25519",
+      "signature": "7RThyoPe-loU8zyPQjBVfBPLeglkywDTpMLt2BzhbkJTY2rDlrIRrtolTEg-hErtATHiTgv35vHBAJ0q8OA7AA"
+    }
+  ]
+}
