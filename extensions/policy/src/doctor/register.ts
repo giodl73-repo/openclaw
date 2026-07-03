@@ -33,6 +33,7 @@ const loadFsPromisesModule = async () => {
 };
 
 import { createPolicyDoctorChecks } from "./checks.js";
+import { POLICY_FIX_METADATA_BY_CHECK_ID } from "./fix-metadata.js";
 import {
   CHECK_IDS,
   POLICY_CHECK_IDS,
@@ -179,7 +180,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       policyPath,
       evidence,
       expectedAttestationHash: settings.expectedAttestationHash,
-      findings,
+      findings: withPolicyFixRecommendations(findings),
       attestedFindings: findings,
     };
   }
@@ -198,7 +199,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       policyPath,
       evidence,
       expectedAttestationHash: settings.expectedAttestationHash,
-      findings,
+      findings: withPolicyFixRecommendations(findings),
       attestedFindings: findings,
     };
   }
@@ -210,7 +211,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       policyPath,
       evidence,
       expectedAttestationHash: settings.expectedAttestationHash,
-      findings,
+      findings: withPolicyFixRecommendations(findings),
       attestedFindings: findings,
     };
   }
@@ -238,7 +239,7 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
       policy: { value: policy, hash: policyHash },
       evidence,
       expectedAttestationHash: settings.expectedAttestationHash,
-      findings,
+      findings: withPolicyFixRecommendations(findings),
       attestedFindings: findings,
     };
   }
@@ -347,9 +348,31 @@ async function evaluatePolicyUncached(ctx: HealthCheckContext): Promise<PolicyEv
     policy: { value: policy, hash: policyHash },
     evidence,
     expectedAttestationHash: settings.expectedAttestationHash,
-    findings,
+    findings: withPolicyFixRecommendations(findings),
     attestedFindings: policyFindings,
   };
+}
+
+function withPolicyFixRecommendations(
+  findings: readonly HealthFinding[],
+): readonly HealthFinding[] {
+  return findings.map((finding) => {
+    const metadata = POLICY_FIX_METADATA_BY_CHECK_ID.get(
+      finding.checkId as (typeof POLICY_CHECK_IDS)[number],
+    );
+    if (metadata === undefined) {
+      return finding;
+    }
+    return {
+      ...finding,
+      fixRecommendation: {
+        fixClass: metadata.fixClass,
+        ...(metadata.policyPath !== undefined ? { policyPath: metadata.policyPath } : {}),
+        ...(metadata.configTargets !== undefined ? { configTargets: metadata.configTargets } : {}),
+        summary: metadata.summary,
+      },
+    };
+  });
 }
 
 function policyParseFinding(
