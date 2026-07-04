@@ -3,7 +3,22 @@ import { listCliCatalogPromptSurfaces } from "./prompt-projection.js";
 
 describe("CLI catalog overlay prompt projection", () => {
   it("returns only lean model-facing routing fields", () => {
-    const gateway = listCliCatalogPromptSurfaces().find((surface) => surface.id === "gateway");
+    const surfaces = listCliCatalogPromptSurfaces();
+    const gatewayStatus = surfaces.find((surface) => surface.id === "gateway-status");
+    const gateway = surfaces.find((surface) => surface.id === "gateway");
+
+    expect(surfaces).toHaveLength(19);
+    expect(gatewayStatus).toEqual({
+      id: "gateway-status",
+      title: "Gateway status",
+      kind: "routed-operation",
+      dispatchMode: "direct",
+      target: "gateway status",
+      examples: ["gateway status"],
+      commandHints: ["gateway status"],
+      risk: "low",
+      confirmationRequired: false,
+    });
 
     expect(gateway).toEqual({
       id: "gateway",

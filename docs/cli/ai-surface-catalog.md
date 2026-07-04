@@ -6,7 +6,7 @@ sidebarTitle: "AI Surface Catalog"
 
 # AI Surface Catalog
 
-This page is generated from the CLI catalog overlay registry. It describes existing OpenClaw command and tool surfaces that the AI can route toward.
+This page is generated from the CLI catalog overlay registry and existing OpenClaw CLI registries. It describes the command metadata, command-routing metadata, routed operations, and agent tool surfaces that the AI can route toward.
 
 The catalog is metadata only. It does not add a new execution dispatcher, runtime hook, gateway plugin, or policy engine. Each listed surface keeps owning its current validation, permissions, and execution behavior.
 
@@ -20,7 +20,25 @@ openclaw catalog list --json
 openclaw catalog list --markdown
 ```
 
-## Surfaces
+## Catalog shape
+
+- CLI descriptors: 56
+- Command routes: 92
+- Routed operations: 14
+- Agent/tool surfaces: 5
+- Prompt projection items: 19
+
+The full JSON output is hierarchical. `cli.descriptors` is the command inventory, `cli.commandRoutes` is the startup/routing policy inventory, `cli.routedOperations` is the mechanical fast-path operation inventory, and `agentToolSurfaces` describes non-CLI or tool-backed model surfaces.
+
+## CLI descriptors
+
+`crestodian`, `setup`, `onboard`, `configure`, `config`, `backup`, `migrate`, `doctor`, `dashboard`, `reset`, `uninstall`, `message`, `mcp`, `transcripts`, `agent`, `agents`, `status`, `health`, `sessions`, `commitments`, `tasks`, `acp`, `gateway`, `daemon`, `logs`, `system`, `models`, `catalog`, `infer`, `capability`, `approvals`, `exec-policy`, `nodes`, `devices`, `node`, `sandbox`, `tui`, `terminal`, `chat`, `cron`, `dns`, `docs`, `proxy`, `hooks`, `webhooks`, `qr`, `clawbot`, `pairing`, `plugins`, `channels`, `directory`, `security`, `secrets`, `skills`, `update`, `completion`
+
+## Routed operations
+
+`agents-list`, `channels-list`, `channels-status`, `config-get`, `config-unset`, `gateway-status`, `health`, `models-list`, `models-status`, `plugins-list`, `sessions`, `status`, `tasks-audit`, `tasks-list`
+
+## Agent/tool surfaces
 
 ### `skill_workshop`: Skill Workshop proposals
 

@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildCatalogList } from "../src/cli-catalog-overlay/list.js";
 import {
   listCliCatalogSurfaces,
   type CliCatalogSurfaceDefinition,
@@ -44,7 +45,10 @@ function renderSurface(surface: CliCatalogSurfaceDefinition): string[] {
 }
 
 export function renderCliCatalogOverlayReferenceDoc(): string {
+  const catalog = buildCatalogList();
   const surfaces = listCliCatalogSurfaces();
+  const descriptorNames = catalog.cli.descriptors.map((descriptor) => descriptor.name);
+  const routedOperationIds = catalog.cli.routedOperations.map((operation) => operation.id);
   return [
     "---",
     'summary: "AI-operable OpenClaw surfaces described by the CLI catalog overlay"',
@@ -54,7 +58,7 @@ export function renderCliCatalogOverlayReferenceDoc(): string {
     "",
     "# AI Surface Catalog",
     "",
-    "This page is generated from the CLI catalog overlay registry. It describes existing OpenClaw command and tool surfaces that the AI can route toward.",
+    "This page is generated from the CLI catalog overlay registry and existing OpenClaw CLI registries. It describes the command metadata, command-routing metadata, routed operations, and agent tool surfaces that the AI can route toward.",
     "",
     "The catalog is metadata only. It does not add a new execution dispatcher, runtime hook, gateway plugin, or policy engine. Each listed surface keeps owning its current validation, permissions, and execution behavior.",
     "",
@@ -68,7 +72,25 @@ export function renderCliCatalogOverlayReferenceDoc(): string {
     "openclaw catalog list --markdown",
     "```",
     "",
-    "## Surfaces",
+    "## Catalog shape",
+    "",
+    `- CLI descriptors: ${catalog.counts.commandDescriptors}`,
+    `- Command routes: ${catalog.counts.commandRoutes}`,
+    `- Routed operations: ${catalog.counts.routedOperations}`,
+    `- Agent/tool surfaces: ${catalog.counts.agentToolSurfaces}`,
+    `- Prompt projection items: ${catalog.counts.promptProjection}`,
+    "",
+    "The full JSON output is hierarchical. `cli.descriptors` is the command inventory, `cli.commandRoutes` is the startup/routing policy inventory, `cli.routedOperations` is the mechanical fast-path operation inventory, and `agentToolSurfaces` describes non-CLI or tool-backed model surfaces.",
+    "",
+    "## CLI descriptors",
+    "",
+    inlineCodeList(descriptorNames),
+    "",
+    "## Routed operations",
+    "",
+    inlineCodeList(routedOperationIds),
+    "",
+    "## Agent/tool surfaces",
     "",
     ...surfaces.flatMap(renderSurface),
   ].join("\n");

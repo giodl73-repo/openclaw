@@ -12,26 +12,25 @@ function formatSurfaceLine(surface: {
   kind: string;
   dispatchMode: string;
   target: string;
-  intent: string;
-  examples: readonly string[];
   commandHints: readonly string[];
   risk: string;
   confirmationRequired: boolean;
 }): string {
-  const examples = surface.examples.length > 0 ? ` examples=${surface.examples.join(" | ")}` : "";
-  const commands =
-    surface.commandHints.length > 0 ? ` commands=${surface.commandHints.join(" | ")}` : "";
-  return `- ${surface.id}: ${surface.title} [${surface.kind}, ${surface.dispatchMode}, target=${surface.target}, risk=${surface.risk}, confirmation=${surface.confirmationRequired}]${examples}${commands}`;
+  const confirm = surface.confirmationRequired ? "1" : "0";
+  if (surface.kind === "routed-operation") {
+    return `- ${surface.id}->${surface.target} r=${surface.risk} c=${confirm}`;
+  }
+  const commands = surface.commandHints.join(" | ");
+  return `- ${surface.id}: ${surface.title} target=${surface.target} r=${surface.risk} c=${confirm} commands=${commands}`;
 }
 
 export function buildCliCatalogOverlayPromptSection(): string[] {
   const surfaces = listCliCatalogPromptSurfaces();
   return [
     "## CLI Catalog Overlay",
-    "Use the CLI catalog overlay as metadata over existing OpenClaw command surfaces. Prefer a matched existing surface before inventing a new flow.",
-    "Treat the overlay as a classifier and routing guide: describe the surface, choose the existing command or tool, and keep the execution path mechanical.",
-    "If a request already matches an OpenClaw command surface, reuse that command surface instead of inventing a new API or prompt-only workflow.",
-    "Use the existing surface metadata to decide intent, risk, and dispatch target. When in doubt, choose the smallest existing command surface that fits.",
+    "Use catalog metadata to route bounded requests to existing OpenClaw commands/tools before inventing a flow.",
+    "Full JSON has descriptors, command routes, routed ops, and agent/tool surfaces; this prompt is the lean projection.",
+    "Use the smallest matching surface and keep execution on its current path.",
     "",
     "### Catalog",
     ...surfaces.map(formatSurfaceLine),

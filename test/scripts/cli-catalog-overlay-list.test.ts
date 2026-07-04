@@ -19,8 +19,10 @@ describe("cli-catalog-overlay-list script", () => {
 
     expect(result.status).toBe(0);
     const list = JSON.parse(result.stdout) as ReturnType<typeof buildCatalogList>;
-    expect(list.surfaceCount).toBe(5);
-    expect(list.surfaces.find((surface) => surface.id === "gateway")).toMatchObject({
+    expect(list.counts.commandDescriptors).toBe(56);
+    expect(list.counts.commandRoutes).toBe(92);
+    expect(list.counts.routedOperations).toBe(14);
+    expect(list.agentToolSurfaces.find((surface) => surface.id === "gateway")).toMatchObject({
       descriptor: { name: "gateway" },
     });
   });
@@ -30,6 +32,7 @@ describe("cli-catalog-overlay-list script", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("# CLI Catalog Overlay List");
+    expect(result.stdout).toContain("| `gateway-status` | `gateway status` |");
     expect(result.stdout).toContain(
       "| `gateway` | `runtime` | `medium` | `mixed` | yes | `gateway` | CLI descriptor: gateway |",
     );

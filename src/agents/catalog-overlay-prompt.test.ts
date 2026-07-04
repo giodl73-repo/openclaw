@@ -7,7 +7,7 @@ describe("buildCliCatalogOverlayPromptSection", () => {
 
     expect(section).toContain("## CLI Catalog Overlay");
     expect(section).toContain(
-      "Use the CLI catalog overlay as metadata over existing OpenClaw command surfaces.",
+      "Use catalog metadata to route bounded requests to existing OpenClaw commands/tools",
     );
     expect(section).toContain("### Catalog");
     expect(section).toContain("- gateway: Gateway control");

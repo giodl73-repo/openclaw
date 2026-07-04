@@ -277,7 +277,7 @@ describe("buildAgentSystemPrompt", () => {
 
     expect(prompt).toContain("## CLI Catalog Overlay");
     expect(prompt).toContain(
-      "Use the CLI catalog overlay as metadata over existing OpenClaw command surfaces",
+      "Use catalog metadata to route bounded requests to existing OpenClaw commands/tools",
     );
     expect(prompt).toContain("- gateway: Gateway control");
     expect(prompt).not.toContain(["##", "Claw", "Ops"].join(" "));

@@ -38,9 +38,13 @@ describe("catalog cli", () => {
       await createProgram().parseAsync(["node", "openclaw", "catalog", "list", "--json"]);
     });
 
-    const parsed = JSON.parse(output) as { surfaceCount: number; surfaces: Array<{ id: string }> };
-    expect(parsed.surfaceCount).toBe(5);
-    expect(parsed.surfaces.map((surface) => surface.id)).toContain("gateway");
+    const parsed = JSON.parse(output) as {
+      counts: { commandDescriptors: number; routedOperations: number };
+      agentToolSurfaces: Array<{ id: string }>;
+    };
+    expect(parsed.counts.commandDescriptors).toBe(56);
+    expect(parsed.counts.routedOperations).toBe(14);
+    expect(parsed.agentToolSurfaces.map((surface) => surface.id)).toContain("gateway");
   });
 
   it("prints catalog list Markdown by default", async () => {
@@ -49,6 +53,7 @@ describe("catalog cli", () => {
     });
 
     expect(output).toContain("# CLI Catalog Overlay List");
+    expect(output).toContain("`gateway-status`");
     expect(output).toContain("`gateway`");
   });
 });

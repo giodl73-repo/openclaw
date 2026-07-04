@@ -43,7 +43,7 @@ describe("CLI catalog overlay registry guards", () => {
   it("keeps the prompt projection lean", () => {
     const section = buildCliCatalogOverlayPromptSection().join("\n");
 
-    expect(section.length).toBeLessThan(1800);
-    expect(Math.round(section.length / 4)).toBeLessThan(450);
+    expect(section.length).toBeLessThan(3600);
+    expect(Math.round(section.length / 4)).toBeLessThan(900);
   });
 });
