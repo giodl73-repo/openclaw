@@ -270,6 +270,20 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Do not invent commands");
   });
 
+  it("includes CLI catalog overlay routing guidance", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toContain("## CLI Catalog Overlay");
+    expect(prompt).toContain(
+      "Use the CLI catalog overlay as metadata over existing OpenClaw command surfaces",
+    );
+    expect(prompt).toContain("- gateway: Gateway control");
+    expect(prompt).not.toContain(["##", "Claw", "Ops"].join(" "));
+    expect(prompt).not.toContain(["claw", "ops list"].join(""));
+  });
+
   it("points agents to config field docs and broader configuration docs", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
@@ -727,9 +741,7 @@ describe("buildAgentSystemPrompt", () => {
       workspaceDir: "/tmp/openclaw",
       toolNames: ["read", "skill_workshop"],
     });
-    expect(withTool).toContain(
-      "- skill_workshop: Create, update, revise, list, inspect, apply, reject, or quarantine Skill Workshop proposals",
-    );
+    expect(withTool).toContain("- skill_workshop: Manage Skill Workshop proposals");
     expect(withTool).toContain("## Skill Workshop");
     expect(withTool).toContain(
       "Use `skill_workshop` when the user wants to create, update, revise, list, inspect, apply, reject, or quarantine a reusable skill, Skill Workshop proposal, playbook, workflow, procedure, or durable instruction.",
@@ -750,7 +762,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(withTool).toContain(
       "Use `action=apply`, `action=reject`, or `action=quarantine` only after the user explicitly asks to approve/use/apply, reject, or quarantine a specific proposal.",
     );
-    expect(withTool).toContain("Generated skills are pending proposals by default.");
+    expect(withTool).toContain("Pending skills stay proposals.");
     expect(withTool).toContain(
       "Do not apply, reject, or quarantine proposals manually with filesystem operations or shell commands.",
     );

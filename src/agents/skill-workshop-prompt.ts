@@ -16,7 +16,7 @@ export function buildSkillWorkshopPromptSection(): string[] {
     "For `action=revise`, pass `proposal_id` when known. If it is not known, pass the proposal or skill name in `name` so `skill_workshop` can resolve the pending proposal or return candidates.",
     "Use `action=list` or `action=inspect` only for pending proposal discovery/inspection. Do not use filesystem search for proposal discovery.",
     "If the user names an existing live skill, read or view that skill when needed for context, but create the update proposal through `skill_workshop`.",
-    "Generated skills are pending proposals by default. Do not apply, install, approve, enable, or write into live skills unless the user explicitly asks for that separate action.",
+    "Pending skills stay proposals. Use `skill_workshop` for proposal lifecycle; live install/enable or approval actions must go through the existing command or tool surface for that action.",
     "Use `action=apply`, `action=reject`, or `action=quarantine` only after the user explicitly asks to approve/use/apply, reject, or quarantine a specific proposal. Pass `proposal_id`; if it is not known, use `action=list` or `action=inspect` first.",
     "Do not apply, reject, or quarantine proposals manually with filesystem operations or shell commands. Proposal lifecycle changes must use `skill_workshop`.",
     "You may gather context first, but the durable proposal write or lifecycle change must use `skill_workshop`.",

@@ -32,6 +32,7 @@ import {
   buildFullBootstrapPromptLines,
   buildLimitedBootstrapPromptLines,
 } from "./bootstrap-prompt.js";
+import { buildCliCatalogOverlayPromptSection } from "./catalog-overlay-prompt.js";
 import type { ResolvedTimeFormat } from "./date-time.js";
 import type { EmbeddedContextFile } from "./embedded-agent-helpers.js";
 import type {
@@ -789,8 +790,7 @@ export function buildAgentSystemPrompt(params: {
       "On-demand list/status visibility for sub-agent runs in this requester session; do not use for wait loops",
     session_status:
       "Show a /status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
-    skill_workshop:
-      "Create, update, revise, list, inspect, apply, reject, or quarantine Skill Workshop proposals",
+    skill_workshop: "Manage Skill Workshop proposals",
     image: "Analyze an image with the configured image model",
     image_generate: "Generate images with the configured image-generation model",
   };
@@ -971,6 +971,7 @@ export function buildAgentSystemPrompt(params: {
   const skillWorkshopSection = availableTools.has(SKILL_WORKSHOP_TOOL_NAME)
     ? buildSkillWorkshopPromptSection()
     : [];
+  const cliCatalogOverlaySection = buildCliCatalogOverlayPromptSection();
   const memorySection = buildMemorySection({
     isMinimal,
     includeMemorySection: params.includeMemorySection,
@@ -1138,6 +1139,7 @@ export function buildAgentSystemPrompt(params: {
       "`restart`, not stop+start.",
       "",
       ...skillsSection,
+      ...cliCatalogOverlaySection,
       ...skillWorkshopSection,
       ...memorySection,
       hasGateway && !isMinimal ? "## OpenClaw Self-Update" : "",
