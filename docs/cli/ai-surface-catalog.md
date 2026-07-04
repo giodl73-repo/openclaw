@@ -30,6 +30,18 @@ openclaw catalog list --markdown
 
 The full JSON output is hierarchical. `cli.descriptors` is the command inventory, `cli.commandRoutes` is the startup/routing policy inventory, `cli.routedOperations` is the mechanical fast-path operation inventory, and `agentToolSurfaces` describes non-CLI or tool-backed model surfaces.
 
+## Integration uses
+
+The catalog is designed for more than prompt routing. Use `buildCatalogList()` or `openclaw catalog list --json` when a consumer needs structured command metadata instead of hardcoded command lists or scraped help output.
+
+Good first consumers are:
+
+- Reference docs generated from descriptors, command routes, routed operations, and agent/tool surfaces.
+- Audit and policy inventory reports for risk, confirmation, effect mode, and route-policy keys.
+- Routed-operation smoke-test matrices and coverage gap reports.
+- Operator, diagnostics, admin, and debug views that need to explain mechanical OpenClaw surfaces.
+- Future automation adapters that select an existing command or tool from catalog metadata while leaving execution with that surface.
+
 ## CLI descriptors
 
 `crestodian`, `setup`, `onboard`, `configure`, `config`, `backup`, `migrate`, `doctor`, `dashboard`, `reset`, `uninstall`, `message`, `mcp`, `transcripts`, `agent`, `agents`, `status`, `health`, `sessions`, `commitments`, `tasks`, `acp`, `gateway`, `daemon`, `logs`, `system`, `models`, `catalog`, `infer`, `capability`, `approvals`, `exec-policy`, `nodes`, `devices`, `node`, `sandbox`, `tui`, `terminal`, `chat`, `cron`, `dns`, `docs`, `proxy`, `hooks`, `webhooks`, `qr`, `clawbot`, `pairing`, `plugins`, `channels`, `directory`, `security`, `secrets`, `skills`, `update`, `completion`
