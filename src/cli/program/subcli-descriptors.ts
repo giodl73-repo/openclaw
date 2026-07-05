@@ -30,6 +30,11 @@ const subCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
+    name: "catalog",
+    description: "List OpenClaw catalog metadata",
+    hasSubcommands: true,
+  },
+  {
     name: "infer",
     description: "Run provider-backed inference commands through a stable CLI surface",
     hasSubcommands: true,
