@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { buildCatalogList, renderCatalogListMarkdown } from "../cli-catalog-overlay/list.js";
+import { collectRuntimeCommandTree } from "../cli-catalog-overlay/runtime-commands.js";
 
 export function registerCatalogCli(program: Command): void {
   const catalog = program.command("catalog").description("List OpenClaw catalog metadata");
@@ -14,10 +15,11 @@ export function registerCatalogCli(program: Command): void {
         command.error("error: --json and --markdown cannot be combined");
         return;
       }
+      const runtimeCommands = collectRuntimeCommandTree(program);
       if (opts.json) {
-        process.stdout.write(`${JSON.stringify(buildCatalogList(), null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(buildCatalogList({ runtimeCommands }), null, 2)}\n`);
         return;
       }
-      process.stdout.write(`${renderCatalogListMarkdown()}\n`);
+      process.stdout.write(`${renderCatalogListMarkdown({ runtimeCommands })}\n`);
     });
 }
