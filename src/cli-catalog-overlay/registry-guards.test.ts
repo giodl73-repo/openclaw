@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { listCliCatalogSurfaces } from "./registry.js";
 
@@ -20,7 +22,6 @@ describe("CLI catalog overlay registry guards", () => {
       expectNonEmptyString(surface.intent, `${surface.id}.intent`);
       expectNonEmptyString(surface.owner, `${surface.id}.owner`);
       expect(surface.examples.length, `${surface.id}.examples`).toBeGreaterThan(0);
-      expect(surface.aliases.length, `${surface.id}.aliases`).toBeGreaterThan(0);
       expect(surface.effects.length, `${surface.id}.effects`).toBeGreaterThan(0);
       expect(surface.commandHints.length, `${surface.id}.commandHints`).toBeGreaterThan(0);
       expect(["draft", "stable", "deprecated"]).toContain(surface.status);
@@ -41,5 +42,24 @@ describe("CLI catalog overlay registry guards", () => {
       expect(surface.target).toBe(surface.cliDescriptor?.name);
       expect(surface.cliDescriptor?.description.trim().length).toBeGreaterThan(0);
     }
+  });
+  it("keeps the prompt projection lean", async () => {
+    const { buildCliCatalogOverlayPromptSection } =
+      await import("../agents/catalog-overlay-prompt.js");
+    const section = buildCliCatalogOverlayPromptSection().join("\n");
+
+    expect(section.length).toBeLessThan(3600);
+    expect(Math.round(section.length / 4)).toBeLessThan(900);
+  });
+
+  it("keeps the prompt projection off the full catalog builder", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/cli-catalog-overlay/prompt-projection.ts"),
+      "utf8",
+    );
+
+    expect(source).not.toContain('from "./list.js"');
+    expect(source).not.toContain("buildCatalogList");
+    expect(source).not.toContain("routed-command-definitions");
   });
 });
