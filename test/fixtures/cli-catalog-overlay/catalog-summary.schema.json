@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "cli-catalog-overlay-operator-summary",
+  "topLevelFields": [
+    "attention",
+    "counts",
+    "generatedFrom",
+    "nextChecks",
+    "schemaVersion"
+  ],
+  "counts": {
+    "commandDescriptors": 61,
+    "commandRoutes": 97,
+    "routedOperations": 14,
+    "agentToolSurfaces": 5,
+    "nodeCommands": 1,
+    "nodeCommandsRequiringApproval": 1,
+    "confirmationRequiredSurfaces": 2,
+    "routePolicyKeys": 8,
+    "coverageGaps": 14
+  },
+  "countFields": [
+    "agentToolSurfaces",
+    "commandDescriptors",
+    "commandRoutes",
+    "confirmationRequiredSurfaces",
+    "coverageGaps",
+    "nodeCommands",
+    "nodeCommandsRequiringApproval",
+    "routePolicyKeys",
+    "routedOperations"
+  ],
+  "attentionFields": [
+    "confirmationRequiredSurfaceIds",
+    "mediumRiskSurfaceIds",
+    "mixedEffectSurfaceIds",
+    "nodeCommandApprovalIds",
+    "policyKeyIds"
+  ],
+  "attention": {
+    "confirmationRequiredSurfaceIds": [
+      "gateway",
+      "skill_workshop"
+    ],
+    "mediumRiskSurfaceIds": [
+      "gateway",
+      "skill_workshop"
+    ],
+    "mixedEffectSurfaceIds": [
+      "gateway",
+      "process",
+      "skill_workshop"
+    ],
+    "nodeCommandApprovalIds": [
+      "node:demo-filesystem:filesystem.read"
+    ],
+    "policyKeyIds": [
+      "bypassConfigGuard",
+      "ensureCliPath",
+      "hideBanner",
+      "loadPlugins",
+      "networkProxy",
+      "ownsProtocolStdout",
+      "pluginRegistry",
+      "routeConfigGuard"
+    ]
+  },
+  "nextChecks": [
+    "Review confirmation-required catalog surfaces before widening automation.",
+    "Review command routes with networkProxy policy before changing proxy startup behavior.",
+    "Use catalog test-matrix output to prioritize routed-operation smoke coverage.",
+    "Review node/operator command approval state before exposing node-scoped prompt projections."
+  ]
+}

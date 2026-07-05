@@ -1,0 +1,43 @@
+{
+  "count": 21,
+  "itemFields": [
+    "commandHints",
+    "confirmationRequired",
+    "dispatchMode",
+    "examples",
+    "id",
+    "kind",
+    "risk",
+    "target",
+    "title"
+  ],
+  "ids": [
+    "agents-list",
+    "channels-list",
+    "channels-status",
+    "config-get",
+    "config-unset",
+    "demo-plugin:demo plugin",
+    "gateway",
+    "gateway-status",
+    "health",
+    "models-list",
+    "models-status",
+    "node:demo-filesystem:filesystem.read",
+    "plugins-list",
+    "process",
+    "session_status",
+    "sessions",
+    "sessions_spawn",
+    "skill_workshop",
+    "status",
+    "tasks-audit",
+    "tasks-list"
+  ],
+  "pluginSurfaceIds": [
+    "demo-plugin:demo plugin"
+  ],
+  "nodeCommandSurfaceIds": [
+    "node:demo-filesystem:filesystem.read"
+  ]
+}
