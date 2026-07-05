@@ -2,6 +2,10 @@ import type { Command } from "commander";
 import { buildCatalogAudit, renderCatalogAuditMarkdown } from "../cli-catalog-overlay/audit.js";
 import { buildCatalogList, renderCatalogListMarkdown } from "../cli-catalog-overlay/list.js";
 import {
+  buildCatalogOperatorSummary,
+  renderCatalogOperatorSummaryMarkdown,
+} from "../cli-catalog-overlay/operator-summary.js";
+import {
   buildCatalogTestMatrix,
   renderCatalogTestMatrixMarkdown,
 } from "../cli-catalog-overlay/test-matrix.js";
@@ -58,5 +62,22 @@ export function registerCatalogCli(program: Command): void {
         return;
       }
       process.stdout.write(`${renderCatalogTestMatrixMarkdown()}\n`);
+    });
+
+  catalog
+    .command("summary")
+    .description("Summarize catalog inventory for operator and admin review")
+    .option("--json", "Output JSON", false)
+    .option("--markdown", "Output Markdown", false)
+    .action((opts: { json?: boolean; markdown?: boolean }, command: Command) => {
+      if (opts.json && opts.markdown) {
+        command.error("error: --json and --markdown cannot be combined");
+        return;
+      }
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(buildCatalogOperatorSummary(), null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(`${renderCatalogOperatorSummaryMarkdown()}\n`);
     });
 }

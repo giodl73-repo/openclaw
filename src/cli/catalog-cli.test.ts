@@ -110,4 +110,28 @@ describe("catalog cli", () => {
     expect(output).toContain("# CLI Catalog Overlay Test Matrix");
     expect(output).toContain("| `gateway-status` | `gateway status` |");
   });
+
+  it("prints catalog summary JSON", async () => {
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "summary", "--json"]);
+    });
+
+    const parsed = JSON.parse(output) as {
+      counts: { commandRoutes: number; coverageGaps: number };
+      attention: { confirmationRequiredSurfaceIds: string[]; policyKeyIds: string[] };
+    };
+    expect(parsed.counts.commandRoutes).toBe(93);
+    expect(parsed.counts.coverageGaps).toBe(14);
+    expect(parsed.attention.confirmationRequiredSurfaceIds).toEqual(["gateway", "skill_workshop"]);
+    expect(parsed.attention.policyKeyIds).toContain("networkProxy");
+  });
+
+  it("prints catalog summary Markdown", async () => {
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "summary"]);
+    });
+
+    expect(output).toContain("# CLI Catalog Operator Summary");
+    expect(output).toContain("- Test-matrix coverage gaps: 14");
+  });
 });
