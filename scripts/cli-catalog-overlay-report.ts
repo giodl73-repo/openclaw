@@ -2,9 +2,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildCatalogList } from "../src/cli-catalog-overlay/list.js";
+import { buildCatalogAudit, type CliCatalogAudit } from "../src/cli-catalog-overlay/audit.js";
+import { buildCatalogList, type CliCatalogList } from "../src/cli-catalog-overlay/list.js";
 import { buildCatalogOperatorSummary } from "../src/cli-catalog-overlay/operator-summary.js";
-import { buildCatalogTestMatrix } from "../src/cli-catalog-overlay/test-matrix.js";
+import {
+  buildCatalogTestMatrix,
+  type CliCatalogTestMatrix,
+} from "../src/cli-catalog-overlay/test-matrix.js";
 
 export const DEFAULT_CLI_CATALOG_REPORT_DIR = ".artifacts/cli-catalog-overlay";
 
@@ -13,6 +17,7 @@ export type CliCatalogOverlayReport = {
   readonly generatedFrom: "cli-catalog-overlay-report";
   readonly advisory: true;
   readonly files: {
+    readonly auditJson: string;
     readonly summaryJson: string;
     readonly testMatrixJson: string;
     readonly reportMarkdown: string;
@@ -22,7 +27,18 @@ export type CliCatalogOverlayReport = {
     readonly commandRoutes: number;
     readonly routedOperations: number;
     readonly agentToolSurfaces: number;
+    readonly confirmationRequiredSurfaces: number;
+    readonly routePolicyKeys: number;
+    readonly routesWithoutPolicyKeys: number;
     readonly coverageGaps: number;
+  };
+  readonly auditSignals: {
+    readonly confirmationRequiredSurfaceIds: readonly string[];
+    readonly mediumRiskSurfaceIds: readonly string[];
+    readonly mixedEffectSurfaceIds: readonly string[];
+    readonly routePolicyKeys: readonly string[];
+    readonly routesWithoutPolicyKeys: readonly string[];
+    readonly coverageGapRouteIds: readonly string[];
   };
   readonly notes: readonly string[];
 };
@@ -31,14 +47,38 @@ function markdownList(values: readonly string[]): string[] {
   return values.length > 0 ? values.map((value) => `- ${value}`) : ["- None"];
 }
 
-export function buildCliCatalogOverlayReport(): CliCatalogOverlayReport {
-  const list = buildCatalogList();
-  const testMatrix = buildCatalogTestMatrix({ list });
+function inlineCodeList(values: readonly string[]): string {
+  return values.length > 0 ? values.map((value) => "`" + value + "`").join(", ") : "None";
+}
+
+function surfaceGroupIds(audit: CliCatalogAudit, groupId: string): readonly string[] {
+  return audit.surfaces.byRisk.find((group) => group.id === groupId)?.surfaceIds ?? [];
+}
+
+function effectModeGroupIds(audit: CliCatalogAudit, groupId: string): readonly string[] {
+  return audit.surfaces.byEffectMode.find((group) => group.id === groupId)?.surfaceIds ?? [];
+}
+
+function commandPathLabels(paths: readonly (readonly string[])[]): readonly string[] {
+  return paths.map((pathParts) => pathParts.join(" "));
+}
+
+export function buildCliCatalogOverlayReport(
+  params: {
+    readonly list?: CliCatalogList;
+    readonly audit?: CliCatalogAudit;
+    readonly testMatrix?: CliCatalogTestMatrix;
+  } = {},
+): CliCatalogOverlayReport {
+  const list = params.list ?? buildCatalogList();
+  const audit = params.audit ?? buildCatalogAudit(list);
+  const testMatrix = params.testMatrix ?? buildCatalogTestMatrix({ list });
   return {
     schemaVersion: 1,
     generatedFrom: "cli-catalog-overlay-report",
     advisory: true,
     files: {
+      auditJson: "catalog-audit.json",
       summaryJson: "catalog-summary.json",
       testMatrixJson: "catalog-test-matrix.json",
       reportMarkdown: "catalog-report.md",
@@ -48,11 +88,23 @@ export function buildCliCatalogOverlayReport(): CliCatalogOverlayReport {
       commandRoutes: list.counts.commandRoutes,
       routedOperations: list.counts.routedOperations,
       agentToolSurfaces: list.counts.agentToolSurfaces,
+      confirmationRequiredSurfaces: audit.counts.confirmationRequiredSurfaces,
+      routePolicyKeys: audit.counts.routePolicyKeys,
+      routesWithoutPolicyKeys: audit.commandRoutes.routesWithoutPolicyKeys.length,
       coverageGaps: testMatrix.counts.coverageGaps,
+    },
+    auditSignals: {
+      confirmationRequiredSurfaceIds: audit.surfaces.confirmationRequiredSurfaceIds,
+      mediumRiskSurfaceIds: surfaceGroupIds(audit, "medium"),
+      mixedEffectSurfaceIds: effectModeGroupIds(audit, "mixed"),
+      routePolicyKeys: audit.commandRoutes.byPolicyKey.map((group) => group.policyKey).toSorted(),
+      routesWithoutPolicyKeys: commandPathLabels(audit.commandRoutes.routesWithoutPolicyKeys),
+      coverageGapRouteIds: testMatrix.coverageGaps.map((gap) => gap.routeId),
     },
     notes: [
       "Catalog reports are advisory artifacts for review and automation consumers.",
       "Coverage gaps are reported but do not fail validation by themselves.",
+      "Audit signals identify review targets but do not enforce policy.",
       "Use schema fixtures to review intentional JSON contract drift.",
     ],
   };
@@ -77,10 +129,23 @@ export function renderCliCatalogOverlayReportMarkdown(
     `- Command routes: ${report.counts.commandRoutes}`,
     `- Routed operations: ${report.counts.routedOperations}`,
     `- Agent/tool surfaces: ${report.counts.agentToolSurfaces}`,
+    `- Confirmation-required surfaces: ${report.counts.confirmationRequiredSurfaces}`,
+    `- Route policy keys: ${report.counts.routePolicyKeys}`,
+    `- Routes without policy keys: ${report.counts.routesWithoutPolicyKeys}`,
     `- Test-matrix coverage gaps: ${report.counts.coverageGaps}`,
+    "",
+    "## Audit signals",
+    "",
+    `- Confirmation required: ${inlineCodeList(report.auditSignals.confirmationRequiredSurfaceIds)}`,
+    `- Medium risk: ${inlineCodeList(report.auditSignals.mediumRiskSurfaceIds)}`,
+    `- Mixed effect mode: ${inlineCodeList(report.auditSignals.mixedEffectSurfaceIds)}`,
+    `- Route policy keys: ${inlineCodeList(report.auditSignals.routePolicyKeys)}`,
+    `- Routes without policy keys: ${inlineCodeList(report.auditSignals.routesWithoutPolicyKeys)}`,
+    `- Coverage gap route IDs: ${inlineCodeList(report.auditSignals.coverageGapRouteIds)}`,
     "",
     "## Output files",
     "",
+    `- ${report.files.auditJson}`,
     `- ${report.files.summaryJson}`,
     `- ${report.files.testMatrixJson}`,
     `- ${report.files.reportMarkdown}`,
@@ -96,10 +161,12 @@ export function writeCliCatalogOverlayReport(
   outDir = DEFAULT_CLI_CATALOG_REPORT_DIR,
 ): CliCatalogOverlayReport {
   const list = buildCatalogList();
+  const audit = buildCatalogAudit(list);
   const testMatrix = buildCatalogTestMatrix({ list });
-  const summary = buildCatalogOperatorSummary({ list, testMatrix });
-  const report = buildCliCatalogOverlayReport();
+  const summary = buildCatalogOperatorSummary({ list, audit, testMatrix });
+  const report = buildCliCatalogOverlayReport({ list, audit, testMatrix });
   mkdirSync(outDir, { recursive: true });
+  writeFileSync(path.join(outDir, report.files.auditJson), `${JSON.stringify(audit, null, 2)}\n`);
   writeFileSync(
     path.join(outDir, report.files.summaryJson),
     `${JSON.stringify(summary, null, 2)}\n`,
