@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { buildCatalogList } from "../src/cli-catalog-overlay/list.js";
+import { buildCatalogList, type CliCatalogList } from "../src/cli-catalog-overlay/list.js";
 import {
   listCliCatalogSurfaces,
   type CliCatalogSurfaceDefinition,
@@ -17,6 +17,74 @@ function boolLabel(value: boolean): string {
 
 function inlineCodeList(values: readonly string[]): string {
   return values.length > 0 ? values.map((value) => "`" + value + "`").join(", ") : "None";
+}
+
+function markdownTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
+function paddedTableRow(values: readonly string[], widths: readonly number[]): string {
+  return `| ${values.map((value, index) => markdownTableCell(value).padEnd(widths[index])).join(" | ")} |`;
+}
+
+function renderMarkdownTable(
+  headers: readonly string[],
+  rows: readonly (readonly string[])[],
+): string[] {
+  const escapedRows = rows.map((row) => row.map(markdownTableCell));
+  const escapedHeaders = headers.map(markdownTableCell);
+  const widths = escapedHeaders.map((header, index) =>
+    Math.max(header.length, ...escapedRows.map((row) => row[index].length)),
+  );
+  return [
+    paddedTableRow(escapedHeaders, widths),
+    paddedTableRow(
+      widths.map((width) => "-".repeat(Math.max(3, width))),
+      widths,
+    ),
+    ...escapedRows.map((row) => paddedTableRow(row, widths)),
+  ];
+}
+
+function commandPathLabel(path: readonly string[]): string {
+  return "`" + path.join(" ") + "`";
+}
+
+function renderCliDescriptorTable(descriptors: CliCatalogList["cli"]["descriptors"]): string[] {
+  return renderMarkdownTable(
+    ["Name", "Description", "Source", "Subcommands", "Parent default help"],
+    descriptors.map((descriptor) => [
+      "`" + descriptor.name + "`",
+      descriptor.description,
+      "`" + descriptor.source + "`",
+      boolLabel(descriptor.hasSubcommands),
+      boolLabel(descriptor.parentDefaultHelp),
+    ]),
+  );
+}
+
+function renderCommandRouteTable(routes: CliCatalogList["cli"]["commandRoutes"]): string[] {
+  return renderMarkdownTable(
+    ["Command path", "Exact", "Route ID", "Policy keys"],
+    routes.map((route) => [
+      commandPathLabel(route.commandPath),
+      boolLabel(route.exact),
+      route.routeId ? "`" + route.routeId + "`" : "None",
+      inlineCodeList(route.policyKeys),
+    ]),
+  );
+}
+
+function renderRoutedOperationTable(
+  operations: CliCatalogList["cli"]["routedOperations"],
+): string[] {
+  return renderMarkdownTable(
+    ["Operation", "Command paths"],
+    operations.map((operation) => [
+      `\`${operation.id}\``,
+      operation.commandPaths.map(commandPathLabel).join(", "),
+    ]),
+  );
 }
 
 function renderSurface(surface: CliCatalogSurfaceDefinition): string[] {
@@ -47,8 +115,6 @@ function renderSurface(surface: CliCatalogSurfaceDefinition): string[] {
 export function renderCliCatalogOverlayReferenceDoc(): string {
   const catalog = buildCatalogList();
   const surfaces = listCliCatalogSurfaces();
-  const descriptorNames = catalog.cli.descriptors.map((descriptor) => descriptor.name);
-  const routedOperationIds = catalog.cli.routedOperations.map((operation) => operation.id);
   return [
     "---",
     'summary: "AI-operable OpenClaw surfaces described by the CLI catalog overlay"',
@@ -96,11 +162,15 @@ export function renderCliCatalogOverlayReferenceDoc(): string {
     "",
     "## CLI descriptors",
     "",
-    inlineCodeList(descriptorNames),
+    ...renderCliDescriptorTable(catalog.cli.descriptors),
+    "",
+    "## Command routes",
+    "",
+    ...renderCommandRouteTable(catalog.cli.commandRoutes),
     "",
     "## Routed operations",
     "",
-    inlineCodeList(routedOperationIds),
+    ...renderRoutedOperationTable(catalog.cli.routedOperations),
     "",
     "## Agent/tool surfaces",
     "",

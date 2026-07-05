@@ -12,8 +12,12 @@ describe("generate-cli-catalog-overlay-doc", () => {
     expect(doc).toContain("# AI Surface Catalog");
     expect(doc).toContain("metadata only");
     expect(doc).toContain("openclaw catalog list --json");
+    expect(doc).toContain("| Name          | Description");
+    expect(doc).toContain("| Command path          | Exact | Route ID");
+    expect(doc).toContain("| Operation         | Command paths");
     expect(doc).toContain("### `gateway`: Gateway control");
     expect(doc).toContain("- CLI descriptor: `gateway`");
+    expect(doc).toContain("| `gateway-status`  | `gateway status`");
     expect(doc).toContain("### `skill_workshop`: Skill Workshop proposals");
   });
 

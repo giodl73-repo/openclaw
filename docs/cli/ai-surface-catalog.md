@@ -44,11 +44,181 @@ Good first consumers are:
 
 ## CLI descriptors
 
-`crestodian`, `setup`, `onboard`, `configure`, `config`, `backup`, `migrate`, `doctor`, `dashboard`, `reset`, `uninstall`, `message`, `mcp`, `transcripts`, `agent`, `agents`, `status`, `health`, `sessions`, `commitments`, `tasks`, `acp`, `gateway`, `daemon`, `logs`, `system`, `models`, `catalog`, `infer`, `capability`, `approvals`, `exec-policy`, `nodes`, `devices`, `node`, `sandbox`, `tui`, `terminal`, `chat`, `cron`, `dns`, `docs`, `proxy`, `hooks`, `webhooks`, `qr`, `clawbot`, `pairing`, `plugins`, `channels`, `directory`, `security`, `secrets`, `skills`, `update`, `completion`
+| Name          | Description                                                                                 | Source   | Subcommands | Parent default help |
+| ------------- | ------------------------------------------------------------------------------------------- | -------- | ----------- | ------------------- |
+| `crestodian`  | Open the interactive setup and repair assistant                                             | `core`   | no          | no                  |
+| `setup`       | Initialize local config and an agent workspace                                              | `core`   | no          | no                  |
+| `onboard`     | Interactive onboarding for gateway, workspace, and skills                                   | `core`   | no          | no                  |
+| `configure`   | Interactive configuration for credentials, channels, gateway, and agent defaults            | `core`   | no          | no                  |
+| `config`      | Non-interactive config helpers (get/set/unset/file/validate). Default: starts guided setup. | `core`   | yes         | no                  |
+| `backup`      | Create and verify local backup archives for OpenClaw state                                  | `core`   | yes         | no                  |
+| `migrate`     | Import state from another agent system                                                      | `core`   | yes         | no                  |
+| `doctor`      | Diagnose and repair config, Gateway, plugin, and channel problems                           | `core`   | no          | no                  |
+| `dashboard`   | Open the Control UI with your current token                                                 | `core`   | no          | no                  |
+| `reset`       | Reset local config/state (keeps the CLI installed)                                          | `core`   | no          | no                  |
+| `uninstall`   | Uninstall the gateway service + local data (CLI remains)                                    | `core`   | no          | no                  |
+| `message`     | Send, read, and manage channel messages                                                     | `core`   | yes         | no                  |
+| `mcp`         | Manage OpenClaw MCP config and channel bridge                                               | `core`   | yes         | yes                 |
+| `transcripts` | Inspect stored transcripts                                                                  | `core`   | yes         | no                  |
+| `agent`       | Run one agent turn via the Gateway                                                          | `core`   | no          | no                  |
+| `agents`      | Manage isolated agents (workspaces, auth, routing)                                          | `core`   | yes         | no                  |
+| `status`      | Show Gateway, channel, model, and recent-session status                                     | `core`   | no          | no                  |
+| `health`      | Fetch detailed health from the running Gateway                                              | `core`   | no          | no                  |
+| `sessions`    | List stored conversation sessions                                                           | `core`   | yes         | no                  |
+| `commitments` | List and manage inferred follow-up commitments                                              | `core`   | yes         | no                  |
+| `tasks`       | Inspect durable background tasks and flows                                                  | `core`   | yes         | no                  |
+| `acp`         | Run and manage ACP-backed coding agents                                                     | `subcli` | yes         | no                  |
+| `gateway`     | Run, inspect, and query the OpenClaw Gateway                                                | `subcli` | yes         | no                  |
+| `daemon`      | Manage the Gateway service (legacy alias)                                                   | `subcli` | yes         | no                  |
+| `logs`        | Tail Gateway logs locally or via RPC                                                        | `subcli` | no          | no                  |
+| `system`      | System events, heartbeat, and presence                                                      | `subcli` | yes         | no                  |
+| `models`      | List, scan, and set model providers                                                         | `subcli` | yes         | no                  |
+| `catalog`     | List OpenClaw catalog metadata                                                              | `subcli` | yes         | no                  |
+| `infer`       | Run provider-backed model, media, search, and embedding commands                            | `subcli` | yes         | no                  |
+| `capability`  | Run provider capability commands (fallback alias: infer)                                    | `subcli` | yes         | no                  |
+| `approvals`   | Manage exec approvals (gateway or node host)                                                | `subcli` | yes         | yes                 |
+| `exec-policy` | Show or synchronize requested exec policy with host approvals                               | `subcli` | yes         | no                  |
+| `nodes`       | Pair nodes and run node-host commands through the Gateway                                   | `subcli` | yes         | no                  |
+| `devices`     | Device pairing + token management                                                           | `subcli` | yes         | yes                 |
+| `node`        | Run and manage the headless node host service                                               | `subcli` | yes         | no                  |
+| `sandbox`     | Manage sandbox containers for agent isolation                                               | `subcli` | yes         | no                  |
+| `tui`         | Open a terminal UI connected to the Gateway                                                 | `subcli` | no          | no                  |
+| `terminal`    | Open a local terminal UI (alias for tui --local)                                            | `subcli` | no          | no                  |
+| `chat`        | Open a local terminal UI (alias for tui --local)                                            | `subcli` | no          | no                  |
+| `cron`        | Schedule and inspect Gateway background jobs                                                | `subcli` | yes         | yes                 |
+| `dns`         | DNS helpers for wide-area discovery (Tailscale + CoreDNS)                                   | `subcli` | yes         | no                  |
+| `docs`        | Search the live OpenClaw docs                                                               | `subcli` | no          | no                  |
+| `proxy`       | Run the OpenClaw debug proxy and inspect captured traffic                                   | `subcli` | yes         | no                  |
+| `hooks`       | Manage internal agent hooks                                                                 | `subcli` | yes         | no                  |
+| `webhooks`    | Webhook helpers and integrations                                                            | `subcli` | yes         | no                  |
+| `qr`          | Generate mobile pairing QR/setup code                                                       | `subcli` | no          | no                  |
+| `clawbot`     | Legacy clawbot command aliases                                                              | `subcli` | yes         | no                  |
+| `pairing`     | Secure DM pairing (approve inbound requests)                                                | `subcli` | yes         | no                  |
+| `plugins`     | Install, enable, disable, and inspect plugins                                               | `subcli` | yes         | yes                 |
+| `channels`    | Add, remove, login, and inspect messaging channels                                          | `subcli` | yes         | yes                 |
+| `directory`   | Lookup contact and group IDs (self, peers, groups) for supported chat channels              | `subcli` | yes         | no                  |
+| `security`    | Security tools and local config audits                                                      | `subcli` | yes         | no                  |
+| `secrets`     | Audit, apply, and reload SecretRef-backed credentials                                       | `subcli` | yes         | no                  |
+| `skills`      | List, inspect, and install agent skills                                                     | `subcli` | yes         | no                  |
+| `update`      | Update OpenClaw and inspect update channel status                                           | `subcli` | yes         | no                  |
+| `completion`  | Generate shell completion script                                                            | `subcli` | no          | no                  |
+
+## Command routes
+
+| Command path          | Exact | Route ID          | Policy keys                                                         |
+| --------------------- | ----- | ----------------- | ------------------------------------------------------------------- |
+| `crestodian`          | no    | None              | `bypassConfigGuard`, `ensureCliPath`, `loadPlugins`                 |
+| `agent`               | no    | None              | `loadPlugins`, `networkProxy`, `pluginRegistry`                     |
+| `message`             | no    | None              | `loadPlugins`                                                       |
+| `channels`            | no    | None              | `loadPlugins`, `pluginRegistry`                                     |
+| `directory`           | no    | None              | `loadPlugins`                                                       |
+| `agents`              | no    | None              | `loadPlugins`, `networkProxy`                                       |
+| `agents`              | yes   | `agents-list`     | `loadPlugins`, `networkProxy`                                       |
+| `agents bind`         | yes   | None              | `loadPlugins`                                                       |
+| `agents bindings`     | yes   | None              | `loadPlugins`                                                       |
+| `agents unbind`       | yes   | None              | `loadPlugins`                                                       |
+| `agents set-identity` | yes   | None              | `loadPlugins`                                                       |
+| `agents delete`       | yes   | None              | `loadPlugins`                                                       |
+| `configure`           | no    | None              | `bypassConfigGuard`, `loadPlugins`                                  |
+| `config`              | yes   | None              | `bypassConfigGuard`, `loadPlugins`, `networkProxy`                  |
+| `config models`       | yes   | None              | `bypassConfigGuard`, `loadPlugins`, `networkProxy`                  |
+| `migrate`             | no    | None              | `bypassConfigGuard`, `loadPlugins`, `networkProxy`                  |
+| `status`              | no    | `status`          | `ensureCliPath`, `loadPlugins`, `networkProxy`, `pluginRegistry`    |
+| `health`              | no    | `health`          | `ensureCliPath`, `loadPlugins`, `networkProxy`, `pluginRegistry`    |
+| `gateway`             | no    | None              | `networkProxy`                                                      |
+| `gateway status`      | yes   | `gateway-status`  | `loadPlugins`, `networkProxy`, `routeConfigGuard`                   |
+| `gateway call`        | yes   | None              | `networkProxy`                                                      |
+| `gateway diagnostics` | yes   | None              | `networkProxy`                                                      |
+| `gateway discover`    | yes   | None              | `networkProxy`                                                      |
+| `gateway export`      | yes   | None              | `networkProxy`                                                      |
+| `gateway health`      | yes   | None              | `networkProxy`                                                      |
+| `gateway install`     | yes   | None              | `networkProxy`                                                      |
+| `gateway probe`       | yes   | None              | `networkProxy`                                                      |
+| `gateway restart`     | yes   | None              | `networkProxy`                                                      |
+| `gateway stability`   | yes   | None              | `networkProxy`                                                      |
+| `gateway start`       | yes   | None              | `networkProxy`                                                      |
+| `gateway stop`        | yes   | None              | `networkProxy`                                                      |
+| `gateway uninstall`   | yes   | None              | `networkProxy`                                                      |
+| `gateway usage-cost`  | yes   | None              | `networkProxy`                                                      |
+| `sessions`            | yes   | `sessions`        | `ensureCliPath`, `networkProxy`                                     |
+| `commitments`         | no    | None              | `ensureCliPath`, `loadPlugins`, `networkProxy`                      |
+| `agents list`         | no    | `agents-list`     | `loadPlugins`, `networkProxy`                                       |
+| `config get`          | yes   | `config-get`      | `ensureCliPath`, `networkProxy`                                     |
+| `config unset`        | yes   | `config-unset`    | `ensureCliPath`, `networkProxy`                                     |
+| `models list`         | yes   | `models-list`     | `ensureCliPath`, `networkProxy`, `routeConfigGuard`                 |
+| `models status`       | yes   | `models-status`   | `ensureCliPath`, `networkProxy`, `routeConfigGuard`                 |
+| `catalog`             | no    | None              | `bypassConfigGuard`, `ensureCliPath`, `loadPlugins`, `networkProxy` |
+| `tasks list`          | yes   | `tasks-list`      | `ensureCliPath`, `loadPlugins`, `networkProxy`                      |
+| `tasks audit`         | yes   | `tasks-audit`     | `ensureCliPath`, `loadPlugins`, `networkProxy`                      |
+| `tasks`               | no    | `tasks-list`      | `ensureCliPath`, `loadPlugins`, `networkProxy`                      |
+| `tool`                | no    | None              | `ensureCliPath`, `loadPlugins`, `networkProxy`                      |
+| `tools`               | no    | None              | `ensureCliPath`, `loadPlugins`, `networkProxy`                      |
+| `acp`                 | no    | None              | `networkProxy`                                                      |
+| `approvals`           | no    | None              | `networkProxy`                                                      |
+| `backup`              | no    | None              | `bypassConfigGuard`, `networkProxy`                                 |
+| `chat`                | no    | None              | `networkProxy`                                                      |
+| `config`              | no    | None              | `networkProxy`                                                      |
+| `cron`                | no    | None              | `networkProxy`                                                      |
+| `dashboard`           | no    | None              | `networkProxy`                                                      |
+| `daemon`              | no    | None              | `networkProxy`                                                      |
+| `devices`             | no    | None              | `networkProxy`                                                      |
+| `doctor`              | no    | None              | `bypassConfigGuard`, `loadPlugins`                                  |
+| `exec-policy`         | no    | None              | `networkProxy`                                                      |
+| `hooks`               | no    | None              | `networkProxy`                                                      |
+| `logs`                | no    | None              | `networkProxy`                                                      |
+| `mcp`                 | no    | None              | `networkProxy`                                                      |
+| `node`                | no    | None              | `networkProxy`                                                      |
+| `node run`            | yes   | None              | `networkProxy`                                                      |
+| `nodes`               | no    | None              | `networkProxy`                                                      |
+| `pairing`             | no    | None              | `networkProxy`                                                      |
+| `proxy`               | no    | None              | `networkProxy`                                                      |
+| `qr`                  | no    | None              | `networkProxy`                                                      |
+| `reset`               | no    | None              | `networkProxy`                                                      |
+| `completion`          | no    | None              | `bypassConfigGuard`, `hideBanner`, `networkProxy`                   |
+| `secrets`             | no    | None              | `bypassConfigGuard`, `networkProxy`                                 |
+| `security`            | no    | None              | `networkProxy`                                                      |
+| `system`              | no    | None              | `networkProxy`                                                      |
+| `terminal`            | no    | None              | `networkProxy`                                                      |
+| `tui`                 | no    | None              | `networkProxy`                                                      |
+| `uninstall`           | no    | None              | `networkProxy`                                                      |
+| `update`              | no    | None              | `hideBanner`                                                        |
+| `config validate`     | yes   | None              | `bypassConfigGuard`, `networkProxy`                                 |
+| `config schema`       | yes   | None              | `bypassConfigGuard`, `networkProxy`                                 |
+| `plugins update`      | yes   | None              | `hideBanner`                                                        |
+| `plugins list`        | yes   | `plugins-list`    | `ensureCliPath`, `loadPlugins`, `networkProxy`                      |
+| `onboard`             | yes   | None              | `loadPlugins`                                                       |
+| `channels add`        | yes   | None              | `loadPlugins`, `networkProxy`                                       |
+| `channels logs`       | yes   | None              | `loadPlugins`, `networkProxy`                                       |
+| `channels remove`     | yes   | None              | `networkProxy`, `pluginRegistry`                                    |
+| `channels resolve`    | yes   | None              | `networkProxy`, `pluginRegistry`                                    |
+| `channels status`     | yes   | `channels-status` | `loadPlugins`, `networkProxy`                                       |
+| `channels list`       | yes   | `channels-list`   | `loadPlugins`, `networkProxy`                                       |
+| `skills`              | yes   | None              | `networkProxy`                                                      |
+| `skills check`        | yes   | None              | `networkProxy`                                                      |
+| `skills info`         | yes   | None              | `networkProxy`                                                      |
+| `skills install`      | yes   | None              | None                                                                |
+| `skills list`         | yes   | None              | `networkProxy`                                                      |
+| `skills search`       | yes   | None              | None                                                                |
+| `skills update`       | yes   | None              | None                                                                |
 
 ## Routed operations
 
-`agents-list`, `channels-list`, `channels-status`, `config-get`, `config-unset`, `gateway-status`, `health`, `models-list`, `models-status`, `plugins-list`, `sessions`, `status`, `tasks-audit`, `tasks-list`
+| Operation         | Command paths           |
+| ----------------- | ----------------------- |
+| `agents-list`     | `agents`, `agents list` |
+| `channels-list`   | `channels list`         |
+| `channels-status` | `channels status`       |
+| `config-get`      | `config get`            |
+| `config-unset`    | `config unset`          |
+| `gateway-status`  | `gateway status`        |
+| `health`          | `health`                |
+| `models-list`     | `models list`           |
+| `models-status`   | `models status`         |
+| `plugins-list`    | `plugins list`          |
+| `sessions`        | `sessions`              |
+| `status`          | `status`                |
+| `tasks-audit`     | `tasks audit`           |
+| `tasks-list`      | `tasks list`, `tasks`   |
 
 ## Agent/tool surfaces
 
