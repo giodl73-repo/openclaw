@@ -10,7 +10,7 @@ describe("cli catalog overlay list", () => {
       generatedFrom: "cli-catalog-overlay",
       counts: {
         commandDescriptors: 56,
-        commandRoutes: 92,
+        commandRoutes: 93,
         routedOperations: 14,
         agentToolSurfaces: 5,
         promptProjection: 19,
@@ -43,7 +43,7 @@ describe("cli catalog overlay list", () => {
 
     expect(markdown).toContain("# CLI Catalog Overlay List");
     expect(markdown).toContain("- CLI descriptors: 56");
-    expect(markdown).toContain("- Command routes: 92");
+    expect(markdown).toContain("- Command routes: 93");
     expect(markdown).toContain("| `gateway-status` | `gateway status` |");
     expect(markdown).toContain(
       "| `gateway` | `runtime` | `medium` | `mixed` | yes | `gateway` | CLI descriptor: gateway |",

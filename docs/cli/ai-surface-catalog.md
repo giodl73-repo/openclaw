@@ -23,7 +23,7 @@ openclaw catalog list --markdown
 ## Catalog shape
 
 - CLI descriptors: 56
-- Command routes: 92
+- Command routes: 93
 - Routed operations: 14
 - Agent/tool surfaces: 5
 - Prompt projection items: 19
