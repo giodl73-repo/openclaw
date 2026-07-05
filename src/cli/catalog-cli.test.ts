@@ -56,4 +56,31 @@ describe("catalog cli", () => {
     expect(output).toContain("`gateway-status`");
     expect(output).toContain("`gateway`");
   });
+
+  it("prints catalog audit JSON", async () => {
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "audit", "--json"]);
+    });
+
+    const parsed = JSON.parse(output) as {
+      counts: { commandRoutes: number; confirmationRequiredSurfaces: number };
+      surfaces: { confirmationRequiredSurfaceIds: string[] };
+      commandRoutes: { byPolicyKey: Array<{ policyKey: string }> };
+    };
+    expect(parsed.counts.commandRoutes).toBe(93);
+    expect(parsed.counts.confirmationRequiredSurfaces).toBe(2);
+    expect(parsed.surfaces.confirmationRequiredSurfaceIds).toEqual(["gateway", "skill_workshop"]);
+    expect(parsed.commandRoutes.byPolicyKey.map((group) => group.policyKey)).toContain(
+      "networkProxy",
+    );
+  });
+
+  it("prints catalog audit Markdown", async () => {
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "audit"]);
+    });
+
+    expect(output).toContain("# CLI Catalog Overlay Audit");
+    expect(output).toContain("| Confirmation required | `gateway`, `skill_workshop` |");
+  });
 });
