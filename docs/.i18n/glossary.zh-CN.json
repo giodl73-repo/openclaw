@@ -1230,5 +1230,9 @@
   {
     "source": "Docs map",
     "target": "文档地图"
+  },
+  {
+    "source": "CLI catalog reference",
+    "target": "CLI 目录参考"
   }
 ]
