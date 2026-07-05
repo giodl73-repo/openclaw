@@ -113,4 +113,20 @@ describe("catalog cli", () => {
     expect(JSON.parse(output).counts.pluginCommands).toBe(1);
     expect(loggingState.forceConsoleToStderr).toBe(false);
   });
+
+  it("prints catalog audit, test matrix, and summary JSON", async () => {
+    const audit = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "audit", "--json"]);
+    });
+    const matrix = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "test-matrix", "--json"]);
+    });
+    const summary = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "summary", "--json"]);
+    });
+
+    expect(JSON.parse(audit).counts.commandRoutes).toBe(94);
+    expect(JSON.parse(matrix).counts.routedOperations).toBe(14);
+    expect(JSON.parse(summary).counts.coverageGaps).toBeGreaterThan(0);
+  });
 });
