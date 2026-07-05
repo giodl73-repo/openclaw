@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { buildCatalogAudit } from "../src/cli-catalog-overlay/audit.js";
+import { buildCliCatalogConsumerContract } from "../src/cli-catalog-overlay/consumer-contract.js";
 import { buildCatalogList, type CliCatalogList } from "../src/cli-catalog-overlay/list.js";
 import { buildCatalogOperatorSummary } from "../src/cli-catalog-overlay/operator-summary.js";
 import { listCliCatalogPromptSurfaces } from "../src/cli-catalog-overlay/prompt-projection.js";
@@ -81,6 +82,7 @@ export function buildCliCatalogReferenceMarkdown(): string {
     const testMatrix = buildCatalogTestMatrix({ list });
     const summary = buildCatalogOperatorSummary({ list, audit, testMatrix });
     const promptSurfaces = listCliCatalogPromptSurfaces();
+    const consumerContract = buildCliCatalogConsumerContract();
     const lines = [
       "---",
       'summary: "Generated CLI catalog reference for command metadata, lenses, and machine-readable contracts"',
@@ -258,6 +260,29 @@ export function buildCliCatalogReferenceMarkdown(): string {
           code(surface.target),
           code(surface.risk),
           codeList(surface.commandHints),
+        ]),
+      ),
+      "",
+      "## Consumer contract",
+      "",
+      "The catalog contract is read-only. External consumers should use the JSON commands instead of scraping help text. Builder modules remain repo-internal until package exports are added deliberately.",
+      "",
+      ...markdownTable(
+        ["Area", "Values"],
+        [
+          ["Consumers", codeList([...consumerContract.consumers])],
+          ["Stable external commands", codeList(consumerContract.stableExternalCommands)],
+          ["Repo-internal builders", codeList(consumerContract.repoInternalBuilderModules)],
+          ["Non-goals", consumerContract.nonGoals.join("; ")],
+        ],
+      ),
+      "",
+      ...markdownTable(
+        ["JSON output", "Stable fields", "Snapshot fields"],
+        consumerContract.jsonOutputs.map((output) => [
+          code(output.command),
+          codeList(output.stableFields),
+          codeList(output.snapshotFields),
         ]),
       ),
       "",

@@ -175,6 +175,24 @@ The generated reference intentionally snapshots static descriptors, command rout
 | `process`         | `command`          | `process`         | `low`    | `process list`, `process poll`, `process log`, `process write`                                    |
 | `gateway`         | `command`          | `gateway`         | `medium` | `gateway status`, `gateway restart`, `gateway config.schema.lookup`, `gateway config.apply`       |
 
+## Consumer contract
+
+The catalog contract is read-only. External consumers should use the JSON commands instead of scraping help text. Builder modules remain repo-internal until package exports are added deliberately.
+
+| Area                     | Values                                                                                                                                                                                                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Consumers                | `policy`, `admin`, `diagnostics`, `prompt`, `ci-report`                                                                                                                                                                                                        |
+| Stable external commands | `openclaw catalog list --json`, `openclaw catalog audit --json`, `openclaw catalog test-matrix --json`, `openclaw catalog summary --json`                                                                                                                      |
+| Repo-internal builders   | `src/cli-catalog-overlay/list.js`, `src/cli-catalog-overlay/audit.js`, `src/cli-catalog-overlay/test-matrix.js`, `src/cli-catalog-overlay/operator-summary.js`, `src/cli-catalog-overlay/prompt-projection.js`, `src/cli-catalog-overlay/consumer-contract.js` |
+| Non-goals                | The catalog does not execute commands.; The catalog does not enforce policy decisions.; The catalog does not make inventory counts permanent compatibility promises.                                                                                           |
+
+| JSON output                           | Stable fields                                                                              | Snapshot fields                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `openclaw catalog list --json`        | `schemaVersion`, `generatedFrom`, `counts`, `cli`, `agentToolSurfaces`, `promptProjection` | `counts.*`, `cli.descriptors`, `cli.commandRoutes`, `cli.runtimeCommands`, `cli.pluginCommands` |
+| `openclaw catalog audit --json`       | `schemaVersion`, `generatedFrom`, `counts`, `surfaces`, `commandRoutes`                    | `counts.*`, `surfaces.*`, `commandRoutes.byPolicyKey`, `commandRoutes.routesWithoutPolicyKeys`  |
+| `openclaw catalog test-matrix --json` | `schemaVersion`, `generatedFrom`, `counts`, `candidates`, `coverageGaps`                   | `counts.*`, `candidates`, `coverageGaps`                                                        |
+| `openclaw catalog summary --json`     | `schemaVersion`, `generatedFrom`, `counts`, `attention`, `nextChecks`                      | `counts.*`, `attention.*`, `nextChecks`                                                         |
+
 ## Audit and operator attention
 
 | Area                  | Values                                                                                                                                        |
