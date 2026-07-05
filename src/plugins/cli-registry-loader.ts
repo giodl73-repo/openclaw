@@ -46,6 +46,12 @@ export type PluginCliCommandGroupEntry = {
   register: (program: OpenClawPluginCliContext["program"]) => Promise<void>;
 };
 
+export type PluginCliDescriptorEntry = {
+  pluginId: string;
+  parentPath: readonly string[];
+  descriptors: readonly OpenClawPluginCliCommandDescriptor[];
+};
+
 /** Creates the default plugin CLI logger shared with runtime loading. */
 export function createPluginCliLogger(): PluginLogger {
   return createPluginRuntimeLoaderLogger();
@@ -242,7 +248,32 @@ export async function loadPluginCliDescriptors(
   }
 }
 
-async function loadPluginCliRegistrationEntries(params: {
+export async function loadPluginCliDescriptorEntries(
+  params: PluginCliPublicLoadParams,
+): Promise<PluginCliDescriptorEntry[]> {
+  try {
+    const logger = resolvePluginCliLogger(params.logger);
+    const context = resolvePluginCliLoadContext({
+      cfg: params.cfg,
+      env: params.env,
+      logger,
+    });
+    const { registry } = await loadPluginCliMetadataRegistryWithContext(
+      context,
+      { primaryCommand: params.primaryCommand },
+      params.loaderOptions,
+    );
+    return registry.cliRegistrars.map((entry) => ({
+      pluginId: entry.pluginId,
+      parentPath: entry.parentPath ?? [],
+      descriptors: entry.descriptors,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function loadPluginCliRegistrationEntries(params: {
   cfg?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   loaderOptions?: PluginCliLoaderOptions;
