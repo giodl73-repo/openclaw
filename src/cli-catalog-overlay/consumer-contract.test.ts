@@ -12,6 +12,7 @@ describe("CLI catalog consumer contract", () => {
     });
     expect(contract.consumers).toEqual(["policy", "admin", "diagnostics", "prompt", "ci-report"]);
     expect(contract.stableExternalCommands).toContain("openclaw catalog list --json");
+    expect(contract.advisoryReportArtifacts).toContain("catalog-report.md");
     expect(contract.repoInternalBuilderModules).toContain(
       "src/cli-catalog-overlay/consumer-contract.js",
     );
@@ -21,6 +22,8 @@ describe("CLI catalog consumer contract", () => {
       "test-matrix",
       "summary",
     ]);
+    expect(contract.contractNotes.join("\n")).toContain("stable external read path");
+    expect(contract.contractNotes.join("\n")).toContain("not as the durable public API");
     expect(contract.nonGoals.join("\n")).toContain("does not enforce policy");
   });
 

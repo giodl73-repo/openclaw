@@ -13,8 +13,10 @@ export type CliCatalogConsumerContract = {
   readonly readOnly: true;
   readonly consumers: readonly CliCatalogConsumerId[];
   readonly stableExternalCommands: readonly string[];
+  readonly advisoryReportArtifacts: readonly string[];
   readonly repoInternalBuilderModules: readonly string[];
   readonly jsonOutputs: readonly CliCatalogJsonOutputContract[];
+  readonly contractNotes: readonly string[];
   readonly nonGoals: readonly string[];
 };
 
@@ -29,6 +31,12 @@ export function buildCliCatalogConsumerContract(): CliCatalogConsumerContract {
       "openclaw catalog audit --json",
       "openclaw catalog test-matrix --json",
       "openclaw catalog summary --json",
+    ],
+    advisoryReportArtifacts: [
+      "catalog-audit.json",
+      "catalog-summary.json",
+      "catalog-test-matrix.json",
+      "catalog-report.md",
     ],
     repoInternalBuilderModules: [
       "src/cli-catalog-overlay/list.js",
@@ -97,6 +105,11 @@ export function buildCliCatalogConsumerContract(): CliCatalogConsumerContract {
         stableFields: ["schemaVersion", "generatedFrom", "counts", "attention", "nextChecks"],
         snapshotFields: ["counts.*", "attention.*", "nextChecks"],
       },
+    ],
+    contractNotes: [
+      "Use the catalog JSON commands as the stable external read path.",
+      "Treat advisory report artifacts as review outputs, not as the durable public API.",
+      "Add package exports deliberately before importing catalog builders outside the repo.",
     ],
     nonGoals: [
       "The catalog does not execute commands.",
