@@ -1,9 +1,12 @@
 import { Command } from "commander";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loggingState } from "../logging/state.js";
+import type { PluginCliDescriptorEntry } from "../plugins/cli-registry-loader.js";
 import { registerCatalogCli } from "./catalog-cli.js";
 
-const loadPluginCliDescriptorEntriesMock = vi.hoisted(() => vi.fn(async () => []));
+const loadPluginCliDescriptorEntriesMock = vi.hoisted(() =>
+  vi.fn<() => Promise<PluginCliDescriptorEntry[]>>(async () => []),
+);
 
 vi.mock("../plugins/cli-registry-loader.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../plugins/cli-registry-loader.js")>();
