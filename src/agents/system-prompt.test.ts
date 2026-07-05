@@ -736,12 +736,14 @@ describe("buildAgentSystemPrompt", () => {
     });
     expect(withoutTool).not.toContain("## Skill Workshop");
     expect(withoutTool).not.toContain("use `skill_workshop`");
+    expect(withoutTool).not.toContain("commands=skill_workshop");
 
     const withTool = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
       toolNames: ["read", "skill_workshop"],
     });
     expect(withTool).toContain("- skill_workshop: Manage Skill Workshop proposals");
+    expect(withTool).toContain("commands=skill_workshop action=create|update|revise");
     expect(withTool).toContain("## Skill Workshop");
     expect(withTool).toContain(
       "Use `skill_workshop` when the user wants to create, update, revise, list, inspect, apply, reject, or quarantine a reusable skill, Skill Workshop proposal, playbook, workflow, procedure, or durable instruction.",

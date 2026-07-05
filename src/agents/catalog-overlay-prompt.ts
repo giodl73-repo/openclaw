@@ -6,6 +6,13 @@
  */
 import { listCliCatalogPromptSurfaces } from "../cli-catalog-overlay/prompt-projection.js";
 
+const TOOL_BACKED_SURFACE_TARGETS = new Set([
+  "process",
+  "session_status",
+  "sessions_spawn",
+  "skill_workshop",
+]);
+
 function formatSurfaceLine(surface: {
   id: string;
   title: string;
@@ -24,8 +31,30 @@ function formatSurfaceLine(surface: {
   return `- ${surface.id}: ${surface.title} target=${surface.target} r=${surface.risk} c=${confirm} commands=${commands}`;
 }
 
-export function buildCliCatalogOverlayPromptSection(): string[] {
-  const surfaces = listCliCatalogPromptSurfaces();
+function shouldRenderSurface(
+  surface: {
+    kind: string;
+    target: string;
+  },
+  availableTools?: ReadonlySet<string>,
+): boolean {
+  if (!availableTools || surface.kind === "routed-operation") {
+    return true;
+  }
+  if (!TOOL_BACKED_SURFACE_TARGETS.has(surface.target)) {
+    return true;
+  }
+  return availableTools.has(surface.target);
+}
+
+export function buildCliCatalogOverlayPromptSection(
+  params: {
+    availableTools?: ReadonlySet<string>;
+  } = {},
+): string[] {
+  const surfaces = listCliCatalogPromptSurfaces().filter((surface) =>
+    shouldRenderSurface(surface, params.availableTools),
+  );
   return [
     "## CLI Catalog Overlay",
     "Use catalog metadata to route bounded requests to existing OpenClaw commands/tools before inventing a flow.",
