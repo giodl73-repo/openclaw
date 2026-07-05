@@ -1398,5 +1398,9 @@
   {
     "source": "Zalo personal channel config",
     "target": "Zalo 个人渠道配置"
+  },
+  {
+    "source": "CLI catalog reference",
+    "target": "CLI 目录参考"
   }
 ]
