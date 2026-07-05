@@ -1282,6 +1282,21 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Remote browser control (node host proxy)
   - H2: Related
 
+## cli/catalog.md
+
+- Route: /cli/catalog
+- Headings:
+  - H1: CLI catalog reference
+  - H2: Commands
+  - H2: Lens counts
+  - H2: JSON contracts
+  - H2: Dynamic command inventory
+  - H2: CLI descriptors
+  - H2: Routed operations
+  - H2: Agent and tool surfaces
+  - H2: Prompt projection
+  - H2: Audit and operator attention
+
 ## cli/channels.md
 
 - Route: /cli/channels
