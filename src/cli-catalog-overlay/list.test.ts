@@ -16,6 +16,7 @@ describe("cli catalog overlay list", () => {
         promptProjection: 19,
       },
     });
+    expect(list.cli.runtimeCommandScope).toBe("current-invocation-registered-tree");
     expect(list.cli.descriptors.find((descriptor) => descriptor.name === "gateway")).toMatchObject({
       source: "subcli",
       hasSubcommands: true,
@@ -44,6 +45,7 @@ describe("cli catalog overlay list", () => {
     expect(markdown).toContain("# CLI Catalog Overlay List");
     expect(markdown).toContain("- CLI descriptors: 58");
     expect(markdown).toContain("- Command routes: 94");
+    expect(markdown).toContain("- Runtime command scope: current-invocation-registered-tree");
     expect(markdown).toContain("| `gateway-status` | `gateway status` |");
     expect(markdown).toContain(
       "| `gateway` | `runtime` | `medium` | `mixed` | yes | `gateway` | CLI descriptor: gateway |",
