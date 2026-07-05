@@ -272,7 +272,9 @@ export function buildCliCatalogReferenceMarkdown(): string {
         [
           ["Consumers", codeList([...consumerContract.consumers])],
           ["Stable external commands", codeList(consumerContract.stableExternalCommands)],
+          ["Advisory report artifacts", codeList(consumerContract.advisoryReportArtifacts)],
           ["Repo-internal builders", codeList(consumerContract.repoInternalBuilderModules)],
+          ["Contract notes", consumerContract.contractNotes.join("; ")],
           ["Non-goals", consumerContract.nonGoals.join("; ")],
         ],
       ),
