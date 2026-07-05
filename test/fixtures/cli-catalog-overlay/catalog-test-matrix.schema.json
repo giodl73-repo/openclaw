@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "cli-catalog-overlay-test-matrix",
+  "topLevelFields": [
+    "candidates",
+    "counts",
+    "coverageGaps",
+    "generatedFrom",
+    "nodeCommandCandidates",
+    "schemaVersion"
+  ],
+  "counts": {
+    "routedOperations": 14,
+    "nodeCommands": 1,
+    "smokeCandidates": 14,
+    "nodeCommandSmokeCandidates": 1,
+    "coveredRoutedOperations": 1,
+    "coverageGaps": 13
+  },
+  "countFields": [
+    "coverageGaps",
+    "coveredRoutedOperations",
+    "nodeCommandSmokeCandidates",
+    "nodeCommands",
+    "routedOperations",
+    "smokeCandidates"
+  ],
+  "candidates": {
+    "count": 14,
+    "itemFields": [
+      "commandPaths",
+      "coverageEvidence",
+      "recommendedTestName",
+      "routeId",
+      "smokeCommands"
+    ],
+    "ids": [
+      "agents-list",
+      "channels-list",
+      "channels-status",
+      "config-get",
+      "config-unset",
+      "gateway-status",
+      "health",
+      "models-list",
+      "models-status",
+      "plugins-list",
+      "sessions",
+      "status",
+      "tasks-audit",
+      "tasks-list"
+    ]
+  },
+  "nodeCommandCandidates": {
+    "count": 1,
+    "itemFields": [
+      "approvalKind",
+      "availability",
+      "command",
+      "commandId",
+      "recommendedTestName",
+      "smokeCommand"
+    ]
+  },
+  "coverageGaps": {
+    "count": 13,
+    "itemFields": [
+      "commandPaths",
+      "coverageEvidence",
+      "recommendedTestName",
+      "routeId",
+      "smokeCommands"
+    ],
+    "ids": [
+      "agents-list",
+      "channels-list",
+      "channels-status",
+      "config-get",
+      "config-unset",
+      "health",
+      "models-list",
+      "models-status",
+      "plugins-list",
+      "sessions",
+      "status",
+      "tasks-audit",
+      "tasks-list"
+    ]
+  },
+  "candidateRouteIds": [
+    "agents-list",
+    "channels-list",
+    "channels-status",
+    "config-get",
+    "config-unset",
+    "gateway-status",
+    "health",
+    "models-list",
+    "models-status",
+    "plugins-list",
+    "sessions",
+    "status",
+    "tasks-audit",
+    "tasks-list"
+  ]
+}
