@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "cli-catalog-overlay-test-matrix",
+  "topLevelFields": [
+    "candidates",
+    "counts",
+    "generatedFrom",
+    "nodeCommandCandidates",
+    "schemaVersion"
+  ],
+  "counts": {
+    "routedOperations": 14,
+    "nodeCommands": 1,
+    "testCandidates": 14,
+    "nodeCommandTestCandidates": 1,
+    "evidencedRoutedOperations": 1
+  },
+  "countFields": [
+    "evidencedRoutedOperations",
+    "nodeCommandTestCandidates",
+    "nodeCommands",
+    "routedOperations",
+    "testCandidates"
+  ],
+  "candidates": {
+    "count": 14,
+    "itemFields": [
+      "commandPathLabels",
+      "commandPaths",
+      "coverageEvidence",
+      "recommendedTestName",
+      "routeId"
+    ],
+    "ids": [
+      "agents-list",
+      "channels-list",
+      "channels-status",
+      "config-get",
+      "config-unset",
+      "gateway-status",
+      "health",
+      "models-list",
+      "models-status",
+      "plugins-list",
+      "sessions",
+      "status",
+      "tasks-audit",
+      "tasks-list"
+    ]
+  },
+  "nodeCommandCandidates": {
+    "count": 1,
+    "itemFields": [
+      "approvalKind",
+      "availability",
+      "command",
+      "commandId",
+      "invocationHint",
+      "recommendedTestName"
+    ]
+  },
+  "candidateRouteIds": [
+    "agents-list",
+    "channels-list",
+    "channels-status",
+    "config-get",
+    "config-unset",
+    "gateway-status",
+    "health",
+    "models-list",
+    "models-status",
+    "plugins-list",
+    "sessions",
+    "status",
+    "tasks-audit",
+    "tasks-list"
+  ]
+}
