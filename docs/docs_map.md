@@ -1300,6 +1300,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Routed operations
   - H2: Agent and tool surfaces
   - H2: Prompt projection
+  - H2: Consumer contract
   - H2: Audit and operator attention
 
 ## cli/channels.md
