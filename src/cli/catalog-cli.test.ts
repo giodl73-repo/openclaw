@@ -1,6 +1,17 @@
 import { Command } from "commander";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { loggingState } from "../logging/state.js";
 import { registerCatalogCli } from "./catalog-cli.js";
+
+const loadPluginCliDescriptorEntriesMock = vi.hoisted(() => vi.fn(async () => []));
+
+vi.mock("../plugins/cli-registry-loader.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../plugins/cli-registry-loader.js")>();
+  return {
+    ...original,
+    loadPluginCliDescriptorEntries: loadPluginCliDescriptorEntriesMock,
+  };
+});
 
 function createProgram(): Command {
   const program = new Command();
@@ -33,13 +44,23 @@ async function captureStdout(run: () => Promise<void> | void): Promise<string> {
 }
 
 describe("catalog cli", () => {
+  afterEach(() => {
+    loadPluginCliDescriptorEntriesMock.mockReset();
+    loadPluginCliDescriptorEntriesMock.mockResolvedValue([]);
+  });
+
   it("prints catalog list JSON", async () => {
     const output = await captureStdout(async () => {
       await createProgram().parseAsync(["node", "openclaw", "catalog", "list", "--json"]);
     });
 
     const parsed = JSON.parse(output) as {
-      counts: { commandDescriptors: number; routedOperations: number; runtimeCommands: number };
+      counts: {
+        commandDescriptors: number;
+        routedOperations: number;
+        runtimeCommands: number;
+        pluginCommands: number;
+      };
       cli: { runtimeCommandScope: string };
       agentToolSurfaces: Array<{ id: string }>;
     };
@@ -47,6 +68,7 @@ describe("catalog cli", () => {
     expect(parsed.counts.routedOperations).toBe(14);
     expect(parsed.counts.runtimeCommands).toBeGreaterThan(0);
     expect(parsed.cli.runtimeCommandScope).toBe("current-invocation-registered-tree");
+    expect(parsed.counts.pluginCommands).toBe(0);
     expect(parsed.agentToolSurfaces.map((surface) => surface.id)).toContain("gateway");
   });
 
@@ -59,5 +81,36 @@ describe("catalog cli", () => {
     expect(output).toContain("`gateway-status`");
     expect(output).toContain("`gateway`");
     expect(output).toContain("## Runtime registered commands");
+  });
+
+  it("routes plugin descriptor loading logs away from JSON stdout", async () => {
+    const forceStderrSnapshots: boolean[] = [];
+    loadPluginCliDescriptorEntriesMock.mockImplementationOnce(async () => {
+      forceStderrSnapshots.push(loggingState.forceConsoleToStderr);
+      return [
+        {
+          pluginId: "example-plugin",
+          parentPath: [],
+          descriptors: [
+            { name: "example", description: "Example plugin command", hasSubcommands: false },
+          ],
+        },
+      ];
+    });
+
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync([
+        "node",
+        "openclaw",
+        "catalog",
+        "list",
+        "--json",
+        "--plugin-descriptors",
+      ]);
+    });
+
+    expect(forceStderrSnapshots).toEqual([true]);
+    expect(JSON.parse(output).counts.pluginCommands).toBe(1);
+    expect(loggingState.forceConsoleToStderr).toBe(false);
   });
 });
