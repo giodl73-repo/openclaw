@@ -182,6 +182,7 @@ export function createCapturedPluginRegistration(params?: {
               name: descriptor.name.trim(),
               description: descriptor.description.trim(),
               hasSubcommands: descriptor.hasSubcommands,
+              ...(descriptor.hidden === true ? { hidden: true } : {}),
             }))
             .filter((descriptor) => descriptor.name && descriptor.description);
           const commands = normalizeStringEntries([

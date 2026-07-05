@@ -259,13 +259,17 @@
     "itemFields": [
       "aliases",
       "commandPath",
+      "depth",
       "description",
       "discoveryMode",
       "hasSubcommands",
+      "hidden",
       "name",
+      "parentPath",
       "sourceId",
       "sourceKind",
-      "visibility"
+      "visibility",
+      "visibleSubcommandCount"
     ],
     "ids": [
       "runtime"
@@ -275,10 +279,14 @@
     "count": 1,
     "itemFields": [
       "commandPath",
+      "depth",
       "description",
+      "descriptorName",
       "discoveryMode",
       "hasSubcommands",
+      "hidden",
       "name",
+      "parentPath",
       "pluginId",
       "sourceId",
       "sourceKind",
