@@ -48,11 +48,14 @@ describe("catalog cli", () => {
     });
 
     const parsed = JSON.parse(output) as {
-      counts: { commandDescriptors: number; routedOperations: number };
+      counts: { commandDescriptors: number; routedOperations: number; runtimeCommands: number };
+      cli: { runtimeCommandScope: string };
       agentToolSurfaces: Array<{ id: string }>;
     };
     expect(parsed.counts.commandDescriptors).toBe(61);
     expect(parsed.counts.routedOperations).toBe(14);
+    expect(parsed.counts.runtimeCommands).toBeGreaterThan(0);
+    expect(parsed.cli.runtimeCommandScope).toBe("current-invocation-registered-tree");
     expect(parsed.agentToolSurfaces.map((surface) => surface.id)).toContain("gateway");
   });
 
@@ -64,5 +67,6 @@ describe("catalog cli", () => {
     expect(output).toContain("# CLI Catalog Overlay List");
     expect(output).toContain("`gateway-status`");
     expect(output).toContain("`gateway`");
+    expect(output).toContain("## Runtime registered commands");
   });
 });

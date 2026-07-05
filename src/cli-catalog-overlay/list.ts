@@ -8,6 +8,7 @@ import {
   type CliCatalogSourceKind,
   type CliCatalogVisibility,
 } from "./registry.js";
+import type { CliCatalogRuntimeCommand } from "./runtime-commands.js";
 
 export type CliCatalogListSurface = {
   readonly id: string;
@@ -75,6 +76,10 @@ export type CliCatalogListRoutedOperation = {
   readonly visibility: readonly CliCatalogVisibility[];
 };
 
+export type CliCatalogRuntimeCommandScope = "current-invocation-registered-tree";
+
+const RUNTIME_COMMAND_SCOPE: CliCatalogRuntimeCommandScope = "current-invocation-registered-tree";
+
 export type CliCatalogList = {
   readonly schemaVersion: 1;
   readonly generatedFrom: "cli-catalog-overlay";
@@ -84,12 +89,15 @@ export type CliCatalogList = {
     readonly routedOperations: number;
     readonly agentToolSurfaces: number;
     readonly promptProjection: number;
+    readonly runtimeCommands: number;
     readonly nodeCommands: number;
   };
   readonly cli: {
     readonly descriptors: readonly CliCatalogListDescriptor[];
     readonly commandRoutes: readonly CliCatalogListCommandRoute[];
     readonly routedOperations: readonly CliCatalogListRoutedOperation[];
+    readonly runtimeCommandScope: CliCatalogRuntimeCommandScope;
+    readonly runtimeCommands: readonly CliCatalogRuntimeCommand[];
     readonly nodeCommands: readonly CliCatalogNodeCommand[];
   };
   readonly agentToolSurfaces: readonly CliCatalogListSurface[];
@@ -195,6 +203,7 @@ function buildRoutedOperations(
 
 export function buildCatalogList(
   params: {
+    runtimeCommands?: readonly CliCatalogRuntimeCommand[];
     nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): CliCatalogList {
@@ -202,6 +211,7 @@ export function buildCatalogList(
   const commandRoutes = buildCommandRoutes();
   const routedOperations = buildRoutedOperations(commandRoutes);
   const agentToolSurfaces = mapSurfaces();
+  const runtimeCommands = params.runtimeCommands ?? [];
   const nodeCommands = buildNodeCommandCatalog(params.nodeCommands);
   const promptProjection = {
     routedOperationIds: routedOperations.map((operation) => operation.id),
@@ -222,12 +232,15 @@ export function buildCatalogList(
         promptProjection.routedOperationIds.length +
         promptProjection.agentToolSurfaceIds.length +
         promptProjection.nodeCommandIds.length,
+      runtimeCommands: runtimeCommands.length,
       nodeCommands: nodeCommands.length,
     },
     cli: {
       descriptors,
       commandRoutes,
       routedOperations,
+      runtimeCommandScope: RUNTIME_COMMAND_SCOPE,
+      runtimeCommands,
       nodeCommands,
     },
     agentToolSurfaces,
@@ -237,6 +250,7 @@ export function buildCatalogList(
 
 export function renderCatalogListMarkdown(
   params: {
+    runtimeCommands?: readonly CliCatalogRuntimeCommand[];
     nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): string {
@@ -253,6 +267,8 @@ export function renderCatalogListMarkdown(
     `- Routed operations: ${list.counts.routedOperations}`,
     `- Agent/tool surfaces: ${list.counts.agentToolSurfaces}`,
     `- Prompt projection items: ${list.counts.promptProjection}`,
+    `- Runtime commands: ${list.counts.runtimeCommands}`,
+    `- Runtime command scope: ${list.cli.runtimeCommandScope}`,
     `- Node/operator commands: ${list.counts.nodeCommands}`,
     "",
     "## Routed operations",
@@ -263,6 +279,21 @@ export function renderCatalogListMarkdown(
   for (const operation of list.cli.routedOperations) {
     const paths = operation.commandPaths.map((path) => markdownCodeCell(path.join(" "))).join(", ");
     lines.push(`| ${markdownCodeCell(operation.id)} | ${paths || "None"} |`);
+  }
+
+  if (list.cli.runtimeCommands.length > 0) {
+    lines.push(
+      "",
+      "## Runtime registered commands",
+      "",
+      "| Command path | Parent | Depth | Visible subcommands | Description |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    for (const command of list.cli.runtimeCommands) {
+      lines.push(
+        `| \`${command.commandPath.join(" ")}\` | ${command.parentPath.length > 0 ? "`" + command.parentPath.join(" ") + "`" : "None"} | ${command.depth} | ${command.visibleSubcommandCount} | ${command.description || "None"} |`,
+      );
+    }
   }
 
   if (list.cli.nodeCommands.length > 0) {
