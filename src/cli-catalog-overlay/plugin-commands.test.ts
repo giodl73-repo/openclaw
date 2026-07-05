@@ -8,7 +8,15 @@ describe("plugin command catalog", () => {
       {
         pluginId: "example-plugin",
         parentPath: ["nodes"],
-        descriptors: [{ name: "camera", description: "Camera controls", hasSubcommands: true }],
+        descriptors: [
+          { name: "camera", description: "Camera controls", hasSubcommands: true },
+          {
+            name: "private-camera",
+            description: "Private camera controls",
+            hasSubcommands: false,
+            hidden: true,
+          },
+        ],
       },
     ]);
 
@@ -16,11 +24,16 @@ describe("plugin command catalog", () => {
       expect.objectContaining({
         pluginId: "example-plugin",
         commandPath: ["nodes", "camera"],
+        parentPath: ["nodes"],
+        depth: 2,
+        descriptorName: "camera",
+        hidden: false,
         sourceKind: "plugin",
         sourceId: "example-plugin:nodes camera",
         discoveryMode: "plugin-descriptor",
       }),
     ]);
+    expect(pluginCommands.map((command) => command.name)).not.toContain("private-camera");
     expect(buildCatalogList({ pluginCommands }).counts.pluginCommands).toBe(1);
   });
 });
