@@ -1817,6 +1817,7 @@
                     "group": "Utility",
                     "pages": [
                       "cli/acp",
+                      "cli/catalog",
                       "cli/clawbot",
                       "cli/completion",
                       "cli/dns",
