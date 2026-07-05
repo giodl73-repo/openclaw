@@ -2182,6 +2182,8 @@ export type OpenClawPluginCliCommandDescriptor = {
   name: string;
   description: string;
   hasSubcommands: boolean;
+  /** Hide the placeholder from generated catalogs while preserving command ownership metadata. */
+  hidden?: boolean;
 };
 
 export type OpenClawPluginNodeCliFeatureOptions = {

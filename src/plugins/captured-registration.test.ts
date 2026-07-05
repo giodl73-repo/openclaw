@@ -83,6 +83,16 @@ describe("captured plugin registration", () => {
           description: "Captured command",
           handler: async () => ({ text: "ok" }),
         });
+        api.registerCli(() => {}, {
+          descriptors: [
+            {
+              name: "captured-hidden-cli",
+              description: "Captured hidden CLI",
+              hasSubcommands: false,
+              hidden: true,
+            },
+          ],
+        });
         api.registerAgentToolResultMiddleware(() => undefined, {
           runtimes: ["codex"],
         });
@@ -104,6 +114,9 @@ describe("captured plugin registration", () => {
     expect(captured.textTransforms[0]?.input).toHaveLength(1);
     expect(captured.agentToolResultMiddlewares).toHaveLength(1);
     expect(captured.agentToolResultMiddlewares[0]?.runtimes).toEqual(["codex"]);
+    expect(captured.cliRegistrars.flatMap((entry) => entry.descriptors)).toContainEqual(
+      expect.objectContaining({ name: "captured-hidden-cli", hidden: true }),
+    );
     expect(captured.api.registerMemoryEmbeddingProvider).toBeTypeOf("function");
   });
 

@@ -69,10 +69,14 @@ function expectFixture(name: string, value: JsonValue): void {
 const sampleRuntimeCommands: readonly CliCatalogRuntimeCommand[] = [
   {
     commandPath: ["demo", "runtime"],
+    parentPath: ["demo"],
+    depth: 2,
     name: "runtime",
     aliases: ["rt"],
     description: "Demo runtime command",
     hasSubcommands: false,
+    visibleSubcommandCount: 0,
+    hidden: false,
     sourceKind: "runtime",
     sourceId: "demo runtime",
     discoveryMode: "runtime-registered",

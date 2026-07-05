@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildPluginCatalogCommands } from "./plugin-commands.js";
 import { listCliCatalogPromptSurfaces } from "./prompt-projection.js";
 
 describe("CLI catalog overlay prompt projection", () => {
@@ -50,19 +51,13 @@ describe("CLI catalog overlay prompt projection", () => {
   });
 
   it("includes plugin descriptor commands only when a plugin is prompt-enabled", () => {
-    const pluginCommands = [
+    const pluginCommands = buildPluginCatalogCommands([
       {
         pluginId: "demo-plugin",
-        commandPath: ["demo"],
-        name: "demo",
-        description: "Demo plugin command",
-        hasSubcommands: false,
-        sourceKind: "plugin" as const,
-        sourceId: "demo-plugin:demo",
-        discoveryMode: "plugin-descriptor" as const,
-        visibility: ["docs", "audit", "operator", "policy"] as const,
+        parentPath: [],
+        descriptors: [{ name: "demo", description: "Demo plugin command", hasSubcommands: false }],
       },
-    ];
+    ]);
 
     expect(
       listCliCatalogPromptSurfaces({ pluginCommands }).map((surface) => surface.id),
