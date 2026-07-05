@@ -508,6 +508,18 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain('Use `runtime: "subagent"` instead.');
   });
 
+  it("omits host command routes from sandboxed prompts", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["exec", "gateway"],
+      sandboxInfo: { enabled: true },
+    });
+
+    expect(prompt).not.toContain("## OpenClaw Commands");
+    expect(prompt).not.toContain("gateway-status->openclaw gateway status");
+    expect(prompt).not.toContain("agents-list->openclaw agents");
+  });
+
   it("preserves tool casing in the prompt", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
