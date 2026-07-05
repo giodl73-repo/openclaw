@@ -1507,6 +1507,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               name,
               description,
               hasSubcommands: descriptor.hasSubcommands,
+              ...(descriptor.hidden === true ? { hidden: true } : {}),
             }
           : null;
       })
