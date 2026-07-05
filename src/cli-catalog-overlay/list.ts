@@ -1,6 +1,7 @@
 import { cliCommandCatalog } from "../cli/command-catalog.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
+import type { CliCatalogPluginCommand } from "./plugin-commands.js";
 import {
   listCliCatalogSurfaces,
   type CliCatalogDiscoveryMode,
@@ -78,6 +79,7 @@ export type CliCatalogList = {
     readonly agentToolSurfaces: number;
     readonly promptProjection: number;
     readonly runtimeCommands: number;
+    readonly pluginCommands: number;
   };
   readonly cli: {
     readonly descriptors: readonly CliCatalogListDescriptor[];
@@ -85,6 +87,7 @@ export type CliCatalogList = {
     readonly routedOperations: readonly CliCatalogListRoutedOperation[];
     readonly runtimeCommandScope: CliCatalogRuntimeCommandScope;
     readonly runtimeCommands: readonly CliCatalogRuntimeCommand[];
+    readonly pluginCommands: readonly CliCatalogPluginCommand[];
   };
   readonly agentToolSurfaces: readonly CliCatalogListSurface[];
   readonly promptProjection: {
@@ -179,13 +182,17 @@ function buildRoutedOperations(
 }
 
 export function buildCatalogList(
-  params: { runtimeCommands?: readonly CliCatalogRuntimeCommand[] } = {},
+  params: {
+    runtimeCommands?: readonly CliCatalogRuntimeCommand[];
+    pluginCommands?: readonly CliCatalogPluginCommand[];
+  } = {},
 ): CliCatalogList {
   const descriptors = buildDescriptors();
   const commandRoutes = buildCommandRoutes();
   const routedOperations = buildRoutedOperations(commandRoutes);
   const agentToolSurfaces = mapSurfaces();
   const runtimeCommands = params.runtimeCommands ?? [];
+  const pluginCommands = params.pluginCommands ?? [];
   const promptProjection = {
     routedOperationIds: routedOperations.map((operation) => operation.id),
     agentToolSurfaceIds: agentToolSurfaces.map((surface) => surface.id),
@@ -201,6 +208,7 @@ export function buildCatalogList(
       promptProjection:
         promptProjection.routedOperationIds.length + promptProjection.agentToolSurfaceIds.length,
       runtimeCommands: runtimeCommands.length,
+      pluginCommands: pluginCommands.length,
     },
     cli: {
       descriptors,
@@ -208,6 +216,7 @@ export function buildCatalogList(
       routedOperations,
       runtimeCommandScope: RUNTIME_COMMAND_SCOPE,
       runtimeCommands,
+      pluginCommands,
     },
     agentToolSurfaces,
     promptProjection,
@@ -215,7 +224,10 @@ export function buildCatalogList(
 }
 
 export function renderCatalogListMarkdown(
-  params: { runtimeCommands?: readonly CliCatalogRuntimeCommand[] } = {},
+  params: {
+    runtimeCommands?: readonly CliCatalogRuntimeCommand[];
+    pluginCommands?: readonly CliCatalogPluginCommand[];
+  } = {},
 ): string {
   const list = buildCatalogList(params);
   const lines = [
@@ -232,6 +244,7 @@ export function renderCatalogListMarkdown(
     `- Prompt projection items: ${list.counts.promptProjection}`,
     `- Runtime commands: ${list.counts.runtimeCommands}`,
     `- Runtime command scope: ${list.cli.runtimeCommandScope}`,
+    `- Plugin descriptor commands: ${list.counts.pluginCommands}`,
     "",
     "## Routed operations",
     "",
@@ -242,6 +255,21 @@ export function renderCatalogListMarkdown(
     const paths = operation.commandPaths.map((path) => "`" + path.join(" ") + "`").join(", ");
     lines.push(`| \`${operation.id}\` | ${paths || "None"} |`);
   }
+  if (list.cli.pluginCommands.length > 0) {
+    lines.push(
+      "",
+      "## Plugin descriptor commands",
+      "",
+      "| Command path | Plugin | Description |",
+      "| --- | --- | --- |",
+    );
+    for (const command of list.cli.pluginCommands) {
+      lines.push(
+        `| \`${command.commandPath.join(" ")}\` | \`${command.pluginId}\` | ${command.description || "None"} |`,
+      );
+    }
+  }
+
   if (list.cli.runtimeCommands.length > 0) {
     lines.push(
       "",
