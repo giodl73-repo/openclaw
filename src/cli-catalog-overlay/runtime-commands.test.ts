@@ -24,11 +24,20 @@ describe("runtime command catalog", () => {
       expect.arrayContaining([
         expect.objectContaining({
           commandPath: ["alpha"],
+          parentPath: [],
+          depth: 1,
           aliases: ["a"],
+          visibleSubcommandCount: 0,
+          hidden: false,
           discoveryMode: "runtime-registered",
           sourceKind: "runtime",
         }),
-        expect.objectContaining({ commandPath: ["beta", "child"] }),
+        expect.objectContaining({
+          commandPath: ["beta"],
+          hasSubcommands: true,
+          visibleSubcommandCount: 1,
+        }),
+        expect.objectContaining({ commandPath: ["beta", "child"], parentPath: ["beta"], depth: 2 }),
       ]),
     );
     expect(runtimeCommands.map((command) => command.commandPath)).not.toContainEqual(["secret"]);
@@ -36,6 +45,9 @@ describe("runtime command catalog", () => {
       "secret",
       "child",
     ]);
+    expect(
+      runtimeCommands.find((command) => command.commandPath[0] === "secret-visible-parent"),
+    ).toBeUndefined();
     expect(buildCatalogList({ runtimeCommands }).counts.runtimeCommands).toBe(3);
   });
 

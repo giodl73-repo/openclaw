@@ -294,12 +294,12 @@ export function renderCatalogListMarkdown(
       "",
       "## Plugin descriptor commands",
       "",
-      "| Command path | Plugin | Description |",
-      "| --- | --- | --- |",
+      "| Command path | Parent | Depth | Plugin | Description |",
+      "| --- | --- | --- | --- | --- |",
     );
     for (const command of list.cli.pluginCommands) {
       lines.push(
-        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${markdownCodeCell(command.pluginId)} | ${markdownTableCell(command.description || "None")} |`,
+        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${command.parentPath.length > 0 ? markdownCodeCell(command.parentPath.join(" ")) : "None"} | ${command.depth} | ${markdownCodeCell(command.pluginId)} | ${markdownTableCell(command.description || "None")} |`,
       );
     }
   }
@@ -309,12 +309,12 @@ export function renderCatalogListMarkdown(
       "",
       "## Runtime registered commands",
       "",
-      "| Command path | Description |",
-      "| --- | --- |",
+      "| Command path | Parent | Depth | Visible subcommands | Description |",
+      "| --- | --- | --- | --- | --- |",
     );
     for (const command of list.cli.runtimeCommands) {
       lines.push(
-        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${markdownTableCell(command.description || "None")} |`,
+        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${command.parentPath.length > 0 ? markdownCodeCell(command.parentPath.join(" ")) : "None"} | ${command.depth} | ${command.visibleSubcommandCount} | ${markdownTableCell(command.description || "None")} |`,
       );
     }
   }
