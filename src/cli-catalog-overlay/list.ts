@@ -2,6 +2,7 @@ import { cliCommandCatalog } from "../cli/command-catalog.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
 import { buildNodeCommandCatalog, type CliCatalogNodeCommand } from "./node-commands.js";
+import type { CliCatalogPluginCommand } from "./plugin-commands.js";
 import {
   listCliCatalogSurfaces,
   type CliCatalogDiscoveryMode,
@@ -79,6 +80,7 @@ export type CliCatalogList = {
     readonly agentToolSurfaces: number;
     readonly promptProjection: number;
     readonly runtimeCommands: number;
+    readonly pluginCommands: number;
     readonly nodeCommands: number;
   };
   readonly cli: {
@@ -87,6 +89,7 @@ export type CliCatalogList = {
     readonly routedOperations: readonly CliCatalogListRoutedOperation[];
     readonly runtimeCommandScope: CliCatalogRuntimeCommandScope;
     readonly runtimeCommands: readonly CliCatalogRuntimeCommand[];
+    readonly pluginCommands: readonly CliCatalogPluginCommand[];
     readonly nodeCommands: readonly CliCatalogNodeCommand[];
   };
   readonly agentToolSurfaces: readonly CliCatalogListSurface[];
@@ -184,6 +187,7 @@ function buildRoutedOperations(
 export function buildCatalogList(
   params: {
     runtimeCommands?: readonly CliCatalogRuntimeCommand[];
+    pluginCommands?: readonly CliCatalogPluginCommand[];
     nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): CliCatalogList {
@@ -192,6 +196,7 @@ export function buildCatalogList(
   const routedOperations = buildRoutedOperations(commandRoutes);
   const agentToolSurfaces = mapSurfaces();
   const runtimeCommands = params.runtimeCommands ?? [];
+  const pluginCommands = params.pluginCommands ?? [];
   const nodeCommands = buildNodeCommandCatalog(params.nodeCommands);
   const promptProjection = {
     routedOperationIds: routedOperations.map((operation) => operation.id),
@@ -208,6 +213,7 @@ export function buildCatalogList(
       promptProjection:
         promptProjection.routedOperationIds.length + promptProjection.agentToolSurfaceIds.length,
       runtimeCommands: runtimeCommands.length,
+      pluginCommands: pluginCommands.length,
       nodeCommands: nodeCommands.length,
     },
     cli: {
@@ -216,6 +222,7 @@ export function buildCatalogList(
       routedOperations,
       runtimeCommandScope: RUNTIME_COMMAND_SCOPE,
       runtimeCommands,
+      pluginCommands,
       nodeCommands,
     },
     agentToolSurfaces,
@@ -226,6 +233,7 @@ export function buildCatalogList(
 export function renderCatalogListMarkdown(
   params: {
     runtimeCommands?: readonly CliCatalogRuntimeCommand[];
+    pluginCommands?: readonly CliCatalogPluginCommand[];
     nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): string {
@@ -244,6 +252,7 @@ export function renderCatalogListMarkdown(
     `- Prompt projection items: ${list.counts.promptProjection}`,
     `- Runtime commands: ${list.counts.runtimeCommands}`,
     `- Runtime command scope: ${list.cli.runtimeCommandScope}`,
+    `- Plugin descriptor commands: ${list.counts.pluginCommands}`,
     `- Node/operator commands: ${list.counts.nodeCommands}`,
     "",
     "## Routed operations",
@@ -255,19 +264,31 @@ export function renderCatalogListMarkdown(
     const paths = operation.commandPaths.map((path) => "`" + path.join(" ") + "`").join(", ");
     lines.push(`| \`${operation.id}\` | ${paths || "None"} |`);
   }
+  if (list.cli.pluginCommands.length > 0) {
+    lines.push(
+      "",
+      "## Plugin descriptor commands",
+      "",
+      "| Command path | Plugin | Description |",
+      "| --- | --- | --- |",
+    );
+    for (const command of list.cli.pluginCommands) {
+      lines.push(
+        `| \`${command.commandPath.join(" ")}\` | \`${command.pluginId}\` | ${command.description || "None"} |`,
+      );
+    }
+  }
 
   if (list.cli.runtimeCommands.length > 0) {
     lines.push(
       "",
       "## Runtime registered commands",
       "",
-      "| Command path | Parent | Depth | Visible subcommands | Description |",
-      "| --- | --- | --- | --- | --- |",
+      "| Command path | Description |",
+      "| --- | --- |",
     );
     for (const command of list.cli.runtimeCommands) {
-      lines.push(
-        `| \`${command.commandPath.join(" ")}\` | ${command.parentPath.length > 0 ? "`" + command.parentPath.join(" ") + "`" : "None"} | ${command.depth} | ${command.visibleSubcommandCount} | ${command.description || "None"} |`,
-      );
+      lines.push(`| \`${command.commandPath.join(" ")}\` | ${command.description || "None"} |`);
     }
   }
 
