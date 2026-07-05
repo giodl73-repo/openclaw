@@ -83,4 +83,31 @@ describe("catalog cli", () => {
     expect(output).toContain("# CLI Catalog Overlay Audit");
     expect(output).toContain("| Confirmation required | `gateway`, `skill_workshop` |");
   });
+
+  it("prints catalog test matrix JSON", async () => {
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "test-matrix", "--json"]);
+    });
+
+    const parsed = JSON.parse(output) as {
+      counts: { routedOperations: number; coverageGaps: number };
+      candidates: Array<{ routeId: string; smokeCommands: string[] }>;
+    };
+    expect(parsed.counts.routedOperations).toBe(14);
+    expect(parsed.counts.coverageGaps).toBe(14);
+    expect(
+      parsed.candidates.find((candidate) => candidate.routeId === "gateway-status"),
+    ).toMatchObject({
+      smokeCommands: ["gateway status"],
+    });
+  });
+
+  it("prints catalog test matrix Markdown", async () => {
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync(["node", "openclaw", "catalog", "test-matrix"]);
+    });
+
+    expect(output).toContain("# CLI Catalog Overlay Test Matrix");
+    expect(output).toContain("| `gateway-status` | `gateway status` |");
+  });
 });
