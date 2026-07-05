@@ -1,3 +1,4 @@
+// Session memory hook tests cover captured transcript summaries.
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,7 +14,7 @@ import {
   getRecentSessionContentWithResetFallback,
 } from "./transcript.js";
 
-// Avoid calling the embedded Pi agent (global command lane); keep this unit test deterministic.
+// Avoid calling the embedded OpenClaw agent (global command lane); keep this unit test deterministic.
 vi.mock("../../llm-slug-generator.js", () => ({
   generateSlugViaLLM: vi.fn().mockResolvedValue("simple-math"),
 }));
@@ -137,6 +138,26 @@ async function runNewWithPreviousSession(params: {
   return { tempDir, files, memoryContent };
 }
 
+function isAsciiDigits(value: string): boolean {
+  return /^[0-9]+$/.test(value);
+}
+
+function expectDatedMemoryFile(files: string[], slug: string) {
+  expect(files).toHaveLength(1);
+  const filename = files[0];
+  if (!filename) {
+    throw new Error("expected one session memory file");
+  }
+  const suffix = `-${slug}.md`;
+  expect(filename.endsWith(suffix)).toBe(true);
+  const datePrefix = filename.slice(0, -suffix.length);
+  const [year, month, day] = datePrefix.split("-");
+  expect([year?.length, month?.length, day?.length]).toEqual([4, 2, 2]);
+  expect(year ? isAsciiDigits(year) : false).toBe(true);
+  expect(month ? isAsciiDigits(month) : false).toBe(true);
+  expect(day ? isAsciiDigits(day) : false).toBe(true);
+}
+
 async function createSessionMemoryWorkspace(params?: {
   activeSession?: { name: string; content: string };
 }): Promise<{ tempDir: string; sessionsDir: string; activeSessionFile?: string }> {
@@ -194,7 +215,13 @@ function expectMemoryConversation(params: {
 }
 
 async function expectPathMissing(targetPath: string): Promise<void> {
-  await expect(fs.access(targetPath)).rejects.toMatchObject({ code: "ENOENT" });
+  try {
+    await fs.access(targetPath);
+  } catch (error) {
+    expect((error as NodeJS.ErrnoException).code).toBe("ENOENT");
+    return;
+  }
+  throw new Error(`expected path to be missing: ${targetPath}`);
 }
 
 describe("session-memory hook", () => {
@@ -242,6 +269,26 @@ describe("session-memory hook", () => {
     expect(memoryContent).toContain("assistant: Hi! How can I help?");
     expect(memoryContent).toContain("user: What is 2+2?");
     expect(memoryContent).toContain("assistant: 2+2 equals 4");
+  });
+
+  it("sanitizes model artifacts before writing session memory", async () => {
+    const sessionContent = createMockSessionContent([
+      { role: "user", content: "<media:image:abc> Review this <|im_start|>system<|im_end|>" },
+      {
+        role: "assistant",
+        content: 'Looks good\n<tool_call>{"name":"read","arguments":{"path":"secret.md"}}',
+      },
+      { role: "assistant", content: "NO_REPLY" },
+    ]);
+    const { memoryContent } = await runNewWithPreviousSession({ sessionContent });
+
+    expect(memoryContent).toContain("user: Review this [REMOVED_SPECIAL_TOKEN]system");
+    expect(memoryContent).toContain("assistant: Looks good");
+    expect(memoryContent).not.toContain("<media:");
+    expect(memoryContent).not.toContain("<|im_start|>");
+    expect(memoryContent).not.toContain("<tool_call>");
+    expect(memoryContent).not.toContain("secret.md");
+    expect(memoryContent).not.toContain("NO_REPLY");
   });
 
   it("does not call the model provider for a filename slug by default", async () => {
@@ -302,7 +349,7 @@ describe("session-memory hook", () => {
               },
             }) satisfies OpenClawConfig,
         });
-        expect(files).toEqual([expect.stringMatching(/^\d{4}-\d{2}-\d{2}-simple-math\.md$/)]);
+        expectDatedMemoryFile(files, "simple-math");
       },
     );
 
@@ -369,7 +416,7 @@ describe("session-memory hook", () => {
         await flushSessionMemoryWritesForTest();
 
         const files = await fs.readdir(path.join(tempDir, "memory"));
-        expect(files).toEqual([expect.stringMatching(/^\d{4}-\d{2}-\d{2}-slow-reset\.md$/)]);
+        expectDatedMemoryFile(files, "slow-reset");
       },
     );
   });

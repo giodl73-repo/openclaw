@@ -1,17 +1,23 @@
+// Feishu plugin module implements media behavior.
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import type * as Lark from "@larksuiteoapi/node-sdk";
-import type { MessageReceipt } from "openclaw/plugin-sdk/channel-message";
+import type { MessageReceipt } from "openclaw/plugin-sdk/channel-outbound";
 import { mediaKindFromMime } from "openclaw/plugin-sdk/media-mime";
-import { MEDIA_FFMPEG_MAX_AUDIO_DURATION_SECS, runFfmpeg } from "openclaw/plugin-sdk/media-runtime";
+import {
+  MEDIA_FFMPEG_MAX_AUDIO_DURATION_SECS,
+  runFfmpeg,
+  runFfprobe,
+} from "openclaw/plugin-sdk/media-runtime";
+import { saveMediaBuffer, saveMediaStream, type SavedMedia } from "openclaw/plugin-sdk/media-store";
 import { readRegularFile, writeExternalFileWithinRoot } from "openclaw/plugin-sdk/security-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   resolvePreferredOpenClawTmpDir,
   withTempWorkspace,
   withTempDownloadPath,
 } from "openclaw/plugin-sdk/temp-path";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/text-runtime";
 import type { ClawdbotConfig } from "../runtime-api.js";
 import { resolveFeishuRuntimeAccount } from "./accounts.js";
 import { createFeishuClient } from "./client.js";
@@ -45,13 +51,8 @@ const FEISHU_TRANSCODABLE_AUDIO_EXTS = new Set([
   ".wma",
 ]);
 
-export type DownloadImageResult = {
-  buffer: Buffer;
-  contentType?: string;
-};
-
-export type DownloadMessageResourceResult = {
-  buffer: Buffer;
+export type SaveMessageResourceResult = {
+  saved: SavedMedia;
   contentType?: string;
   fileName?: string;
 };
@@ -78,10 +79,7 @@ type FeishuUploadResponse =
   | Awaited<ReturnType<Lark.Client["im"]["image"]["create"]>>
   | Awaited<ReturnType<Lark.Client["im"]["file"]["create"]>>;
 
-type FeishuDownloadResponse =
-  | Awaited<ReturnType<Lark.Client["im"]["image"]["get"]>>
-  | Awaited<ReturnType<Lark.Client["im"]["file"]["get"]>>
-  | Awaited<ReturnType<Lark.Client["im"]["messageResource"]["get"]>>;
+type FeishuDownloadResponse = Awaited<ReturnType<Lark.Client["im"]["messageResource"]["get"]>>;
 
 type FeishuHeaderMap = Record<string, string | string[]>;
 type FeishuMessageResourceDownloadType = "image" | "file" | "media";
@@ -242,25 +240,24 @@ function extractFeishuDownloadMetadata(response: FeishuDownloadResponse): {
   return { contentType, fileName };
 }
 
-async function readReadableBuffer(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
+function mediaLimitError(maxBytes: number): Error {
+  return new Error(`Media exceeds ${Math.round(maxBytes / (1024 * 1024))}MB limit`);
 }
 
-async function readFeishuResponseBuffer(params: {
+async function saveFeishuResponseMedia(params: {
   response: FeishuDownloadResponse;
   tmpDirPrefix: string;
   errorPrefix: string;
-}): Promise<Buffer> {
-  const { response } = params;
+  maxBytes: number;
+  contentType?: string;
+  fileName?: string;
+}): Promise<SavedMedia> {
+  const { response, maxBytes, contentType, fileName } = params;
   if (Buffer.isBuffer(response)) {
-    return response;
+    return saveMediaBuffer(response, contentType, "inbound", maxBytes, fileName);
   }
   if (response instanceof ArrayBuffer) {
-    return Buffer.from(response);
+    return saveMediaBuffer(Buffer.from(response), contentType, "inbound", maxBytes, fileName);
   }
   const responseWithOptionalFields = response as FeishuDownloadResponse & {
     code?: number;
@@ -275,96 +272,98 @@ async function readFeishuResponseBuffer(params: {
   }
 
   if (responseWithOptionalFields.data && Buffer.isBuffer(responseWithOptionalFields.data)) {
-    return responseWithOptionalFields.data;
+    return saveMediaBuffer(
+      responseWithOptionalFields.data,
+      contentType,
+      "inbound",
+      maxBytes,
+      fileName,
+    );
   }
   if (responseWithOptionalFields.data instanceof ArrayBuffer) {
-    return Buffer.from(responseWithOptionalFields.data);
+    return saveMediaBuffer(
+      Buffer.from(responseWithOptionalFields.data),
+      contentType,
+      "inbound",
+      maxBytes,
+      fileName,
+    );
   }
   if (typeof response.getReadableStream === "function") {
-    return readReadableBuffer(response.getReadableStream());
+    return saveMediaStream(
+      response.getReadableStream(),
+      contentType,
+      "inbound",
+      maxBytes,
+      fileName,
+    );
   }
   if (typeof response.writeFile === "function") {
     return await withTempDownloadPath({ prefix: params.tmpDirPrefix }, async (tmpPath) => {
       await response.writeFile(tmpPath);
-      return await fs.promises.readFile(tmpPath);
+      const stat = await fs.promises.stat(tmpPath);
+      if (stat.size > maxBytes) {
+        throw mediaLimitError(maxBytes);
+      }
+      return await saveMediaStream(
+        fs.createReadStream(tmpPath),
+        contentType,
+        "inbound",
+        maxBytes,
+        fileName,
+      );
     });
   }
   if (responseWithOptionalFields[Symbol.asyncIterator]) {
     const asyncIterable = responseWithOptionalFields as AsyncIterable<Buffer | Uint8Array | string>;
-    const chunks: Buffer[] = [];
-    for await (const chunk of asyncIterable) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
+    return saveMediaStream(asyncIterable, contentType, "inbound", maxBytes, fileName);
   }
   if (response instanceof Readable) {
-    return readReadableBuffer(response);
+    return saveMediaStream(response, contentType, "inbound", maxBytes, fileName);
   }
 
   const keys = Object.keys(response as object);
   throw new Error(`${params.errorPrefix}: unexpected response format. Keys: [${keys.join(", ")}]`);
 }
 
-/**
- * Download an image from Feishu using image_key.
- * Used for downloading images sent in messages.
- */
-export async function downloadImageFeishu(params: {
-  cfg: ClawdbotConfig;
-  imageKey: string;
-  accountId?: string;
-}): Promise<DownloadImageResult> {
-  const { cfg, imageKey, accountId } = params;
-  const normalizedImageKey = normalizeFeishuExternalKey(imageKey);
-  if (!normalizedImageKey) {
-    throw new Error("Feishu image download failed: invalid image_key");
-  }
-  const { client } = createConfiguredFeishuMediaClient({ cfg, accountId });
-
-  const response = await client.im.image.get({
-    path: { image_key: normalizedImageKey },
-  });
-
-  const buffer = await readFeishuResponseBuffer({
-    response,
-    tmpDirPrefix: "openclaw-feishu-img-",
-    errorPrefix: "Feishu image download failed",
-  });
-  const meta = extractFeishuDownloadMetadata(response);
-  return { buffer, contentType: meta.contentType };
-}
-
-async function downloadMessageResourceWithType(params: {
+async function saveMessageResourceWithType(params: {
   client: ReturnType<typeof createFeishuClient>;
   messageId: string;
   fileKey: string;
   type: FeishuMessageResourceDownloadType;
-}): Promise<DownloadMessageResourceResult> {
+  maxBytes: number;
+  originalFilename?: string;
+}): Promise<SaveMessageResourceResult> {
   const response = await params.client.im.messageResource.get({
     path: { message_id: params.messageId, file_key: params.fileKey },
     params: { type: params.type },
   });
-
-  const buffer = await readFeishuResponseBuffer({
+  const meta = extractFeishuDownloadMetadata(response);
+  const saved = await saveFeishuResponseMedia({
     response,
     tmpDirPrefix: "openclaw-feishu-resource-",
     errorPrefix: "Feishu message resource download failed",
+    maxBytes: params.maxBytes,
+    contentType: meta.contentType,
+    fileName:
+      meta.fileName ??
+      (params.originalFilename
+        ? recoverUtf8FileNameFromLatin1Header(params.originalFilename)
+        : undefined),
   });
-  return { buffer, ...extractFeishuDownloadMetadata(response) };
+  return { saved, ...meta };
 }
 
-/**
- * Download a message resource (file/image/audio/video) from Feishu.
- * Used for downloading files, audio, and video from messages.
- */
-export async function downloadMessageResourceFeishu(params: {
+export async function saveMessageResourceFeishu(params: {
   cfg: ClawdbotConfig;
   messageId: string;
   fileKey: string;
   type: "image" | "file";
   accountId?: string;
-}): Promise<DownloadMessageResourceResult> {
-  const { cfg, messageId, fileKey, type, accountId } = params;
+  maxBytes: number;
+  originalFilename?: string;
+}): Promise<SaveMessageResourceResult> {
+  const { cfg, messageId, fileKey, type, accountId, maxBytes, originalFilename } = params;
   const normalizedFileKey = normalizeFeishuExternalKey(fileKey);
   if (!normalizedFileKey) {
     throw new Error("Feishu message resource download failed: invalid file_key");
@@ -372,22 +371,26 @@ export async function downloadMessageResourceFeishu(params: {
   const { client } = createConfiguredFeishuMediaClient({ cfg, accountId });
 
   try {
-    return await downloadMessageResourceWithType({
+    return await saveMessageResourceWithType({
       client,
       messageId,
       fileKey: normalizedFileKey,
       type,
+      maxBytes,
+      originalFilename,
     });
   } catch (err) {
     if (type !== "file" || !isHttpStatusError(err, 502)) {
       throw err;
     }
     try {
-      return await downloadMessageResourceWithType({
+      return await saveMessageResourceWithType({
         client,
         messageId,
         fileKey: normalizedFileKey,
         type: "media",
+        maxBytes,
+        originalFilename,
       });
     } catch {
       throw err;
@@ -472,7 +475,7 @@ export async function uploadFileFeishu(params: {
   file: Buffer | string; // Buffer or file path
   fileName: string;
   fileType: "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream";
-  duration?: number; // Required for audio/video files, in milliseconds
+  duration?: number; // Audio/video duration, in milliseconds.
   accountId?: string;
 }): Promise<UploadFileResult> {
   const { cfg, file, fileName, fileType, duration, accountId } = params;
@@ -493,7 +496,7 @@ export async function uploadFileFeishu(params: {
           file_type: fileType,
           file_name: safeFileName,
           file: fileData,
-          ...(duration !== undefined && { duration }),
+          ...(duration !== undefined ? { duration } : {}),
         },
       }),
     "Feishu file upload failed",
@@ -781,6 +784,8 @@ async function transcodeToFeishuVoiceOpus(params: {
             "libopus",
             "-b:a",
             FEISHU_VOICE_BITRATE,
+            "-f",
+            "ogg",
             outputPath,
           ]);
         },
@@ -814,6 +819,29 @@ async function prepareFeishuVoiceMedia(params: {
       err,
     );
     return params;
+  }
+}
+
+async function probeAudioDurationMs(buffer: Buffer): Promise<number | undefined> {
+  try {
+    return await withTempWorkspace(
+      { rootDir: resolvePreferredOpenClawTmpDir(), prefix: "feishu-audio-probe-" },
+      async (workspace) => {
+        const inputPath = await workspace.write("input.ogg", buffer);
+        const stdout = await runFfprobe(
+          ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", inputPath],
+          { timeoutMs: 5_000 },
+        );
+        const seconds = Number.parseFloat(stdout.trim());
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return undefined;
+        }
+        return Math.max(1, Math.round(seconds * 1000));
+      },
+    );
+  } catch (err) {
+    console.warn("[feishu] failed to probe audio duration; voice bubble will omit it:", err);
+    return undefined;
   }
 }
 
@@ -902,11 +930,13 @@ export async function sendMediaFeishu(params: {
       ...(voiceIntentDegradedToFile ? { voiceIntentDegradedToFile: true } : {}),
     };
   }
+  const durationMs = routing.msgType === "audio" ? await probeAudioDurationMs(buffer) : undefined;
   const { fileKey } = await uploadFileFeishu({
     cfg,
     file: buffer,
     fileName: name,
     fileType: routing.fileType ?? "stream",
+    ...(durationMs !== undefined ? { duration: durationMs } : {}),
     accountId,
   });
   const result = await sendFileFeishu({

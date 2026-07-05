@@ -1,10 +1,11 @@
+// Config CLI integration tests cover end-to-end config command reads and writes.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import JSON5 from "json5";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { clearConfigCache, clearRuntimeConfigSnapshot } from "../config/config.js";
-import { captureEnv } from "../test-utils/env.js";
+import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../test-utils/env.js";
 import { runConfigSet } from "./config-cli.js";
 
 function createTestRuntime() {
@@ -90,8 +91,8 @@ async function withExecDryRunConfigHarness(
       "utf8",
     );
 
-    process.env.OPENCLAW_TEST_FAST = "1";
-    process.env.OPENCLAW_CONFIG_PATH = configPath;
+    setTestEnvValue("OPENCLAW_TEST_FAST", "1");
+    setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
     clearConfigCache();
     clearRuntimeConfigSnapshot();
 
@@ -110,6 +111,30 @@ async function withExecDryRunConfigHarness(
 }
 
 describe("config cli integration", () => {
+  beforeAll(async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-config-cli-warmup-"));
+    const configPath = path.join(tempDir, "openclaw.json");
+    const envSnapshot = captureEnv(["OPENCLAW_CONFIG_PATH", "OPENCLAW_TEST_FAST"]);
+    try {
+      fs.writeFileSync(configPath, `${JSON.stringify({ gateway: { port: 18789 } }, null, 2)}\n`);
+      setTestEnvValue("OPENCLAW_TEST_FAST", "1");
+      setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
+      clearConfigCache();
+      clearRuntimeConfigSnapshot();
+      await runConfigSet({
+        path: "gateway.port",
+        value: "18790",
+        cliOptions: {},
+        runtime: createTestRuntime().runtime,
+      });
+    } finally {
+      envSnapshot.restore();
+      clearConfigCache();
+      clearRuntimeConfigSnapshot();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts plugin hook conversation-access policy via config set", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-config-cli-plugin-hooks-"));
     const configPath = path.join(tempDir, "openclaw.json");
@@ -127,8 +152,8 @@ describe("config cli integration", () => {
         "utf8",
       );
 
-      process.env.OPENCLAW_TEST_FAST = "1";
-      process.env.OPENCLAW_CONFIG_PATH = configPath;
+      setTestEnvValue("OPENCLAW_TEST_FAST", "1");
+      setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
       clearConfigCache();
       clearRuntimeConfigSnapshot();
 
@@ -197,9 +222,9 @@ describe("config cli integration", () => {
         "utf8",
       );
 
-      process.env.OPENCLAW_TEST_FAST = "1";
-      process.env.OPENCLAW_CONFIG_PATH = configPath;
-      process.env.DISCORD_BOT_TOKEN = "test-token";
+      setTestEnvValue("OPENCLAW_TEST_FAST", "1");
+      setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
+      setTestEnvValue("DISCORD_BOT_TOKEN", "test-token");
       clearConfigCache();
       clearRuntimeConfigSnapshot();
 
@@ -215,8 +240,8 @@ describe("config cli integration", () => {
       const afterDryRun = fs.readFileSync(configPath, "utf8");
       expect(afterDryRun).toBe(before);
       expect(runtime.errors).toStrictEqual([]);
-      expect(runtime.logs).toEqual(
-        expect.arrayContaining([expect.stringContaining("Dry run successful: 2 update(s)")]),
+      expect(runtime.logs.some((line) => line.includes("Dry run successful: 2 update(s)"))).toBe(
+        true,
       );
 
       await runConfigSet({
@@ -268,9 +293,9 @@ describe("config cli integration", () => {
         "utf8",
       );
 
-      process.env.OPENCLAW_TEST_FAST = "1";
-      process.env.OPENCLAW_CONFIG_PATH = configPath;
-      delete process.env.MISSING_TEST_SECRET;
+      setTestEnvValue("OPENCLAW_TEST_FAST", "1");
+      setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
+      deleteTestEnvValue("MISSING_TEST_SECRET");
       clearConfigCache();
       clearRuntimeConfigSnapshot();
 
@@ -303,12 +328,10 @@ describe("config cli integration", () => {
       };
       expect(payload.ok).toBe(false);
       expect(payload.checks?.resolvability).toBe(true);
-      expect(payload.errors).toEqual(
-        expect.arrayContaining([expect.objectContaining({ kind: "resolvability" })]),
-      );
-      expect(payload.errors?.map((entry) => entry.ref ?? "")).toEqual(
-        expect.arrayContaining([expect.stringContaining("MISSING_TEST_SECRET")]),
-      );
+      expect(payload.errors?.some((entry) => entry.kind === "resolvability")).toBe(true);
+      expect(
+        payload.errors?.some((entry) => (entry.ref ?? "").includes("MISSING_TEST_SECRET")),
+      ).toBe(true);
     } finally {
       envSnapshot.restore();
       clearConfigCache();
