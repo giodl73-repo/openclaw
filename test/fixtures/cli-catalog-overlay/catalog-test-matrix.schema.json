@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "cli-catalog-overlay-test-matrix",
+  "topLevelFields": [
+    "candidates",
+    "counts",
+    "coverageGaps",
+    "generatedFrom",
+    "schemaVersion"
+  ],
+  "counts": {
+    "routedOperations": 14,
+    "smokeCandidates": 14,
+    "coveredRoutedOperations": 1,
+    "coverageGaps": 13
+  },
+  "countFields": [
+    "coverageGaps",
+    "coveredRoutedOperations",
+    "routedOperations",
+    "smokeCandidates"
+  ],
+  "candidates": {
+    "count": 14,
+    "itemFields": [
+      "commandPaths",
+      "coverageEvidence",
+      "recommendedTestName",
+      "routeId",
+      "smokeCommands"
+    ],
+    "ids": [
+      "agents-list",
+      "channels-list",
+      "channels-status",
+      "config-get",
+      "config-unset",
+      "gateway-status",
+      "health",
+      "models-list",
+      "models-status",
+      "plugins-list",
+      "sessions",
+      "status",
+      "tasks-audit",
+      "tasks-list"
+    ]
+  },
+  "coverageGaps": {
+    "count": 13,
+    "itemFields": [
+      "commandPaths",
+      "coverageEvidence",
+      "recommendedTestName",
+      "routeId",
+      "smokeCommands"
+    ],
+    "ids": [
+      "agents-list",
+      "channels-list",
+      "channels-status",
+      "config-get",
+      "config-unset",
+      "health",
+      "models-list",
+      "models-status",
+      "plugins-list",
+      "sessions",
+      "status",
+      "tasks-audit",
+      "tasks-list"
+    ]
+  },
+  "candidateRouteIds": [
+    "agents-list",
+    "channels-list",
+    "channels-status",
+    "config-get",
+    "config-unset",
+    "gateway-status",
+    "health",
+    "models-list",
+    "models-status",
+    "plugins-list",
+    "sessions",
+    "status",
+    "tasks-audit",
+    "tasks-list"
+  ]
+}
