@@ -1,5 +1,6 @@
 // Declarative CLI command catalog for startup policy and fast-path routing.
 import { hasFlag } from "./argv.js";
+import type { CliCatalogMetadata } from "./catalog-metadata.js";
 
 export type CliCommandPluginLoadPolicy =
   | "never"
@@ -48,6 +49,7 @@ export type CliCommandCatalogEntry = {
   route?: {
     id: CliRoutedCommandId;
     preloadPlugins?: boolean;
+    catalog?: CliCatalogMetadata;
   };
 };
 
@@ -202,7 +204,15 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
     commandPath: ["config", "unset"],
     exact: true,
     policy: { ensureCliPath: false, networkProxy: "bypass" },
-    route: { id: "config-unset" },
+    route: {
+      id: "config-unset",
+      catalog: {
+        title: "Unset config",
+        risk: "medium",
+        confirmationRequired: true,
+        effectMode: "mutating",
+      },
+    },
   },
   {
     commandPath: ["models", "list"],

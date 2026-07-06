@@ -18,22 +18,22 @@ Use `--check` in validation to verify the checked-in page is current.
 
 ## Commands
 
-| Command                        | Purpose                                                                                                                                                    | Machine output |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `openclaw catalog list`        | List command descriptors, command routes, routed operations, runtime commands, plugin descriptor commands, agent/tool surfaces, and prompt projection IDs. | `--json`       |
-| `openclaw catalog audit`       | Group catalog surfaces and command routes for audit and policy review.                                                                                     | `--json`       |
-| `openclaw catalog test-matrix` | List routed-operation smoke-test candidates and explicit coverage gaps.                                                                                    | `--json`       |
-| `openclaw catalog summary`     | Summarize catalog inventory for operator and admin handoffs.                                                                                               | `--json`       |
+| Command                        | Purpose                                                                                                                                                 | Machine output |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `openclaw catalog list`        | List command descriptors, command routes, routed operations, runtime commands, plugin descriptor commands, catalog surfaces, and prompt projection IDs. | `--json`       |
+| `openclaw catalog audit`       | Group catalog surfaces and command routes for audit and policy review.                                                                                  | `--json`       |
+| `openclaw catalog test-matrix` | List routed-operation smoke-test candidates and explicit coverage gaps.                                                                                 | `--json`       |
+| `openclaw catalog summary`     | Summarize catalog inventory for operator and admin handoffs.                                                                                            | `--json`       |
 
 ## Lens counts
 
-| Lens              | Generated from                         | Key counts                                                                                                               |
-| ----------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| List              | `cli-catalog-overlay`                  | descriptors 58; routes 94; routed operations 14; agent/tool surfaces 5; runtime commands dynamic; plugin commands opt-in |
-| Audit             | `cli-catalog-overlay-audit`            | confirmation-required surfaces 2; route policy keys 7                                                                    |
-| Test matrix       | `cli-catalog-overlay-test-matrix`      | smoke candidates 14; coverage gaps 14                                                                                    |
-| Summary           | `cli-catalog-overlay-operator-summary` | coverage gaps 14; policy keys 7                                                                                          |
-| Prompt projection | `cli-catalog-overlay-prompt`           | prompt surfaces 19                                                                                                       |
+| Lens              | Generated from                         | Key counts                                                                                                            |
+| ----------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| List              | `cli-catalog-overlay`                  | descriptors 58; routes 94; routed operations 14; catalog surfaces 5; runtime commands dynamic; plugin commands opt-in |
+| Audit             | `cli-catalog-overlay-audit`            | confirmation-required surfaces 2; route policy keys 7                                                                 |
+| Test matrix       | `cli-catalog-overlay-test-matrix`      | smoke candidates 14; coverage gaps 14                                                                                 |
+| Summary           | `cli-catalog-overlay-operator-summary` | coverage gaps 14; policy keys 7                                                                                       |
+| Prompt projection | `cli-catalog-overlay-prompt`           | prompt surfaces 19                                                                                                    |
 
 ## JSON contracts
 
@@ -48,7 +48,7 @@ Checked schema fixtures live under `test/fixtures/cli-catalog-overlay/` and inte
 
 ## Dynamic command inventory
 
-The generated reference intentionally snapshots static descriptors, command routes, routed operations, agent/tool surfaces, and prompt projection metadata. `openclaw catalog list` also fills `cli.runtimeCommands` from the current Commander tree at command execution time, and `cli.pluginCommands` when `--plugin-descriptors` is requested. Inspect those dynamic arrays with `openclaw catalog list --json` instead of treating this generated page as a complete runtime/plugin inventory dump.
+The generated reference intentionally snapshots static descriptors, command routes, routed operations, catalog surfaces, and prompt projection metadata. `openclaw catalog list` also fills `cli.runtimeCommands` from the current Commander tree at command execution time, and `cli.pluginCommands` when `--plugin-descriptors` is requested. Inspect those dynamic arrays with `openclaw catalog list --json` instead of treating this generated page as a complete runtime/plugin inventory dump.
 
 | Field                 | Scope                                                       | How to inspect                                      |
 | --------------------- | ----------------------------------------------------------- | --------------------------------------------------- |

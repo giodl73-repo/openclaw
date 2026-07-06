@@ -1,4 +1,5 @@
 import { cliCommandCatalog } from "../cli/command-catalog.js";
+import type { CliCatalogMetadata } from "../cli/catalog-metadata.js";
 import type { CliCatalogPluginCommand } from "./plugin-commands.js";
 import { listCliCatalogSurfaces } from "./registry.js";
 
@@ -34,27 +35,33 @@ const ROUTED_OPERATION_TITLES: Readonly<Record<string, string>> = {
 type PromptRoutedOperation = {
   readonly id: string;
   readonly commandPaths: readonly (readonly string[])[];
+  readonly title?: string;
+  readonly risk?: string;
+  readonly confirmationRequired?: boolean;
 };
 
-function routedOperationRisk(id: string): "low" | "medium" {
-  return id === "config-unset" ? "medium" : "low";
-}
-
 function listPromptRoutedOperations(): readonly PromptRoutedOperation[] {
-  const byId = new Map<string, string[][]>();
+  const byId = new Map<string, { commandPaths: string[][]; catalog?: CliCatalogMetadata }>();
   for (const entry of cliCommandCatalog) {
     const id = entry.route?.id;
     if (!id) {
       continue;
     }
-    const commandPaths = byId.get(id) ?? [];
-    commandPaths.push([...entry.commandPath]);
-    byId.set(id, commandPaths);
+    const group = byId.get(id) ?? { commandPaths: [] };
+    group.commandPaths.push([...entry.commandPath]);
+    group.catalog ??= entry.route?.catalog;
+    byId.set(id, group);
   }
 
   return [...byId.entries()]
     .toSorted(([left], [right]) => left.localeCompare(right))
-    .map(([id, commandPaths]) => ({ id, commandPaths }));
+    .map(([id, group]) => ({
+      id,
+      commandPaths: group.commandPaths,
+      title: group.catalog?.title,
+      risk: group.catalog?.risk,
+      confirmationRequired: group.catalog?.confirmationRequired,
+    }));
 }
 
 export function listCliCatalogPromptSurfaces(
@@ -65,14 +72,14 @@ export function listCliCatalogPromptSurfaces(
 ): readonly CliCatalogPromptSurface[] {
   const routedOperations = listPromptRoutedOperations().map((operation) => ({
     id: operation.id,
-    title: ROUTED_OPERATION_TITLES[operation.id] ?? operation.id,
+    title: operation.title ?? ROUTED_OPERATION_TITLES[operation.id] ?? operation.id,
     kind: "routed-operation",
     dispatchMode: "direct",
     target: operation.commandPaths[0]?.join(" ") ?? operation.id,
     examples: operation.commandPaths.slice(0, 2).map((path) => path.join(" ")),
     commandHints: operation.commandPaths.map((path) => path.join(" ")),
-    risk: routedOperationRisk(operation.id),
-    confirmationRequired: routedOperationRisk(operation.id) !== "low",
+    risk: operation.risk ?? "low",
+    confirmationRequired: operation.confirmationRequired ?? false,
   }));
   const agentToolSurfaces = listCliCatalogSurfaces()
     .filter((surface) => surface.visibility.includes("prompt"))
@@ -96,9 +103,9 @@ export function listCliCatalogPromptSurfaces(
       dispatchMode: "metadata-first",
       target: command.commandPath.join(" "),
       examples: [command.commandPath.join(" ")],
-      commandHints: [command.commandPath.join(" ")],
-      risk: "medium",
-      confirmationRequired: true,
+      commandHints: command.commandHints,
+      risk: command.risk,
+      confirmationRequired: command.confirmationRequired,
     }));
   return [...routedOperations, ...agentToolSurfaces, ...pluginSurfaces];
 }
