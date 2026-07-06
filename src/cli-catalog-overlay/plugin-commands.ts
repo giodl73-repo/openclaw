@@ -12,6 +12,10 @@ export type CliCatalogPluginCommand = {
   readonly description: string;
   readonly hasSubcommands: boolean;
   readonly hidden: false;
+  readonly risk: string;
+  readonly confirmationRequired: boolean;
+  readonly effectMode: string;
+  readonly commandHints: readonly string[];
   readonly sourceKind: "plugin";
   readonly sourceId: string;
   readonly discoveryMode: "plugin-descriptor";
@@ -40,10 +44,15 @@ export function buildPluginCatalogCommands(
           description: descriptor.description,
           hasSubcommands: descriptor.hasSubcommands,
           hidden: false,
+          risk: descriptor.catalog?.risk ?? "medium",
+          confirmationRequired: descriptor.catalog?.confirmationRequired ?? true,
+          effectMode: descriptor.catalog?.effectMode ?? "mixed",
+          commandHints: descriptor.catalog?.commandHints ?? [commandPath.join(" ")],
           sourceKind: "plugin" as const,
           sourceId: `${entry.pluginId}:${commandPath.join(" ")}`,
           discoveryMode: "plugin-descriptor" as const,
-          visibility: ["docs", "audit", "operator", "policy"] as const,
+          visibility:
+            descriptor.catalog?.visibility ?? (["docs", "audit", "operator", "policy"] as const),
         };
       }),
   );

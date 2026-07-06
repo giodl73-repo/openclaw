@@ -272,16 +272,20 @@
   "pluginCommands": {
     "count": 1,
     "itemFields": [
+      "commandHints",
       "commandPath",
+      "confirmationRequired",
       "depth",
       "description",
       "descriptorName",
       "discoveryMode",
+      "effectMode",
       "hasSubcommands",
       "hidden",
       "name",
       "parentPath",
       "pluginId",
+      "risk",
       "sourceId",
       "sourceKind",
       "visibility"

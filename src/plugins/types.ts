@@ -6,6 +6,7 @@ import type {
   UnifiedModelCatalogKind,
 } from "@openclaw/model-catalog-core/model-catalog-types";
 import type { Command } from "commander";
+import type { CliCatalogMetadata } from "../cli/catalog-metadata.js";
 import type {
   ApiKeyCredential,
   AuthProfileCredential,
@@ -2189,6 +2190,7 @@ export type OpenClawPluginCliCommandDescriptor = {
   name: string;
   description: string;
   hasSubcommands: boolean;
+  catalog?: CliCatalogMetadata;
   /** Hide the placeholder from generated catalogs while preserving command ownership metadata. */
   hidden?: boolean;
 };
