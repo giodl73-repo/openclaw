@@ -188,12 +188,12 @@ The catalog contract is read-only. External consumers should use the JSON comman
 | Contract notes            | Use the catalog JSON commands as the stable external read path.; Treat advisory report artifacts as review outputs, not as the durable public API.; Add package exports deliberately before importing catalog builders outside the repo.                       |
 | Non-goals                 | The catalog does not execute commands.; The catalog does not enforce policy decisions.; The catalog does not make inventory counts permanent compatibility promises.                                                                                           |
 
-| JSON output                           | Stable fields                                                                              | Snapshot fields                                                                                 |
-| ------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `openclaw catalog list --json`        | `schemaVersion`, `generatedFrom`, `counts`, `cli`, `agentToolSurfaces`, `promptProjection` | `counts.*`, `cli.descriptors`, `cli.commandRoutes`, `cli.runtimeCommands`, `cli.pluginCommands` |
-| `openclaw catalog audit --json`       | `schemaVersion`, `generatedFrom`, `counts`, `surfaces`, `commandRoutes`                    | `counts.*`, `surfaces.*`, `commandRoutes.byPolicyKey`, `commandRoutes.routesWithoutPolicyKeys`  |
-| `openclaw catalog test-matrix --json` | `schemaVersion`, `generatedFrom`, `counts`, `candidates`, `coverageGaps`                   | `counts.*`, `candidates`, `coverageGaps`                                                        |
-| `openclaw catalog summary --json`     | `schemaVersion`, `generatedFrom`, `counts`, `attention`, `nextChecks`                      | `counts.*`, `attention.*`, `nextChecks`                                                         |
+| JSON output                           | Stable fields                                                                                     | Snapshot fields                                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `openclaw catalog list --json`        | `schemaVersion`, `generatedFrom`, `counts`, `cli`, `agentToolSurfaces`, `promptProjection`        | `counts.*`, `cli.descriptors`, `cli.commandRoutes`, `cli.runtimeCommands`, `cli.pluginCommands`, `cli.nodeCommands` |
+| `openclaw catalog audit --json`       | `schemaVersion`, `generatedFrom`, `counts`, `surfaces`, `commandRoutes`, `nodeCommands`           | `counts.*`, `surfaces.*`, `commandRoutes.byPolicyKey`, `commandRoutes.routesWithoutPolicyKeys`, `nodeCommands.*`    |
+| `openclaw catalog test-matrix --json` | `schemaVersion`, `generatedFrom`, `counts`, `candidates`, `nodeCommandCandidates`, `coverageGaps` | `counts.*`, `candidates`, `nodeCommandCandidates`, `coverageGaps`                                                   |
+| `openclaw catalog summary --json`     | `schemaVersion`, `generatedFrom`, `counts`, `attention`, `nextChecks`                             | `counts.*`, `attention.*`, `nextChecks`                                                                             |
 
 ## Audit and operator attention
 
