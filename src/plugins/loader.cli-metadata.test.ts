@@ -926,6 +926,11 @@ module.exports = {
           name: "safe-command",
           description: ${JSON.stringify(unsafeDescription)},
           hasSubcommands: false,
+          catalog: {
+            visibility: ["prompt"],
+            risk: "low",
+            confirmationRequired: false,
+          },
         },
         {
           name: "bad\\nname",
@@ -955,6 +960,11 @@ module.exports = {
         name: "safe-command",
         description: "Open link now",
         hasSubcommands: false,
+        catalog: {
+          visibility: ["prompt"],
+          risk: "low",
+          confirmationRequired: false,
+        },
       },
     ]);
     expect(registry.diagnostics.map((diag) => diag.message)).toEqual([
