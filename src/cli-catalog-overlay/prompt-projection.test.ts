@@ -74,13 +74,32 @@ describe("CLI catalog overlay prompt projection", () => {
       {
         pluginId: "demo-plugin",
         parentPath: [],
-        descriptors: [{ name: "demo", description: "Demo plugin command", hasSubcommands: false }],
+        descriptors: [
+          {
+            name: "demo",
+            description: "Demo plugin command",
+            hasSubcommands: false,
+            catalog: { visibility: ["prompt", "docs"] },
+          },
+          {
+            name: "audit-only",
+            description: "Audit-only plugin command",
+            hasSubcommands: false,
+            catalog: { visibility: ["audit", "docs"] },
+          },
+        ],
       },
     ]);
 
     expect(
       listCliCatalogPromptSurfaces({ pluginCommands }).map((surface) => surface.id),
     ).not.toContain("demo-plugin:demo");
+    expect(
+      listCliCatalogPromptSurfaces({
+        pluginCommands,
+        promptPluginIds: new Set(["demo-plugin"]),
+      }).map((surface) => surface.id),
+    ).not.toContain("demo-plugin:audit-only");
     expect(
       listCliCatalogPromptSurfaces({
         pluginCommands,

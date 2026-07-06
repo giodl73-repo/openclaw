@@ -116,7 +116,10 @@ export function listCliCatalogPromptSurfaces(
       confirmationRequired: surface.confirmationRequired,
     }));
   const pluginSurfaces = (params.pluginCommands ?? [])
-    .filter((command) => params.promptPluginIds?.has(command.pluginId))
+    .filter(
+      (command) =>
+        params.promptPluginIds?.has(command.pluginId) && command.visibility.includes("prompt"),
+    )
     .map((command) => ({
       id: modelFacingLiteral(command.sourceId),
       title: modelFacingLiteral(command.description || command.name),
