@@ -35,7 +35,7 @@ describe("cli catalog overlay audit", () => {
       counts: {
         agentToolSurfaces: 5,
         confirmationRequiredSurfaces: 2,
-        commandRoutes: 94,
+        commandRoutes: 97,
       },
     });
     expect(audit.surfaces.confirmationRequiredSurfaceIds).toEqual(["gateway", "skill_workshop"]);
@@ -78,7 +78,7 @@ describe("cli catalog overlay audit", () => {
 
     expect(markdown).toContain("# CLI Catalog Overlay Audit");
     expect(markdown).toContain("- Agent/tool surfaces: 5");
-    expect(markdown).toContain("- Command routes: 94");
+    expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Node/operator commands: 0");
     expect(markdown).toContain("| Risk | `low` (3), `medium` (2) |");
     expect(markdown).toContain("| Confirmation required | `gateway`, `skill_workshop` |");

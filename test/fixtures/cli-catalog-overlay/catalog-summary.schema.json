@@ -9,14 +9,14 @@
     "schemaVersion"
   ],
   "counts": {
-    "commandDescriptors": 58,
-    "commandRoutes": 94,
+    "commandDescriptors": 60,
+    "commandRoutes": 97,
     "routedOperations": 14,
     "agentToolSurfaces": 5,
     "nodeCommands": 1,
     "nodeCommandsRequiringApproval": 1,
     "confirmationRequiredSurfaces": 2,
-    "routePolicyKeys": 7,
+    "routePolicyKeys": 8,
     "coverageGaps": 14
   },
   "countFields": [
@@ -60,6 +60,7 @@
       "hideBanner",
       "loadPlugins",
       "networkProxy",
+      "ownsProtocolStdout",
       "pluginRegistry",
       "routeConfigGuard"
     ]

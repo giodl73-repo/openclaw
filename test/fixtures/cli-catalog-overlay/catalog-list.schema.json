@@ -10,8 +10,8 @@
     "schemaVersion"
   ],
   "counts": {
-    "commandDescriptors": 58,
-    "commandRoutes": 94,
+    "commandDescriptors": 60,
+    "commandRoutes": 97,
     "routedOperations": 14,
     "agentToolSurfaces": 5,
     "promptProjection": 19,
@@ -39,7 +39,7 @@
     "runtimeCommands"
   ],
   "descriptors": {
-    "count": 58,
+    "count": 60,
     "itemFields": [
       "description",
       "discoveryMode",
@@ -57,6 +57,7 @@
       "agents",
       "approvals",
       "attach",
+      "audit",
       "backup",
       "capability",
       "catalog",
@@ -109,11 +110,12 @@
       "tui",
       "uninstall",
       "update",
-      "webhooks"
+      "webhooks",
+      "worktrees"
     ]
   },
   "commandRoutes": {
-    "count": 94,
+    "count": 97,
     "itemFields": [
       "commandPath",
       "discoveryMode",
@@ -125,6 +127,7 @@
       "visibility"
     ],
     "ids": [
+      "acp",
       "acp",
       "agent",
       "agents",
@@ -184,6 +187,7 @@
       "hooks",
       "logs",
       "mcp",
+      "mcp serve",
       "message",
       "migrate",
       "models-list",
@@ -218,7 +222,8 @@
       "tools",
       "tui",
       "uninstall",
-      "update"
+      "update",
+      "worktrees"
     ]
   },
   "routedOperations": {

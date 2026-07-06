@@ -12,11 +12,11 @@
   "counts": {
     "agentToolSurfaces": 5,
     "confirmationRequiredSurfaces": 2,
-    "commandRoutes": 94,
-    "commandRoutesWithPolicyKeys": 91,
+    "commandRoutes": 97,
+    "commandRoutesWithPolicyKeys": 94,
     "nodeCommands": 1,
     "nodeCommandsRequiringApproval": 1,
-    "routePolicyKeys": 7
+    "routePolicyKeys": 8
   },
   "countFields": [
     "agentToolSurfaces",
@@ -79,7 +79,7 @@
     "routesWithoutPolicyKeys"
   ],
   "byPolicyKey": {
-    "count": 7,
+    "count": 8,
     "itemFields": [
       "commandPaths",
       "count",
@@ -91,6 +91,7 @@
       "hideBanner",
       "loadPlugins",
       "networkProxy",
+      "ownsProtocolStdout",
       "pluginRegistry",
       "routeConfigGuard"
     ]

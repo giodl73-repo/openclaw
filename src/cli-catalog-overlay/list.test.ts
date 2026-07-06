@@ -36,8 +36,8 @@ describe("cli catalog overlay list", () => {
       schemaVersion: 1,
       generatedFrom: "cli-catalog-overlay",
       counts: {
-        commandDescriptors: 58,
-        commandRoutes: 94,
+        commandDescriptors: 60,
+        commandRoutes: 97,
         routedOperations: 14,
         agentToolSurfaces: 5,
         promptProjection: 19,
@@ -85,8 +85,8 @@ describe("cli catalog overlay list", () => {
     const markdown = renderCatalogListMarkdown();
 
     expect(markdown).toContain("# CLI Catalog Overlay List");
-    expect(markdown).toContain("- CLI descriptors: 58");
-    expect(markdown).toContain("- Command routes: 94");
+    expect(markdown).toContain("- CLI descriptors: 60");
+    expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Runtime command scope: current-invocation-registered-tree");
     expect(markdown).toContain("- Node/operator commands: 0");
     expect(markdown).toContain("| `gateway-status` | `gateway status` |");

@@ -32,7 +32,7 @@ describe("generate CLI catalog docs", () => {
     try {
       const content = buildCliCatalogReferenceMarkdown();
 
-      expect(content).toContain("descriptors 58");
+      expect(content).toContain("descriptors 60");
       expect(content).not.toContain("`qa`");
     } finally {
       if (originalPrivateQaCli === undefined) {

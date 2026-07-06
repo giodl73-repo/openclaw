@@ -37,12 +37,12 @@ describe("cli catalog operator summary", () => {
       schemaVersion: 1,
       generatedFrom: "cli-catalog-overlay-operator-summary",
       counts: {
-        commandDescriptors: 58,
-        commandRoutes: 94,
+        commandDescriptors: 60,
+        commandRoutes: 97,
         routedOperations: 14,
         agentToolSurfaces: 5,
         confirmationRequiredSurfaces: 2,
-        routePolicyKeys: 7,
+        routePolicyKeys: 8,
         coverageGaps: 14,
       },
     });
@@ -72,7 +72,7 @@ describe("cli catalog operator summary", () => {
     const markdown = renderCatalogOperatorSummaryMarkdown();
 
     expect(markdown).toContain("# CLI Catalog Operator Summary");
-    expect(markdown).toContain("- Command routes: 94");
+    expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Node/operator commands: 0");
     expect(markdown).toContain("- Test-matrix coverage gaps: 14");
     expect(markdown).toContain("- Confirmation required: `gateway`, `skill_workshop`");
