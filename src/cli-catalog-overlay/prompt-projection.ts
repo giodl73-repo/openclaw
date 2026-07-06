@@ -1,4 +1,5 @@
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
+import type { CliCatalogMetadata } from "../cli/catalog-metadata.js";
 import { cliCommandCatalog } from "../cli/command-catalog.js";
 import type { CliCatalogNodeCommand } from "./node-commands.js";
 import type { CliCatalogPluginCommand } from "./plugin-commands.js";
@@ -36,11 +37,10 @@ const ROUTED_OPERATION_TITLES: Readonly<Record<string, string>> = {
 type PromptRoutedOperation = {
   readonly id: string;
   readonly commandPaths: readonly (readonly string[])[];
+  readonly title?: string;
+  readonly risk?: string;
+  readonly confirmationRequired?: boolean;
 };
-
-function routedOperationRisk(id: string): "low" | "medium" {
-  return id === "config-unset" ? "medium" : "low";
-}
 
 function openClawCommand(path: readonly string[]): string {
   return `openclaw ${path.join(" ")}`;
@@ -55,20 +55,27 @@ function modelFacingLiteral(value: string, maxChars = 160): string {
 }
 
 function listPromptRoutedOperations(): readonly PromptRoutedOperation[] {
-  const byId = new Map<string, string[][]>();
+  const byId = new Map<string, { commandPaths: string[][]; catalog?: CliCatalogMetadata }>();
   for (const entry of cliCommandCatalog) {
     const id = entry.route?.id;
     if (!id) {
       continue;
     }
-    const commandPaths = byId.get(id) ?? [];
-    commandPaths.push([...entry.commandPath]);
-    byId.set(id, commandPaths);
+    const group = byId.get(id) ?? { commandPaths: [] };
+    group.commandPaths.push([...entry.commandPath]);
+    group.catalog ??= entry.route?.catalog;
+    byId.set(id, group);
   }
 
   return [...byId.entries()]
     .toSorted(([left], [right]) => left.localeCompare(right))
-    .map(([id, commandPaths]) => ({ id, commandPaths }));
+    .map(([id, group]) => ({
+      id,
+      commandPaths: group.commandPaths,
+      title: group.catalog?.title,
+      risk: group.catalog?.risk,
+      confirmationRequired: group.catalog?.confirmationRequired,
+    }));
 }
 
 export function listCliCatalogPromptSurfaces(
@@ -81,7 +88,7 @@ export function listCliCatalogPromptSurfaces(
 ): readonly CliCatalogPromptSurface[] {
   const routedOperations = listPromptRoutedOperations().map((operation) => ({
     id: operation.id,
-    title: ROUTED_OPERATION_TITLES[operation.id] ?? operation.id,
+    title: operation.title ?? ROUTED_OPERATION_TITLES[operation.id] ?? operation.id,
     kind: "routed-operation",
     dispatchMode: "direct",
     target: operation.commandPaths[0]
@@ -89,8 +96,8 @@ export function listCliCatalogPromptSurfaces(
       : `openclaw ${operation.id}`,
     examples: operation.commandPaths.slice(0, 2).map(openClawCommand),
     commandHints: operation.commandPaths.map(openClawCommand),
-    risk: routedOperationRisk(operation.id),
-    confirmationRequired: routedOperationRisk(operation.id) !== "low",
+    risk: operation.risk ?? "low",
+    confirmationRequired: operation.confirmationRequired ?? false,
   }));
   const agentToolSurfaces = listCliCatalogSurfaces()
     .filter((surface) => surface.visibility.includes("prompt"))
@@ -117,9 +124,11 @@ export function listCliCatalogPromptSurfaces(
       dispatchMode: "metadata-first",
       target: modelFacingLiteral(openClawCommand(command.commandPath), 240),
       examples: [modelFacingLiteral(openClawCommand(command.commandPath), 240)],
-      commandHints: [modelFacingLiteral(openClawCommand(command.commandPath), 240)],
-      risk: "medium",
-      confirmationRequired: true,
+      commandHints: command.commandHints.map((hint) =>
+        modelFacingLiteral(hint.startsWith("openclaw ") ? hint : `openclaw ${hint}`, 240),
+      ),
+      risk: command.risk,
+      confirmationRequired: command.confirmationRequired,
     }));
   const nodeSurfaces =
     params.scope === "node-operator"

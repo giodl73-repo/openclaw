@@ -1,19 +1,23 @@
 import type { NamedCommandDescriptor } from "../cli/program/command-group-descriptors.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
+import type {
+  CliCatalogDispatchMode,
+  CliCatalogEffectMode,
+  CliCatalogRisk,
+  CliCatalogSurfaceKind,
+  CliCatalogSurfaceStatus,
+  CliCatalogVisibility,
+} from "../cli/catalog-metadata.js";
+export type {
+  CliCatalogDispatchMode,
+  CliCatalogEffectMode,
+  CliCatalogRisk,
+  CliCatalogSurfaceKind,
+  CliCatalogSurfaceStatus,
+  CliCatalogVisibility,
+} from "../cli/catalog-metadata.js";
 
-export type CliCatalogSurfaceId =
-  | "skill_workshop"
-  | "session_status"
-  | "sessions_spawn"
-  | "process"
-  | "gateway";
-
-export type CliCatalogSurfaceKind = "tool" | "command" | "workflow";
-export type CliCatalogDispatchMode = "direct" | "metadata-first" | "hybrid";
-export type CliCatalogRisk = "low" | "medium" | "high";
-export type CliCatalogSurfaceStatus = "draft" | "stable" | "deprecated";
-export type CliCatalogEffectMode = "read" | "mutating" | "mixed";
 export type CliCatalogSourceKind =
   | "core"
   | "subcli"
@@ -27,10 +31,9 @@ export type CliCatalogDiscoveryMode =
   | "explicit-overlay"
   | "runtime-registered"
   | "plugin-descriptor";
-export type CliCatalogVisibility = "docs" | "prompt" | "audit" | "operator" | "policy";
 
 export type CliCatalogSurfaceDefinition = {
-  readonly id: CliCatalogSurfaceId;
+  readonly id: string;
   readonly title: string;
   readonly kind: CliCatalogSurfaceKind;
   readonly dispatchMode: CliCatalogDispatchMode;
@@ -54,41 +57,54 @@ export type CliCatalogSurfaceDefinition = {
   readonly cliDescriptor?: NamedCommandDescriptor;
 };
 
-type CliCatalogSurfaceInput = Omit<CliCatalogSurfaceDefinition, "cliDescriptor"> & {
-  readonly cliDescriptorName?: string;
-};
-
-function getCliDescriptors(): readonly NamedCommandDescriptor[] {
-  return [...getCoreCliCommandDescriptors(), ...getSubCliEntries()];
-}
-
-function findCliDescriptor(name: string): NamedCommandDescriptor {
-  const descriptor = getCliDescriptors().find((entry) => entry.name === name);
-  if (!descriptor) {
-    throw new Error(`Missing CLI descriptor for catalog overlay surface: ${name}`);
+function surfaceFromDescriptor(
+  descriptor: NamedCommandDescriptor,
+  sourceKind: "core" | "subcli",
+): CliCatalogSurfaceDefinition | undefined {
+  const catalog = descriptor.catalog;
+  if (!catalog) {
+    return undefined;
   }
-  return descriptor;
-}
-
-function defineCliCatalogSurface(input: CliCatalogSurfaceInput): CliCatalogSurfaceDefinition {
-  const { cliDescriptorName, ...surface } = input;
-  if (!cliDescriptorName) {
-    return surface;
-  }
-  const descriptor = findCliDescriptor(cliDescriptorName);
   return {
-    ...surface,
+    id: catalog.id ?? descriptor.name,
+    title: catalog.title ?? descriptor.description,
+    kind: catalog.kind ?? "command",
+    dispatchMode: catalog.dispatchMode ?? "direct",
+    target: catalog.target ?? descriptor.name,
     source: `CLI descriptor: ${descriptor.name}`,
-    sourceKind: "subcli",
+    sourceKind,
     sourceId: descriptor.name,
     discoveryMode: "static-descriptor",
-    target: descriptor.name,
-    intent: surface.intent || descriptor.description,
+    visibility: catalog.visibility ?? ["docs", "audit", "operator", "policy"],
+    intent: catalog.intent ?? descriptor.description,
+    examples: catalog.examples ?? [],
+    aliases: catalog.aliases ?? [],
+    owner: catalog.owner ?? "cli",
+    status: catalog.status ?? "stable",
+    confidence: catalog.confidence ?? "high",
+    risk: catalog.risk ?? "low",
+    confirmationRequired: catalog.confirmationRequired ?? false,
+    effectMode: catalog.effectMode ?? "read",
+    effects: catalog.effects ?? [],
+    commandHints: catalog.commandHints ?? [descriptor.name],
     cliDescriptor: descriptor,
   };
 }
 
-const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
+function listDescriptorCatalogSurfaces(): readonly CliCatalogSurfaceDefinition[] {
+  return [
+    ...getCoreCliCommandDescriptors().flatMap((descriptor) => {
+      const surface = surfaceFromDescriptor(descriptor, "core");
+      return surface ? [surface] : [];
+    }),
+    ...getSubCliEntries().flatMap((descriptor) => {
+      const surface = surfaceFromDescriptor(descriptor, "subcli");
+      return surface ? [surface] : [];
+    }),
+  ];
+}
+
+const CLI_CATALOG_ADAPTER_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
   {
     id: "skill_workshop",
     title: "Skill Workshop proposals",
@@ -185,43 +201,14 @@ const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
     effects: ["process.lifecycle"],
     commandHints: ["process list", "process poll", "process log", "process write"],
   },
-  defineCliCatalogSurface({
-    id: "gateway",
-    title: "Gateway control",
-    kind: "command",
-    dispatchMode: "hybrid",
-    cliDescriptorName: "gateway",
-    target: "gateway",
-    source: "",
-    sourceKind: "subcli",
-    sourceId: "gateway",
-    discoveryMode: "static-descriptor",
-    visibility: ["docs", "prompt", "audit", "operator", "policy"],
-    intent: "Inspect, reconfigure, or restart the OpenClaw gateway.",
-    examples: ["restart the gateway", "inspect gateway config"],
-    aliases: ["gateway", "restart gateway"],
-    owner: "runtime",
-    status: "stable",
-    confidence: "high",
-    risk: "medium",
-    confirmationRequired: true,
-    effectMode: "mixed",
-    effects: ["gateway.restart", "gateway.config"],
-    commandHints: [
-      "gateway status",
-      "gateway restart",
-      "gateway config.schema.lookup",
-      "gateway config.apply",
-    ],
-  }),
 ] as const;
 
 export function listCliCatalogSurfaces(): readonly CliCatalogSurfaceDefinition[] {
-  return CLI_CATALOG_SURFACES;
+  return [...CLI_CATALOG_ADAPTER_SURFACES, ...listDescriptorCatalogSurfaces()];
 }
 
 export function getCliCatalogSurface(
-  surfaceId: CliCatalogSurfaceId,
+  surfaceId: string,
 ): CliCatalogSurfaceDefinition | undefined {
-  return CLI_CATALOG_SURFACES.find((surface) => surface.id === surfaceId);
+  return listCliCatalogSurfaces().find((surface) => surface.id === surfaceId);
 }
