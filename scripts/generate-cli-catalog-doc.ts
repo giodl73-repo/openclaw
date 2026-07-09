@@ -109,7 +109,7 @@ export function buildCliCatalogReferenceMarkdown(): string {
         [
           [
             code("openclaw catalog list"),
-            "List command descriptors, command routes, routed operations, runtime commands, plugin descriptor commands, catalog surfaces, and prompt projection IDs.",
+            "List command descriptors, command routes, routed operations, runtime commands, plugin descriptor commands, node/operator commands, catalog surfaces, and prompt projection IDs.",
             code("--json"),
           ],
           [
@@ -138,7 +138,7 @@ export function buildCliCatalogReferenceMarkdown(): string {
           [
             "List",
             code(list.generatedFrom),
-            `descriptors ${list.counts.commandDescriptors}; routes ${list.counts.commandRoutes}; routed operations ${list.counts.routedOperations}; catalog surfaces ${list.counts.agentToolSurfaces}; runtime commands dynamic; plugin commands opt-in`,
+            `descriptors ${list.counts.commandDescriptors}; routes ${list.counts.commandRoutes}; routed operations ${list.counts.routedOperations}; catalog surfaces ${list.counts.agentToolSurfaces}; runtime commands dynamic; plugin commands opt-in; node/operator commands supplied by runtime owners`,
           ],
           [
             "Audit",
@@ -195,7 +195,7 @@ export function buildCliCatalogReferenceMarkdown(): string {
       "",
       "## Dynamic command inventory",
       "",
-      "The generated reference intentionally snapshots static descriptors, command routes, routed operations, catalog surfaces, and prompt projection metadata. `openclaw catalog list` also fills `cli.runtimeCommands` from the current Commander tree at command execution time, and `cli.pluginCommands` when `--plugin-descriptors` is requested. Inspect those dynamic arrays with `openclaw catalog list --json` instead of treating this generated page as a complete runtime/plugin inventory dump.",
+      "The generated reference intentionally snapshots static descriptors, command routes, routed operations, catalog surfaces, and prompt projection metadata. `openclaw catalog list` also fills `cli.runtimeCommands` from the current Commander tree at command execution time, `cli.pluginCommands` when `--plugin-descriptors` is requested, and `cli.nodeCommands` when node/gateway owners supply approved command metadata. Inspect those dynamic arrays with `openclaw catalog list --json` instead of treating this generated page as a complete runtime/plugin/node inventory dump.",
       "",
       ...markdownTable(
         ["Field", "Scope", "How to inspect"],
@@ -209,6 +209,11 @@ export function buildCliCatalogReferenceMarkdown(): string {
             "`cli.pluginCommands`",
             "Metadata-only plugin descriptor entries requested on demand",
             "`openclaw catalog list --json --plugin-descriptors`",
+          ],
+          [
+            "`cli.nodeCommands`",
+            "Node/operator commands supplied by pairing, gateway, or node-host owners",
+            "`openclaw catalog list --json`",
           ],
         ],
       ),
