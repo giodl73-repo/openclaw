@@ -1507,7 +1507,10 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               name,
               description,
               hasSubcommands: descriptor.hasSubcommands,
-              ...(descriptor.catalog ? { catalog: descriptor.catalog } : {}),
+              ...(descriptor.effectProfile ? { effectProfile: descriptor.effectProfile } : {}),
+              ...(descriptor.catalogExposure
+                ? { catalogExposure: descriptor.catalogExposure }
+                : {}),
               ...(descriptor.hidden === true ? { hidden: true } : {}),
             }
           : null;

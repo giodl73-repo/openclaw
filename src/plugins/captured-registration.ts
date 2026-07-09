@@ -182,7 +182,10 @@ export function createCapturedPluginRegistration(params?: {
               name: descriptor.name.trim(),
               description: descriptor.description.trim(),
               hasSubcommands: descriptor.hasSubcommands,
-              ...(descriptor.catalog ? { catalog: descriptor.catalog } : {}),
+              ...(descriptor.effectProfile ? { effectProfile: descriptor.effectProfile } : {}),
+              ...(descriptor.catalogExposure
+                ? { catalogExposure: descriptor.catalogExposure }
+                : {}),
               ...(descriptor.hidden === true ? { hidden: true } : {}),
             }))
             .filter((descriptor) => descriptor.name && descriptor.description);

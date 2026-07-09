@@ -1,6 +1,6 @@
 // Descriptor-to-lazy-command-group adapters used by core and sub-CLI registration.
 import type { Command } from "commander";
-import type { CliCatalogMetadata } from "../catalog-metadata.js";
+import type { CatalogExposure, CommandEffectProfile } from "../catalog-metadata.js";
 
 /** Descriptor for one root command placeholder. */
 export type NamedCommandDescriptor = {
@@ -8,7 +8,8 @@ export type NamedCommandDescriptor = {
   description: string;
   hasSubcommands: boolean;
   parentDefaultHelp?: boolean;
-  catalog?: CliCatalogMetadata;
+  effectProfile?: CommandEffectProfile;
+  catalogExposure?: CatalogExposure;
 };
 
 /** Group spec that names the placeholders owned by one registrar. */
