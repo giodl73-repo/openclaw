@@ -10,6 +10,8 @@ export type CliCatalogOperatorSummary = {
     readonly commandRoutes: number;
     readonly routedOperations: number;
     readonly agentToolSurfaces: number;
+    readonly nodeCommands: number;
+    readonly nodeCommandsRequiringApproval: number;
     readonly confirmationRequiredSurfaces: number;
     readonly routePolicyKeys: number;
     readonly coverageGaps: number;
@@ -18,6 +20,7 @@ export type CliCatalogOperatorSummary = {
     readonly confirmationRequiredSurfaceIds: readonly string[];
     readonly mediumRiskSurfaceIds: readonly string[];
     readonly mixedEffectSurfaceIds: readonly string[];
+    readonly nodeCommandApprovalIds: readonly string[];
     readonly policyKeyIds: readonly string[];
   };
   readonly nextChecks: readonly string[];
@@ -55,6 +58,8 @@ export function buildCatalogOperatorSummary(
       commandRoutes: list.counts.commandRoutes,
       routedOperations: list.counts.routedOperations,
       agentToolSurfaces: list.counts.agentToolSurfaces,
+      nodeCommands: list.counts.nodeCommands,
+      nodeCommandsRequiringApproval: audit.counts.nodeCommandsRequiringApproval,
       confirmationRequiredSurfaces: audit.counts.confirmationRequiredSurfaces,
       routePolicyKeys: audit.counts.routePolicyKeys,
       coverageGaps,
@@ -63,6 +68,7 @@ export function buildCatalogOperatorSummary(
       confirmationRequiredSurfaceIds,
       mediumRiskSurfaceIds: groupIds(audit.surfaces.byRisk, "medium"),
       mixedEffectSurfaceIds: groupIds(audit.surfaces.byEffectMode, "mixed"),
+      nodeCommandApprovalIds: audit.nodeCommands.approvalRequiredCommandIds,
       policyKeyIds,
     },
     nextChecks: [
@@ -74,6 +80,9 @@ export function buildCatalogOperatorSummary(
         : "",
       coverageGaps > 0
         ? "Use catalog test-matrix output to prioritize routed-operation smoke coverage."
+        : "",
+      audit.nodeCommands.approvalRequiredCommandIds.length > 0
+        ? "Review node/operator command approval state before exposing node-scoped prompt projections."
         : "",
     ].filter(Boolean),
   };
@@ -96,6 +105,8 @@ export function renderCatalogOperatorSummaryMarkdown(): string {
     `- Command routes: ${summary.counts.commandRoutes}`,
     `- Routed operations: ${summary.counts.routedOperations}`,
     `- Agent/tool surfaces: ${summary.counts.agentToolSurfaces}`,
+    `- Node/operator commands: ${summary.counts.nodeCommands}`,
+    `- Node/operator commands requiring approval: ${summary.counts.nodeCommandsRequiringApproval}`,
     `- Confirmation-required surfaces: ${summary.counts.confirmationRequiredSurfaces}`,
     `- Route policy keys: ${summary.counts.routePolicyKeys}`,
     `- Test-matrix coverage gaps: ${summary.counts.coverageGaps}`,
@@ -105,6 +116,7 @@ export function renderCatalogOperatorSummaryMarkdown(): string {
     `- Confirmation required: ${inlineCodeList(summary.attention.confirmationRequiredSurfaceIds)}`,
     `- Medium risk: ${inlineCodeList(summary.attention.mediumRiskSurfaceIds)}`,
     `- Mixed effect mode: ${inlineCodeList(summary.attention.mixedEffectSurfaceIds)}`,
+    `- Node/operator approval: ${inlineCodeList(summary.attention.nodeCommandApprovalIds)}`,
     `- Route policy keys: ${inlineCodeList(summary.attention.policyKeyIds)}`,
     "",
     "## Next checks",

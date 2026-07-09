@@ -20,6 +20,8 @@ export type CliCatalogAudit = {
     readonly confirmationRequiredSurfaces: number;
     readonly commandRoutes: number;
     readonly commandRoutesWithPolicyKeys: number;
+    readonly nodeCommands: number;
+    readonly nodeCommandsRequiringApproval: number;
     readonly routePolicyKeys: number;
   };
   readonly surfaces: {
@@ -32,6 +34,12 @@ export type CliCatalogAudit = {
     readonly byPolicyKey: readonly CliCatalogAuditRoutePolicyGroup[];
     readonly routesWithoutPolicyKeys: readonly (readonly string[])[];
   };
+  readonly nodeCommands: {
+    readonly byAvailability: readonly CliCatalogAuditSurfaceGroup[];
+    readonly byApprovalKind: readonly CliCatalogAuditSurfaceGroup[];
+    readonly byTrustBoundary: readonly CliCatalogAuditSurfaceGroup[];
+    readonly approvalRequiredCommandIds: readonly string[];
+  };
 };
 
 function commandPathLabel(path: readonly string[]): string {
@@ -42,9 +50,9 @@ function markdownCommandPath(path: readonly string[]): string {
   return "`" + commandPathLabel(path) + "`";
 }
 
-function groupSurfacesBy(
-  surfaces: readonly CliCatalogListSurface[],
-  getKey: (surface: CliCatalogListSurface) => string,
+function groupSurfacesBy<T extends { readonly id: string }>(
+  surfaces: readonly T[],
+  getKey: (surface: T) => string,
 ): readonly CliCatalogAuditSurfaceGroup[] {
   const groups = new Map<string, string[]>();
   for (const surface of surfaces) {
@@ -90,6 +98,10 @@ export function buildCatalogAudit(list = buildCatalogList()): CliCatalogAudit {
     .map((surface) => surface.id)
     .toSorted();
   const byPolicyKey = groupRoutesByPolicyKey(list.cli.commandRoutes);
+  const approvalRequiredCommandIds = list.cli.nodeCommands
+    .filter((command) => command.approvalKind !== "none" || command.availability !== "approved")
+    .map((command) => command.id)
+    .toSorted();
   const routesWithoutPolicyKeys = list.cli.commandRoutes
     .filter((route) => route.policyKeys.length === 0)
     .map((route) => route.commandPath)
@@ -103,6 +115,8 @@ export function buildCatalogAudit(list = buildCatalogList()): CliCatalogAudit {
       confirmationRequiredSurfaces: confirmationRequiredSurfaceIds.length,
       commandRoutes: list.cli.commandRoutes.length,
       commandRoutesWithPolicyKeys: list.cli.commandRoutes.length - routesWithoutPolicyKeys.length,
+      nodeCommands: list.cli.nodeCommands.length,
+      nodeCommandsRequiringApproval: approvalRequiredCommandIds.length,
       routePolicyKeys: byPolicyKey.length,
     },
     surfaces: {
@@ -114,6 +128,12 @@ export function buildCatalogAudit(list = buildCatalogList()): CliCatalogAudit {
     commandRoutes: {
       byPolicyKey,
       routesWithoutPolicyKeys,
+    },
+    nodeCommands: {
+      byAvailability: groupSurfacesBy(list.cli.nodeCommands, (command) => command.availability),
+      byApprovalKind: groupSurfacesBy(list.cli.nodeCommands, (command) => command.approvalKind),
+      byTrustBoundary: groupSurfacesBy(list.cli.nodeCommands, (command) => command.trustBoundary),
+      approvalRequiredCommandIds,
     },
   };
 }
@@ -131,6 +151,8 @@ export function renderCatalogAuditMarkdown(): string {
     `- Confirmation-required surfaces: ${audit.counts.confirmationRequiredSurfaces}`,
     `- Command routes: ${audit.counts.commandRoutes}`,
     `- Command routes with policy keys: ${audit.counts.commandRoutesWithPolicyKeys}`,
+    `- Node/operator commands: ${audit.counts.nodeCommands}`,
+    `- Node/operator commands requiring approval: ${audit.counts.nodeCommandsRequiringApproval}`,
     `- Route policy keys: ${audit.counts.routePolicyKeys}`,
     "",
     "## Surface groups",
@@ -152,6 +174,16 @@ export function renderCatalogAuditMarkdown(): string {
       `| \`${group.policyKey}\` | ${group.commandPaths.map(markdownCommandPath).join(", ")} |`,
     );
   }
+  lines.push(
+    "",
+    "## Node/operator command groups",
+    "",
+    "| Group | Values |",
+    "| --- | --- |",
+    `| Availability | ${audit.nodeCommands.byAvailability.map((group) => `\`${group.id}\` (${group.count})`).join(", ") || "None"} |`,
+    `| Approval | ${audit.nodeCommands.byApprovalKind.map((group) => `\`${group.id}\` (${group.count})`).join(", ") || "None"} |`,
+    `| Trust boundary | ${audit.nodeCommands.byTrustBoundary.map((group) => `\`${group.id}\` (${group.count})`).join(", ") || "None"} |`,
+  );
   lines.push("");
   return lines.join("\n");
 }

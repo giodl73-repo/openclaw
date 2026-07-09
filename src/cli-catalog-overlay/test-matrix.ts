@@ -18,16 +18,28 @@ export type CliCatalogTestMatrixCandidate = {
   readonly coverageEvidence: readonly CliCatalogTestCoverageEvidence[];
 };
 
+export type CliCatalogNodeCommandTestCandidate = {
+  readonly commandId: string;
+  readonly command: string;
+  readonly smokeCommand: string;
+  readonly recommendedTestName: string;
+  readonly approvalKind: string;
+  readonly availability: string;
+};
+
 export type CliCatalogTestMatrix = {
   readonly schemaVersion: 1;
   readonly generatedFrom: "cli-catalog-overlay-test-matrix";
   readonly counts: {
     readonly routedOperations: number;
+    readonly nodeCommands: number;
     readonly smokeCandidates: number;
+    readonly nodeCommandSmokeCandidates: number;
     readonly coveredRoutedOperations: number;
     readonly coverageGaps: number;
   };
   readonly candidates: readonly CliCatalogTestMatrixCandidate[];
+  readonly nodeCommandCandidates: readonly CliCatalogNodeCommandTestCandidate[];
   readonly coverageGaps: readonly CliCatalogTestMatrixCandidate[];
 };
 
@@ -41,6 +53,10 @@ function markdownCommand(value: string): string {
 
 function recommendedTestName(operation: CliCatalogListRoutedOperation): string {
   return `catalog routed operation: ${operation.id}`;
+}
+
+function recommendedNodeCommandTestName(commandId: string): string {
+  return `catalog node command: ${commandId}`;
 }
 
 function groupCoverageByRouteId(
@@ -85,17 +101,28 @@ export function buildCatalogTestMatrix(
     };
   });
   const coverageGaps = candidates.filter((candidate) => candidate.coverageEvidence.length === 0);
+  const nodeCommandCandidates = list.cli.nodeCommands.map((command) => ({
+    commandId: command.id,
+    command: command.command,
+    smokeCommand: command.invocationHint,
+    recommendedTestName: recommendedNodeCommandTestName(command.id),
+    approvalKind: command.approvalKind,
+    availability: command.availability,
+  }));
 
   return {
     schemaVersion: 1,
     generatedFrom: "cli-catalog-overlay-test-matrix",
     counts: {
       routedOperations: list.cli.routedOperations.length,
+      nodeCommands: list.cli.nodeCommands.length,
       smokeCandidates: candidates.length,
+      nodeCommandSmokeCandidates: nodeCommandCandidates.length,
       coveredRoutedOperations: candidates.length - coverageGaps.length,
       coverageGaps: coverageGaps.length,
     },
     candidates,
+    nodeCommandCandidates,
     coverageGaps,
   };
 }
@@ -110,7 +137,9 @@ export function renderCatalogTestMatrixMarkdown(): string {
     "## Counts",
     "",
     `- Routed operations: ${matrix.counts.routedOperations}`,
+    `- Node/operator commands: ${matrix.counts.nodeCommands}`,
     `- Smoke candidates: ${matrix.counts.smokeCandidates}`,
+    `- Node/operator smoke candidates: ${matrix.counts.nodeCommandSmokeCandidates}`,
     `- Covered routed operations: ${matrix.counts.coveredRoutedOperations}`,
     `- Coverage gaps: ${matrix.counts.coverageGaps}`,
     "",
@@ -129,6 +158,20 @@ export function renderCatalogTestMatrixMarkdown(): string {
     lines.push(
       `| \`${candidate.routeId}\` | ${candidate.smokeCommands.map(markdownCommand).join(", ")} | ${candidate.recommendedTestName} | ${coverage} |`,
     );
+  }
+  if (matrix.nodeCommandCandidates.length > 0) {
+    lines.push(
+      "",
+      "## Node/operator candidates",
+      "",
+      "| Command ID | Smoke command | Approval | Availability | Recommended test name |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    for (const candidate of matrix.nodeCommandCandidates) {
+      lines.push(
+        `| \`${candidate.commandId}\` | ${markdownCommand(candidate.smokeCommand)} | \`${candidate.approvalKind}\` | \`${candidate.availability}\` | ${candidate.recommendedTestName} |`,
+      );
+    }
   }
   lines.push("");
   return lines.join("\n");

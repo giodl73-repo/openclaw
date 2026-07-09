@@ -1,8 +1,33 @@
 import { describe, expect, it } from "vitest";
+import { buildCatalogAudit } from "./audit.js";
+import { buildCatalogList } from "./list.js";
+import type { CliCatalogNodeCommand } from "./node-commands.js";
 import {
   buildCatalogOperatorSummary,
   renderCatalogOperatorSummaryMarkdown,
 } from "./operator-summary.js";
+
+const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
+  {
+    id: "node:demo-filesystem:filesystem.write",
+    command: "filesystem.write",
+    title: "Write file through paired node",
+    description: "Write a file through a paired node command declaration.",
+    argumentHints: ["path", "content"],
+    invocationHint: "openclaw nodes invoke --node demo-filesystem --command filesystem.write",
+    availability: "pending-approval",
+    approvalKind: "operator-confirmation",
+    risk: "high",
+    confirmationRequired: true,
+    effectMode: "mutating",
+    effects: ["filesystem.write"],
+    trustBoundary: "paired-node",
+    sourceKind: "node-pairing",
+    sourceId: "demo-filesystem:filesystem.write",
+    discoveryMode: "paired-node-declaration",
+    visibility: ["audit", "operator"],
+  },
+];
 
 describe("cli catalog operator summary", () => {
   it("combines catalog list, audit, and test-matrix counts", () => {
@@ -29,11 +54,26 @@ describe("cli catalog operator summary", () => {
     );
   });
 
+  it("surfaces node/operator approval attention", () => {
+    const list = buildCatalogList({ nodeCommands: sampleNodeCommands });
+    const audit = buildCatalogAudit(list);
+    const summary = buildCatalogOperatorSummary({ list, audit });
+
+    expect(summary.counts.nodeCommands).toBe(1);
+    expect(summary.attention.nodeCommandApprovalIds).toEqual([
+      "node:demo-filesystem:filesystem.write",
+    ]);
+    expect(summary.nextChecks).toContain(
+      "Review node/operator command approval state before exposing node-scoped prompt projections.",
+    );
+  });
+
   it("renders Markdown for diagnostics and operator handoffs", () => {
     const markdown = renderCatalogOperatorSummaryMarkdown();
 
     expect(markdown).toContain("# CLI Catalog Operator Summary");
     expect(markdown).toContain("- Command routes: 94");
+    expect(markdown).toContain("- Node/operator commands: 0");
     expect(markdown).toContain("- Test-matrix coverage gaps: 14");
     expect(markdown).toContain("- Confirmation required: `gateway`, `skill_workshop`");
     expect(markdown).toContain("- Route policy keys:");
