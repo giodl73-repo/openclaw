@@ -1,5 +1,5 @@
 {
-  "count": 20,
+  "count": 21,
   "itemFields": [
     "commandHints",
     "confirmationRequired",
@@ -23,6 +23,7 @@
     "health",
     "models-list",
     "models-status",
+    "node:demo-filesystem:filesystem.read",
     "plugins-list",
     "process",
     "session_status",
@@ -35,5 +36,8 @@
   ],
   "pluginSurfaceIds": [
     "demo-plugin:demo plugin"
+  ],
+  "nodeCommandSurfaceIds": [
+    "node:demo-filesystem:filesystem.read"
   ]
 }

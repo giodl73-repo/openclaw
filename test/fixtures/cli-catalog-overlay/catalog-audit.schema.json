@@ -5,6 +5,7 @@
     "commandRoutes",
     "counts",
     "generatedFrom",
+    "nodeCommands",
     "schemaVersion",
     "surfaces"
   ],
@@ -13,6 +14,8 @@
     "confirmationRequiredSurfaces": 2,
     "commandRoutes": 94,
     "commandRoutesWithPolicyKeys": 91,
+    "nodeCommands": 1,
+    "nodeCommandsRequiringApproval": 1,
     "routePolicyKeys": 7
   },
   "countFields": [
@@ -20,6 +23,8 @@
     "commandRoutes",
     "commandRoutesWithPolicyKeys",
     "confirmationRequiredSurfaces",
+    "nodeCommands",
+    "nodeCommandsRequiringApproval",
     "routePolicyKeys"
   ],
   "surfaceFields": [
@@ -94,5 +99,47 @@
     "skills install",
     "skills search",
     "skills update"
+  ],
+  "nodeCommandFields": [
+    "approvalRequiredCommandIds",
+    "byApprovalKind",
+    "byAvailability",
+    "byTrustBoundary"
+  ],
+  "nodeCommandsByAvailability": {
+    "count": 1,
+    "itemFields": [
+      "count",
+      "id",
+      "surfaceIds"
+    ],
+    "ids": [
+      "approved"
+    ]
+  },
+  "nodeCommandsByApprovalKind": {
+    "count": 1,
+    "itemFields": [
+      "count",
+      "id",
+      "surfaceIds"
+    ],
+    "ids": [
+      "pairing"
+    ]
+  },
+  "nodeCommandsByTrustBoundary": {
+    "count": 1,
+    "itemFields": [
+      "count",
+      "id",
+      "surfaceIds"
+    ],
+    "ids": [
+      "paired-node"
+    ]
+  },
+  "nodeCommandApprovalRequiredIds": [
+    "node:demo-filesystem:filesystem.read"
   ]
 }

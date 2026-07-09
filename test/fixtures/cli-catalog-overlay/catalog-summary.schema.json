@@ -13,6 +13,8 @@
     "commandRoutes": 94,
     "routedOperations": 14,
     "agentToolSurfaces": 5,
+    "nodeCommands": 1,
+    "nodeCommandsRequiringApproval": 1,
     "confirmationRequiredSurfaces": 2,
     "routePolicyKeys": 7,
     "coverageGaps": 14
@@ -23,6 +25,8 @@
     "commandRoutes",
     "confirmationRequiredSurfaces",
     "coverageGaps",
+    "nodeCommands",
+    "nodeCommandsRequiringApproval",
     "routePolicyKeys",
     "routedOperations"
   ],
@@ -30,6 +34,7 @@
     "confirmationRequiredSurfaceIds",
     "mediumRiskSurfaceIds",
     "mixedEffectSurfaceIds",
+    "nodeCommandApprovalIds",
     "policyKeyIds"
   ],
   "attention": {
@@ -46,6 +51,9 @@
       "process",
       "skill_workshop"
     ],
+    "nodeCommandApprovalIds": [
+      "node:demo-filesystem:filesystem.read"
+    ],
     "policyKeyIds": [
       "bypassConfigGuard",
       "ensureCliPath",
@@ -59,6 +67,7 @@
   "nextChecks": [
     "Review confirmation-required catalog surfaces before widening automation.",
     "Review command routes with networkProxy policy before changing proxy startup behavior.",
-    "Use catalog test-matrix output to prioritize routed-operation smoke coverage."
+    "Use catalog test-matrix output to prioritize routed-operation smoke coverage.",
+    "Review node/operator command approval state before exposing node-scoped prompt projections."
   ]
 }

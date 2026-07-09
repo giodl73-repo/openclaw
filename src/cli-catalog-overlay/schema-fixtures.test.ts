@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildCatalogAudit } from "./audit.js";
 import { buildCatalogList } from "./list.js";
+import type { CliCatalogNodeCommand } from "./node-commands.js";
 import { buildCatalogOperatorSummary } from "./operator-summary.js";
 import { buildPluginCatalogCommands } from "./plugin-commands.js";
 import { listCliCatalogPromptSurfaces } from "./prompt-projection.js";
@@ -84,6 +85,32 @@ const sampleRuntimeCommands: readonly CliCatalogRuntimeCommand[] = [
   },
 ];
 
+const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
+  {
+    id: "node:demo-filesystem:filesystem.read",
+    command: "filesystem.read",
+    title: "Read file through paired node",
+    nodeId: "demo-filesystem",
+    nodeName: "Demo filesystem node",
+    cap: "filesystem",
+    description: "Read a file through a paired node command declaration.",
+    argumentHints: ["path"],
+    invocationHint:
+      'openclaw nodes invoke --node demo-filesystem --command filesystem.read --params {"path":"..."}',
+    availability: "approved",
+    approvalKind: "pairing",
+    risk: "medium",
+    confirmationRequired: true,
+    effectMode: "read",
+    effects: ["filesystem.read"],
+    trustBoundary: "paired-node",
+    sourceKind: "node-pairing",
+    sourceId: "demo-filesystem:filesystem.read",
+    discoveryMode: "paired-node-declaration",
+    visibility: ["docs", "prompt", "audit", "operator", "policy"],
+  },
+];
+
 const samplePluginCommands = buildPluginCatalogCommands([
   {
     pluginId: "demo-plugin",
@@ -102,6 +129,7 @@ function buildCatalogListSchemaFixture(): JsonValue {
   const list = buildCatalogList({
     runtimeCommands: sampleRuntimeCommands,
     pluginCommands: samplePluginCommands,
+    nodeCommands: sampleNodeCommands,
   });
   return {
     schemaVersion: list.schemaVersion,
@@ -116,6 +144,7 @@ function buildCatalogListSchemaFixture(): JsonValue {
     runtimeCommandScope: list.cli.runtimeCommandScope,
     runtimeCommands: arrayContract(list.cli.runtimeCommands),
     pluginCommands: arrayContract(list.cli.pluginCommands),
+    nodeCommands: arrayContract(list.cli.nodeCommands),
     agentToolSurfaces: arrayContract(list.agentToolSurfaces),
     promptProjection: {
       fields: sortedKeys(list.promptProjection),
@@ -126,7 +155,7 @@ function buildCatalogListSchemaFixture(): JsonValue {
 }
 
 function buildCatalogAuditSchemaFixture(): JsonValue {
-  const audit = buildCatalogAudit();
+  const audit = buildCatalogAudit(buildCatalogList({ nodeCommands: sampleNodeCommands }));
   return {
     schemaVersion: audit.schemaVersion,
     generatedFrom: audit.generatedFrom,
@@ -143,11 +172,17 @@ function buildCatalogAuditSchemaFixture(): JsonValue {
     routesWithoutPolicyKeys: audit.commandRoutes.routesWithoutPolicyKeys.map((path) =>
       path.join(" "),
     ),
+    nodeCommandFields: sortedKeys(audit.nodeCommands),
+    nodeCommandsByAvailability: arrayContract(audit.nodeCommands.byAvailability),
+    nodeCommandsByApprovalKind: arrayContract(audit.nodeCommands.byApprovalKind),
+    nodeCommandsByTrustBoundary: arrayContract(audit.nodeCommands.byTrustBoundary),
+    nodeCommandApprovalRequiredIds: audit.nodeCommands.approvalRequiredCommandIds,
   };
 }
 
 function buildCatalogTestMatrixSchemaFixture(): JsonValue {
   const matrix = buildCatalogTestMatrix({
+    list: buildCatalogList({ nodeCommands: sampleNodeCommands }),
     coverageEvidence: [
       {
         routeId: "gateway-status",
@@ -163,13 +198,15 @@ function buildCatalogTestMatrixSchemaFixture(): JsonValue {
     counts: matrix.counts,
     countFields: sortedKeys(matrix.counts),
     candidates: arrayContract(matrix.candidates),
+    nodeCommandCandidates: arrayContract(matrix.nodeCommandCandidates),
     coverageGaps: arrayContract(matrix.coverageGaps),
     candidateRouteIds: matrix.candidates.map((candidate) => candidate.routeId).toSorted(),
   };
 }
 
 function buildCatalogSummarySchemaFixture(): JsonValue {
-  const summary = buildCatalogOperatorSummary();
+  const list = buildCatalogList({ nodeCommands: sampleNodeCommands });
+  const summary = buildCatalogOperatorSummary({ list, audit: buildCatalogAudit(list) });
   return {
     schemaVersion: summary.schemaVersion,
     generatedFrom: summary.generatedFrom,
@@ -186,6 +223,8 @@ function buildPromptProjectionSchemaFixture(): JsonValue {
   const surfaces = listCliCatalogPromptSurfaces({
     pluginCommands: samplePluginCommands,
     promptPluginIds: new Set(["demo-plugin"]),
+    nodeCommands: sampleNodeCommands,
+    scope: "node-operator",
   });
   return {
     count: surfaces.length,
@@ -193,6 +232,10 @@ function buildPromptProjectionSchemaFixture(): JsonValue {
     ids: surfaces.map((surface) => surface.id).toSorted(),
     pluginSurfaceIds: surfaces
       .filter((surface) => surface.kind === "plugin-command")
+      .map((surface) => surface.id)
+      .toSorted(),
+    nodeCommandSurfaceIds: surfaces
+      .filter((surface) => surface.kind === "node-command")
       .map((surface) => surface.id)
       .toSorted(),
   };

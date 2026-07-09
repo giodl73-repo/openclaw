@@ -16,12 +16,14 @@
     "agentToolSurfaces": 5,
     "promptProjection": 19,
     "runtimeCommands": 1,
-    "pluginCommands": 1
+    "pluginCommands": 1,
+    "nodeCommands": 1
   },
   "countFields": [
     "agentToolSurfaces",
     "commandDescriptors",
     "commandRoutes",
+    "nodeCommands",
     "pluginCommands",
     "promptProjection",
     "routedOperations",
@@ -30,6 +32,7 @@
   "cliFields": [
     "commandRoutes",
     "descriptors",
+    "nodeCommands",
     "pluginCommands",
     "routedOperations",
     "runtimeCommandScope",
@@ -289,6 +292,34 @@
     ],
     "ids": [
       "plugin"
+    ]
+  },
+  "nodeCommands": {
+    "count": 1,
+    "itemFields": [
+      "approvalKind",
+      "argumentHints",
+      "availability",
+      "cap",
+      "command",
+      "confirmationRequired",
+      "description",
+      "discoveryMode",
+      "effectMode",
+      "effects",
+      "id",
+      "invocationHint",
+      "nodeId",
+      "nodeName",
+      "risk",
+      "sourceId",
+      "sourceKind",
+      "title",
+      "trustBoundary",
+      "visibility"
+    ],
+    "ids": [
+      "node:demo-filesystem:filesystem.read"
     ]
   },
   "agentToolSurfaces": {
