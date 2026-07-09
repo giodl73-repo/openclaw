@@ -3,6 +3,7 @@ import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "@openclaw/ai/internal/shared";
 // user-visible sections for owners, tools, safety, skills, and subagents.
 import { describe, expect, it } from "vitest";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+import type { CliCatalogNodeCommand } from "../cli-catalog-overlay/node-commands.js";
 import { typedCases } from "../test-utils/typed-cases.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import { resolveAgentPromptSurfaceForSessionKey } from "./prompt-surface.js";
@@ -14,6 +15,29 @@ import {
   buildAgentSystemPrompt,
   buildRuntimeLine,
 } from "./system-prompt.js";
+
+const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
+  {
+    id: "node:demo-filesystem:filesystem.read",
+    command: "filesystem.read",
+    title: "Read file through paired node",
+    nodeId: "demo-filesystem",
+    description: "Read a file through a paired node command declaration.",
+    argumentHints: ["path"],
+    invocationHint: "openclaw nodes invoke --node demo-filesystem --command filesystem.read",
+    availability: "approved",
+    approvalKind: "pairing",
+    risk: "medium",
+    confirmationRequired: true,
+    effectMode: "read",
+    effects: ["filesystem.read"],
+    trustBoundary: "paired-node",
+    sourceKind: "node-pairing",
+    sourceId: "demo-filesystem:filesystem.read",
+    discoveryMode: "paired-node-declaration",
+    visibility: ["prompt", "audit", "operator"],
+  },
+];
 
 describe("buildAgentSystemPrompt", () => {
   it("resolves helper session keys to scoped prompt surfaces", () => {
@@ -759,6 +783,28 @@ describe("buildAgentSystemPrompt", () => {
     expect(withTool).toContain("## Skill Workshop");
     expect(withTool).toContain("Route durable skill work");
     expect(withTool).toContain("Generated skills are pending proposals.");
+  });
+
+  it("can render node command catalog prompt entries for node-operator scope", () => {
+    const defaultPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      cliCatalogOverlay: {
+        nodeCommands: sampleNodeCommands,
+      },
+    });
+    const nodeOperatorPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      cliCatalogOverlay: {
+        nodeCommands: sampleNodeCommands,
+        scope: "node-operator",
+      },
+    });
+
+    expect(defaultPrompt).not.toContain("node:demo-filesystem:filesystem.read");
+    expect(nodeOperatorPrompt).toContain("## CLI Catalog Overlay");
+    expect(nodeOperatorPrompt).toContain(
+      "- node:demo-filesystem:filesystem.read: Read file through paired node target=filesystem.read r=medium c=1",
+    );
   });
 
   it("appends available skills when provided", () => {

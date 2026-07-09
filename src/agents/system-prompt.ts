@@ -26,6 +26,8 @@ import {
   hasNativeApprovalPromptRuntimeCapability,
   isKnownNativeApprovalPromptChannel,
 } from "../channels/plugins/native-approval-prompt.js";
+import type { CliCatalogNodeCommand } from "../cli-catalog-overlay/node-commands.js";
+import type { CliCatalogPluginCommand } from "../cli-catalog-overlay/plugin-commands.js";
 import type { SubagentDelegationMode } from "../config/types.agent-defaults.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
 import { buildMemoryPromptSection } from "../plugins/memory-state.js";
@@ -721,6 +723,13 @@ export function buildAgentSystemPrompt(params: {
   nativeCommandNames?: string[];
   /** Plugin-owned prompt guidance for registered native slash commands. */
   nativeCommandGuidanceLines?: string[];
+  /** Optional catalog overlay inputs for scoped prompt projections such as node-operator mode. */
+  cliCatalogOverlay?: {
+    pluginCommands?: readonly CliCatalogPluginCommand[];
+    promptPluginIds?: ReadonlySet<string>;
+    nodeCommands?: readonly CliCatalogNodeCommand[];
+    scope?: "default" | "node-operator";
+  };
   runtimeInfo?: {
     agentId?: string;
     sessionKey?: string;
@@ -973,7 +982,10 @@ export function buildAgentSystemPrompt(params: {
     : [];
   const cliCatalogOverlaySection = isMinimal
     ? []
-    : buildCliCatalogOverlayPromptSection({ availableTools });
+    : buildCliCatalogOverlayPromptSection({
+        availableTools,
+        ...params.cliCatalogOverlay,
+      });
   const memorySection = buildMemorySection({
     isMinimal,
     includeMemorySection: params.includeMemorySection,
@@ -1038,6 +1050,7 @@ export function buildAgentSystemPrompt(params: {
     includeMemorySection: params.includeMemorySection,
     memoryCitationsMode: params.memoryCitationsMode,
     memorySection,
+    cliCatalogOverlay: params.cliCatalogOverlay,
     cliCatalogOverlaySection,
     acpEnabled,
     stableContextFiles: contextFiles.stable,
