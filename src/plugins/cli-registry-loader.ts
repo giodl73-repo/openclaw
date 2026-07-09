@@ -49,6 +49,7 @@ export type PluginCliCommandGroupEntry = {
 export type PluginCliDescriptorEntry = {
   pluginId: string;
   parentPath: readonly string[];
+  commands: readonly string[];
   descriptors: readonly OpenClawPluginCliCommandDescriptor[];
 };
 
@@ -266,6 +267,7 @@ export async function loadPluginCliDescriptorEntries(
     return registry.cliRegistrars.map((entry) => ({
       pluginId: entry.pluginId,
       parentPath: entry.parentPath ?? [],
+      commands: entry.commands,
       descriptors: entry.descriptors,
     }));
   } catch {
