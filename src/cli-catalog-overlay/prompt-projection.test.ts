@@ -1,6 +1,30 @@
 import { describe, expect, it } from "vitest";
+import type { CliCatalogNodeCommand } from "./node-commands.js";
 import { buildPluginCatalogCommands } from "./plugin-commands.js";
 import { listCliCatalogPromptSurfaces } from "./prompt-projection.js";
+
+const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
+  {
+    id: "node:demo-filesystem:filesystem.read",
+    command: "filesystem.read",
+    title: "Read file through paired node",
+    nodeId: "demo-filesystem",
+    description: "Read a file through a paired node command declaration.",
+    argumentHints: ["path"],
+    invocationHint: "openclaw nodes invoke --node demo-filesystem --command filesystem.read",
+    availability: "approved",
+    approvalKind: "pairing",
+    risk: "medium",
+    confirmationRequired: true,
+    effectMode: "read",
+    effects: ["filesystem.read"],
+    trustBoundary: "paired-node",
+    sourceKind: "node-pairing",
+    sourceId: "demo-filesystem:filesystem.read",
+    discoveryMode: "paired-node-declaration",
+    visibility: ["prompt", "audit", "operator"],
+  },
+];
 
 describe("CLI catalog overlay prompt projection", () => {
   it("returns only lean model-facing routing fields", () => {
@@ -70,6 +94,26 @@ describe("CLI catalog overlay prompt projection", () => {
     ).toMatchObject({
       kind: "plugin-command",
       target: "demo",
+      risk: "medium",
+      confirmationRequired: true,
+    });
+  });
+
+  it("includes node commands only in the node-operator prompt scope", () => {
+    expect(
+      listCliCatalogPromptSurfaces({ nodeCommands: sampleNodeCommands }).map(
+        (surface) => surface.id,
+      ),
+    ).not.toContain("node:demo-filesystem:filesystem.read");
+
+    expect(
+      listCliCatalogPromptSurfaces({
+        scope: "node-operator",
+        nodeCommands: sampleNodeCommands,
+      }).find((surface) => surface.id === "node:demo-filesystem:filesystem.read"),
+    ).toMatchObject({
+      kind: "node-command",
+      target: "filesystem.read",
       risk: "medium",
       confirmationRequired: true,
     });

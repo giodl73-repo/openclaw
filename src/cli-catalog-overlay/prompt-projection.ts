@@ -1,5 +1,6 @@
-import { cliCommandCatalog } from "../cli/command-catalog.js";
 import type { CliCatalogMetadata } from "../cli/catalog-metadata.js";
+import { cliCommandCatalog } from "../cli/command-catalog.js";
+import type { CliCatalogNodeCommand } from "./node-commands.js";
 import type { CliCatalogPluginCommand } from "./plugin-commands.js";
 import { listCliCatalogSurfaces } from "./registry.js";
 
@@ -68,6 +69,8 @@ export function listCliCatalogPromptSurfaces(
   params: {
     pluginCommands?: readonly CliCatalogPluginCommand[];
     promptPluginIds?: ReadonlySet<string>;
+    nodeCommands?: readonly CliCatalogNodeCommand[];
+    scope?: "default" | "node-operator";
   } = {},
 ): readonly CliCatalogPromptSurface[] {
   const routedOperations = listPromptRoutedOperations().map((operation) => ({
@@ -107,5 +110,21 @@ export function listCliCatalogPromptSurfaces(
       risk: command.risk,
       confirmationRequired: command.confirmationRequired,
     }));
-  return [...routedOperations, ...agentToolSurfaces, ...pluginSurfaces];
+  const nodeSurfaces =
+    params.scope === "node-operator"
+      ? (params.nodeCommands ?? [])
+          .filter((command) => command.visibility.includes("prompt"))
+          .map((command) => ({
+            id: command.id,
+            title: command.title,
+            kind: "node-command",
+            dispatchMode: "metadata-first",
+            target: command.command,
+            examples: [command.invocationHint],
+            commandHints: [command.invocationHint, ...command.argumentHints],
+            risk: command.risk,
+            confirmationRequired: command.confirmationRequired,
+          }))
+      : [];
+  return [...routedOperations, ...agentToolSurfaces, ...pluginSurfaces, ...nodeSurfaces];
 }
