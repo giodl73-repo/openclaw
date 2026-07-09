@@ -125,7 +125,7 @@ describe("catalog cli", () => {
       await createProgram().parseAsync(["node", "openclaw", "catalog", "summary", "--json"]);
     });
 
-    expect(JSON.parse(audit).counts.commandRoutes).toBe(94);
+    expect(JSON.parse(audit).counts.commandRoutes).toBe(97);
     expect(JSON.parse(matrix).counts.routedOperations).toBe(14);
     expect(JSON.parse(summary).counts.coverageGaps).toBeGreaterThan(0);
   });
