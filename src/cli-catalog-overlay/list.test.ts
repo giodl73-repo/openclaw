@@ -57,6 +57,7 @@ describe("cli catalog overlay list", () => {
       owner: "runtime",
       risk: "medium",
       effectMode: "mixed",
+      effects: ["gateway.restart", "gateway.config"],
       confirmationRequired: true,
       descriptor: { name: "gateway", hasSubcommands: true },
     });
