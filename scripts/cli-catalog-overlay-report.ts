@@ -27,6 +27,8 @@ export type CliCatalogOverlayReport = {
     readonly commandRoutes: number;
     readonly routedOperations: number;
     readonly agentToolSurfaces: number;
+    readonly nodeCommands: number;
+    readonly nodeCommandsRequiringApproval: number;
     readonly confirmationRequiredSurfaces: number;
     readonly routePolicyKeys: number;
     readonly routesWithoutPolicyKeys: number;
@@ -36,6 +38,7 @@ export type CliCatalogOverlayReport = {
     readonly confirmationRequiredSurfaceIds: readonly string[];
     readonly mediumRiskSurfaceIds: readonly string[];
     readonly mixedEffectSurfaceIds: readonly string[];
+    readonly nodeCommandApprovalIds: readonly string[];
     readonly routePolicyKeys: readonly string[];
     readonly routesWithoutPolicyKeys: readonly string[];
     readonly coverageGapRouteIds: readonly string[];
@@ -88,6 +91,8 @@ export function buildCliCatalogOverlayReport(
       commandRoutes: list.counts.commandRoutes,
       routedOperations: list.counts.routedOperations,
       agentToolSurfaces: list.counts.agentToolSurfaces,
+      nodeCommands: list.counts.nodeCommands,
+      nodeCommandsRequiringApproval: audit.counts.nodeCommandsRequiringApproval,
       confirmationRequiredSurfaces: audit.counts.confirmationRequiredSurfaces,
       routePolicyKeys: audit.counts.routePolicyKeys,
       routesWithoutPolicyKeys: audit.commandRoutes.routesWithoutPolicyKeys.length,
@@ -97,6 +102,7 @@ export function buildCliCatalogOverlayReport(
       confirmationRequiredSurfaceIds: audit.surfaces.confirmationRequiredSurfaceIds,
       mediumRiskSurfaceIds: surfaceGroupIds(audit, "medium"),
       mixedEffectSurfaceIds: effectModeGroupIds(audit, "mixed"),
+      nodeCommandApprovalIds: audit.nodeCommands.approvalRequiredCommandIds,
       routePolicyKeys: audit.commandRoutes.byPolicyKey.map((group) => group.policyKey).toSorted(),
       routesWithoutPolicyKeys: commandPathLabels(audit.commandRoutes.routesWithoutPolicyKeys),
       coverageGapRouteIds: testMatrix.coverageGaps.map((gap) => gap.routeId),
@@ -129,6 +135,8 @@ export function renderCliCatalogOverlayReportMarkdown(
     `- Command routes: ${report.counts.commandRoutes}`,
     `- Routed operations: ${report.counts.routedOperations}`,
     `- Agent/tool surfaces: ${report.counts.agentToolSurfaces}`,
+    `- Node/operator commands: ${report.counts.nodeCommands}`,
+    `- Node/operator commands requiring approval: ${report.counts.nodeCommandsRequiringApproval}`,
     `- Confirmation-required surfaces: ${report.counts.confirmationRequiredSurfaces}`,
     `- Route policy keys: ${report.counts.routePolicyKeys}`,
     `- Routes without policy keys: ${report.counts.routesWithoutPolicyKeys}`,
@@ -139,6 +147,7 @@ export function renderCliCatalogOverlayReportMarkdown(
     `- Confirmation required: ${inlineCodeList(report.auditSignals.confirmationRequiredSurfaceIds)}`,
     `- Medium risk: ${inlineCodeList(report.auditSignals.mediumRiskSurfaceIds)}`,
     `- Mixed effect mode: ${inlineCodeList(report.auditSignals.mixedEffectSurfaceIds)}`,
+    `- Node/operator approval: ${inlineCodeList(report.auditSignals.nodeCommandApprovalIds)}`,
     `- Route policy keys: ${inlineCodeList(report.auditSignals.routePolicyKeys)}`,
     `- Routes without policy keys: ${inlineCodeList(report.auditSignals.routesWithoutPolicyKeys)}`,
     `- Coverage gap route IDs: ${inlineCodeList(report.auditSignals.coverageGapRouteIds)}`,
