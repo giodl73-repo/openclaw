@@ -1,3 +1,4 @@
+import type { CliCatalogNodeCommand } from "../cli-catalog-overlay/node-commands.js";
 /**
  * System-prompt contribution for a CLI-catalog-first OpenClaw command overlay.
  *
@@ -65,11 +66,15 @@ export function buildCliCatalogOverlayPromptSection(
     hostCliAvailable?: boolean;
     pluginCommands?: readonly CliCatalogPluginCommand[];
     promptPluginIds?: ReadonlySet<string>;
+    nodeCommands?: readonly CliCatalogNodeCommand[];
+    scope?: "default" | "node-operator";
   } = {},
 ): string[] {
   const surfaces = listCliCatalogPromptSurfaces({
     pluginCommands: params.pluginCommands,
     promptPluginIds: params.promptPluginIds,
+    nodeCommands: params.nodeCommands,
+    scope: params.scope,
   }).filter((surface) =>
     shouldRenderSurface(surface, params.availableTools, params.hostCliAvailable),
   );
