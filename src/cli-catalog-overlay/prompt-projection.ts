@@ -1,4 +1,4 @@
-import type { CliCatalogMetadata } from "../cli/catalog-metadata.js";
+import type { CommandEffectProfile } from "../cli/catalog-metadata.js";
 import { cliCommandCatalog } from "../cli/command-catalog.js";
 import type { CliCatalogNodeCommand } from "./node-commands.js";
 import type { CliCatalogPluginCommand } from "./plugin-commands.js";
@@ -42,7 +42,10 @@ type PromptRoutedOperation = {
 };
 
 function listPromptRoutedOperations(): readonly PromptRoutedOperation[] {
-  const byId = new Map<string, { commandPaths: string[][]; catalog?: CliCatalogMetadata }>();
+  const byId = new Map<
+    string,
+    { commandPaths: string[][]; effectProfile?: CommandEffectProfile }
+  >();
   for (const entry of cliCommandCatalog) {
     const id = entry.route?.id;
     if (!id) {
@@ -50,7 +53,7 @@ function listPromptRoutedOperations(): readonly PromptRoutedOperation[] {
     }
     const group = byId.get(id) ?? { commandPaths: [] };
     group.commandPaths.push([...entry.commandPath]);
-    group.catalog ??= entry.route?.catalog;
+    group.effectProfile ??= entry.route?.effectProfile;
     byId.set(id, group);
   }
 
@@ -59,9 +62,8 @@ function listPromptRoutedOperations(): readonly PromptRoutedOperation[] {
     .map(([id, group]) => ({
       id,
       commandPaths: group.commandPaths,
-      title: group.catalog?.title,
-      risk: group.catalog?.risk,
-      confirmationRequired: group.catalog?.confirmationRequired,
+      risk: group.effectProfile?.risk,
+      confirmationRequired: group.effectProfile?.confirmationRequired,
     }));
 }
 

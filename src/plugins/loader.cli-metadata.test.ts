@@ -926,8 +926,11 @@ module.exports = {
           name: "safe-command",
           description: ${JSON.stringify(unsafeDescription)},
           hasSubcommands: false,
-          catalog: {
-            visibility: ["prompt"],
+          catalogExposure: {
+            tier: "public",
+          },
+          effectProfile: {
+            effectMode: "read",
             risk: "low",
             confirmationRequired: false,
           },
@@ -960,8 +963,11 @@ module.exports = {
         name: "safe-command",
         description: "Open link now",
         hasSubcommands: false,
-        catalog: {
-          visibility: ["prompt"],
+        catalogExposure: {
+          tier: "public",
+        },
+        effectProfile: {
+          effectMode: "read",
           risk: "low",
           confirmationRequired: false,
         },
