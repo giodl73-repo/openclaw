@@ -1,20 +1,14 @@
+import type {
+  CliCatalogEffectMode,
+  CliCatalogRisk,
+  CliCatalogVisibility,
+} from "../cli/catalog-metadata.js";
 import type { NamedCommandDescriptor } from "../cli/program/command-group-descriptors.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
-import type {
-  CliCatalogDispatchMode,
-  CliCatalogEffectMode,
-  CliCatalogRisk,
-  CliCatalogSurfaceKind,
-  CliCatalogSurfaceStatus,
-  CliCatalogVisibility,
-} from "../cli/catalog-metadata.js";
 export type {
-  CliCatalogDispatchMode,
   CliCatalogEffectMode,
   CliCatalogRisk,
-  CliCatalogSurfaceKind,
-  CliCatalogSurfaceStatus,
   CliCatalogVisibility,
 } from "../cli/catalog-metadata.js";
 
@@ -35,8 +29,8 @@ export type CliCatalogDiscoveryMode =
 export type CliCatalogSurfaceDefinition = {
   readonly id: string;
   readonly title: string;
-  readonly kind: CliCatalogSurfaceKind;
-  readonly dispatchMode: CliCatalogDispatchMode;
+  readonly kind: "tool" | "command" | "workflow";
+  readonly dispatchMode: "direct" | "metadata-first" | "hybrid";
   readonly target: string;
   readonly source: string;
   readonly sourceKind: CliCatalogSourceKind;
@@ -47,7 +41,7 @@ export type CliCatalogSurfaceDefinition = {
   readonly examples: readonly string[];
   readonly aliases: readonly string[];
   readonly owner: string;
-  readonly status: CliCatalogSurfaceStatus;
+  readonly status: "draft" | "stable" | "deprecated";
   readonly confidence: "low" | "medium" | "high";
   readonly risk: CliCatalogRisk;
   readonly confirmationRequired: boolean;
@@ -57,36 +51,62 @@ export type CliCatalogSurfaceDefinition = {
   readonly cliDescriptor?: NamedCommandDescriptor;
 };
 
+const PROMPT_VISIBLE_DESCRIPTOR_IDS = new Set(["gateway"]);
+
+const DESCRIPTOR_NORMALIZATION = {
+  gateway: {
+    title: "Gateway control",
+    dispatchMode: "hybrid",
+    owner: "runtime",
+    intent: "Inspect, reconfigure, or restart the OpenClaw gateway.",
+    examples: ["restart the gateway", "inspect gateway config"],
+  },
+} as const;
+
+function descriptorVisibility(descriptor: NamedCommandDescriptor): readonly CliCatalogVisibility[] {
+  const base: CliCatalogVisibility[] =
+    descriptor.catalogExposure?.tier === "internal"
+      ? ["audit", "operator", "policy"]
+      : ["docs", "audit", "operator", "policy"];
+  if (PROMPT_VISIBLE_DESCRIPTOR_IDS.has(descriptor.name)) {
+    base.push("prompt");
+  }
+  return base;
+}
+
 function surfaceFromDescriptor(
   descriptor: NamedCommandDescriptor,
   sourceKind: "core" | "subcli",
 ): CliCatalogSurfaceDefinition | undefined {
-  const catalog = descriptor.catalog;
-  if (!catalog) {
+  const effectProfile = descriptor.effectProfile;
+  const exposure = descriptor.catalogExposure;
+  if (!effectProfile && !exposure) {
     return undefined;
   }
+  const normalized =
+    DESCRIPTOR_NORMALIZATION[descriptor.name as keyof typeof DESCRIPTOR_NORMALIZATION];
   return {
-    id: catalog.id ?? descriptor.name,
-    title: catalog.title ?? descriptor.description,
-    kind: catalog.kind ?? "command",
-    dispatchMode: catalog.dispatchMode ?? "direct",
-    target: catalog.target ?? descriptor.name,
+    id: descriptor.name,
+    title: normalized?.title ?? descriptor.description,
+    kind: "command",
+    dispatchMode: normalized?.dispatchMode ?? "direct",
+    target: descriptor.name,
     source: `CLI descriptor: ${descriptor.name}`,
     sourceKind,
     sourceId: descriptor.name,
     discoveryMode: "static-descriptor",
-    visibility: catalog.visibility ?? ["docs", "audit", "operator", "policy"],
-    intent: catalog.intent ?? descriptor.description,
-    examples: catalog.examples ?? [],
-    aliases: catalog.aliases ?? [],
-    owner: catalog.owner ?? "cli",
-    status: catalog.status ?? "stable",
-    confidence: catalog.confidence ?? "high",
-    risk: catalog.risk ?? "low",
-    confirmationRequired: catalog.confirmationRequired ?? false,
-    effectMode: catalog.effectMode ?? "read",
-    effects: catalog.effects ?? [],
-    commandHints: catalog.commandHints ?? [descriptor.name],
+    visibility: descriptorVisibility(descriptor),
+    intent: normalized?.intent ?? descriptor.description,
+    examples: normalized?.examples ?? [],
+    aliases: [],
+    owner: normalized?.owner ?? "cli",
+    status: "stable",
+    confidence: "high",
+    risk: effectProfile?.risk ?? "low",
+    confirmationRequired: effectProfile?.confirmationRequired ?? false,
+    effectMode: effectProfile?.effectMode ?? "read",
+    effects: [],
+    commandHints: effectProfile?.commandHints ?? [descriptor.name],
     cliDescriptor: descriptor,
   };
 }
@@ -207,8 +227,6 @@ export function listCliCatalogSurfaces(): readonly CliCatalogSurfaceDefinition[]
   return [...CLI_CATALOG_ADAPTER_SURFACES, ...listDescriptorCatalogSurfaces()];
 }
 
-export function getCliCatalogSurface(
-  surfaceId: string,
-): CliCatalogSurfaceDefinition | undefined {
+export function getCliCatalogSurface(surfaceId: string): CliCatalogSurfaceDefinition | undefined {
   return listCliCatalogSurfaces().find((surface) => surface.id === surfaceId);
 }

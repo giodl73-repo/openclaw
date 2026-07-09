@@ -122,7 +122,7 @@ const samplePluginCommands = buildPluginCatalogCommands([
         name: "plugin",
         description: "Demo plugin command",
         hasSubcommands: false,
-        catalog: { visibility: ["prompt", "docs"] },
+        catalogExposure: { tier: "public" },
       },
     ],
   },

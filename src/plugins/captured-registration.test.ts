@@ -89,8 +89,11 @@ describe("captured plugin registration", () => {
               name: "captured-hidden-cli",
               description: "Captured hidden CLI",
               hasSubcommands: false,
-              catalog: {
-                visibility: ["prompt"],
+              catalogExposure: {
+                tier: "public",
+              },
+              effectProfile: {
+                effectMode: "read",
                 risk: "low",
                 confirmationRequired: false,
               },
@@ -122,8 +125,11 @@ describe("captured plugin registration", () => {
     expect(captured.cliRegistrars.flatMap((entry) => entry.descriptors)).toContainEqual(
       expect.objectContaining({
         name: "captured-hidden-cli",
-        catalog: {
-          visibility: ["prompt"],
+        catalogExposure: {
+          tier: "public",
+        },
+        effectProfile: {
+          effectMode: "read",
           risk: "low",
           confirmationRequired: false,
         },

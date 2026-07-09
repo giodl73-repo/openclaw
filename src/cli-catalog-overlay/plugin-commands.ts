@@ -44,15 +44,17 @@ export function buildPluginCatalogCommands(
           description: descriptor.description,
           hasSubcommands: descriptor.hasSubcommands,
           hidden: false,
-          risk: descriptor.catalog?.risk ?? "medium",
-          confirmationRequired: descriptor.catalog?.confirmationRequired ?? true,
-          effectMode: descriptor.catalog?.effectMode ?? "mixed",
-          commandHints: descriptor.catalog?.commandHints ?? [commandPath.join(" ")],
+          risk: descriptor.effectProfile?.risk ?? "medium",
+          confirmationRequired: descriptor.effectProfile?.confirmationRequired ?? true,
+          effectMode: descriptor.effectProfile?.effectMode ?? "mixed",
+          commandHints: descriptor.effectProfile?.commandHints ?? [commandPath.join(" ")],
           sourceKind: "plugin" as const,
           sourceId: `${entry.pluginId}:${commandPath.join(" ")}`,
           discoveryMode: "plugin-descriptor" as const,
           visibility:
-            descriptor.catalog?.visibility ?? (["docs", "audit", "operator", "policy"] as const),
+            descriptor.catalogExposure?.tier === "internal"
+              ? (["audit", "operator", "policy"] as const)
+              : (["docs", "prompt", "audit", "operator", "policy"] as const),
         };
       }),
   );
