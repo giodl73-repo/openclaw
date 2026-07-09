@@ -67,7 +67,7 @@ describe("catalog cli", () => {
       cli: { runtimeCommandScope: string };
       agentToolSurfaces: Array<{ id: string }>;
     };
-    expect(parsed.counts.commandDescriptors).toBe(58);
+    expect(parsed.counts.commandDescriptors).toBe(60);
     expect(parsed.counts.routedOperations).toBe(14);
     expect(parsed.counts.runtimeCommands).toBeGreaterThan(0);
     expect(parsed.cli.runtimeCommandScope).toBe("current-invocation-registered-tree");
@@ -128,7 +128,7 @@ describe("catalog cli", () => {
       await createProgram().parseAsync(["node", "openclaw", "catalog", "summary", "--json"]);
     });
 
-    expect(JSON.parse(audit).counts.commandRoutes).toBe(94);
+    expect(JSON.parse(audit).counts.commandRoutes).toBe(97);
     expect(JSON.parse(matrix).counts.routedOperations).toBe(14);
     expect(JSON.parse(summary).counts.coverageGaps).toBeGreaterThan(0);
   });
