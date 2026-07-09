@@ -2099,6 +2099,7 @@ export async function runEmbeddedAttempt(
         nativeCommandGuidanceLines: listRegisteredPluginAgentPromptGuidance({
           surface: promptSurface,
         }),
+        cliCatalogOverlay: params.cliCatalogOverlay,
         runtimeInfo,
         messageToolHints,
         toolSchemaDirectoryPrompt,

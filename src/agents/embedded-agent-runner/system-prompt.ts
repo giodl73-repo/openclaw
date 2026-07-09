@@ -3,6 +3,8 @@
  */
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
 import type { ChatType } from "../../channels/chat-type.js";
+import type { CliCatalogNodeCommand } from "../../cli-catalog-overlay/node-commands.js";
+import type { CliCatalogPluginCommand } from "../../cli-catalog-overlay/plugin-commands.js";
 import type { SubagentDelegationMode } from "../../config/types.agent-defaults.js";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -55,6 +57,13 @@ export function buildEmbeddedSystemPrompt(params: {
   nativeCommandNames?: string[];
   /** Plugin-owned prompt guidance for registered native slash commands. */
   nativeCommandGuidanceLines?: string[];
+  /** Optional catalog overlay inputs for scoped prompt projections such as node-operator mode. */
+  cliCatalogOverlay?: {
+    pluginCommands?: readonly CliCatalogPluginCommand[];
+    promptPluginIds?: ReadonlySet<string>;
+    nodeCommands?: readonly CliCatalogNodeCommand[];
+    scope?: "default" | "node-operator";
+  };
   runtimeInfo: {
     agentId?: string;
     sessionKey?: string;
@@ -115,6 +124,7 @@ export function buildEmbeddedSystemPrompt(params: {
     promptSurface: params.promptSurface,
     nativeCommandNames: params.nativeCommandNames,
     nativeCommandGuidanceLines: params.nativeCommandGuidanceLines,
+    cliCatalogOverlay: params.cliCatalogOverlay,
     runtimeInfo: params.runtimeInfo,
     messageToolHints: params.messageToolHints,
     toolSchemaDirectoryPrompt: params.toolSchemaDirectoryPrompt,

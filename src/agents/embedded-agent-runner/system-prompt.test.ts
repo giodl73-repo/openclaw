@@ -1,6 +1,7 @@
 // Embedded system prompt tests cover prompt assembly for provider guidance,
 // delegation mode, workspace-only safety, memory sections, and active processes.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CliCatalogNodeCommand } from "../../cli-catalog-overlay/node-commands.js";
 import { clearMemoryPluginState, registerMemoryPromptSection } from "../../plugins/memory-state.js";
 import type { AgentSession } from "../sessions/index.js";
 import { applySystemPromptToSession, buildEmbeddedSystemPrompt } from "./system-prompt.js";
@@ -8,6 +9,29 @@ import { applySystemPromptToSession, buildEmbeddedSystemPrompt } from "./system-
 vi.mock("../../tts/tts.js", () => ({
   buildTtsSystemPromptHint: vi.fn(() => undefined),
 }));
+
+const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
+  {
+    id: "node:demo-filesystem:filesystem.read",
+    command: "filesystem.read",
+    title: "Read file through paired node",
+    nodeId: "demo-filesystem",
+    description: "Read a file through a paired node command declaration.",
+    argumentHints: ["path"],
+    invocationHint: "openclaw nodes invoke --node demo-filesystem --command filesystem.read",
+    availability: "approved",
+    approvalKind: "pairing",
+    risk: "medium",
+    confirmationRequired: true,
+    effectMode: "read",
+    effects: ["filesystem.read"],
+    trustBoundary: "paired-node",
+    sourceKind: "node-pairing",
+    sourceId: "demo-filesystem:filesystem.read",
+    discoveryMode: "paired-node-declaration",
+    visibility: ["prompt", "audit", "operator"],
+  },
+];
 
 describe("applySystemPromptToSession", () => {
   it("applies the trimmed prompt through the session base prompt setter", () => {
@@ -199,6 +223,51 @@ describe("buildEmbeddedSystemPrompt", () => {
     expect(prompt).not.toContain("Larger work: use `sessions_spawn`");
     expect(prompt).not.toContain("Do not poll `subagents list` / `sessions_list` in a loop");
     expect(prompt).toContain("Subagent-only command guidance.");
+  });
+
+  it("forwards node-operator catalog overlay inputs to embedded prompt rendering", () => {
+    const defaultPrompt = buildEmbeddedSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      reasoningTagHint: false,
+      runtimeInfo: {
+        host: "local",
+        os: "darwin",
+        arch: "arm64",
+        node: process.version,
+        model: "gpt-5.4",
+        provider: "openai",
+      },
+      tools: [{ name: "nodes" } as never],
+      modelAliasLines: [],
+      userTimezone: "UTC",
+      cliCatalogOverlay: {
+        nodeCommands: sampleNodeCommands,
+      },
+    });
+    const nodeOperatorPrompt = buildEmbeddedSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      reasoningTagHint: false,
+      runtimeInfo: {
+        host: "local",
+        os: "darwin",
+        arch: "arm64",
+        node: process.version,
+        model: "gpt-5.4",
+        provider: "openai",
+      },
+      tools: [{ name: "nodes" } as never],
+      modelAliasLines: [],
+      userTimezone: "UTC",
+      cliCatalogOverlay: {
+        nodeCommands: sampleNodeCommands,
+        scope: "node-operator",
+      },
+    });
+
+    expect(defaultPrompt).not.toContain("node:demo-filesystem:filesystem.read");
+    expect(nodeOperatorPrompt).toContain(
+      "- node:demo-filesystem:filesystem.read: Read file through paired node target=filesystem.read r=medium c=1",
+    );
   });
 
   it("can omit base memory guidance for non-legacy context engines", () => {
