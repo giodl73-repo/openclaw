@@ -9,6 +9,7 @@ import { parseByteSize } from "../cli/parse-bytes.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
 import { base64UrlDecode, normalizeEd25519PublicKeyBase64Url } from "../infra/ed25519-signature.js";
 import { normalizeAgentId } from "../routing/session-key.js";
+import { HOSTING_PROFILE_IDS } from "../hosting/readiness.js";
 import {
   isValidControlUiChatMessageMaxWidth,
   normalizeControlUiChatMessageMaxWidth,
@@ -73,6 +74,13 @@ const GatewayRemoteSchemaShape = {
 } satisfies ConfigSchemaShape<GatewayRemoteConfig>;
 
 const GatewayRemoteConfigSchema = z.object(GatewayRemoteSchemaShape).strict().optional();
+
+const HostingSchema = z
+  .object({
+    profile: z.enum(HOSTING_PROFILE_IDS).optional(),
+  })
+  .strict()
+  .optional();
 
 const TailscaleServiceNameSchema = z.string().regex(/^svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, {
   message:
@@ -718,6 +726,7 @@ export const OpenClawSchema = z
       })
       .strict()
       .optional(),
+    hosting: HostingSchema,
     audit: z
       .object({
         enabled: z.boolean().optional(),
