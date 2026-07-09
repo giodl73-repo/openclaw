@@ -60,6 +60,7 @@ const DESCRIPTOR_NORMALIZATION = {
     owner: "runtime",
     intent: "Inspect, reconfigure, or restart the OpenClaw gateway.",
     examples: ["restart the gateway", "inspect gateway config"],
+    effects: ["gateway.restart", "gateway.config"],
   },
 } as const;
 
@@ -105,7 +106,7 @@ function surfaceFromDescriptor(
     risk: effectProfile?.risk ?? "low",
     confirmationRequired: effectProfile?.confirmationRequired ?? false,
     effectMode: effectProfile?.effectMode ?? "read",
-    effects: [],
+    effects: normalized?.effects ?? [],
     commandHints: effectProfile?.commandHints ?? [descriptor.name],
     cliDescriptor: descriptor,
   };
