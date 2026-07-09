@@ -29,6 +29,12 @@ import { resolveMainSessionKey } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
 import {
+  buildHostingReadiness,
+  resolveHostingProfile,
+  type HostingPluginReadinessInput,
+  type HostingReadinessResult,
+} from "../hosting/readiness.js";
+import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
 } from "../infra/diagnostic-events.js";
@@ -52,6 +58,7 @@ import { loadInstalledPluginIndexInstallRecordsSync } from "../plugins/installed
 import { cleanupRetainedManagedNpmInstallGenerations } from "../plugins/managed-npm-retention.js";
 import { clearPluginMetadataLifecycleCaches } from "../plugins/plugin-metadata-lifecycle.js";
 import {
+  getActivePluginRegistry,
   pinActivePluginChannelRegistry,
   pinActivePluginHttpRouteRegistry,
   pinActivePluginSessionExtensionRegistry,
@@ -124,7 +131,7 @@ import {
 } from "./server/health-state.js";
 import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
 import { broadcastPresenceSnapshot } from "./server/presence-events.js";
-import { createReadinessChecker } from "./server/readiness.js";
+import { createReadinessChecker, type ReadinessResult } from "./server/readiness.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 import { maybeSeedControlUiAllowedOriginsAtStartup } from "./startup-control-ui-origins.js";
@@ -145,6 +152,53 @@ ensureOpenClawCliOnPath();
 
 const MAX_MEDIA_TTL_HOURS = 24 * 7;
 const POST_READY_MAINTENANCE_DELAY_MS = 250;
+
+function isCurrentWorkspaceUsable(): boolean {
+  try {
+    return process.cwd().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function buildGatewayPluginReadinessInput(): HostingPluginReadinessInput | undefined {
+  const registry = getActivePluginRegistry();
+  if (!registry) {
+    return undefined;
+  }
+  const errors = registry.plugins
+    .filter((plugin) => plugin.status === "error")
+    .map((plugin) => ({
+      id: plugin.id,
+      activated: plugin.activated === true,
+      ...(plugin.activationSource ? { activationSource: plugin.activationSource } : {}),
+      error: plugin.error ?? "unknown plugin load error",
+    }))
+    .toSorted((left, right) => left.id.localeCompare(right.id));
+  return errors.length > 0 ? { errors } : undefined;
+}
+
+function mergeGatewayAndHostingReadiness(
+  gateway: ReadinessResult,
+  hosting: HostingReadinessResult,
+): ReadinessResult {
+  const failing = Array.from(
+    new Set([...gateway.failing, ...(!hosting.ready ? hosting.failures : [])]),
+  );
+  const failures = Array.from(
+    new Set([...(!gateway.ready ? gateway.failing : []), ...hosting.failures]),
+  );
+  return {
+    ...gateway,
+    ready: gateway.ready && hosting.ready,
+    failing,
+    profile: hosting.profile,
+    ...(hosting.expectedProfile ? { expectedProfile: hosting.expectedProfile } : {}),
+    conditions: hosting.conditions,
+    failures,
+    hosting,
+  };
+}
 
 type GatewayStartupChannelPlugin = {
   id: ChannelId;
@@ -872,7 +926,7 @@ export async function startGatewayServer(
   channelManager.setAutostartSuppression(opts.channelAutostartSuppression ?? null);
   const sidecarStartup = opts.sidecarStartup ?? "start";
   const isGatewayStartupPending = () => !startupSidecarsReady && sidecarStartup === "start";
-  const getReadiness = createReadinessChecker({
+  const getGatewayReadiness = createReadinessChecker({
     channelManager,
     startedAt: serverStartedAt,
     getStartupPending: isGatewayStartupPending,
@@ -883,6 +937,18 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
+  const getReadiness = async (): Promise<ReadinessResult> => {
+    const gatewayReadiness = await getGatewayReadiness();
+    const config = getRuntimeConfig();
+    const hostingReadiness = buildHostingReadiness({
+      profile: resolveHostingProfile({ config, env: process.env }),
+      configLoaded: true,
+      gateway: "responding",
+      workspaceUsable: isCurrentWorkspaceUsable(),
+      plugins: buildGatewayPluginReadinessInput(),
+    });
+    return mergeGatewayAndHostingReadiness(gatewayReadiness, hostingReadiness);
+  };
   log.info("starting HTTP server...");
   let currentPluginRegistryGatewayContext: GatewayRequestContext | undefined;
   const watchNodeRequestHandler: {

@@ -95,6 +95,12 @@ describe("status-json-payload", () => {
     ).toEqual({
       ok: true,
       os: { platform: "linux" },
+      readiness: {
+        profile: "local",
+        ready: true,
+        failures: [],
+        conditions: expect.any(Array),
+      },
       update: {
         root: "/tmp/openclaw",
         installKind: "package",
@@ -139,35 +145,318 @@ describe("status-json-payload", () => {
   });
 
   it("omits optional sections when they are absent", () => {
-    expect(
-      buildStatusJsonPayload({
-        summary: { ok: true },
-        surface: {
-          cfg: { gateway: {} },
-          update: {
-            root: "/tmp/openclaw",
-            installKind: "package",
-            packageManager: "npm",
-          } as never,
-          tailscaleMode: "off",
-          gatewayMode: "local",
-          remoteUrlMissing: false,
-          gatewayConnection: { url: "ws://127.0.0.1:18789" },
-          gatewayReachable: false,
-          gatewayProbe: null,
-          gatewayProbeAuth: null,
-          gatewaySelf: null,
-          gatewayProbeAuthWarning: null,
-          gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
-          nodeService: { label: "node", installed: false, loadedText: "not installed" },
+    const payload = buildStatusJsonPayload({
+      summary: { ok: true },
+      surface: {
+        cfg: { gateway: {} },
+        update: {
+          root: "/tmp/openclaw",
+          installKind: "package",
+          packageManager: "npm",
+        } as never,
+        tailscaleMode: "off",
+        gatewayMode: "local",
+        remoteUrlMissing: false,
+        gatewayConnection: { url: "ws://127.0.0.1:18789" },
+        gatewayReachable: false,
+        gatewayProbe: null,
+        gatewayProbeAuth: null,
+        gatewaySelf: null,
+        gatewayProbeAuthWarning: null,
+        gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
+        nodeService: { label: "node", installed: false, loadedText: "not installed" },
+      },
+      osSummary: { platform: "linux" },
+      memory: null,
+      memoryPlugin: null,
+      agents: [],
+      secretDiagnostics: [],
+    });
+    expect(payload).not.toHaveProperty("securityAudit");
+    expect(payload.readiness).toMatchObject({
+      profile: "local",
+      ready: false,
+      failures: ["GatewayUnavailable"],
+    });
+  });
+
+  it("prefers readiness from deep gateway health when present", () => {
+    const payload = buildStatusJsonPayload({
+      summary: { ok: true },
+      surface: {
+        cfg: { gateway: {} },
+        update: {
+          root: "/tmp/openclaw",
+          installKind: "package",
+          packageManager: "npm",
+        } as never,
+        tailscaleMode: "off",
+        gatewayMode: "local",
+        remoteUrlMissing: false,
+        gatewayConnection: { url: "ws://127.0.0.1:18789" },
+        gatewayReachable: true,
+        gatewayProbe: null,
+        gatewayProbeAuth: null,
+        gatewaySelf: null,
+        gatewayProbeAuthWarning: null,
+        gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
+        nodeService: { label: "node", installed: false, loadedText: "not installed" },
+      },
+      osSummary: { platform: "linux" },
+      memory: null,
+      memoryPlugin: null,
+      agents: [],
+      secretDiagnostics: [],
+      health: {
+        ok: true,
+        readiness: {
+          profile: "local",
+          ready: false,
+          failures: ["PluginLoadFailures"],
+          conditions: [],
         },
-        osSummary: { platform: "linux" },
-        memory: null,
-        memoryPlugin: null,
-        agents: [],
-        secretDiagnostics: [],
-      }),
-    ).not.toHaveProperty("securityAudit");
+      },
+    });
+
+    expect(payload.readiness).toEqual({
+      profile: "local",
+      ready: false,
+      failures: ["PluginLoadFailures"],
+      conditions: [],
+    });
+  });
+
+  it("preserves readiness already collected in the status summary", () => {
+    const summaryReadiness = {
+      profile: "node-mode",
+      ready: true,
+      failures: [],
+      conditions: [
+        {
+          type: "NodePairingReady",
+          status: "True",
+          reason: "NodePairingReady",
+          message: "Node pairing has 1 approved node.",
+        },
+      ],
+    };
+    const payload = buildStatusJsonPayload({
+      summary: {
+        ok: true,
+        readiness: summaryReadiness,
+      },
+      surface: {
+        cfg: { hosting: { profile: "node-mode" }, gateway: {} },
+        update: {
+          root: "/tmp/openclaw",
+          installKind: "package",
+          packageManager: "npm",
+        } as never,
+        tailscaleMode: "off",
+        gatewayMode: "local",
+        remoteUrlMissing: false,
+        gatewayConnection: { url: "ws://127.0.0.1:18789" },
+        gatewayReachable: true,
+        gatewayProbe: null,
+        gatewayProbeAuth: null,
+        gatewaySelf: null,
+        gatewayProbeAuthWarning: null,
+        gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
+        nodeService: { label: "node", installed: false, loadedText: "not installed" },
+      },
+      osSummary: { platform: "linux" },
+      memory: null,
+      memoryPlugin: null,
+      agents: [],
+      secretDiagnostics: [],
+    });
+
+    expect(payload.readiness).toMatchObject({
+      profile: "node-mode",
+      ready: true,
+      failures: [],
+      conditions: expect.arrayContaining([
+        summaryReadiness.conditions[0],
+        expect.objectContaining({
+          type: "GatewayResponding",
+          status: "True",
+          reason: "GatewayResponding",
+        }),
+      ]),
+    });
+  });
+
+  it("prefers readiness from the live gateway probe over summary readiness", () => {
+    const payload = buildStatusJsonPayload({
+      summary: {
+        ok: true,
+        readiness: {
+          profile: "local",
+          ready: true,
+          failures: [],
+          conditions: [],
+        },
+      },
+      surface: {
+        cfg: { gateway: {} },
+        update: {
+          root: "/tmp/openclaw",
+          installKind: "package",
+          packageManager: "npm",
+        } as never,
+        tailscaleMode: "off",
+        gatewayMode: "local",
+        remoteUrlMissing: false,
+        gatewayConnection: { url: "ws://127.0.0.1:18789" },
+        gatewayReachable: true,
+        gatewayProbe: {
+          connectLatencyMs: 42,
+          error: null,
+          health: {
+            readiness: {
+              profile: "container",
+              ready: true,
+              failures: [],
+              conditions: [
+                {
+                  type: "ProfileSelected",
+                  status: "True",
+                  reason: "ProfileSelected",
+                  message: "Runtime selected the container hosting profile.",
+                },
+              ],
+            },
+          },
+        },
+        gatewayProbeAuth: null,
+        gatewaySelf: null,
+        gatewayProbeAuthWarning: null,
+        gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
+        nodeService: { label: "node", installed: false, loadedText: "not installed" },
+      },
+      osSummary: { platform: "linux" },
+      memory: null,
+      memoryPlugin: null,
+      agents: [],
+      secretDiagnostics: [],
+    });
+
+    expect(payload.readiness).toMatchObject({
+      profile: "container",
+      ready: true,
+      failures: [],
+    });
+  });
+
+  it("prefers readiness-only gateway health over summary readiness", () => {
+    const payload = buildStatusJsonPayload({
+      summary: {
+        ok: true,
+        readiness: {
+          profile: "local",
+          ready: true,
+          failures: [],
+          conditions: [],
+        },
+      },
+      surface: {
+        cfg: { gateway: {} },
+        update: {
+          root: "/tmp/openclaw",
+          installKind: "package",
+          packageManager: "npm",
+        } as never,
+        tailscaleMode: "off",
+        gatewayMode: "local",
+        remoteUrlMissing: false,
+        gatewayConnection: { url: "ws://127.0.0.1:18789" },
+        gatewayReachable: true,
+        gatewayProbe: null,
+        gatewayProbeAuth: null,
+        gatewaySelf: null,
+        gatewayProbeAuthWarning: null,
+        gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
+        nodeService: { label: "node", installed: false, loadedText: "not installed" },
+      },
+      osSummary: { platform: "linux" },
+      memory: null,
+      memoryPlugin: null,
+      agents: [],
+      secretDiagnostics: [],
+      readiness: {
+        readiness: {
+          profile: "container",
+          ready: true,
+          failures: [],
+          conditions: [],
+        },
+      },
+    });
+
+    expect(payload.readiness).toMatchObject({
+      profile: "container",
+      ready: true,
+      failures: [],
+    });
+    expect(payload).not.toHaveProperty("health");
+  });
+
+  it("uses scanned gateway reachability with summary readiness", () => {
+    const payload = buildStatusJsonPayload({
+      summary: {
+        ok: true,
+        readiness: {
+          profile: "local",
+          ready: true,
+          failures: [],
+          conditions: [
+            {
+              type: "GatewayResponding",
+              status: "Unknown",
+              reason: "GatewayNotChecked",
+              message: "This status path did not probe a running Gateway.",
+            },
+          ],
+        },
+      },
+      surface: {
+        cfg: { gateway: {} },
+        update: {
+          root: "/tmp/openclaw",
+          installKind: "package",
+          packageManager: "npm",
+        } as never,
+        tailscaleMode: "off",
+        gatewayMode: "local",
+        remoteUrlMissing: false,
+        gatewayConnection: { url: "ws://127.0.0.1:18789" },
+        gatewayReachable: false,
+        gatewayProbe: null,
+        gatewayProbeAuth: null,
+        gatewaySelf: null,
+        gatewayProbeAuthWarning: null,
+        gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
+        nodeService: { label: "node", installed: false, loadedText: "not installed" },
+      },
+      osSummary: { platform: "linux" },
+      memory: null,
+      memoryPlugin: null,
+      agents: [],
+      secretDiagnostics: [],
+    });
+
+    expect(payload.readiness).toMatchObject({
+      profile: "local",
+      ready: false,
+      failures: ["GatewayUnavailable"],
+      conditions: expect.arrayContaining([
+        expect.objectContaining({
+          type: "GatewayResponding",
+          status: "False",
+          reason: "GatewayUnavailable",
+        }),
+      ]),
+    });
   });
 
   it("includes model-pricing health from the gateway probe", () => {

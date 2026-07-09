@@ -532,6 +532,11 @@ describe("getHealthSnapshot", () => {
     const snap = await getHealthSnapshot({ timeoutMs: 10, probe: false });
 
     expect(snap.plugins?.loaded).toEqual(["telegram"]);
+    expect(snap.readiness).toMatchObject({
+      profile: "local",
+      ready: false,
+      failures: ["PluginLoadFailures"],
+    });
     expect(snap.plugins?.errors).toEqual([
       {
         id: "optional-broken",
@@ -621,6 +626,10 @@ describe("getHealthSnapshot", () => {
       timeoutMs: 10,
     })) satisfies HealthSummary;
     expect(snap.ok).toBe(true);
+    expect(snap.readiness).toMatchObject({
+      profile: "local",
+      ready: true,
+    });
     const telegram = snap.channels.telegram as {
       configured?: boolean;
       probe?: unknown;

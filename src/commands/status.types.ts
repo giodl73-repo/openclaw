@@ -1,9 +1,9 @@
 // Shared status output types.
 // These shapes are consumed by scan, summary, text report, and JSON status builders.
 
+import type { FastMode } from "@openclaw/normalization-core/string-coerce";
 import type { ChannelId } from "../channels/plugins/types.public.js";
 import type { SessionKind } from "../sessions/classify-session-kind.js";
-import type { FastMode } from "@openclaw/normalization-core/string-coerce";
 import type {
   RetainedLostTaskAuditSummary,
   TaskAuditSummary,
@@ -53,6 +53,7 @@ export type HeartbeatStatus = {
 /** Aggregate status summary before text or JSON formatting. */
 export type StatusSummary = {
   runtimeVersion?: string | null;
+  readiness?: import("../hosting/readiness.js").HostingReadinessResult;
   eventLoop?: import("../gateway/server/event-loop-health.js").GatewayEventLoopHealth;
   linkChannel?: {
     id: ChannelId;

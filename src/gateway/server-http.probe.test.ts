@@ -64,6 +64,50 @@ describe("gateway probe endpoints", () => {
     });
   });
 
+  it("returns detailed hosting readiness fields for local /ready requests", async () => {
+    const getReadiness: ReadinessChecker = async () => ({
+      ready: true,
+      failing: [],
+      uptimeMs: 45_000,
+      profile: "local",
+      conditions: [
+        {
+          type: "ProfileSelected",
+          status: "True",
+          reason: "ProfileSelected",
+          message: "Runtime selected the local hosting profile.",
+        },
+      ],
+      failures: [],
+    });
+
+    await withGatewayServer({
+      prefix: "probe-hosting-ready",
+      resolvedAuth: AUTH_NONE,
+      overrides: { getReadiness },
+      run: async (server) => {
+        const { res, getBody } = await sendGatewayRequest(server, { path: "/ready" });
+
+        expect(res.statusCode).toBe(200);
+        expect(JSON.parse(getBody())).toEqual({
+          ready: true,
+          failing: [],
+          uptimeMs: 45_000,
+          profile: "local",
+          conditions: [
+            {
+              type: "ProfileSelected",
+              status: "True",
+              reason: "ProfileSelected",
+              message: "Runtime selected the local hosting profile.",
+            },
+          ],
+          failures: [],
+        });
+      },
+    });
+  });
+
   it("returns only readiness state for unauthenticated remote /ready requests", async () => {
     const getReadiness: ReadinessChecker = () => ({
       ready: false,

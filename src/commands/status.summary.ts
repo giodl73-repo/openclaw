@@ -15,6 +15,8 @@ import { resolveSessionTotalTokens, type SessionEntry } from "../config/sessions
 import type { OpenClawConfig } from "../config/types.js";
 import { resolveCronJobsStorePath } from "../cron/store.js";
 import { listGatewayAgentsBasic } from "../gateway/agent-list.js";
+import { buildHostingReadiness, resolveHostingProfile } from "../hosting/readiness.js";
+import { resolveNodeModeReadinessEvidence } from "../hosting/node-mode.js";
 import { resolveHeartbeatSummaryForAgent } from "../infra/heartbeat-summary.js";
 import { peekSystemEvents } from "../infra/system-events.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
@@ -218,6 +220,14 @@ function listSessionCandidates(storePath: string, agentId?: string) {
         updatedAt: entry?.updatedAt ?? null,
       }))
   );
+}
+
+function isCurrentWorkspaceUsable(): boolean {
+  try {
+    return process.cwd().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Removes session paths and recent session details from a status summary. */
@@ -552,8 +562,26 @@ export async function getStatusSummary(
   );
   const totalSessions = allSessions.length;
 
+  const profile = resolveHostingProfile({ config: cfg, env: process.env });
+  const workspaceUsable = isCurrentWorkspaceUsable();
+  const nodeMode =
+    profile === "node-mode"
+      ? await resolveNodeModeReadinessEvidence({
+          config: cfg,
+          gateway: "not-checked",
+          workspaceUsable,
+        })
+      : undefined;
+
   const summary: StatusSummary = {
     runtimeVersion: resolveRuntimeServiceVersion(process.env),
+    readiness: buildHostingReadiness({
+      profile,
+      configLoaded: true,
+      gateway: "not-checked",
+      workspaceUsable,
+      nodeMode,
+    }),
     linkChannel: linkContext
       ? {
           id: linkContext.plugin.id,
