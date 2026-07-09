@@ -1,6 +1,7 @@
 import { cliCommandCatalog } from "../cli/command-catalog.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
+import { buildNodeCommandCatalog, type CliCatalogNodeCommand } from "./node-commands.js";
 import type { CliCatalogPluginCommand } from "./plugin-commands.js";
 import {
   listCliCatalogSurfaces,
@@ -80,6 +81,7 @@ export type CliCatalogList = {
     readonly promptProjection: number;
     readonly runtimeCommands: number;
     readonly pluginCommands: number;
+    readonly nodeCommands: number;
   };
   readonly cli: {
     readonly descriptors: readonly CliCatalogListDescriptor[];
@@ -88,6 +90,7 @@ export type CliCatalogList = {
     readonly runtimeCommandScope: CliCatalogRuntimeCommandScope;
     readonly runtimeCommands: readonly CliCatalogRuntimeCommand[];
     readonly pluginCommands: readonly CliCatalogPluginCommand[];
+    readonly nodeCommands: readonly CliCatalogNodeCommand[];
   };
   readonly agentToolSurfaces: readonly CliCatalogListSurface[];
   readonly promptProjection: {
@@ -185,6 +188,7 @@ export function buildCatalogList(
   params: {
     runtimeCommands?: readonly CliCatalogRuntimeCommand[];
     pluginCommands?: readonly CliCatalogPluginCommand[];
+    nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): CliCatalogList {
   const descriptors = buildDescriptors();
@@ -193,6 +197,7 @@ export function buildCatalogList(
   const agentToolSurfaces = mapSurfaces();
   const runtimeCommands = params.runtimeCommands ?? [];
   const pluginCommands = params.pluginCommands ?? [];
+  const nodeCommands = buildNodeCommandCatalog(params.nodeCommands);
   const promptProjection = {
     routedOperationIds: routedOperations.map((operation) => operation.id),
     agentToolSurfaceIds: agentToolSurfaces.map((surface) => surface.id),
@@ -209,6 +214,7 @@ export function buildCatalogList(
         promptProjection.routedOperationIds.length + promptProjection.agentToolSurfaceIds.length,
       runtimeCommands: runtimeCommands.length,
       pluginCommands: pluginCommands.length,
+      nodeCommands: nodeCommands.length,
     },
     cli: {
       descriptors,
@@ -217,6 +223,7 @@ export function buildCatalogList(
       runtimeCommandScope: RUNTIME_COMMAND_SCOPE,
       runtimeCommands,
       pluginCommands,
+      nodeCommands,
     },
     agentToolSurfaces,
     promptProjection,
@@ -227,6 +234,7 @@ export function renderCatalogListMarkdown(
   params: {
     runtimeCommands?: readonly CliCatalogRuntimeCommand[];
     pluginCommands?: readonly CliCatalogPluginCommand[];
+    nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): string {
   const list = buildCatalogList(params);
@@ -245,6 +253,7 @@ export function renderCatalogListMarkdown(
     `- Runtime commands: ${list.counts.runtimeCommands}`,
     `- Runtime command scope: ${list.cli.runtimeCommandScope}`,
     `- Plugin descriptor commands: ${list.counts.pluginCommands}`,
+    `- Node/operator commands: ${list.counts.nodeCommands}`,
     "",
     "## Routed operations",
     "",
@@ -281,6 +290,21 @@ export function renderCatalogListMarkdown(
     for (const command of list.cli.runtimeCommands) {
       lines.push(
         `| \`${command.commandPath.join(" ")}\` | ${command.parentPath.length > 0 ? "`" + command.parentPath.join(" ") + "`" : "None"} | ${command.depth} | ${command.visibleSubcommandCount} | ${command.description || "None"} |`,
+      );
+    }
+  }
+
+  if (list.cli.nodeCommands.length > 0) {
+    lines.push(
+      "",
+      "## Node/operator commands",
+      "",
+      "| Command | Node | Availability | Approval | Risk | Effect mode | Invocation |",
+      "| --- | --- | --- | --- | --- | --- | --- |",
+    );
+    for (const command of list.cli.nodeCommands) {
+      lines.push(
+        `| \`${command.command}\` | ${command.nodeName ?? command.nodeId ?? "Any"} | \`${command.availability}\` | \`${command.approvalKind}\` | \`${command.risk}\` | \`${command.effectMode}\` | \`${command.invocationHint}\` |`,
       );
     }
   }

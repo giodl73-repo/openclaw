@@ -1,5 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { buildCatalogList, renderCatalogListMarkdown } from "./list.js";
+import type { CliCatalogNodeCommand } from "./node-commands.js";
+
+const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
+  {
+    id: "node:demo-filesystem:filesystem.read",
+    command: "filesystem.read",
+    title: "Read file through paired node",
+    nodeId: "demo-filesystem",
+    nodeName: "Demo filesystem node",
+    cap: "filesystem",
+    description: "Read a file through a paired node command declaration.",
+    argumentHints: ["path"],
+    invocationHint:
+      'openclaw nodes invoke --node demo-filesystem --command filesystem.read --params {"path":"..."}',
+    availability: "approved",
+    approvalKind: "pairing",
+    risk: "medium",
+    confirmationRequired: true,
+    effectMode: "read",
+    effects: ["filesystem.read"],
+    trustBoundary: "paired-node",
+    sourceKind: "node-pairing",
+    sourceId: "demo-filesystem:filesystem.read",
+    discoveryMode: "paired-node-declaration",
+    visibility: ["docs", "prompt", "audit", "operator", "policy"],
+  },
+];
 
 describe("cli catalog overlay list", () => {
   it("builds a read-only programmatic list", () => {
@@ -39,6 +66,19 @@ describe("cli catalog overlay list", () => {
     );
   });
 
+  it("carries supplied node/operator commands through the list contract", () => {
+    const list = buildCatalogList({ nodeCommands: sampleNodeCommands });
+
+    expect(list.counts.nodeCommands).toBe(1);
+    expect(list.cli.nodeCommands[0]).toMatchObject({
+      id: "node:demo-filesystem:filesystem.read",
+      command: "filesystem.read",
+      availability: "approved",
+      approvalKind: "pairing",
+      trustBoundary: "paired-node",
+    });
+  });
+
   it("renders a Markdown list table for tools that need text output", () => {
     const markdown = renderCatalogListMarkdown();
 
@@ -46,9 +86,19 @@ describe("cli catalog overlay list", () => {
     expect(markdown).toContain("- CLI descriptors: 58");
     expect(markdown).toContain("- Command routes: 94");
     expect(markdown).toContain("- Runtime command scope: current-invocation-registered-tree");
+    expect(markdown).toContain("- Node/operator commands: 0");
     expect(markdown).toContain("| `gateway-status` | `gateway status` |");
     expect(markdown).toContain(
       "| `gateway` | `runtime` | `medium` | `mixed` | yes | `gateway` | CLI descriptor: gateway |",
+    );
+  });
+
+  it("renders node/operator command rows when supplied", () => {
+    const markdown = renderCatalogListMarkdown({ nodeCommands: sampleNodeCommands });
+
+    expect(markdown).toContain("## Node/operator commands");
+    expect(markdown).toContain(
+      "| `filesystem.read` | Demo filesystem node | `approved` | `pairing` |",
     );
   });
 });
