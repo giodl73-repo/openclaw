@@ -15,6 +15,9 @@ openclaw status --deep
 openclaw status --usage
 ```
 
+Use [`openclaw ready`](/cli/ready) when a container, service supervisor, or
+deployment script needs a single pass/fail readiness probe.
+
 | Flag                    | Description                                                                                                     |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `--all`                 | Full diagnosis (read-only, pasteable). Includes security audit, plugin compatibility, and memory-vector probes. |
@@ -101,4 +104,5 @@ their own files, chunks, vector, and FTS state.
 ## Related
 
 - [CLI reference](/cli)
+- [`openclaw ready`](/cli/ready)
 - [Doctor](/gateway/doctor)

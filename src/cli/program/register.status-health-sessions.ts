@@ -183,6 +183,31 @@ export function registerStatusHealthSessionsCommands(program: Command) {
       });
     });
 
+  program
+    .command("ready")
+    .description("Check whether the running gateway satisfies its hosting profile")
+    .option("--json", "Output JSON instead of text", false)
+    .option("--timeout <ms>", "Connection timeout in milliseconds", "10000")
+    .option("--expect-profile <profile>", "Fail if the runtime selected a different profile")
+    .addHelpText(
+      "after",
+      () =>
+        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/ready", "docs.openclaw.ai/cli/ready")}\n`,
+    )
+    .action(async (opts) => {
+      await runWithVerboseAndTimeout(opts, async ({ timeoutMs }) => {
+        const { readyCommand } = await import("../../commands/ready.js");
+        await readyCommand(
+          {
+            json: Boolean(opts.json),
+            timeoutMs,
+            expectProfile: opts.expectProfile,
+          },
+          defaultRuntime,
+        );
+      });
+    });
+
   const sessionsCmd = addSessionsListOptions(
     program.command("sessions").description("List stored conversation sessions"),
   )

@@ -10,7 +10,15 @@ import { resolveRequiredHomeDir } from "../../infra/home-dir.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { shouldMigrateStateFromPath } from "../argv.js";
 
-const ALLOWED_INVALID_COMMANDS = new Set(["audit", "doctor", "logs", "health", "help", "status"]);
+const ALLOWED_INVALID_COMMANDS = new Set([
+  "audit",
+  "doctor",
+  "logs",
+  "health",
+  "help",
+  "ready",
+  "status",
+]);
 const ALLOWED_INVALID_GATEWAY_SUBCOMMANDS = new Set([
   "run",
   "status",
@@ -316,7 +324,7 @@ export async function ensureConfigReady(params: {
   );
   params.runtime.error(
     muted(
-      "Audit, status, health, logs, tasks list/audit, and doctor commands still run with invalid config.",
+      "Audit, status, health, ready, logs, tasks list/audit, and doctor commands still run with invalid config.",
     ),
   );
   if (!allowInvalid) {

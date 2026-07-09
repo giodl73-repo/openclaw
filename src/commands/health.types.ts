@@ -78,6 +78,7 @@ export type HealthSummary = {
   ok: true;
   ts: number;
   durationMs: number;
+  readiness?: import("../hosting/readiness.js").HostingReadinessResult;
   eventLoop?: import("../gateway/server/event-loop-health.js").GatewayEventLoopHealth;
   plugins?: PluginHealthSummary;
   contextEngines?: ContextEngineHealthSummary;

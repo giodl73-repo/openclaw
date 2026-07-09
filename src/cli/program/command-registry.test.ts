@@ -37,6 +37,7 @@ vi.mock("./register.status-health-sessions.js", () => ({
   registerStatusHealthSessionsCommands: (program: Command) => {
     program.command("status");
     program.command("health");
+    program.command("ready");
     program.command("sessions");
     program.command("commitments");
     const tasks = program.command("tasks");
@@ -168,6 +169,7 @@ describe("command-registry", () => {
     const names = namesOf(program);
     expect(names).toContain("status");
     expect(names).toContain("health");
+    expect(names).toContain("ready");
     expect(names).toContain("sessions");
     expect(names).toContain("commitments");
     expect(names).toContain("tasks");
@@ -176,7 +178,7 @@ describe("command-registry", () => {
   it("can eagerly register the status/session command group repeatedly for completion", async () => {
     const program = createProgram();
 
-    for (const name of ["status", "health", "sessions", "commitments", "tasks"]) {
+    for (const name of ["status", "health", "ready", "sessions", "commitments", "tasks"]) {
       await expect(registerCoreCliByName(program, testProgramContext, name)).resolves.toBe(true);
     }
 

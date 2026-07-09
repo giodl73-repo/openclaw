@@ -727,6 +727,7 @@ describe("argv helpers", () => {
   it.each([
     { argv: ["node", "openclaw", "status"], expected: true },
     { argv: ["node", "openclaw", "health"], expected: false },
+    { argv: ["node", "openclaw", "ready"], expected: false },
     { argv: ["node", "openclaw", "sessions"], expected: false },
     { argv: ["node", "openclaw", "--profile", "work", "status"], expected: true },
     { argv: ["node", "openclaw", "--log-level=debug", "models", "list"], expected: true },

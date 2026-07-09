@@ -99,6 +99,11 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: false,
   },
   {
+    name: "ready",
+    description: "Check whether the running gateway satisfies its hosting profile",
+    hasSubcommands: false,
+  },
+  {
     name: "audit",
     description: "Inspect metadata-only agent run and tool action records",
     hasSubcommands: false,

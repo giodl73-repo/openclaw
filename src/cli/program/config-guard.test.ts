@@ -374,7 +374,7 @@ describe("ensureConfigReady", () => {
       "",
       `Fix: ${formatCliCommand("openclaw doctor --fix")}`,
       `Inspect: ${formatCliCommand("openclaw config validate")}`,
-      "Audit, status, health, logs, tasks list/audit, and doctor commands still run with invalid config.",
+      "Audit, status, health, ready, logs, tasks list/audit, and doctor commands still run with invalid config.",
     ]);
     expect(runtime.exit).toHaveBeenCalledWith(1);
   });

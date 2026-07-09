@@ -87,6 +87,11 @@ vi.mock("../commands/health.js", () => {
   };
 });
 
+vi.mock("../commands/ready.js", () => {
+  loaded.mark("ready-command");
+  return { readyCommand: vi.fn(async () => {}) };
+});
+
 vi.mock("../commands/sessions.js", () => {
   loaded.mark("sessions-command");
   return { sessionsCommand: vi.fn(async () => {}) };
@@ -266,7 +271,7 @@ describe("subcommand help cold imports", () => {
     expect(loaded.modules).not.toContain("uninstall-command");
   });
 
-  it("keeps status and health help out of command action modules", async () => {
+  it("keeps status, health, and ready help out of command action modules", async () => {
     const { registerStatusHealthSessionsCommands } =
       await import("./program/register.status-health-sessions.js");
     const program = makeProgram();
@@ -274,9 +279,11 @@ describe("subcommand help cold imports", () => {
     registerStatusHealthSessionsCommands(program);
     await expectHelpExit(program, ["status", "--help"]);
     await expectHelpExit(program, ["health", "--help"]);
+    await expectHelpExit(program, ["ready", "--help"]);
 
     expect(loaded.modules).not.toContain("status-command");
     expect(loaded.modules).not.toContain("health-command");
+    expect(loaded.modules).not.toContain("ready-command");
     expect(loaded.modules).not.toContain("sessions-command");
     expect(loaded.modules).not.toContain("sessions-cleanup-command");
     expect(loaded.modules).not.toContain("export-trajectory-command");

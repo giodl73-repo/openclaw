@@ -37,5 +37,6 @@ openclaw health --debug
 ## Related
 
 - [CLI reference](/cli)
+- [`openclaw ready`](/cli/ready) — pass/fail hosting readiness probe
 - [`openclaw status`](/cli/status) — local diagnosis and channel probes without a full health snapshot
 - [Gateway health](/gateway/health)

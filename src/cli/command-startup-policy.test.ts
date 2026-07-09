@@ -69,6 +69,11 @@ describe("command-startup-policy", () => {
     ).toBe(false);
     expect(
       resolvePolicy({
+        commandPath: ["ready"],
+      }).loadPlugins,
+    ).toBe(false);
+    expect(
+      resolvePolicy({
         commandPath: ["channels", "status"],
       }).loadPlugins,
     ).toBe(false);
