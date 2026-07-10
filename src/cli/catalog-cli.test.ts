@@ -128,6 +128,60 @@ describe("catalog cli", () => {
     expect(loggingState.forceConsoleToStderr).toBe(false);
   });
 
+  it("includes opted-in plugin effects in audit and summary output", async () => {
+    loadPluginCliDescriptorEntriesMock.mockResolvedValue([
+      {
+        pluginId: "deploy-plugin",
+        parentPath: [],
+        commands: ["deploy"],
+        descriptors: [
+          {
+            name: "deploy",
+            description: "Deploy a release",
+            hasSubcommands: false,
+            effectProfile: {
+              effectMode: "mutating",
+              risk: "high",
+              confirmationRequired: true,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const auditOutput = await captureStdout(async () => {
+      await createProgram().parseAsync([
+        "node",
+        "openclaw",
+        "catalog",
+        "audit",
+        "--json",
+        "--plugin-descriptors",
+      ]);
+    });
+    const summaryOutput = await captureStdout(async () => {
+      await createProgram().parseAsync([
+        "node",
+        "openclaw",
+        "catalog",
+        "summary",
+        "--json",
+        "--plugin-descriptors",
+      ]);
+    });
+
+    expect(JSON.parse(auditOutput).surfaces.confirmationRequiredSurfaceIds).toContain(
+      "deploy-plugin:deploy",
+    );
+    expect(JSON.parse(summaryOutput).attention.confirmationRequiredSurfaceIds).toContain(
+      "deploy-plugin:deploy",
+    );
+    expect(JSON.parse(summaryOutput).attention.highRiskSurfaceIds).toContain(
+      "deploy-plugin:deploy",
+    );
+    expect(loadPluginCliDescriptorEntriesMock).toHaveBeenCalledTimes(2);
+  });
+
   it("prints catalog audit, test matrix, and summary JSON", async () => {
     const audit = await captureStdout(async () => {
       await createProgram().parseAsync(["node", "openclaw", "catalog", "audit", "--json"]);

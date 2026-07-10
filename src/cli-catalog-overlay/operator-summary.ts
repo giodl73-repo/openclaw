@@ -16,6 +16,7 @@ export type CliCatalogOperatorSummary = {
   };
   readonly attention: {
     readonly confirmationRequiredSurfaceIds: readonly string[];
+    readonly highRiskSurfaceIds: readonly string[];
     readonly mediumRiskSurfaceIds: readonly string[];
     readonly mixedEffectSurfaceIds: readonly string[];
     readonly nodeCommandApprovalIds: readonly string[];
@@ -44,6 +45,7 @@ export function buildCatalogOperatorSummary(
   const audit = params.audit ?? buildCatalogAudit(list);
   const policyKeyIds = audit.commandRoutes.byPolicyKey.map((group) => group.policyKey).toSorted();
   const confirmationRequiredSurfaceIds = audit.surfaces.confirmationRequiredSurfaceIds;
+  const highRiskSurfaceIds = groupIds(audit.surfaces.byRisk, "high");
 
   return {
     schemaVersion: 1,
@@ -60,6 +62,7 @@ export function buildCatalogOperatorSummary(
     },
     attention: {
       confirmationRequiredSurfaceIds,
+      highRiskSurfaceIds,
       mediumRiskSurfaceIds: groupIds(audit.surfaces.byRisk, "medium"),
       mixedEffectSurfaceIds: groupIds(audit.surfaces.byEffectMode, "mixed"),
       nodeCommandApprovalIds: audit.nodeCommands.approvalRequiredCommandIds,
@@ -68,6 +71,9 @@ export function buildCatalogOperatorSummary(
     nextChecks: [
       confirmationRequiredSurfaceIds.length > 0
         ? "Review confirmation-required catalog surfaces before widening automation."
+        : "",
+      highRiskSurfaceIds.length > 0
+        ? "Review high-risk catalog surfaces before widening automation."
         : "",
       policyKeyIds.includes("networkProxy")
         ? "Review command routes with networkProxy policy before changing proxy startup behavior."
@@ -83,8 +89,13 @@ function inlineCodeList(values: readonly string[]): string {
   return values.length > 0 ? values.map((value) => "`" + value + "`").join(", ") : "None";
 }
 
-export function renderCatalogOperatorSummaryMarkdown(): string {
-  const summary = buildCatalogOperatorSummary();
+export function renderCatalogOperatorSummaryMarkdown(
+  params: {
+    readonly list?: CliCatalogList;
+    readonly audit?: CliCatalogAudit;
+  } = {},
+): string {
+  const summary = buildCatalogOperatorSummary(params);
   return [
     "# CLI Catalog Operator Summary",
     "",
@@ -104,6 +115,7 @@ export function renderCatalogOperatorSummaryMarkdown(): string {
     "## Attention",
     "",
     `- Confirmation required: ${inlineCodeList(summary.attention.confirmationRequiredSurfaceIds)}`,
+    `- High risk: ${inlineCodeList(summary.attention.highRiskSurfaceIds)}`,
     `- Medium risk: ${inlineCodeList(summary.attention.mediumRiskSurfaceIds)}`,
     `- Mixed effect mode: ${inlineCodeList(summary.attention.mixedEffectSurfaceIds)}`,
     `- Node/operator approval: ${inlineCodeList(summary.attention.nodeCommandApprovalIds)}`,

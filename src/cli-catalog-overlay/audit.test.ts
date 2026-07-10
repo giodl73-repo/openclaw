@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildCatalogAudit, renderCatalogAuditMarkdown } from "./audit.js";
 import { buildCatalogList } from "./list.js";
 import type { CliCatalogNodeCommand } from "./node-commands.js";
+import { buildPluginCatalogCommands } from "./plugin-commands.js";
 
 const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
   {
@@ -34,14 +35,21 @@ describe("cli catalog overlay audit", () => {
       generatedFrom: "cli-catalog-overlay-audit",
       counts: {
         agentToolSurfaces: 5,
-        confirmationRequiredSurfaces: 2,
+        confirmationRequiredSurfaces: 3,
         commandRoutes: 97,
       },
     });
-    expect(audit.surfaces.confirmationRequiredSurfaceIds).toEqual(["gateway", "skill_workshop"]);
+    expect(audit.surfaces.confirmationRequiredSurfaceIds).toEqual([
+      "config-unset",
+      "gateway",
+      "skill_workshop",
+    ]);
     expect(audit.surfaces.byRisk.find((group) => group.id === "medium")).toMatchObject({
-      count: 2,
-      surfaceIds: ["gateway", "skill_workshop"],
+      count: 3,
+      surfaceIds: ["config-unset", "gateway", "skill_workshop"],
+    });
+    expect(audit.surfaces.byEffectMode.find((group) => group.id === "mutating")).toMatchObject({
+      surfaceIds: ["config-unset", "sessions_spawn"],
     });
     expect(audit.surfaces.byEffectMode.find((group) => group.id === "mixed")).toMatchObject({
       surfaceIds: ["gateway", "process", "session_status", "skill_workshop"],
@@ -71,6 +79,34 @@ describe("cli catalog overlay audit", () => {
       count: 1,
       surfaceIds: ["node:demo-host:mcp.status"],
     });
+  });
+
+  it("includes supplied plugin effects in operator attention", () => {
+    const pluginCommands = buildPluginCatalogCommands([
+      {
+        pluginId: "deploy-plugin",
+        parentPath: [],
+        commands: ["deploy"],
+        descriptors: [
+          {
+            name: "deploy",
+            description: "Deploy a release",
+            hasSubcommands: false,
+            effectProfile: {
+              effectMode: "mutating",
+              risk: "high",
+              confirmationRequired: true,
+            },
+          },
+        ],
+      },
+    ]);
+    const audit = buildCatalogAudit(buildCatalogList({ pluginCommands }));
+
+    expect(audit.surfaces.confirmationRequiredSurfaceIds).toContain("deploy-plugin:deploy");
+    expect(audit.surfaces.byRisk.find((group) => group.id === "high")?.surfaceIds).toEqual([
+      "deploy-plugin:deploy",
+    ]);
   });
 
   it("derives approval attention from pending and confirmation state", () => {
@@ -115,8 +151,10 @@ describe("cli catalog overlay audit", () => {
     expect(markdown).toContain("- Agent/tool surfaces: 5");
     expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Node/operator commands: 0");
-    expect(markdown).toContain("| Risk | `low` (3), `medium` (2) |");
-    expect(markdown).toContain("| Confirmation required | `gateway`, `skill_workshop` |");
+    expect(markdown).toContain("| Risk | `low` (16), `medium` (3) |");
+    expect(markdown).toContain(
+      "| Confirmation required | `config-unset`, `gateway`, `skill_workshop` |",
+    );
     expect(markdown).toContain("| `networkProxy` |");
     expect(markdown).toContain("## Command routes without policy keys");
     expect(markdown).toContain("`skills install`, `skills search`, `skills update`");

@@ -24,7 +24,7 @@ const sampleNodeCommands: readonly CliCatalogNodeCommand[] = [
     sourceKind: "node-pairing",
     sourceId: "demo-filesystem:filesystem.read",
     discoveryMode: "paired-node-declaration",
-    visibility: ["docs", "prompt", "audit", "operator", "policy"],
+    visibility: ["docs", "audit", "operator", "policy"],
   },
 ];
 
@@ -40,7 +40,6 @@ describe("cli catalog overlay list", () => {
         commandRoutes: 97,
         routedOperations: 14,
         agentToolSurfaces: 5,
-        promptProjection: 19,
         runtimeCommands: 0,
         nodeCommands: 0,
       },
@@ -53,10 +52,18 @@ describe("cli catalog overlay list", () => {
     expect(
       list.cli.routedOperations.find((operation) => operation.id === "gateway-status"),
     ).toMatchObject({ commandPaths: [["gateway", "status"]] });
+    expect(
+      list.cli.routedOperations.find((operation) => operation.id === "config-unset"),
+    ).toMatchObject({
+      risk: "medium",
+      confirmationRequired: true,
+      effectMode: "mutating",
+    });
     expect(list.agentToolSurfaces.find((surface) => surface.id === "gateway")).toMatchObject({
       owner: "runtime",
       risk: "medium",
       effectMode: "mixed",
+      effects: ["gateway.restart", "gateway.config"],
       confirmationRequired: true,
       descriptor: { name: "gateway", hasSubcommands: true },
     });
@@ -80,8 +87,6 @@ describe("cli catalog overlay list", () => {
       approvalKind: "pairing",
       trustBoundary: "paired-node",
     });
-    expect(list.promptProjection.nodeCommandIds).toEqual(["node:demo-filesystem:filesystem.read"]);
-    expect(list.counts.promptProjection).toBe(20);
   });
 
   it("renders a Markdown list table for tools that need text output", () => {
@@ -92,7 +97,7 @@ describe("cli catalog overlay list", () => {
     expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Runtime command scope: current-invocation-registered-tree");
     expect(markdown).toContain("- Node/operator commands: 0");
-    expect(markdown).toContain("| `gateway-status` | `gateway status` |");
+    expect(markdown).toContain("| `gateway-status` | `low` | `read` | no | `gateway status` |");
     expect(markdown).toContain(
       "| `gateway` | `runtime` | `medium` | `mixed` | yes | `gateway` | CLI descriptor: gateway |",
     );
