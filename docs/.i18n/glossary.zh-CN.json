@@ -1434,5 +1434,9 @@
   {
     "source": "openclaw nodes approve",
     "target": "openclaw nodes approve"
+  },
+  {
+    "source": "CLI catalog reference",
+    "target": "CLI 目录参考"
   }
 ]
