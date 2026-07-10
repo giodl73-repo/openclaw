@@ -114,6 +114,42 @@ function createExpectedStatusPayload() {
     gatewayService: { installed: false },
     nodeService: { installed: false },
     agents: [],
+    readiness: {
+      profile: "local",
+      ready: false,
+      conditions: [
+        {
+          type: "ProfileSelected",
+          status: "True",
+          requirement: "required",
+          reason: "ProfileSelected",
+          message: "Runtime selected the local hosting profile.",
+        },
+        {
+          type: "ConfigLoaded",
+          status: "True",
+          requirement: "required",
+          reason: "ConfigLoaded",
+          message: "Runtime configuration loaded.",
+        },
+        {
+          type: "GatewayResponding",
+          status: "False",
+          requirement: "required",
+          reason: "GatewayUnavailable",
+          message: "Gateway did not respond to the readiness request.",
+        },
+        {
+          type: "PluginsLoaded",
+          status: "Unknown",
+          requirement: "advisory",
+          reason: "PluginStatusUnavailable",
+          message: "Plugin registry status is not available on this surface.",
+        },
+      ],
+      failures: ["GatewayUnavailable"],
+      advisories: ["PluginStatusUnavailable"],
+    },
     secretDiagnostics: [],
   };
 }

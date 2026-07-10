@@ -167,12 +167,17 @@ function buildGatewayPluginReadinessInput(
 ): HostingPluginReadinessInput {
   const errors = registry.plugins
     .filter((plugin) => plugin.status === "error")
-    .map((plugin) => ({
-      id: plugin.id,
-      activated: plugin.activated === true,
-      ...(plugin.activationSource ? { activationSource: plugin.activationSource } : {}),
-      error: plugin.error ?? "unknown plugin load error",
-    }))
+    .map((plugin) => {
+      const error: HostingPluginReadinessInput["errors"][number] = {
+        id: plugin.id,
+        activated: plugin.activated === true,
+        error: plugin.error ?? "unknown plugin load error",
+      };
+      if (plugin.activationSource) {
+        error.activationSource = plugin.activationSource;
+      }
+      return error;
+    })
     .toSorted((left, right) => left.id.localeCompare(right.id));
   return { errors };
 }

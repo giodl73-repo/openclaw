@@ -105,9 +105,9 @@ const HostingSchema = z
         message: "custom hosting profile must be defined in hosting.profiles",
       });
     }
-    for (const [profileId, profile] of Object.entries(value.profiles ?? {})) {
-      const required = new Set(profile.requiredCriteria ?? []);
-      const duplicate = (profile.advisoryCriteria ?? []).find((id) => required.has(id));
+    for (const [profileId, profileDefinition] of Object.entries(value.profiles ?? {})) {
+      const required = new Set(profileDefinition.requiredCriteria ?? []);
+      const duplicate = (profileDefinition.advisoryCriteria ?? []).find((id) => required.has(id));
       if (duplicate) {
         ctx.addIssue({
           code: "custom",
