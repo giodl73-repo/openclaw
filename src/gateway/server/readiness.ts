@@ -22,7 +22,6 @@ export type ReadinessResult = {
   uptimeMs: number;
   eventLoop?: GatewayEventLoopHealth;
   profile?: HostingReadinessResult["profile"];
-  expectedProfile?: HostingReadinessResult["expectedProfile"];
   conditions?: HostingReadinessCondition[];
   failures?: string[];
   hosting?: HostingReadinessResult;

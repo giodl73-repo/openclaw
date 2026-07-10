@@ -37,8 +37,7 @@ import { getGatewayModelPricingHealth } from "../gateway/model-pricing-cache-sta
 import { isGatewayModelPricingEnabled } from "../gateway/model-pricing-config.js";
 import type { ChannelRuntimeSnapshot } from "../gateway/server-channel-runtime.types.js";
 import { info } from "../globals.js";
-import { buildHostingReadiness, resolveHostingProfile } from "../hosting/readiness.js";
-import { resolveNodeModeReadinessEvidence } from "../hosting/node-mode.js";
+import { buildHostingReadiness } from "../hosting/readiness.js";
 import { countFailedDeliveryQueueEntries } from "../infra/delivery-queue-sqlite.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -388,14 +387,6 @@ function buildPluginHealthSummary(): PluginHealthSummary | undefined {
   return { loaded, errors };
 }
 
-function isCurrentWorkspaceUsable(): boolean {
-  try {
-    return process.cwd().length > 0;
-  } catch {
-    return false;
-  }
-}
-
 function readBooleanField(value: unknown, key: string): boolean | undefined {
   const record = asNullableRecord(value);
   if (!record) {
@@ -722,27 +713,14 @@ export async function getHealthSnapshot(params?: {
   const pluginHealth = buildPluginHealthSummary();
   const contextEngineHealth = buildContextEngineHealthSummary();
   const deliveryQueueHealth = buildDeliveryQueueHealthSummary();
-  const profile = resolveHostingProfile({ config: cfg, env: process.env });
-  const workspaceUsable = isCurrentWorkspaceUsable();
-  const nodeMode =
-    profile === "node-mode"
-      ? await resolveNodeModeReadinessEvidence({
-          config: cfg,
-          gateway: "responding",
-          workspaceUsable,
-        })
-      : undefined;
   const summary: HealthSummary = {
     ok: true,
     ts: Date.now(),
     durationMs: Date.now() - start,
     readiness: buildHostingReadiness({
-      profile,
       configLoaded: true,
       gateway: "responding",
-      workspaceUsable,
       plugins: pluginHealth,
-      nodeMode,
     }),
     ...(params?.eventLoop ? { eventLoop: params.eventLoop } : {}),
     ...(pluginHealth ? { plugins: pluginHealth } : {}),

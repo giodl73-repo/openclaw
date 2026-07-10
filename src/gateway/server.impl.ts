@@ -30,7 +30,6 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
 import {
   buildHostingReadiness,
-  resolveHostingProfile,
   type HostingPluginReadinessInput,
   type HostingReadinessResult,
 } from "../hosting/readiness.js";
@@ -153,14 +152,6 @@ ensureOpenClawCliOnPath();
 const MAX_MEDIA_TTL_HOURS = 24 * 7;
 const POST_READY_MAINTENANCE_DELAY_MS = 250;
 
-function isCurrentWorkspaceUsable(): boolean {
-  try {
-    return process.cwd().length > 0;
-  } catch {
-    return false;
-  }
-}
-
 function buildGatewayPluginReadinessInput(): HostingPluginReadinessInput | undefined {
   const registry = getActivePluginRegistry();
   if (!registry) {
@@ -193,7 +184,6 @@ function mergeGatewayAndHostingReadiness(
     ready: gateway.ready && hosting.ready,
     failing,
     profile: hosting.profile,
-    ...(hosting.expectedProfile ? { expectedProfile: hosting.expectedProfile } : {}),
     conditions: hosting.conditions,
     failures,
     hosting,
@@ -939,12 +929,9 @@ export async function startGatewayServer(
   });
   const getReadiness = async (): Promise<ReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
-    const config = getRuntimeConfig();
     const hostingReadiness = buildHostingReadiness({
-      profile: resolveHostingProfile({ config, env: process.env }),
       configLoaded: true,
       gateway: "responding",
-      workspaceUsable: isCurrentWorkspaceUsable(),
       plugins: buildGatewayPluginReadinessInput(),
     });
     return mergeGatewayAndHostingReadiness(gatewayReadiness, hostingReadiness);

@@ -270,7 +270,8 @@ describe("getStatusSummary", () => {
     expect(summary.runtimeVersion).toBe("2026.3.8");
     expect(summary.readiness).toMatchObject({
       profile: "local",
-      ready: true,
+      ready: false,
+      failures: ["GatewayNotChecked", "PluginStatusUnavailable"],
     });
     expect(summary.heartbeat.defaultAgentId).toBe("main");
     expect(summary.channelSummary).toEqual(["ok"]);
