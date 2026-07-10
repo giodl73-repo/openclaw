@@ -92,6 +92,7 @@ describe("buildHostingReadiness", () => {
       runtimeGateway: {
         mode: "local",
         bind: "lan",
+        bindHost: "0.0.0.0",
         port: 18789,
         authMode: "token",
         trustedProxyCount: 0,
@@ -102,6 +103,21 @@ describe("buildHostingReadiness", () => {
     });
 
     expect(readiness.ready).toBe(true);
+  });
+
+  it("rejects a custom loopback host for the container profile", () => {
+    const readiness = buildHostingReadiness({
+      profile: "container",
+      config: {
+        gateway: { mode: "local", bind: "custom", customBindHost: "127.0.0.1" },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.failures).toContain("ContainerGatewayLoopback");
   });
 
   it("requires complete trusted-proxy posture for reverse-proxy", () => {

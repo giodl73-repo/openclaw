@@ -921,6 +921,7 @@ export async function startGatewayServer(
       runtimeGateway: {
         mode: "local",
         bind: bindMode,
+        bindHost,
         port,
         authMode: getResolvedAuth().mode,
         trustedProxyUserHeader: getResolvedAuth().trustedProxy?.userHeader,

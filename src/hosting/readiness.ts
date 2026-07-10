@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayBindMode } from "../config/types.gateway.js";
+import { isLoopbackHost } from "../gateway/net.js";
 
 export const HOSTING_PROFILE_IDS = ["local", "container", "reverse-proxy", "managed"] as const;
 export type HostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
@@ -58,6 +59,7 @@ export type HostingReadinessInput = {
   runtimeGateway?: {
     mode: "local";
     bind: GatewayBindMode;
+    bindHost: string;
     port: number;
     authMode: string;
     trustedProxyUserHeader?: string;
@@ -199,7 +201,10 @@ function buildContainerCondition(input: HostingReadinessInput): HostingReadiness
     };
   }
   const bind = input.runtimeGateway?.bind ?? input.config?.gateway?.bind ?? "loopback";
-  if (bind === "loopback") {
+  const bindHost =
+    input.runtimeGateway?.bindHost ??
+    (bind === "custom" ? input.config?.gateway?.customBindHost?.trim() : undefined);
+  if (bind === "loopback" || (bindHost && isLoopbackHost(bindHost))) {
     return {
       type: "ContainerStateReady",
       status: "False",
@@ -207,11 +212,19 @@ function buildContainerCondition(input: HostingReadinessInput): HostingReadiness
       message: "Container profile requires a non-loopback Gateway bind.",
     };
   }
+  if (bind === "auto" && !bindHost) {
+    return {
+      type: "ContainerStateReady",
+      status: "Unknown",
+      reason: "ContainerBindNotResolved",
+      message: "Container profile requires the resolved Gateway bind host.",
+    };
+  }
   return {
     type: "ContainerStateReady",
     status: "True",
     reason: "ContainerStateReady",
-    message: `Gateway is hosted locally with ${bind} bind on port ${input.runtimeGateway?.port ?? input.config?.gateway?.port ?? 18789}.`,
+    message: `Gateway is hosted locally at ${bindHost ?? bind}:${input.runtimeGateway?.port ?? input.config?.gateway?.port ?? 18789}.`,
   };
 }
 
