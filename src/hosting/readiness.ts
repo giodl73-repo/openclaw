@@ -3,6 +3,10 @@ export const DEFAULT_HOSTING_PROFILE = "local" as const;
 export type HostingProfileId = typeof DEFAULT_HOSTING_PROFILE;
 
 export type HostingReadinessConditionType =
+  | "GatewayStartupComplete"
+  | "GatewayAcceptingWork"
+  | "ChannelRuntimeReady"
+  | "EventLoopHealthy"
   | "ProfileSelected"
   | "ConfigLoaded"
   | "GatewayResponding"

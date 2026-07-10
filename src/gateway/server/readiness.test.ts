@@ -2,8 +2,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChannelId } from "../../channels/plugins/index.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.js";
+import { buildHostingReadiness } from "../../hosting/readiness.js";
 import type { ChannelManager, ChannelRuntimeSnapshot } from "../server-channels.js";
-import { createReadinessChecker } from "./readiness.js";
+import { createReadinessChecker, mergeGatewayAndHostingReadiness } from "./readiness.js";
 
 /**
  * Readiness checker tests for startup grace, channel health, and stale sockets.
@@ -129,11 +130,93 @@ function readySnapshot(
   uptimeMs = FIVE_MIN_MS,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  return { ready: true, failing: [], uptimeMs, ...extra };
+  const eventLoop = extra.eventLoop as { degraded: boolean; reasons: string[] } | undefined;
+  return {
+    ready: true,
+    failing: [],
+    uptimeMs,
+    conditions: coreConditions({ eventLoop }),
+    ...extra,
+  };
 }
 
 function failingSnapshot(failing: string[], uptimeMs = FIVE_MIN_MS): Record<string, unknown> {
-  return { ready: false, failing, uptimeMs };
+  const draining = failing.includes("gateway-draining");
+  const startupPending = !draining && failing.includes("startup-sidecars");
+  return {
+    ready: false,
+    failing,
+    uptimeMs,
+    conditions: coreConditions({
+      startupPending,
+      draining,
+      channelFailing: startupPending || draining ? undefined : failing,
+    }),
+  };
+}
+
+function coreConditions(
+  params: {
+    startupPending?: boolean;
+    draining?: boolean;
+    channelFailing?: string[];
+    eventLoop?: { degraded: boolean; reasons: string[] };
+  } = {},
+) {
+  const channelChecked =
+    params.channelFailing !== undefined || (!params.startupPending && !params.draining);
+  const channelFailing = params.channelFailing ?? [];
+  const eventLoop = params.eventLoop;
+  return [
+    {
+      type: "GatewayStartupComplete",
+      status: params.startupPending ? "False" : "True",
+      requirement: "required",
+      reason: params.startupPending ? "GatewayStartupPending" : "GatewayStartupComplete",
+      message: params.startupPending
+        ? "Gateway startup dependencies are still pending."
+        : "Gateway startup dependencies are complete.",
+    },
+    {
+      type: "GatewayAcceptingWork",
+      status: params.draining ? "False" : "True",
+      requirement: "required",
+      reason: params.draining ? "GatewayDraining" : "GatewayAcceptingWork",
+      message: params.draining
+        ? "Gateway is draining and is not accepting new work."
+        : "Gateway is accepting new work.",
+    },
+    {
+      type: "ChannelRuntimeReady",
+      status: !channelChecked ? "Unknown" : channelFailing.length > 0 ? "False" : "True",
+      requirement: "required",
+      reason: !channelChecked
+        ? "ChannelRuntimeNotChecked"
+        : channelFailing.length > 0
+          ? "ChannelRuntimeUnavailable"
+          : "ChannelRuntimeReady",
+      message: !channelChecked
+        ? "Channel runtime health was not evaluated on this readiness pass."
+        : channelFailing.length > 0
+          ? `Selected channels are not ready: ${channelFailing.join(", ")}.`
+          : "Selected channel runtimes are ready.",
+    },
+    {
+      type: "EventLoopHealthy",
+      status: !eventLoop ? "Unknown" : eventLoop.degraded ? "False" : "True",
+      requirement: "advisory",
+      reason: !eventLoop
+        ? "EventLoopStatusUnavailable"
+        : eventLoop.degraded
+          ? "EventLoopDegraded"
+          : "EventLoopHealthy",
+      message: !eventLoop
+        ? "Event-loop health is not available yet."
+        : eventLoop.degraded
+          ? `Event-loop health is degraded: ${eventLoop.reasons.join(", ")}.`
+          : "Event-loop health is within its healthy thresholds.",
+    },
+  ];
 }
 
 describe("createReadinessChecker", () => {
@@ -380,5 +463,35 @@ describe("createReadinessChecker", () => {
         }),
       );
     });
+  });
+});
+
+describe("mergeGatewayAndHostingReadiness", () => {
+  it("normalizes core failures and advisories while preserving legacy fields", () => {
+    const gateway = failingSnapshot(["discord"]);
+    const hosting = buildHostingReadiness({
+      configLoaded: true,
+      gateway: "responding",
+      plugins: {
+        errors: [{ id: "broken", activated: true, error: "load failed" }],
+      },
+    });
+
+    const result = mergeGatewayAndHostingReadiness(gateway, hosting);
+
+    expect(result.ready).toBe(false);
+    expect(result.failing).toEqual(["discord"]);
+    expect(result.failures).toEqual(["ChannelRuntimeUnavailable"]);
+    expect(result.advisories).toEqual(["EventLoopStatusUnavailable", "PluginLoadFailures"]);
+    expect(result.conditions?.map((condition) => condition.type)).toEqual([
+      "GatewayStartupComplete",
+      "GatewayAcceptingWork",
+      "ChannelRuntimeReady",
+      "EventLoopHealthy",
+      "ProfileSelected",
+      "ConfigLoaded",
+      "GatewayResponding",
+      "PluginsLoaded",
+    ]);
   });
 });
