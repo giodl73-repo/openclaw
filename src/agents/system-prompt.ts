@@ -38,6 +38,7 @@ import {
   buildFullBootstrapPromptLines,
   buildLimitedBootstrapPromptLines,
 } from "./bootstrap-prompt.js";
+import { buildCommandInventoryPromptSection } from "./command-inventory-prompt.js";
 import type { ResolvedTimeFormat } from "./date-time.js";
 import type { EmbeddedContextFile } from "./embedded-agent-helpers.js";
 import type {
@@ -996,6 +997,12 @@ export function buildAgentSystemPrompt(params: {
   const skillWorkshopSection = availableTools.has(SKILL_WORKSHOP_TOOL_NAME)
     ? buildSkillWorkshopPromptSection()
     : [];
+  const commandInventorySection = isMinimal
+    ? []
+    : buildCommandInventoryPromptSection({
+        availableTools,
+        hostCliAvailable: !sandboxedRuntime,
+      });
   const memorySection = buildMemorySection({
     isMinimal,
     includeMemorySection: params.includeMemorySection,
@@ -1064,6 +1071,7 @@ export function buildAgentSystemPrompt(params: {
     includeMemorySection: params.includeMemorySection,
     memoryCitationsMode: params.memoryCitationsMode,
     memorySection,
+    commandInventorySection,
     acpEnabled,
     stableContextFiles: contextFiles.stable,
   });
@@ -1164,6 +1172,7 @@ export function buildAgentSystemPrompt(params: {
       "",
       ...skillsSection,
       ...skillWorkshopSection,
+      ...commandInventorySection,
       ...memorySection,
       hasGateway && !isMinimal ? "## OpenClaw Self-Update" : "",
       hasGateway && !isMinimal
