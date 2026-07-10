@@ -123,6 +123,23 @@ describe("refreshGatewayHealthSnapshot", () => {
     );
   });
 
+  it("projects canonical Gateway hosting readiness into health", async () => {
+    const healthState = await loadHealthState();
+    const readiness = {
+      profile: "managed" as const,
+      ready: true,
+      conditions: [],
+      failures: [],
+    };
+
+    const snapshot = await healthState.refreshGatewayHealthSnapshot({
+      probe: false,
+      getHostingReadiness: async () => readiness,
+    });
+
+    expect(snapshot.readiness).toEqual(readiness);
+  });
+
   it("captures runtime snapshots for completed refreshes and guards snapshot failures", async () => {
     const healthState = await loadHealthState();
     const runtimeSnapshot = {

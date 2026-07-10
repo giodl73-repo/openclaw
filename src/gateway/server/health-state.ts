@@ -81,6 +81,7 @@ export async function refreshGatewayHealthSnapshot(opts?: {
   getRuntimeSnapshot?: () => ChannelRuntimeSnapshot;
   getEventLoopHealth?: () => GatewayEventLoopHealth | undefined;
   getConfigReloaderHotReloadStatus?: () => GatewayHotReloadStatus | undefined;
+  getHostingReadiness?: () => Promise<NonNullable<HealthSummary["readiness"]>>;
 }) {
   const includeSensitive = opts?.includeSensitive === true;
   let refresh = includeSensitive ? sensitiveHealthRefresh : healthRefresh;
@@ -101,6 +102,10 @@ export async function refreshGatewayHealthSnapshot(opts?: {
         ...(eventLoop ? { eventLoop } : {}),
         ...(configReloadHotReloadStatus ? { configReloadHotReloadStatus } : {}),
       });
+      const hostingReadiness = await opts?.getHostingReadiness?.();
+      if (hostingReadiness) {
+        snap.readiness = hostingReadiness;
+      }
       if (!includeSensitive) {
         healthCache = snap;
         healthVersion += 1;

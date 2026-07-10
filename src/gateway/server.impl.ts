@@ -1118,6 +1118,7 @@ export async function startGatewayServer(
       getRuntimeSnapshot,
       getEventLoopHealth: readinessEventLoopHealth.snapshot,
       getConfigReloaderHotReloadStatus: () => runtimeState?.configReloader.hotReloadStatus?.(),
+      getHostingReadiness: async () => (await getReadiness()).hosting!,
     });
   const stopRegisteredPostReadySidecars = async () => {
     const postReadySidecars = runtimeState.postReadySidecars;
