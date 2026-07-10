@@ -4,7 +4,11 @@ import type { ChannelId } from "../../channels/plugins/index.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.js";
 import { buildHostingReadiness } from "../../hosting/readiness.js";
 import type { ChannelManager, ChannelRuntimeSnapshot } from "../server-channels.js";
-import { createReadinessChecker, mergeGatewayAndHostingReadiness } from "./readiness.js";
+import {
+  createReadinessChecker,
+  mergeGatewayAndHostingReadiness,
+  withReadinessEvaluationTimeout,
+} from "./readiness.js";
 
 /**
  * Readiness checker tests for startup grace, channel health, and stale sockets.
@@ -516,5 +520,19 @@ describe("mergeGatewayAndHostingReadiness", () => {
       "GatewayResponding",
       "PluginsLoaded",
     ]);
+  });
+});
+
+describe("withReadinessEvaluationTimeout", () => {
+  it("rejects a readiness evaluation that never settles", async () => {
+    await expect(withReadinessEvaluationTimeout(new Promise<never>(() => {}), 5)).rejects.toThrow(
+      "readiness evaluation exceeded 5ms",
+    );
+  });
+
+  it("returns a readiness evaluation that settles inside the outer budget", async () => {
+    await expect(withReadinessEvaluationTimeout(Promise.resolve("ready"), 5)).resolves.toBe(
+      "ready",
+    );
   });
 });

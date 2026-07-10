@@ -140,6 +140,7 @@ import {
   createReadinessChecker,
   mergeGatewayAndHostingReadiness,
   type ReadinessResult,
+  withReadinessEvaluationTimeout,
 } from "./server/readiness.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
@@ -930,20 +931,21 @@ export async function startGatewayServer(
   const resolveNodeModeReadinessEvidence = createNodeModeReadinessEvidenceResolver();
   const resolvePluginReadiness = createPluginReadinessResolver();
   const resolveWorkspaceReadinessEvidence = createWorkspaceReadinessEvidenceResolver();
-  const getReadiness = async (): Promise<ReadinessResult & HostingReadinessResult> => {
+  const evaluateReadiness = async (): Promise<ReadinessResult & HostingReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
     const config = getRuntimeConfig();
     const profile = resolveHostingProfile({ config, env: process.env });
     const builtInProfile = resolveBuiltInHostingProfile(profile, config);
-    const workspace = await resolveWorkspaceReadinessEvidence({ config, env: process.env });
-    const pluginConditions = await resolvePluginReadiness({ registry: pluginRegistry, config });
-    const nodeMode =
+    const [workspace, pluginConditions, nodeMode] = await Promise.all([
+      resolveWorkspaceReadinessEvidence({ config, env: process.env }),
+      resolvePluginReadiness({ registry: pluginRegistry, config }),
       builtInProfile === "node-mode"
-        ? await resolveNodeModeReadinessEvidence({
+        ? resolveNodeModeReadinessEvidence({
             config,
             connectedNodes: listConnectedNodesForReadiness(),
           })
-        : undefined;
+        : Promise.resolve(undefined),
+    ]);
     const hostingReadiness = buildHostingReadiness({
       profile,
       config,
@@ -966,6 +968,8 @@ export async function startGatewayServer(
     });
     return mergeGatewayAndHostingReadiness(gatewayReadiness, hostingReadiness);
   };
+  const getReadiness = (): Promise<ReadinessResult & HostingReadinessResult> =>
+    withReadinessEvaluationTimeout(evaluateReadiness());
   log.info("starting HTTP server...");
   let currentPluginRegistryGatewayContext: GatewayRequestContext | undefined;
   const watchNodeRequestHandler: {

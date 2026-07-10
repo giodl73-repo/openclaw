@@ -58,12 +58,7 @@ describe("createPluginReadinessResolver", () => {
   });
 
   it("turns timeout and thrown errors into stable unknown evidence", async () => {
-    const timeoutCriterion = registration(
-      ({ signal }) =>
-        new Promise((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(new Error("aborted")));
-        }),
-    );
+    const timeoutCriterion = registration(() => new Promise(() => {}));
     const resolveTimeout = createPluginReadinessResolver({ timeoutMs: 5, cacheTtlMs: 0 });
     const [timedOut] = await resolveTimeout({
       registry: { readinessCriteria: [timeoutCriterion] },
