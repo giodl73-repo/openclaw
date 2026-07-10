@@ -123,6 +123,25 @@ describe("buildHostingReadiness", () => {
     expect(readiness.failures).toContain("TrustedProxySourcesMissing");
   });
 
+  it("allows a same-host reverse proxy to use loopback", () => {
+    const readiness = buildHostingReadiness({
+      profile: "reverse-proxy",
+      config: {
+        gateway: {
+          mode: "local",
+          bind: "loopback",
+          trustedProxies: ["127.0.0.1"],
+          auth: { mode: "trusted-proxy", trustedProxy: { userHeader: "x-user" } },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+    });
+
+    expect(readiness.ready).toBe(true);
+  });
+
   it("reports managed ready only with observed lifecycle readiness", () => {
     const readiness = buildHostingReadiness({
       profile: "managed",

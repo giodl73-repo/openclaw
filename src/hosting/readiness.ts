@@ -306,7 +306,7 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
     buildGatewayCondition(input.gateway),
     buildPluginCondition(input.plugins),
   ];
-  if (profile !== "local") {
+  if (profile === "container") {
     conditions.push(buildContainerCondition(input));
   }
   if (profile === "reverse-proxy" || profile === "managed") {
