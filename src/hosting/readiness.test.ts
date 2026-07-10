@@ -85,6 +85,25 @@ describe("buildHostingReadiness", () => {
     expect(readiness.failures).toContain("ContainerGatewayLoopback");
   });
 
+  it("uses effective startup bind instead of stale persisted bind", () => {
+    const readiness = buildHostingReadiness({
+      profile: "container",
+      config: { gateway: { mode: "local", bind: "loopback" } },
+      runtimeGateway: {
+        mode: "local",
+        bind: "lan",
+        port: 18789,
+        authMode: "token",
+        trustedProxyCount: 0,
+      },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+    });
+
+    expect(readiness.ready).toBe(true);
+  });
+
   it("requires complete trusted-proxy posture for reverse-proxy", () => {
     const readiness = buildHostingReadiness({
       profile: "reverse-proxy",

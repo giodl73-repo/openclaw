@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { GatewayBindMode } from "../config/types.gateway.js";
 
 export const HOSTING_PROFILE_IDS = ["local", "container", "reverse-proxy", "managed"] as const;
 export type HostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
@@ -56,6 +57,14 @@ export type HostingReadinessInput = {
   plugins?: HostingPluginReadinessInput;
   coreConditions?: HostingReadinessCondition[];
   managedLifecycle?: "ready" | "not-ready" | "not-checked";
+  runtimeGateway?: {
+    mode: "local";
+    bind: GatewayBindMode;
+    port: number;
+    authMode: string;
+    trustedProxyUserHeader?: string;
+    trustedProxyCount: number;
+  };
 };
 
 export function buildUnobservedGatewayConditions(): HostingReadinessCondition[] {
@@ -181,8 +190,9 @@ function buildGatewayCondition(
   };
 }
 
-function buildContainerCondition(config: OpenClawConfig | undefined): HostingReadinessCondition {
-  if ((config?.gateway?.mode ?? "local") !== "local") {
+function buildContainerCondition(input: HostingReadinessInput): HostingReadinessCondition {
+  const mode = input.runtimeGateway?.mode ?? input.config?.gateway?.mode ?? "local";
+  if (mode !== "local") {
     return {
       type: "ContainerStateReady",
       status: "False",
@@ -190,7 +200,7 @@ function buildContainerCondition(config: OpenClawConfig | undefined): HostingRea
       message: "Container profile requires this process to host the Gateway locally.",
     };
   }
-  const bind = config?.gateway?.bind ?? "loopback";
+  const bind = input.runtimeGateway?.bind ?? input.config?.gateway?.bind ?? "loopback";
   if (bind === "loopback") {
     return {
       type: "ContainerStateReady",
@@ -203,13 +213,14 @@ function buildContainerCondition(config: OpenClawConfig | undefined): HostingRea
     type: "ContainerStateReady",
     status: "True",
     reason: "ContainerStateReady",
-    message: `Gateway is hosted locally with ${bind} bind on port ${config?.gateway?.port ?? 18789}.`,
+    message: `Gateway is hosted locally with ${bind} bind on port ${input.runtimeGateway?.port ?? input.config?.gateway?.port ?? 18789}.`,
   };
 }
 
-function buildTrustedProxyCondition(config: OpenClawConfig | undefined): HostingReadinessCondition {
-  const auth = config?.gateway?.auth;
-  if (auth?.mode !== "trusted-proxy") {
+function buildTrustedProxyCondition(input: HostingReadinessInput): HostingReadinessCondition {
+  const auth = input.config?.gateway?.auth;
+  const authMode = input.runtimeGateway?.authMode ?? auth?.mode;
+  if (authMode !== "trusted-proxy") {
     return {
       type: "TrustedProxyReady",
       status: "False",
@@ -217,7 +228,8 @@ function buildTrustedProxyCondition(config: OpenClawConfig | undefined): Hosting
       message: "Reverse-proxy profile requires gateway.auth.mode=trusted-proxy.",
     };
   }
-  const userHeader = auth.trustedProxy?.userHeader?.trim();
+  const userHeader =
+    input.runtimeGateway?.trustedProxyUserHeader?.trim() ?? auth?.trustedProxy?.userHeader?.trim();
   if (!userHeader) {
     return {
       type: "TrustedProxyReady",
@@ -226,7 +238,8 @@ function buildTrustedProxyCondition(config: OpenClawConfig | undefined): Hosting
       message: "Trusted-proxy auth requires a non-empty userHeader.",
     };
   }
-  const trustedProxyCount = config?.gateway?.trustedProxies?.length ?? 0;
+  const trustedProxyCount =
+    input.runtimeGateway?.trustedProxyCount ?? input.config?.gateway?.trustedProxies?.length ?? 0;
   if (trustedProxyCount === 0) {
     return {
       type: "TrustedProxyReady",
@@ -294,10 +307,10 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
     buildPluginCondition(input.plugins),
   ];
   if (profile !== "local") {
-    conditions.push(buildContainerCondition(input.config));
+    conditions.push(buildContainerCondition(input));
   }
   if (profile === "reverse-proxy" || profile === "managed") {
-    conditions.push(buildTrustedProxyCondition(input.config));
+    conditions.push(buildTrustedProxyCondition(input));
   }
   if (profile === "managed") {
     conditions.push(buildManagedLifecycleCondition(input.managedLifecycle));

@@ -27,6 +27,7 @@ import {
 import { mergeGatewayTailscaleConfig } from "./startup-auth.js";
 
 type GatewayRuntimeConfig = {
+  bindMode: GatewayBindMode;
   bindHost: string;
   controlUiEnabled: boolean;
   openAiChatCompletionsEnabled: boolean;
@@ -180,6 +181,7 @@ export async function resolveGatewayRuntimeConfig(params: {
   }
 
   return {
+    bindMode,
     bindHost,
     controlUiEnabled,
     openAiChatCompletionsEnabled,

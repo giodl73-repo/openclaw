@@ -782,6 +782,7 @@ export async function startGatewayServer(
     });
   });
   const {
+    bindMode,
     bindHost,
     controlUiEnabled,
     openAiChatCompletionsEnabled,
@@ -917,6 +918,14 @@ export async function startGatewayServer(
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRegistry),
+      runtimeGateway: {
+        mode: "local",
+        bind: bindMode,
+        port,
+        authMode: getResolvedAuth().mode,
+        trustedProxyUserHeader: getResolvedAuth().trustedProxy?.userHeader,
+        trustedProxyCount: config.gateway?.trustedProxies?.length ?? 0,
+      },
     });
     return mergeGatewayAndHostingReadiness(gatewayReadiness, hostingReadiness);
   };
