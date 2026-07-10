@@ -2204,9 +2204,11 @@ export type OpenClawPluginCliCommandDescriptor = {
   name: string;
   description: string;
   hasSubcommands: boolean;
+  /** Optional advisory read/mutation, confirmation, and risk metadata. */
   effectProfile?: CommandEffectProfile;
+  /** Catalog exposure; omitted descriptors default to public inventory. */
   commandExposure?: CommandExposure;
-  /** Hide the placeholder from generated catalogs while preserving command ownership metadata. */
+  /** Hide the command from public inventory while preserving CLI ownership and registration. */
   hidden?: boolean;
 };
 
