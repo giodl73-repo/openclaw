@@ -9,7 +9,11 @@ import { parseByteSize } from "../cli/parse-bytes.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
 import { base64UrlDecode, normalizeEd25519PublicKeyBase64Url } from "../infra/ed25519-signature.js";
 import { normalizeAgentId } from "../routing/session-key.js";
-import { HOSTING_PROFILE_IDS } from "../hosting/readiness.js";
+import {
+  HOSTING_PROFILE_IDS,
+  isBuiltInHostingProfileId,
+  isCustomHostingProfileId,
+} from "../hosting/readiness.js";
 import {
   isValidControlUiChatMessageMaxWidth,
   normalizeControlUiChatMessageMaxWidth,
@@ -75,9 +79,101 @@ const GatewayRemoteSchemaShape = {
 
 const GatewayRemoteConfigSchema = z.object(GatewayRemoteSchemaShape).strict().optional();
 
+const HostingProfileIdSchema = z
+  .string()
+  .transform((value) => value.trim().toLowerCase())
+  .refine((value) => isBuiltInHostingProfileId(value) || isCustomHostingProfileId(value), {
+    message:
+      'Expected a built-in hosting profile or a namespaced custom profile such as "acme.managed"',
+  });
+
+const HostingCustomConditionTypeSchema = z
+  .string()
+  .min(1)
+  .transform((value) => value.trim())
+  .refine((value) => isCustomHostingProfileId(value), {
+    message: 'Custom readiness condition types must be namespaced, for example "acme.backupReady"',
+  });
+
+const HostingReadinessCriterionSchema = z
+  .object({
+    status: z.union([z.literal("True"), z.literal("False"), z.literal("Unknown")]).optional(),
+    reason: z.string().min(1).optional(),
+    message: z.string().min(1).optional(),
+  })
+  .strict();
+
+const HostingReadinessReferencesSchema = z
+  .object({
+    requiredCriteria: z.array(HostingCustomConditionTypeSchema).optional(),
+    optionalCriteria: z.array(HostingCustomConditionTypeSchema).optional(),
+  })
+  .strict();
+
+const HostingCustomProfileSchema = z
+  .object({
+    extends: z.enum(HOSTING_PROFILE_IDS).optional(),
+    label: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    maturity: z.union([z.literal("supported"), z.literal("preview")]).optional(),
+    readiness: HostingReadinessReferencesSchema.optional(),
+  })
+  .strict();
+
 const HostingSchema = z
   .object({
-    profile: z.enum(HOSTING_PROFILE_IDS).optional(),
+    profile: HostingProfileIdSchema.optional(),
+    criteria: z.record(HostingCustomConditionTypeSchema, HostingReadinessCriterionSchema).optional(),
+    profiles: z.record(HostingProfileIdSchema, HostingCustomProfileSchema).optional(),
+    readiness: HostingReadinessReferencesSchema.optional(),
+  })
+  .superRefine((hosting, ctx) => {
+    if (hosting.profile && !isBuiltInHostingProfileId(hosting.profile)) {
+      const profiles = hosting.profiles ?? {};
+      if (!profiles[hosting.profile]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profile"],
+          message: `Custom hosting profile "${hosting.profile}" must be declared under hosting.profiles.`,
+        });
+      }
+    }
+    for (const profile of Object.keys(hosting.profiles ?? {})) {
+      if (isBuiltInHostingProfileId(profile)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["profiles", profile],
+          message: `Built-in hosting profile "${profile}" cannot be redefined.`,
+        });
+      }
+    }
+    const criteria = hosting.criteria ?? {};
+    for (const criterionId of [
+      ...(hosting.readiness?.requiredCriteria ?? []),
+      ...(hosting.readiness?.optionalCriteria ?? []),
+    ]) {
+      if (!criteria[criterionId]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["readiness"],
+          message: `Readiness criterion "${criterionId}" must be declared under hosting.criteria.`,
+        });
+      }
+    }
+    for (const [profile, profileConfig] of Object.entries(hosting.profiles ?? {})) {
+      for (const criterionId of [
+        ...(profileConfig.readiness?.requiredCriteria ?? []),
+        ...(profileConfig.readiness?.optionalCriteria ?? []),
+      ]) {
+        if (!criteria[criterionId]) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["profiles", profile, "readiness"],
+            message: `Readiness criterion "${criterionId}" must be declared under hosting.criteria.`,
+          });
+        }
+      }
+    }
   })
   .strict()
   .optional();

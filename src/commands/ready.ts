@@ -29,6 +29,7 @@ function buildGatewayUnavailableReadiness(params: {
 }): HostingReadinessResult {
   return buildHostingReadiness({
     profile: resolveHostingProfile({ config: params.config, env: process.env }),
+    config: params.config,
     expectedProfile: params.expectedProfile,
     configLoaded: true,
     gateway: "unavailable",
@@ -67,6 +68,7 @@ export async function readyCommand(opts: ReadyCommandOptions, runtime: RuntimeEn
       summary.readiness ??
       buildHostingReadiness({
         profile: resolveHostingProfile({ config: cfg, env: process.env }),
+        config: cfg,
         configLoaded: true,
         gateway: "responding",
         workspaceUsable: true,

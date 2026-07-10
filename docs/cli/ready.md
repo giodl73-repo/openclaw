@@ -80,6 +80,44 @@ Use `--expect-profile` in host manifests when the host must prove it started
 the intended profile. A mismatch returns `ready: false` and the stable failure
 reason `ProfileMismatch`; the flag does not select the profile.
 
+## Custom profiles and conditions
+
+Custom profiles are declared under `hosting.profiles` and must use a namespaced
+id such as `acme.managed`. Built-in profile names cannot be redefined.
+Reusable custom criteria are declared once under `hosting.criteria`; profiles
+then reference those criteria as required or optional:
+
+```json
+{
+  "hosting": {
+    "profile": "acme.managed",
+    "criteria": {
+      "acme.backup-ready": {
+        "status": "True",
+        "reason": "BackupReady",
+        "message": "Backup volume restored."
+      },
+      "acme.telemetry-ready": {
+        "status": "False",
+        "reason": "TelemetryUnavailable"
+      }
+    },
+    "profiles": {
+      "acme.managed": {
+        "extends": "container",
+        "readiness": {
+          "requiredCriteria": ["acme.backup-ready"],
+          "optionalCriteria": ["acme.telemetry-ready"]
+        }
+      }
+    }
+  }
+}
+```
+
+Required criteria block `ready=true` when their status is `False`. Optional
+criteria appear in readiness output but do not block readiness.
+
 ## Node-mode readiness
 
 `node-mode` is the profile for a controlled execution node or cell. It uses the

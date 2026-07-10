@@ -64,7 +64,7 @@ openclaw gateway run --hosting-profile container
   Read the Gateway password from a file.
 </ParamField>
 <ParamField path="--hosting-profile <profile>" type="string">
-  Hosting profile for readiness evaluation: `local`, `container`, `reverse-proxy`, `managed`, or `node-mode`.
+  Hosting profile for readiness evaluation: `local`, `container`, `reverse-proxy`, `managed`, `node-mode`, or a declared custom profile such as `acme.managed`.
 </ParamField>
 For controlled execution nodes, start with `--hosting-profile node-mode` and use
 `openclaw ready --expect-profile node-mode` as the host readiness assertion.

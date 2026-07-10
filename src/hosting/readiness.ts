@@ -8,13 +8,15 @@ export const HOSTING_PROFILE_IDS = [
   "node-mode",
 ] as const;
 
-export type HostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
+export type BuiltInHostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
+export type HostingProfileId = BuiltInHostingProfileId | (string & {});
 
 export type HostingProfileDefinition = {
   id: HostingProfileId;
   label: string;
   description: string;
   maturity: "supported" | "preview";
+  extends?: BuiltInHostingProfileId;
 };
 
 export type HostingReadinessConditionType =
@@ -27,7 +29,8 @@ export type HostingReadinessConditionType =
   | "ControlledTargetsReady"
   | "CommandApprovalReady"
   | "ControlChannelReady"
-  | "StateReady";
+  | "StateReady"
+  | (string & {});
 
 export type HostingReadinessConditionStatus = "True" | "False" | "Unknown";
 
@@ -36,6 +39,7 @@ export type HostingReadinessCondition = {
   status: HostingReadinessConditionStatus;
   reason: string;
   message: string;
+  blocking?: boolean;
 };
 
 export type HostingReadinessResult = {
@@ -86,11 +90,32 @@ export type LocalHostingReadinessInput = {
   workspaceUsable: boolean;
   plugins?: HostingPluginReadinessInput;
   nodeMode?: NodeModeReadinessEvidence;
+  config?: OpenClawConfig;
 };
 
 export const HOSTING_PROFILE_ENV = "OPENCLAW_HOSTING_PROFILE";
 
-export const HOSTING_PROFILE_DEFINITIONS: Record<HostingProfileId, HostingProfileDefinition> = {
+export type HostingReadinessCriterionConfig = {
+  status?: HostingReadinessConditionStatus;
+  reason?: string;
+  message?: string;
+};
+
+export type HostingCustomProfileConfig = {
+  extends?: BuiltInHostingProfileId;
+  label?: string;
+  description?: string;
+  maturity?: "supported" | "preview";
+  readiness?: {
+    requiredCriteria?: string[];
+    optionalCriteria?: string[];
+  };
+};
+
+export const HOSTING_PROFILE_DEFINITIONS: Record<
+  BuiltInHostingProfileId,
+  HostingProfileDefinition
+> = {
   local: {
     id: "local",
     label: "Local",
@@ -123,18 +148,62 @@ export const HOSTING_PROFILE_DEFINITIONS: Record<HostingProfileId, HostingProfil
   },
 };
 
+export function isBuiltInHostingProfileId(value: unknown): value is BuiltInHostingProfileId {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return HOSTING_PROFILE_IDS.includes(normalized as BuiltInHostingProfileId);
+}
+
+export function isCustomHostingProfileId(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/.test(normalized);
+}
+
 export function parseHostingProfileId(value: unknown): HostingProfileId | null {
   if (typeof value !== "string") {
     return null;
   }
   const normalized = value.trim().toLowerCase();
-  return HOSTING_PROFILE_IDS.includes(normalized as HostingProfileId)
-    ? (normalized as HostingProfileId)
+  return isBuiltInHostingProfileId(normalized) || isCustomHostingProfileId(normalized)
+    ? normalized
     : null;
 }
 
 export function formatHostingProfileIds(): string {
-  return HOSTING_PROFILE_IDS.map((profile) => `"${profile}"`).join(", ");
+  return `${HOSTING_PROFILE_IDS.map((profile) => `"${profile}"`).join(", ")}, or a declared namespaced custom profile such as "acme.managed"`;
+}
+
+function customProfileExists(config: OpenClawConfig | undefined, profile: HostingProfileId): boolean {
+  return Boolean(config?.hosting?.profiles?.[profile]);
+}
+
+export function resolveBaseHostingProfile(params: {
+  config?: OpenClawConfig;
+  profile: HostingProfileId;
+}): BuiltInHostingProfileId {
+  if (isBuiltInHostingProfileId(params.profile)) {
+    return params.profile;
+  }
+  return params.config?.hosting?.profiles?.[params.profile]?.extends ?? "local";
+}
+
+function parseConfiguredHostingProfile(params: {
+  config?: OpenClawConfig;
+  value: unknown;
+}): HostingProfileId | null {
+  const profile = parseHostingProfileId(params.value);
+  if (!profile) {
+    return null;
+  }
+  if (isBuiltInHostingProfileId(profile) || customProfileExists(params.config, profile)) {
+    return profile;
+  }
+  return null;
 }
 
 export function resolveHostingProfile(params: {
@@ -143,9 +212,9 @@ export function resolveHostingProfile(params: {
   override?: unknown;
 } = {}): HostingProfileId {
   return (
-    parseHostingProfileId(params.override) ??
-    parseHostingProfileId(params.env?.[HOSTING_PROFILE_ENV]) ??
-    parseHostingProfileId(params.config?.hosting?.profile) ??
+    parseConfiguredHostingProfile({ config: params.config, value: params.override }) ??
+    parseConfiguredHostingProfile({ config: params.config, value: params.env?.[HOSTING_PROFILE_ENV] }) ??
+    parseConfiguredHostingProfile({ config: params.config, value: params.config?.hosting?.profile }) ??
     "local"
   );
 }
@@ -165,8 +234,61 @@ function resolvePluginFailures(plugins: HostingPluginReadinessInput | undefined)
 
 function buildFailureReasons(conditions: HostingReadinessCondition[]): string[] {
   return Array.from(
-    new Set(conditions.filter((entry) => entry.status === "False").map((entry) => entry.reason)),
+    new Set(
+      conditions
+        .filter((entry) => entry.status === "False" && entry.blocking !== false)
+        .map((entry) => entry.reason),
+    ),
   );
+}
+
+function normalizeCriterionCondition(params: {
+  id: string;
+  criterion: HostingReadinessCriterionConfig | undefined;
+  blocking: boolean;
+}): HostingReadinessCondition {
+  const criterion = params.criterion;
+  if (!criterion) {
+    return {
+      type: params.id,
+      status: "False",
+      reason: "CriterionMissing",
+      message: `Readiness criterion ${params.id} is referenced but not defined.`,
+      blocking: params.blocking,
+    };
+  }
+  return {
+    type: params.id,
+    status: criterion.status ?? "Unknown",
+    reason: criterion.reason ?? params.id,
+    message:
+      criterion.message ?? `${params.id} readiness criterion was supplied by hosting config.`,
+    blocking: params.blocking,
+  };
+}
+
+function resolveCustomReadinessConditions(input: LocalHostingReadinessInput) {
+  const criteria = input.config?.hosting?.criteria ?? {};
+  const globalRequired = input.config?.hosting?.readiness?.requiredCriteria ?? [];
+  const globalOptional = input.config?.hosting?.readiness?.optionalCriteria ?? [];
+  const profileReadiness =
+    input.profile && !isBuiltInHostingProfileId(input.profile)
+      ? input.config?.hosting?.profiles?.[input.profile]?.readiness
+      : undefined;
+  return [
+    ...globalRequired.map((id) =>
+      normalizeCriterionCondition({ id, criterion: criteria[id], blocking: true }),
+    ),
+    ...globalOptional.map((id) =>
+      normalizeCriterionCondition({ id, criterion: criteria[id], blocking: false }),
+    ),
+    ...(profileReadiness?.requiredCriteria ?? []).map((id) =>
+      normalizeCriterionCondition({ id, criterion: criteria[id], blocking: true }),
+    ),
+    ...(profileReadiness?.optionalCriteria ?? []).map((id) =>
+      normalizeCriterionCondition({ id, criterion: criteria[id], blocking: false }),
+    ),
+  ];
 }
 
 export function buildLocalHostingReadiness(
@@ -370,10 +492,12 @@ function buildNodeModeReadinessConditions(
 
 export function buildHostingReadiness(input: LocalHostingReadinessInput): HostingReadinessResult {
   const base = buildLocalHostingReadiness(input);
-  if (base.profile !== "node-mode") {
-    return base;
-  }
-  const conditions = [...base.conditions, ...buildNodeModeReadinessConditions(input)];
+  const baseProfile = resolveBaseHostingProfile({ config: input.config, profile: base.profile });
+  const conditions = [
+    ...base.conditions,
+    ...(baseProfile === "node-mode" ? buildNodeModeReadinessConditions(input) : []),
+    ...resolveCustomReadinessConditions(input),
+  ];
   const failures = buildFailureReasons(conditions);
   return {
     ...base,

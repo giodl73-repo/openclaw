@@ -91,8 +91,38 @@ describe("buildLocalHostingReadiness", () => {
     expect(resolveHostingProfile()).toBe("local");
   });
 
+  it("resolves declared custom profiles from config and env", () => {
+    const config = {
+      hosting: {
+        profile: "acme.managed",
+        profiles: {
+          "acme.managed": {
+            extends: "container" as const,
+          },
+        },
+      },
+    };
+
+    expect(resolveHostingProfile({ config })).toBe("acme.managed");
+    expect(
+      resolveHostingProfile({
+        config,
+        env: { OPENCLAW_HOSTING_PROFILE: "acme.managed" } as NodeJS.ProcessEnv,
+      }),
+    ).toBe("acme.managed");
+  });
+
+  it("falls back to local for undeclared custom profile selections", () => {
+    expect(
+      resolveHostingProfile({
+        config: { hosting: { profile: "acme.missing" } },
+      }),
+    ).toBe("local");
+  });
+
   it("parses only built-in profile ids", () => {
     expect(parseHostingProfileId("node-mode")).toBe("node-mode");
+    expect(parseHostingProfileId("acme.managed")).toBe("acme.managed");
     expect(parseHostingProfileId("bad-profile")).toBeNull();
   });
 
@@ -265,5 +295,130 @@ describe("buildLocalHostingReadiness", () => {
     );
     expect(local.ready).toBe(true);
     expect(container.ready).toBe(true);
+  });
+
+  it("adds custom profile readiness conditions without redefining built-in checks", () => {
+    const readiness = buildHostingReadiness({
+      profile: "acme.managed",
+      config: {
+        hosting: {
+          criteria: {
+            "acme.backup-ready": {
+              status: "True",
+              reason: "BackupReady",
+              message: "Backup volume restored.",
+            },
+          },
+          profiles: {
+            "acme.managed": {
+              extends: "container",
+              readiness: {
+                requiredCriteria: ["acme.backup-ready"],
+              },
+            },
+          },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      workspaceUsable: true,
+    });
+
+    expect(readiness).toMatchObject({
+      profile: "acme.managed",
+      ready: true,
+      failures: [],
+    });
+    expect(readiness.conditions.find((condition) => condition.type === "ProfileSelected"))
+      .toMatchObject({
+        status: "True",
+      });
+    expect(readiness.conditions.find((condition) => condition.type === "acme.backup-ready"))
+      .toMatchObject({
+        status: "True",
+        reason: "BackupReady",
+      });
+  });
+
+  it("supports warning-only custom readiness conditions", () => {
+    const readiness = buildHostingReadiness({
+      profile: "container",
+      config: {
+        hosting: {
+          criteria: {
+            "acme.telemetry-ready": {
+              status: "False",
+              reason: "TelemetryUnavailable",
+              message: "Telemetry sink is unavailable.",
+            },
+          },
+          readiness: {
+            optionalCriteria: ["acme.telemetry-ready"],
+          },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      workspaceUsable: true,
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(readiness.failures).toEqual([]);
+    expect(readiness.conditions.find((condition) => condition.type === "acme.telemetry-ready"))
+      .toMatchObject({
+        status: "False",
+        reason: "TelemetryUnavailable",
+        blocking: false,
+      });
+  });
+
+  it("blocks readiness on required custom conditions", () => {
+    const readiness = buildHostingReadiness({
+      profile: "container",
+      config: {
+        hosting: {
+          criteria: {
+            "acme.storage-ready": {
+              status: "False",
+              reason: "StorageUnavailable",
+              message: "Storage is unavailable.",
+            },
+          },
+          readiness: {
+            requiredCriteria: ["acme.storage-ready"],
+          },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      workspaceUsable: true,
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.failures).toEqual(["StorageUnavailable"]);
+  });
+
+  it("blocks readiness when a referenced criterion is missing", () => {
+    const readiness = buildHostingReadiness({
+      profile: "container",
+      config: {
+        hosting: {
+          readiness: {
+            requiredCriteria: ["acme.missing-ready"],
+          },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      workspaceUsable: true,
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.failures).toEqual(["CriterionMissing"]);
+    expect(readiness.conditions.find((condition) => condition.type === "acme.missing-ready"))
+      .toMatchObject({
+        status: "False",
+        reason: "CriterionMissing",
+      });
   });
 });

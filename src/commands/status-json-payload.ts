@@ -87,6 +87,7 @@ export function buildStatusJsonPayload(params: {
       : undefined) ??
     buildHostingReadiness({
       profile: resolveHostingProfile({ config: params.surface.cfg, env: process.env }),
+      config: params.surface.cfg,
       configLoaded: true,
       gateway: params.surface.gatewayReachable ? "responding" : "unavailable",
       workspaceUsable: true,

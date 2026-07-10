@@ -98,7 +98,10 @@ describe("readyCommand", () => {
     await readyCommand({ expectProfile: "bad-profile" as never }, runtime as never);
 
     expect(runtime.error).toHaveBeenCalledWith(
-      'Invalid --expect-profile. Use "local", "container", "reverse-proxy", "managed", "node-mode".',
+      expect.stringContaining("Invalid --expect-profile."),
+    );
+    expect(runtime.error).toHaveBeenCalledWith(
+      expect.stringContaining('declared namespaced custom profile such as "acme.managed"'),
     );
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(callGatewayMock).not.toHaveBeenCalled();

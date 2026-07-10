@@ -577,6 +577,7 @@ export async function getStatusSummary(
     runtimeVersion: resolveRuntimeServiceVersion(process.env),
     readiness: buildHostingReadiness({
       profile,
+      config: cfg,
       configLoaded: true,
       gateway: "not-checked",
       workspaceUsable,

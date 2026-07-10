@@ -39,8 +39,17 @@ import type { ToolsConfig } from "./types.tools.js";
 import type { ProxyConfig } from "./zod-schema.proxy.js";
 
 export type HostingConfig = {
-  /** Built-in hosting profile selected for runtime readiness. Defaults to local. */
+  /** Built-in or declared custom hosting profile selected for runtime readiness. Defaults to local. */
   profile?: import("../hosting/readiness.js").HostingProfileId;
+  /** Reusable custom readiness criteria. Keys must be namespaced, for example "acme.backup-ready". */
+  criteria?: Record<string, import("../hosting/readiness.js").HostingReadinessCriterionConfig>;
+  /** Declared custom hosting profiles. Keys must be namespaced, for example "acme.managed". */
+  profiles?: Record<string, import("../hosting/readiness.js").HostingCustomProfileConfig>;
+  /** Reusable criteria appended to every selected hosting profile. */
+  readiness?: {
+    requiredCriteria?: string[];
+    optionalCriteria?: string[];
+  };
 };
 
 /** One persisted suppression for a known security audit finding. */

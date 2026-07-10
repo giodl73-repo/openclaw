@@ -738,6 +738,7 @@ export async function getHealthSnapshot(params?: {
     durationMs: Date.now() - start,
     readiness: buildHostingReadiness({
       profile,
+      config: cfg,
       configLoaded: true,
       gateway: "responding",
       workspaceUsable,
