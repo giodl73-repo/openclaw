@@ -2391,6 +2391,8 @@ export type OpenClawPluginReadinessResult = {
 export type OpenClawPluginReadinessCriterion = {
   /** Stable identifier local to this plugin. Core publishes it as plugin.<plugin-id>.<id>. */
   id: string;
+  /** Human-readable purpose shown when enumerating the active provider catalog. */
+  description: string;
   check: (ctx: {
     config: OpenClawConfig;
     pluginConfig?: Record<string, unknown>;

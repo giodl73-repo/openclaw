@@ -25,6 +25,7 @@ describe("plugin readiness registration", () => {
     });
     const criterion = {
       id: "backend",
+      description: "Reports storage backend availability.",
       check: () => ({ status: "True" as const, reason: "Ready", message: "Ready." }),
     };
 
@@ -35,6 +36,9 @@ describe("plugin readiness registration", () => {
       expect.objectContaining({
         id: "plugin.storage.backend",
         pluginId: "storage",
+        criterion: expect.objectContaining({
+          description: "Reports storage backend availability.",
+        }),
         pluginConfig: { endpoint: "https://storage.example" },
       }),
     ]);

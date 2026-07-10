@@ -193,6 +193,7 @@ Readiness criteria let a plugin report whether a dependency it owns is usable:
 ```ts
 api.registerReadinessCriterion({
   id: "backend",
+  description: "Reports whether the plugin backend can accept work.",
   async check({ pluginConfig, signal }) {
     const reachable = await probeBackend(pluginConfig, { signal });
     return reachable
@@ -203,7 +204,8 @@ api.registerReadinessCriterion({
 ```
 
 Core publishes this example as `plugin.<plugin-id>.backend`, evaluates it with a
-bounded timeout, and caches the result briefly. Plugin criteria are always
+bounded timeout, caches the result briefly, and retains the descriptor in the
+active Gateway-pinned provider catalog for enumeration. Plugin criteria are always
 advisory when registered. Only an operator-defined hosting profile can promote
 one to required; plugins cannot make their own checks block readiness.
 

@@ -8,6 +8,24 @@ import type { HostingReadinessCondition } from "./readiness.js";
 const DEFAULT_TIMEOUT_MS = 1_000;
 const DEFAULT_CACHE_TTL_MS = 5_000;
 
+export type PluginReadinessProviderDescriptor = {
+  id: string;
+  pluginId: string;
+  pluginName?: string;
+  description: string;
+};
+
+export function listPluginReadinessProviders(
+  registry: Pick<PluginRegistry, "readinessCriteria">,
+): PluginReadinessProviderDescriptor[] {
+  return registry.readinessCriteria.map((registration) => ({
+    id: registration.id,
+    pluginId: registration.pluginId,
+    ...(registration.pluginName ? { pluginName: registration.pluginName } : {}),
+    description: registration.criterion.description,
+  }));
+}
+
 type CachedEvaluation = {
   expiresAt: number;
   value: Promise<HostingReadinessCondition>;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
-import { createPluginReadinessResolver } from "./plugin-readiness.js";
+import { createPluginReadinessResolver, listPluginReadinessProviders } from "./plugin-readiness.js";
 
 function registration(
   check: PluginReadinessCriterionRegistration["criterion"]["check"],
@@ -8,12 +8,32 @@ function registration(
   return {
     id: "plugin.storage.backend",
     pluginId: "storage",
-    criterion: { id: "backend", check },
+    criterion: {
+      id: "backend",
+      description: "Reports storage backend availability.",
+      check,
+    },
     source: "/plugins/storage/index.js",
   };
 }
 
 describe("createPluginReadinessResolver", () => {
+  it("enumerates stable provider descriptors without exposing callbacks", () => {
+    const criterion = registration(() => ({
+      status: "True",
+      reason: "StorageReady",
+      message: "Storage is ready.",
+    }));
+
+    expect(listPluginReadinessProviders({ readinessCriteria: [criterion] })).toEqual([
+      {
+        id: "plugin.storage.backend",
+        pluginId: "storage",
+        description: "Reports storage backend availability.",
+      },
+    ]);
+  });
+
   it("evaluates registered criteria as advisory and coalesces cached calls", async () => {
     const check = vi.fn(() => ({
       status: "True" as const,
