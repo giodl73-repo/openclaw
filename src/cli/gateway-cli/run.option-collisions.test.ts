@@ -1342,17 +1342,11 @@ describe("gateway run option collisions", () => {
 
   it("rejects unsupported hosting profiles before gateway startup", async () => {
     await expect(
-      runGatewayCli([
-        "gateway",
-        "run",
-        "--hosting-profile",
-        "custom-host",
-        "--allow-unconfigured",
-      ]),
+      runGatewayCli(["gateway", "run", "--hosting-profile", "custom-host", "--allow-unconfigured"]),
     ).rejects.toThrow("__exit__:1");
 
     expect(runtimeErrors).toContain(
-      'Invalid --hosting-profile. Use "local", "container", "reverse-proxy", "managed".',
+      'Invalid --hosting-profile. Use "local", "container", "reverse-proxy".',
     );
     expect(startGatewayServer).not.toHaveBeenCalled();
   });

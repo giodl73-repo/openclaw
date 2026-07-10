@@ -1,8 +1,8 @@
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayBindMode } from "../config/types.gateway.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isLoopbackHost } from "../gateway/net.js";
 
-export const HOSTING_PROFILE_IDS = ["local", "container", "reverse-proxy", "managed"] as const;
+export const HOSTING_PROFILE_IDS = ["local", "container", "reverse-proxy"] as const;
 export type HostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
 
 export const DEFAULT_HOSTING_PROFILE: HostingProfileId = "local";
@@ -130,11 +130,13 @@ function resolveExplicitHostingProfile(
   return profile;
 }
 
-export function resolveHostingProfile(params: {
-  config?: OpenClawConfig;
-  env?: NodeJS.ProcessEnv;
-  override?: unknown;
-} = {}): HostingProfileId {
+export function resolveHostingProfile(
+  params: {
+    config?: OpenClawConfig;
+    env?: NodeJS.ProcessEnv;
+    override?: unknown;
+  } = {},
+): HostingProfileId {
   return (
     resolveExplicitHostingProfile(params.override, "gateway startup override") ??
     resolveExplicitHostingProfile(params.env?.[HOSTING_PROFILE_ENV], HOSTING_PROFILE_ENV) ??
@@ -317,7 +319,7 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
   if (profile === "container") {
     conditions.push(buildContainerCondition(input));
   }
-  if (profile === "reverse-proxy" || profile === "managed") {
+  if (profile === "reverse-proxy") {
     conditions.push(buildTrustedProxyCondition(input));
   }
   const failures = conditions

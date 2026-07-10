@@ -157,38 +157,17 @@ describe("buildHostingReadiness", () => {
 
     expect(readiness.ready).toBe(true);
   });
-
-  it("reports managed ready with trusted-proxy hosting requirements", () => {
-    const readiness = buildHostingReadiness({
-      profile: "managed",
-      config: {
-        gateway: {
-          mode: "local",
-          bind: "lan",
-          trustedProxies: ["10.0.0.1"],
-          auth: { mode: "trusted-proxy", trustedProxy: { userHeader: "x-user" } },
-        },
-      },
-      configLoaded: true,
-      gateway: "responding",
-      plugins: { errors: [] },
-    });
-
-    expect(readiness.ready).toBe(true);
-    expect(readiness.failures).toEqual([]);
-    expect(readiness.conditions.map((condition) => condition.type)).toContain("TrustedProxyReady");
-  });
 });
 
 describe("resolveHostingProfile", () => {
   it("uses startup override, environment, config, then local precedence", () => {
     expect(
       resolveHostingProfile({
-        override: "managed",
+        override: "reverse-proxy",
         env: { OPENCLAW_HOSTING_PROFILE: "container" },
-        config: { hosting: { profile: "reverse-proxy" } },
+        config: { hosting: { profile: "local" } },
       }),
-    ).toBe("managed");
+    ).toBe("reverse-proxy");
     expect(
       resolveHostingProfile({
         env: { OPENCLAW_HOSTING_PROFILE: "container" },

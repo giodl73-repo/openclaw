@@ -126,7 +126,7 @@ describe("refreshGatewayHealthSnapshot", () => {
   it("projects canonical Gateway hosting readiness into health", async () => {
     const healthState = await loadHealthState();
     const readiness = {
-      profile: "managed" as const,
+      profile: "reverse-proxy" as const,
       ready: true,
       conditions: [],
       failures: [],

@@ -28,24 +28,30 @@ docker_e2e_build_or_reuse \
 run_scenario() {
   local scenario="$1" profile="$2" bind="$3" expected_status="$4"
   local container_name="openclaw-hosting-profiles-${scenario}-$$"
+  local auth_args=(-e "OPENCLAW_GATEWAY_TOKEN=$TOKEN")
   local profile_args=()
+  local gateway_setup=""
   CONTAINER_NAMES+=("$container_name")
   if [ -n "$profile" ]; then
     profile_args=(-e "OPENCLAW_HOSTING_PROFILE=$profile")
+  fi
+  if [ "$scenario" = "reverse-proxy-ready" ]; then
+    auth_args=()
+    gateway_setup='node "$entry" config set --batch-json '\''[{"path":"gateway.auth.mode","value":"trusted-proxy"},{"path":"gateway.auth.trustedProxy.userHeader","value":"x-forwarded-user"},{"path":"gateway.trustedProxies","value":["127.0.0.1"]}]'\'' >/dev/null;'
   fi
 
   docker_e2e_harness_mount_args
   docker_e2e_docker_cmd run -d \
     "${DOCKER_E2E_HARNESS_ARGS[@]}" \
     --name "$container_name" \
-    -e "OPENCLAW_GATEWAY_TOKEN=$TOKEN" \
+    "${auth_args[@]}" \
     "${profile_args[@]}" \
     -e "OPENCLAW_SKIP_CHANNELS=1" \
     -e "OPENCLAW_SKIP_GMAIL_WATCHER=1" \
     -e "OPENCLAW_SKIP_CRON=1" \
     -e "OPENCLAW_SKIP_CANVAS_HOST=1" \
     "$IMAGE_NAME" \
-    bash -lc "set -euo pipefail; source scripts/lib/openclaw-e2e-instance.sh; entry=\"\$(openclaw_e2e_resolve_entrypoint)\"; node \"\$entry\" config set gateway.controlUi.enabled false >/dev/null; openclaw_e2e_exec_gateway \"\$entry\" $PORT $bind /tmp/hosting-profiles.log" \
+    bash -lc "set -euo pipefail; source scripts/lib/openclaw-e2e-instance.sh; entry=\"\$(openclaw_e2e_resolve_entrypoint)\"; node \"\$entry\" config set gateway.controlUi.enabled false >/dev/null; $gateway_setup openclaw_e2e_exec_gateway \"\$entry\" $PORT $bind /tmp/hosting-profiles.log" \
     >/dev/null
 
   if ! docker_e2e_wait_container_bash "$container_name" 180 0.5 \
@@ -61,5 +67,7 @@ run_scenario() {
 run_scenario local "" loopback 200
 run_scenario container-ready container lan 200
 run_scenario container-loopback container loopback 503
+run_scenario reverse-proxy-ready reverse-proxy loopback 200
+run_scenario reverse-proxy-auth-missing reverse-proxy loopback 503
 
 echo "Hosting profiles Docker E2E passed"

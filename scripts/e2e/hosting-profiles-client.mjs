@@ -39,6 +39,21 @@ if (scenario === "local") {
   assert.equal(condition("ContainerStateReady").requirement, "required");
   assert.equal(condition("ContainerStateReady").reason, "ContainerGatewayLoopback");
   assert.ok(body.failures.includes("ContainerGatewayLoopback"));
+} else if (scenario === "reverse-proxy-ready") {
+  assert.equal(response.status, 200);
+  assert.equal(body.profile, "reverse-proxy");
+  assert.equal(body.ready, true);
+  assert.equal(condition("TrustedProxyReady").status, "True");
+  assert.equal(condition("TrustedProxyReady").requirement, "required");
+  assert.deepEqual(body.failures, []);
+} else if (scenario === "reverse-proxy-auth-missing") {
+  assert.equal(response.status, 503);
+  assert.equal(body.profile, "reverse-proxy");
+  assert.equal(body.ready, false);
+  assert.equal(condition("TrustedProxyReady").status, "False");
+  assert.equal(condition("TrustedProxyReady").requirement, "required");
+  assert.equal(condition("TrustedProxyReady").reason, "TrustedProxyAuthMissing");
+  assert.ok(body.failures.includes("TrustedProxyAuthMissing"));
 } else {
   throw new Error(`unknown hosting profile scenario: ${scenario}`);
 }
