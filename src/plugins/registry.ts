@@ -180,6 +180,7 @@ import type {
   OpenClawPluginHookOptions,
   OpenClawPluginNodeHostCommand,
   OpenClawPluginNodeInvokePolicy,
+  OpenClawPluginReadinessCriterion,
   OpenClawPluginReloadRegistration,
   OpenClawPluginSecurityAuditCollector,
   MediaUnderstandingProviderPlugin,
@@ -1705,6 +1706,45 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     });
   };
 
+  const registerReadinessCriterion = (
+    record: PluginRecord,
+    criterion: OpenClawPluginReadinessCriterion,
+    pluginConfig?: Record<string, unknown>,
+  ) => {
+    const localId = criterion.id.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(localId)) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `readiness criterion id must use lowercase letters, numbers, dots, dashes, or underscores: ${criterion.id}`,
+      });
+      return;
+    }
+    const id = `plugin.${record.id}.${localId}`;
+    const existing = registry.readinessCriteria.find((entry) => entry.id === id);
+    if (existing) {
+      if (existing.pluginId === record.id) {
+        return;
+      }
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `readiness criterion already registered: ${id}`,
+      });
+      return;
+    }
+    registry.readinessCriteria.push({
+      id,
+      pluginId: record.id,
+      pluginName: record.name,
+      criterion: { ...criterion, id: localId },
+      pluginConfig,
+      source: record.source,
+    });
+  };
+
   const registerService = (record: PluginRecord, service: OpenClawPluginService) => {
     const id = service.id.trim();
     if (!id) {
@@ -2892,6 +2932,8 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 registerNodeInvokePolicy(record, policy, params.pluginConfig),
               registerSecurityAuditCollector: (collector) =>
                 registerSecurityAuditCollector(record, collector),
+              registerReadinessCriterion: (criterion) =>
+                registerReadinessCriterion(record, criterion, params.pluginConfig),
               registerInteractiveHandler: (registration) => {
                 const result = registerRegistryPluginInteractiveHandler(record.id, registration, {
                   pluginName: record.name,

@@ -3,12 +3,29 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isLoopbackHost } from "../gateway/net.js";
 
 export const HOSTING_PROFILE_IDS = ["local", "container", "reverse-proxy", "node-mode"] as const;
-export type HostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
+export type BuiltInHostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
+export type HostingProfileId = string;
 
-export const DEFAULT_HOSTING_PROFILE: HostingProfileId = "local";
+export const DEFAULT_HOSTING_PROFILE: BuiltInHostingProfileId = "local";
 export const HOSTING_PROFILE_ENV = "OPENCLAW_HOSTING_PROFILE";
+export const CUSTOM_HOSTING_PROFILE_PATTERN = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
 
-export type HostingReadinessConditionType =
+export const BUILT_IN_HOSTING_PROFILE_CRITERIA: Record<
+  BuiltInHostingProfileId,
+  readonly BuiltInHostingReadinessCriterionId[]
+> = {
+  local: [],
+  container: ["ContainerStateReady"],
+  "reverse-proxy": ["TrustedProxyReady"],
+  "node-mode": [
+    "NodePairingReady",
+    "ControlledTargetsReady",
+    "CommandApprovalReady",
+    "ControlChannelReady",
+  ],
+};
+
+export type BuiltInHostingReadinessCriterionId =
   | "GatewayStartupComplete"
   | "GatewayAcceptingWork"
   | "ChannelRuntimeReady"
@@ -25,6 +42,7 @@ export type HostingReadinessConditionType =
   | "ControlledTargetsReady"
   | "CommandApprovalReady"
   | "ControlChannelReady";
+export type HostingReadinessConditionType = BuiltInHostingReadinessCriterionId | (string & {});
 
 export type HostingReadinessConditionStatus = "True" | "False" | "Unknown";
 export type HostingReadinessRequirement = "required" | "advisory";
@@ -99,6 +117,7 @@ export type HostingReadinessInput = {
     trustedProxyCount: number;
   };
   nodeMode?: NodeModeReadinessEvidence;
+  additionalConditions?: HostingReadinessCondition[];
 };
 
 export function buildUnobservedGatewayConditions(): HostingReadinessCondition[] {
@@ -134,14 +153,25 @@ export function buildUnobservedGatewayConditions(): HostingReadinessCondition[] 
   ];
 }
 
-export function parseHostingProfileId(value: unknown): HostingProfileId | null {
+export function parseHostingProfileId(value: unknown): BuiltInHostingProfileId | null {
   if (typeof value !== "string") {
     return null;
   }
   const normalized = value.trim().toLowerCase();
-  return HOSTING_PROFILE_IDS.includes(normalized as HostingProfileId)
-    ? (normalized as HostingProfileId)
+  return HOSTING_PROFILE_IDS.includes(normalized as BuiltInHostingProfileId)
+    ? (normalized as BuiltInHostingProfileId)
     : null;
+}
+
+export function parseHostingProfileName(value: unknown): HostingProfileId | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (parseHostingProfileId(normalized)) {
+    return normalized;
+  }
+  return CUSTOM_HOSTING_PROFILE_PATTERN.test(normalized) ? normalized : null;
 }
 
 export function formatHostingProfileIds(): string {
@@ -151,17 +181,27 @@ export function formatHostingProfileIds(): string {
 function resolveExplicitHostingProfile(
   value: unknown,
   source: string,
+  config?: OpenClawConfig,
 ): HostingProfileId | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
-  const profile = parseHostingProfileId(value);
-  if (!profile) {
+  const normalized = parseHostingProfileName(value);
+  if (!normalized) {
     throw new Error(
       `Invalid hosting profile from ${source}: ${JSON.stringify(value)}. Expected ${formatHostingProfileIds()}.`,
     );
   }
-  return profile;
+  const builtIn = parseHostingProfileId(normalized);
+  if (builtIn) {
+    return builtIn;
+  }
+  if (config?.hosting?.profiles?.[normalized]) {
+    return normalized;
+  }
+  throw new Error(
+    `Invalid hosting profile from ${source}: ${JSON.stringify(value)}. Expected a built-in profile (${formatHostingProfileIds()}) or a profile defined in hosting.profiles.`,
+  );
 }
 
 export function resolveHostingProfile(
@@ -172,9 +212,28 @@ export function resolveHostingProfile(
   } = {},
 ): HostingProfileId {
   return (
-    resolveExplicitHostingProfile(params.override, "gateway startup override") ??
-    resolveExplicitHostingProfile(params.env?.[HOSTING_PROFILE_ENV], HOSTING_PROFILE_ENV) ??
-    resolveExplicitHostingProfile(params.config?.hosting?.profile, "hosting.profile") ??
+    resolveExplicitHostingProfile(params.override, "gateway startup override", params.config) ??
+    resolveExplicitHostingProfile(
+      params.env?.[HOSTING_PROFILE_ENV],
+      HOSTING_PROFILE_ENV,
+      params.config,
+    ) ??
+    resolveExplicitHostingProfile(
+      params.config?.hosting?.profile,
+      "hosting.profile",
+      params.config,
+    ) ??
+    DEFAULT_HOSTING_PROFILE
+  );
+}
+
+export function resolveBuiltInHostingProfile(
+  profile: HostingProfileId,
+  config?: OpenClawConfig,
+): BuiltInHostingProfileId {
+  return (
+    config?.hosting?.profiles?.[profile]?.extends ??
+    parseHostingProfileId(profile) ??
     DEFAULT_HOSTING_PROFILE
   );
 }
@@ -438,8 +497,16 @@ function buildNodeModeConditions(
 
 export function buildHostingReadiness(input: HostingReadinessInput): HostingReadinessResult {
   const profile = input.profile ?? DEFAULT_HOSTING_PROFILE;
-  const conditions: HostingReadinessCondition[] = [
-    ...(input.coreConditions ?? []),
+  const customProfile = input.config?.hosting?.profiles?.[profile];
+  const builtInProfile = resolveBuiltInHostingProfile(profile, input.config);
+  const conditionsById = new Map<HostingReadinessConditionType, HostingReadinessCondition>();
+  const addCondition = (condition: HostingReadinessCondition) => {
+    conditionsById.set(condition.type, condition);
+  };
+  for (const condition of input.coreConditions ?? []) {
+    addCondition(condition);
+  }
+  const baseConditions: HostingReadinessCondition[] = [
     {
       type: "ProfileSelected",
       status: "True",
@@ -457,19 +524,55 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
         : "Runtime configuration was not loaded.",
     },
   ];
+  for (const condition of baseConditions) {
+    addCondition(condition);
+  }
   if (input.workspaceProbeExpected || input.workspace) {
-    conditions.push(buildWorkspaceCondition(input.workspace));
+    addCondition(buildWorkspaceCondition(input.workspace));
   }
-  conditions.push(buildGatewayCondition(input.gateway), buildPluginCondition(input.plugins));
-  if (profile === "container") {
-    conditions.push(buildContainerCondition(input));
+  addCondition(buildGatewayCondition(input.gateway));
+  addCondition(buildPluginCondition(input.plugins));
+  const profileCandidates = new Map<HostingReadinessConditionType, HostingReadinessCondition>();
+  const profileConditions = [
+    buildContainerCondition(input),
+    buildTrustedProxyCondition(input),
+    ...buildNodeModeConditions(input.nodeMode),
+  ];
+  for (const condition of profileConditions) {
+    profileCandidates.set(condition.type, condition);
   }
-  if (profile === "reverse-proxy") {
-    conditions.push(buildTrustedProxyCondition(input));
+  for (const criterionId of BUILT_IN_HOSTING_PROFILE_CRITERIA[builtInProfile]) {
+    const condition = profileCandidates.get(criterionId);
+    if (condition) {
+      addCondition(condition);
+    }
   }
-  if (profile === "node-mode") {
-    conditions.push(...buildNodeModeConditions(input.nodeMode));
+  for (const condition of input.additionalConditions ?? []) {
+    addCondition({ ...condition, requirement: "advisory" });
   }
+  const requiredCriteria = new Set(customProfile?.requiredCriteria ?? []);
+  const advisoryCriteria = new Set(customProfile?.advisoryCriteria ?? []);
+  for (const criterionId of [...requiredCriteria, ...advisoryCriteria]) {
+    const existing = conditionsById.get(criterionId) ?? profileCandidates.get(criterionId);
+    if (existing) {
+      conditionsById.set(criterionId, {
+        ...existing,
+        requirement:
+          existing.requirement === "required" || requiredCriteria.has(criterionId)
+            ? "required"
+            : "advisory",
+      });
+      continue;
+    }
+    addCondition({
+      type: criterionId,
+      status: "Unknown",
+      requirement: requiredCriteria.has(criterionId) ? "required" : "advisory",
+      reason: "CriterionUnavailable",
+      message: `Readiness criterion ${criterionId} is not registered.`,
+    });
+  }
+  const conditions = [...conditionsById.values()];
   const failures = conditions
     .filter((entry) => entry.requirement === "required" && entry.status !== "True")
     .map((entry) => entry.reason);

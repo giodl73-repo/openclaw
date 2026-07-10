@@ -15,16 +15,55 @@ describe("hosting config schema", () => {
     }
   });
 
-  it("rejects unknown hosting profiles", () => {
+  it("accepts an additive namespaced custom profile", () => {
     const result = validateConfigObjectRaw({
       hosting: {
-        profile: "custom-host",
+        profile: "acme/managed",
+        profiles: {
+          "acme/managed": {
+            extends: "container",
+            requiredCriteria: ["plugin.storage.backend"],
+            advisoryCriteria: ["plugin.metrics.exporter"],
+          },
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.hosting?.profile).toBe("acme/managed");
+    }
+  });
+
+  it("rejects custom profile names without a namespace", () => {
+    const result = validateConfigObjectRaw({
+      hosting: {
+        profiles: { custom: { extends: "local" } },
       },
     });
 
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.issues[0]?.path).toBe("hosting.profile");
-    }
+  });
+
+  it("rejects selection of an undefined custom profile", () => {
+    const result = validateConfigObjectRaw({ hosting: { profile: "acme/missing" } });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects conflicting custom criterion requirements", () => {
+    const result = validateConfigObjectRaw({
+      hosting: {
+        profiles: {
+          "acme/managed": {
+            extends: "local",
+            requiredCriteria: ["plugin.storage.backend"],
+            advisoryCriteria: ["plugin.storage.backend"],
+          },
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
   });
 });

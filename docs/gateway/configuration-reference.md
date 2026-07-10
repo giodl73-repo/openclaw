@@ -509,6 +509,35 @@ See [Inferred commitments](/concepts/commitments).
 
 ---
 
+## Hosting
+
+```json5
+{
+  hosting: {
+    profile: "acme/managed", // built-in or namespaced custom profile
+    profiles: {
+      "acme/managed": {
+        extends: "container", // local | container | reverse-proxy | node-mode
+        requiredCriteria: ["plugin.storage.backend"],
+        advisoryCriteria: ["plugin.metrics.exporter"],
+      },
+    },
+  },
+}
+```
+
+- `profile`: selected hosting profile. Defaults to `local` and can be overridden
+  by `OPENCLAW_HOSTING_PROFILE` or `gateway run --hosting-profile`.
+- `profiles`: additive operator profiles. Names must use a namespace such as
+  `acme/managed`, and each profile extends exactly one built-in profile.
+- `requiredCriteria`: additional registered criteria that must report `True`.
+- `advisoryCriteria`: additional criteria reported without blocking readiness.
+
+Custom profiles cannot remove or demote built-in criteria. See
+[Health checks](/gateway/health#custom-readiness-profiles) for evaluation
+semantics and the [Plugin SDK](/plugins/sdk-overview#infrastructure) for plugin
+registration.
+
 ## Gateway
 
 ```json5

@@ -7,9 +7,13 @@ import {
 import { z } from "zod";
 import { parseByteSize } from "../cli/parse-bytes.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
+import {
+  CUSTOM_HOSTING_PROFILE_PATTERN,
+  HOSTING_PROFILE_IDS,
+  parseHostingProfileId,
+} from "../hosting/readiness.js";
 import { base64UrlDecode, normalizeEd25519PublicKeyBase64Url } from "../infra/ed25519-signature.js";
 import { normalizeAgentId } from "../routing/session-key.js";
-import { HOSTING_PROFILE_IDS } from "../hosting/readiness.js";
 import {
   isValidControlUiChatMessageMaxWidth,
   normalizeControlUiChatMessageMaxWidth,
@@ -77,9 +81,42 @@ const GatewayRemoteConfigSchema = z.object(GatewayRemoteSchemaShape).strict().op
 
 const HostingSchema = z
   .object({
-    profile: z.enum(HOSTING_PROFILE_IDS).optional(),
+    profile: z.string().trim().min(1).optional(),
+    profiles: z
+      .record(
+        z.string().regex(CUSTOM_HOSTING_PROFILE_PATTERN),
+        z
+          .object({
+            extends: z.enum(HOSTING_PROFILE_IDS),
+            requiredCriteria: z.array(z.string().trim().min(1)).optional(),
+            advisoryCriteria: z.array(z.string().trim().min(1)).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
+  .superRefine((value, ctx) => {
+    const profile = value.profile?.trim().toLowerCase();
+    if (profile && !parseHostingProfileId(profile) && !value.profiles?.[profile]) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["profile"],
+        message: "custom hosting profile must be defined in hosting.profiles",
+      });
+    }
+    for (const [profileId, profile] of Object.entries(value.profiles ?? {})) {
+      const required = new Set(profile.requiredCriteria ?? []);
+      const duplicate = (profile.advisoryCriteria ?? []).find((id) => required.has(id));
+      if (duplicate) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["profiles", profileId, "advisoryCriteria"],
+          message: `criterion cannot be both required and advisory: ${duplicate}`,
+        });
+      }
+    }
+  })
   .optional();
 
 const TailscaleServiceNameSchema = z.string().regex(/^svc:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, {

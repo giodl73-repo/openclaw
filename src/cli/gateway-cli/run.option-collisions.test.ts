@@ -1340,13 +1340,26 @@ describe("gateway run option collisions", () => {
     expect(startGatewayServer).toHaveBeenCalledOnce();
   });
 
+  it("accepts a namespaced custom hosting profile for config-backed resolution", async () => {
+    await runGatewayCli([
+      "gateway",
+      "run",
+      "--hosting-profile",
+      "acme/managed",
+      "--allow-unconfigured",
+    ]);
+
+    expect(process.env.OPENCLAW_HOSTING_PROFILE).toBe("acme/managed");
+    expect(startGatewayServer).toHaveBeenCalledOnce();
+  });
+
   it("rejects unsupported hosting profiles before gateway startup", async () => {
     await expect(
       runGatewayCli(["gateway", "run", "--hosting-profile", "custom-host", "--allow-unconfigured"]),
     ).rejects.toThrow("__exit__:1");
 
     expect(runtimeErrors).toContain(
-      'Invalid --hosting-profile. Use "local", "container", "reverse-proxy", "node-mode".',
+      'Invalid --hosting-profile. Use "local", "container", "reverse-proxy", "node-mode" or a namespaced custom profile such as "acme/managed".',
     );
     expect(startGatewayServer).not.toHaveBeenCalled();
   });

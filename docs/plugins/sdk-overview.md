@@ -186,6 +186,26 @@ guidance remain available to non-Codex prompt surfaces for compatibility.
 | `api.registerNodeHostCommand(command)`          | Command handler exposed to paired nodes                      |
 | `api.registerNodeInvokePolicy(policy)`          | Allowlist/approval policy for node-invoked commands          |
 | `api.registerSecurityAuditCollector(collector)` | Findings collector for `openclaw security audit`             |
+| `api.registerReadinessCriterion(criterion)`     | Advisory Gateway readiness criterion                         |
+
+Readiness criteria let a plugin report whether a dependency it owns is usable:
+
+```ts
+api.registerReadinessCriterion({
+  id: "backend",
+  async check({ pluginConfig, signal }) {
+    const reachable = await probeBackend(pluginConfig, { signal });
+    return reachable
+      ? { status: "True", reason: "BackendReady", message: "Backend is reachable." }
+      : { status: "False", reason: "BackendUnavailable", message: "Backend is unreachable." };
+  },
+});
+```
+
+Core publishes this example as `plugin.<plugin-id>.backend`, evaluates it with a
+bounded timeout, and caches the result briefly. Plugin criteria are always
+advisory when registered. Only an operator-defined hosting profile can promote
+one to required; plugins cannot make their own checks block readiness.
 
 Telegram interactive handlers can return `{ submitText }` to route text through
 Telegram's normal inbound agent path after the handler succeeds. OpenClaw keeps

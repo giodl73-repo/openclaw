@@ -29,8 +29,10 @@ import { resolveMainSessionKey } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
 import { createNodeModeReadinessEvidenceResolver } from "../hosting/node-mode.js";
+import { createPluginReadinessResolver } from "../hosting/plugin-readiness.js";
 import {
   buildHostingReadiness,
+  resolveBuiltInHostingProfile,
   resolveHostingProfile,
   type HostingPluginReadinessInput,
   type HostingReadinessResult,
@@ -921,14 +923,17 @@ export async function startGatewayServer(
   });
   let listConnectedNodesForReadiness: () => NodeSession[] = () => [];
   const resolveNodeModeReadinessEvidence = createNodeModeReadinessEvidenceResolver();
+  const resolvePluginReadiness = createPluginReadinessResolver();
   const resolveWorkspaceReadinessEvidence = createWorkspaceReadinessEvidenceResolver();
   const getReadiness = async (): Promise<ReadinessResult & HostingReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
     const config = getRuntimeConfig();
     const profile = resolveHostingProfile({ config, env: process.env });
+    const builtInProfile = resolveBuiltInHostingProfile(profile, config);
     const workspace = await resolveWorkspaceReadinessEvidence({ config, env: process.env });
+    const pluginConditions = await resolvePluginReadiness({ registry: pluginRegistry, config });
     const nodeMode =
-      profile === "node-mode"
+      builtInProfile === "node-mode"
         ? await resolveNodeModeReadinessEvidence({
             config,
             connectedNodes: listConnectedNodesForReadiness(),
@@ -952,6 +957,7 @@ export async function startGatewayServer(
         trustedProxyCount: config.gateway?.trustedProxies?.length ?? 0,
       },
       nodeMode,
+      additionalConditions: pluginConditions,
     });
     return mergeGatewayAndHostingReadiness(gatewayReadiness, hostingReadiness);
   };

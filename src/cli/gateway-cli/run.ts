@@ -33,13 +33,13 @@ import {
 import type { GatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setGatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setVerbose } from "../../globals.js";
-import { isTruthyEnvValue } from "../../infra/env.js";
-import { formatErrorMessage } from "../../infra/errors.js";
 import {
   formatHostingProfileIds,
   HOSTING_PROFILE_ENV,
-  parseHostingProfileId,
+  parseHostingProfileName,
 } from "../../hosting/readiness.js";
+import { isTruthyEnvValue } from "../../infra/env.js";
+import { formatErrorMessage } from "../../infra/errors.js";
 import {
   completeGatewayBootLifecycle,
   GATEWAY_CRASH_LOOP_BREAKER_REASON,
@@ -603,9 +603,11 @@ export async function runGatewayCommand(opts: GatewayRunOpts, hooks: GatewayRunR
   setVerbose(Boolean(opts.verbose));
   const hostingProfileRaw = toOptionString(opts.hostingProfile);
   if (hostingProfileRaw !== undefined) {
-    const hostingProfile = parseHostingProfileId(hostingProfileRaw);
+    const hostingProfile = parseHostingProfileName(hostingProfileRaw);
     if (!hostingProfile) {
-      defaultRuntime.error(`Invalid --hosting-profile. Use ${formatHostingProfileIds()}.`);
+      defaultRuntime.error(
+        `Invalid --hosting-profile. Use ${formatHostingProfileIds()} or a namespaced custom profile such as "acme/managed".`,
+      );
       defaultRuntime.exit(1);
       return;
     }

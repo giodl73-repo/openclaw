@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHostingReadiness as buildHostingReadinessFromEvidence,
+  resolveBuiltInHostingProfile,
   resolveHostingProfile,
   type HostingReadinessInput,
 } from "./readiness.js";
@@ -52,6 +53,98 @@ describe("buildHostingReadiness", () => {
     expect(readiness.ready).toBe(false);
     expect(readiness.failures).toEqual(["GatewayNotChecked"]);
     expect(readiness.advisories).toEqual(["PluginStatusUnavailable"]);
+  });
+
+  it("keeps plugin criteria advisory until a custom profile requires one", () => {
+    const config = {
+      hosting: {
+        profile: "acme/managed",
+        profiles: {
+          "acme/managed": {
+            extends: "local" as const,
+            requiredCriteria: ["plugin.storage.backend"],
+          },
+        },
+      },
+    };
+    const readiness = buildHostingReadiness({
+      profile: "acme/managed",
+      config,
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+      additionalConditions: [
+        {
+          type: "plugin.storage.backend",
+          status: "False",
+          requirement: "advisory",
+          reason: "StorageUnavailable",
+          message: "Storage is unavailable.",
+        },
+      ],
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.failures).toContain("StorageUnavailable");
+    expect(readiness.conditions).toContainEqual(
+      expect.objectContaining({
+        type: "plugin.storage.backend",
+        requirement: "required",
+      }),
+    );
+  });
+
+  it("fails closed when a required custom criterion is not registered", () => {
+    const readiness = buildHostingReadiness({
+      profile: "acme/managed",
+      config: {
+        hosting: {
+          profiles: {
+            "acme/managed": {
+              extends: "local",
+              requiredCriteria: ["plugin.storage.backend"],
+            },
+          },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.failures).toContain("CriterionUnavailable");
+  });
+
+  it("reuses built-in criteria in additive custom profiles", () => {
+    const readiness = buildHostingReadiness({
+      profile: "acme/proxied-local",
+      config: {
+        hosting: {
+          profiles: {
+            "acme/proxied-local": {
+              extends: "local",
+              requiredCriteria: ["TrustedProxyReady"],
+            },
+          },
+        },
+        gateway: {
+          auth: {
+            mode: "trusted-proxy",
+            trustedProxy: { userHeader: "x-forwarded-user" },
+          },
+          trustedProxies: ["10.0.0.1"],
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(readiness.conditions).toContainEqual(
+      expect.objectContaining({ type: "TrustedProxyReady", status: "True" }),
+    );
   });
 
   it("requires workspace write evidence for every built-in profile", () => {
@@ -300,5 +393,29 @@ describe("resolveHostingProfile", () => {
         config: { hosting: { profile: "container" } },
       }),
     ).toThrow(/Invalid hosting profile from OPENCLAW_HOSTING_PROFILE/);
+  });
+
+  it("selects only custom profiles defined in the active config", () => {
+    const config = {
+      hosting: {
+        profile: "acme/managed",
+        profiles: { "acme/managed": { extends: "container" as const } },
+      },
+    };
+    expect(resolveHostingProfile({ config })).toBe("acme/managed");
+    expect(() =>
+      resolveHostingProfile({
+        override: "acme/missing",
+        config,
+      }),
+    ).toThrow(/profile defined in hosting\.profiles/);
+  });
+
+  it("resolves the built-in evidence contract for a custom profile", () => {
+    expect(
+      resolveBuiltInHostingProfile("acme/scout", {
+        hosting: { profiles: { "acme/scout": { extends: "node-mode" } } },
+      }),
+    ).toBe("node-mode");
   });
 });

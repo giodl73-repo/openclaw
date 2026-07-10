@@ -2382,6 +2382,22 @@ export type OpenClawPluginService = {
   stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 };
 
+export type OpenClawPluginReadinessResult = {
+  status: "True" | "False" | "Unknown";
+  reason: string;
+  message: string;
+};
+
+export type OpenClawPluginReadinessCriterion = {
+  /** Stable identifier local to this plugin. Core publishes it as plugin.<plugin-id>.<id>. */
+  id: string;
+  check: (ctx: {
+    config: OpenClawConfig;
+    pluginConfig?: Record<string, unknown>;
+    signal: AbortSignal;
+  }) => OpenClawPluginReadinessResult | Promise<OpenClawPluginReadinessResult>;
+};
+
 export type OpenClawPluginChannelRegistration = {
   plugin: ChannelPlugin;
 };
@@ -2717,6 +2733,8 @@ export type OpenClawPluginApi = {
   registerNodeHostCommand: (command: OpenClawPluginNodeHostCommand) => void;
   registerNodeInvokePolicy: (policy: OpenClawPluginNodeInvokePolicy) => void;
   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;
+  /** Register an advisory readiness criterion that an operator profile may require. */
+  registerReadinessCriterion: (criterion: OpenClawPluginReadinessCriterion) => void;
   registerService: (service: OpenClawPluginService) => void;
   /** Register a local gateway discovery advertiser such as mDNS/Bonjour. */
   registerGatewayDiscoveryService: (service: OpenClawGatewayDiscoveryService) => void;

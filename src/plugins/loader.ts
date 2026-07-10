@@ -488,6 +488,7 @@ type PluginRegistrySnapshot = {
     nodeHostCommands: PluginRegistry["nodeHostCommands"];
     nodeInvokePolicies: PluginRegistry["nodeInvokePolicies"];
     securityAuditCollectors: PluginRegistry["securityAuditCollectors"];
+    readinessCriteria: PluginRegistry["readinessCriteria"];
     services: PluginRegistry["services"];
     commands: PluginRegistry["commands"];
     interactiveHandlers: PluginRegistry["interactiveHandlers"];
@@ -535,6 +536,7 @@ function snapshotPluginRegistry(registry: PluginRegistry): PluginRegistrySnapsho
       nodeHostCommands: [...registry.nodeHostCommands],
       nodeInvokePolicies: [...registry.nodeInvokePolicies],
       securityAuditCollectors: [...registry.securityAuditCollectors],
+      readinessCriteria: [...registry.readinessCriteria],
       services: [...registry.services],
       commands: [...registry.commands],
       interactiveHandlers: [...registry.interactiveHandlers],
@@ -581,6 +583,7 @@ function restorePluginRegistry(registry: PluginRegistry, snapshot: PluginRegistr
   registry.nodeHostCommands = snapshot.arrays.nodeHostCommands;
   registry.nodeInvokePolicies = snapshot.arrays.nodeInvokePolicies;
   registry.securityAuditCollectors = snapshot.arrays.securityAuditCollectors;
+  registry.readinessCriteria = snapshot.arrays.readinessCriteria;
   registry.services = snapshot.arrays.services;
   registry.commands = snapshot.arrays.commands;
   registry.interactiveHandlers = snapshot.arrays.interactiveHandlers;

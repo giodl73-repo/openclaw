@@ -39,8 +39,17 @@ import type { ToolsConfig } from "./types.tools.js";
 import type { ProxyConfig } from "./zod-schema.proxy.js";
 
 export type HostingConfig = {
-  /** Built-in hosting profile selected for runtime readiness. Defaults to local. */
-  profile?: import("../hosting/readiness.js").HostingProfileId;
+  /** Built-in or operator-defined hosting profile. Defaults to local. */
+  profile?: string;
+  /** Additive operator profiles composed over one built-in support contract. */
+  profiles?: Record<
+    string,
+    {
+      extends: import("../hosting/readiness.js").BuiltInHostingProfileId;
+      requiredCriteria?: string[];
+      advisoryCriteria?: string[];
+    }
+  >;
 };
 
 /** One persisted suppression for a known security audit finding. */
