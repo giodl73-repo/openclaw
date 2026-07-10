@@ -2,7 +2,12 @@ import type { GatewayBindMode } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isLoopbackHost } from "../gateway/net.js";
 
-export const HOSTING_PROFILE_IDS = ["local", "container", "reverse-proxy"] as const;
+export const HOSTING_PROFILE_IDS = [
+  "local",
+  "container",
+  "reverse-proxy",
+  "node-mode",
+] as const;
 export type HostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
 
 export const DEFAULT_HOSTING_PROFILE: HostingProfileId = "local";
@@ -19,7 +24,11 @@ export type HostingReadinessConditionType =
   | "GatewayResponding"
   | "PluginsLoaded"
   | "ContainerStateReady"
-  | "TrustedProxyReady";
+  | "TrustedProxyReady"
+  | "NodePairingReady"
+  | "ControlledTargetsReady"
+  | "CommandApprovalReady"
+  | "ControlChannelReady";
 
 export type HostingReadinessConditionStatus = "True" | "False" | "Unknown";
 export type HostingReadinessRequirement = "required" | "advisory";
@@ -49,6 +58,25 @@ export type HostingPluginReadinessInput = {
   }>;
 };
 
+export type NodeModeReadinessEvidence = {
+  pairing?: {
+    pairedCount: number;
+    pendingCount: number;
+    error?: string;
+  };
+  targets?: {
+    knownCount: number;
+    connectedCount: number;
+  };
+  commandApproval?: {
+    configured: boolean;
+    approvedCommandCount: number;
+  };
+  controlChannel?: {
+    connectedCount: number;
+  };
+};
+
 export type HostingReadinessInput = {
   profile?: HostingProfileId;
   config?: OpenClawConfig;
@@ -65,6 +93,7 @@ export type HostingReadinessInput = {
     trustedProxyUserHeader?: string;
     trustedProxyCount: number;
   };
+  nodeMode?: NodeModeReadinessEvidence;
 };
 
 export function buildUnobservedGatewayConditions(): HostingReadinessCondition[] {
@@ -293,6 +322,85 @@ function buildTrustedProxyCondition(input: HostingReadinessInput): HostingReadin
   };
 }
 
+function buildNodeModeConditions(
+  evidence: NodeModeReadinessEvidence | undefined,
+): HostingReadinessCondition[] {
+  const pairing = evidence?.pairing;
+  const pairedCount = pairing?.pairedCount ?? 0;
+  const pendingCount = pairing?.pendingCount ?? 0;
+  const connectedCount = evidence?.targets?.connectedCount ?? 0;
+  const pairingCondition: HostingReadinessCondition = pairing?.error
+    ? {
+        type: "NodePairingReady",
+        status: "False",
+        reason: "NodePairingUnavailable",
+        message: `Node pairing state could not be read: ${pairing.error}`,
+      }
+    : pairedCount > 0
+      ? {
+          type: "NodePairingReady",
+          status: "True",
+          reason: "NodePairingReady",
+          message: `Node pairing has ${pairedCount} approved node${pairedCount === 1 ? "" : "s"}.`,
+        }
+      : {
+          type: "NodePairingReady",
+          status: "False",
+          reason: pendingCount > 0 ? "NodePairingPending" : "NodePairingMissing",
+          message:
+            pendingCount > 0
+              ? `Node pairing has ${pendingCount} pending request${pendingCount === 1 ? "" : "s"} and no approved nodes.`
+              : "Node-mode requires at least one approved node pairing.",
+        };
+  const targetCondition: HostingReadinessCondition =
+    connectedCount > 0
+      ? {
+          type: "ControlledTargetsReady",
+          status: "True",
+          reason: "ControlledTargetsReady",
+          message: `${connectedCount} controlled target${connectedCount === 1 ? " is" : "s are"} connected.`,
+        }
+      : {
+          type: "ControlledTargetsReady",
+          status: "False",
+          reason: "ControlledTargetsDisconnected",
+          message: "Node-mode requires at least one connected controlled target.",
+        };
+  const commandApproval = evidence?.commandApproval;
+  const commandCondition: HostingReadinessCondition = commandApproval?.configured
+    ? {
+        type: "CommandApprovalReady",
+        status: "True",
+        reason: "CommandApprovalReady",
+        message:
+          commandApproval.approvedCommandCount > 0
+            ? `Pairing grants ${commandApproval.approvedCommandCount} approved command${commandApproval.approvedCommandCount === 1 ? "" : "s"}.`
+            : "Gateway node allowCommands provides command approval posture.",
+      }
+    : {
+        type: "CommandApprovalReady",
+        status: "False",
+        reason: "CommandApprovalMissing",
+        message: "Node-mode requires paired command grants or gateway.nodes.allowCommands.",
+      };
+  const controlConnectedCount = evidence?.controlChannel?.connectedCount ?? 0;
+  const controlCondition: HostingReadinessCondition =
+    controlConnectedCount > 0
+      ? {
+          type: "ControlChannelReady",
+          status: "True",
+          reason: "ControlChannelReady",
+          message: `${controlConnectedCount} node control channel${controlConnectedCount === 1 ? " is" : "s are"} connected.`,
+        }
+      : {
+          type: "ControlChannelReady",
+          status: "False",
+          reason: "ControlChannelUnavailable",
+          message: "No node control channel is connected.",
+        };
+  return [pairingCondition, targetCondition, commandCondition, controlCondition];
+}
+
 export function buildHostingReadiness(input: HostingReadinessInput): HostingReadinessResult {
   const profile = input.profile ?? DEFAULT_HOSTING_PROFILE;
   const conditions: HostingReadinessCondition[] = [
@@ -321,6 +429,9 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
   }
   if (profile === "reverse-proxy") {
     conditions.push(buildTrustedProxyCondition(input));
+  }
+  if (profile === "node-mode") {
+    conditions.push(...buildNodeModeConditions(input.nodeMode));
   }
   const failures = conditions
     .filter((entry) => entry.requirement === "required" && entry.status !== "True")

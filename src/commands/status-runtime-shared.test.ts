@@ -374,6 +374,22 @@ describe("status-runtime-shared", () => {
     });
   });
 
+  it("allows safe health callers to skip channel account probes", async () => {
+    await resolveStatusGatewayHealthSafe({
+      config: { gateway: {} },
+      timeoutMs: 4321,
+      gatewayReachable: true,
+      probe: false,
+    });
+
+    expect(mocks.callGateway).toHaveBeenCalledWith({
+      method: "health",
+      params: { probe: false },
+      timeoutMs: 4321,
+      config: { gateway: {} },
+    });
+  });
+
   it("returns null for heartbeat when the gateway is unreachable", async () => {
     expect(
       await resolveStatusLastHeartbeat({

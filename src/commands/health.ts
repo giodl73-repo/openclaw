@@ -37,6 +37,7 @@ import { getGatewayModelPricingHealth } from "../gateway/model-pricing-cache-sta
 import { isGatewayModelPricingEnabled } from "../gateway/model-pricing-config.js";
 import type { ChannelRuntimeSnapshot } from "../gateway/server-channel-runtime.types.js";
 import { info } from "../globals.js";
+import { resolveNodeModeReadinessEvidence } from "../hosting/node-mode.js";
 import {
   buildHostingReadiness,
   buildUnobservedGatewayConditions,
@@ -717,17 +718,26 @@ export async function getHealthSnapshot(params?: {
   const pluginHealth = buildPluginHealthSummary();
   const contextEngineHealth = buildContextEngineHealthSummary();
   const deliveryQueueHealth = buildDeliveryQueueHealthSummary();
+  const profile = resolveHostingProfile({ config: cfg, env: process.env });
+  const nodeMode =
+    profile === "node-mode"
+      ? await resolveNodeModeReadinessEvidence({
+          config: cfg,
+          connectedNodes: [],
+        })
+      : undefined;
   const summary: HealthSummary = {
     ok: true,
     ts: Date.now(),
     durationMs: Date.now() - start,
     readiness: buildHostingReadiness({
-      profile: resolveHostingProfile({ config: cfg, env: process.env }),
+      profile,
       config: cfg,
       configLoaded: true,
       gateway: "responding",
       plugins: pluginHealth,
       coreConditions: buildUnobservedGatewayConditions(),
+      nodeMode,
     }),
     ...(params?.eventLoop ? { eventLoop: params.eventLoop } : {}),
     ...(pluginHealth ? { plugins: pluginHealth } : {}),

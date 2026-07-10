@@ -5,7 +5,11 @@ import type { OpenClawConfig } from "../config/types.js";
 import type { UpdateCheckResult } from "../infra/update-check.js";
 import { buildStatusJsonPayload } from "./status-json-payload.ts";
 import { buildStatusOverviewSurfaceFromScan } from "./status-overview-surface.ts";
-import { resolveStatusRuntimeSnapshot } from "./status-runtime-shared.ts";
+import type { GatewayProbeSnapshot } from "./status.scan.shared.ts";
+import {
+  resolveStatusGatewayHealthSafe,
+  resolveStatusRuntimeSnapshot,
+} from "./status-runtime-shared.ts";
 
 type StatusJsonScanLike = {
   cfg: OpenClawConfig;
@@ -45,6 +49,7 @@ type StatusJsonScanLike = {
       }
     | null
     | undefined;
+  gatewayCallOverrides?: GatewayProbeSnapshot["gatewayCallOverrides"];
   gatewayProbeAuthWarning?: string | null;
   agentStatus: unknown;
   secretDiagnostics: string[];
@@ -75,6 +80,17 @@ export async function resolveStatusJsonOutput(params: {
       includeSecurityAudit: params.includeSecurityAudit,
       suppressHealthErrors: params.suppressHealthErrors,
     });
+  const readiness =
+    health || !scan.gatewayReachable
+      ? undefined
+      : await resolveStatusGatewayHealthSafe({
+          config: scan.cfg,
+          timeoutMs: opts.timeoutMs,
+          gatewayReachable: scan.gatewayReachable,
+          gatewayProbeError: scan.gatewayProbe?.error,
+          probe: false,
+          callOverrides: scan.gatewayCallOverrides,
+        });
 
   return buildStatusJsonPayload({
     summary: scan.summary,
@@ -90,6 +106,7 @@ export async function resolveStatusJsonOutput(params: {
     agents: scan.agentStatus,
     secretDiagnostics: scan.secretDiagnostics,
     securityAudit,
+    readiness,
     health,
     usage,
     lastHeartbeat,

@@ -34,6 +34,7 @@ import {
   type HostingPluginReadinessInput,
   type HostingReadinessResult,
 } from "../hosting/readiness.js";
+import { resolveNodeModeReadinessEvidence } from "../hosting/node-mode.js";
 import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
@@ -136,6 +137,7 @@ import {
   mergeGatewayAndHostingReadiness,
   type ReadinessResult,
 } from "./server/readiness.js";
+import type { NodeSession } from "./node-registry.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 import { maybeSeedControlUiAllowedOriginsAtStartup } from "./startup-control-ui-origins.js";
@@ -916,11 +918,20 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
+  let listConnectedNodesForReadiness: () => NodeSession[] = () => [];
   const getReadiness = async (): Promise<ReadinessResult & HostingReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
     const config = getRuntimeConfig();
+    const profile = resolveHostingProfile({ config, env: process.env });
+    const nodeMode =
+      profile === "node-mode"
+        ? await resolveNodeModeReadinessEvidence({
+            config,
+            connectedNodes: listConnectedNodesForReadiness(),
+          })
+        : undefined;
     const hostingReadiness = buildHostingReadiness({
-      profile: resolveHostingProfile({ config, env: process.env }),
+      profile,
       config,
       configLoaded: true,
       gateway: "responding",
@@ -934,6 +945,7 @@ export async function startGatewayServer(
         trustedProxyUserHeader: getResolvedAuth().trustedProxy?.userHeader,
         trustedProxyCount: config.gateway?.trustedProxies?.length ?? 0,
       },
+      nodeMode,
     });
     return mergeGatewayAndHostingReadiness(gatewayReadiness, hostingReadiness);
   };
@@ -1012,6 +1024,7 @@ export async function startGatewayServer(
     broadcastVoiceWakeChanged,
     hasTalkNodeConnected,
   } = createGatewayNodeSessionRuntime({ broadcast });
+  listConnectedNodesForReadiness = () => nodeRegistry.listConnected();
   const { createWatchNodeHttpRuntime } = await import("./watch-node-http.js");
   const watchNodeHttpRuntime = createWatchNodeHttpRuntime({
     nodeRegistry,

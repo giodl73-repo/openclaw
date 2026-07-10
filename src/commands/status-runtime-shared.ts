@@ -158,6 +158,7 @@ export async function resolveStatusGatewayHealthSafe(params: {
   timeoutMs?: number;
   gatewayReachable: boolean;
   gatewayProbeError?: string | null;
+  probe?: boolean;
   callOverrides?: {
     url: string;
     token?: string;
@@ -171,7 +172,7 @@ export async function resolveStatusGatewayHealthSafe(params: {
   const { callGateway } = await loadGatewayCallModule();
   return await callGateway<HealthSummary>({
     method: "health",
-    params: { probe: true },
+    params: { probe: params.probe ?? true },
     timeoutMs: params.timeoutMs,
     config: params.config,
     ...params.callOverrides,

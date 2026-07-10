@@ -157,6 +157,39 @@ describe("buildHostingReadiness", () => {
 
     expect(readiness.ready).toBe(true);
   });
+  it("requires a live connected target for node-mode", () => {
+    const disconnected = buildHostingReadiness({
+      profile: "node-mode",
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+      nodeMode: {
+        pairing: { pairedCount: 1, pendingCount: 0 },
+        targets: { knownCount: 1, connectedCount: 0 },
+        commandApproval: { configured: true, approvedCommandCount: 1 },
+        controlChannel: { connectedCount: 0 },
+      },
+    });
+    const connected = buildHostingReadiness({
+      profile: "node-mode",
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+      nodeMode: {
+        pairing: { pairedCount: 1, pendingCount: 0 },
+        targets: { knownCount: 1, connectedCount: 1 },
+        commandApproval: { configured: true, approvedCommandCount: 1 },
+        controlChannel: { connectedCount: 1 },
+      },
+    });
+
+    expect(disconnected.ready).toBe(false);
+    expect(disconnected.failures).toEqual([
+      "ControlledTargetsDisconnected",
+      "ControlChannelUnavailable",
+    ]);
+    expect(connected.ready).toBe(true);
+  });
 });
 
 describe("resolveHostingProfile", () => {
