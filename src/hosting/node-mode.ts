@@ -4,6 +4,7 @@ import { listNodePairing } from "../infra/node-pairing.js";
 import type { NodeModeReadinessEvidence } from "./readiness.js";
 
 const DEFAULT_NODE_MODE_PAIRING_CACHE_TTL_MS = 1_000;
+const DEFAULT_NODE_MODE_TIMEOUT_MS = 1_000;
 
 type NodeModeReadinessParams = {
   config: OpenClawConfig;
@@ -91,11 +92,13 @@ export function createNodeModeReadinessEvidenceResolver(
     listPairing?: typeof listNodePairing;
     now?: () => number;
     cacheTtlMs?: number;
+    timeoutMs?: number;
   } = {},
 ): (params: NodeModeReadinessParams) => Promise<NodeModeReadinessEvidence> {
   const listPairing = deps.listPairing ?? listNodePairing;
   const now = deps.now ?? Date.now;
   const cacheTtlMs = Math.max(0, deps.cacheTtlMs ?? DEFAULT_NODE_MODE_PAIRING_CACHE_TTL_MS);
+  const timeoutMs = Math.max(1, deps.timeoutMs ?? DEFAULT_NODE_MODE_TIMEOUT_MS);
   let cached:
     | {
         expiresAt: number;
@@ -114,5 +117,31 @@ export function createNodeModeReadinessEvidenceResolver(
     return cached.value;
   };
 
-  return async (params) => await resolveNodeModeReadinessEvidenceWith(params, loadCachedPairing);
+  return async (params) => {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        resolveNodeModeReadinessEvidenceWith(params, loadCachedPairing),
+        new Promise<NodeModeReadinessEvidence>((resolve) => {
+          timeout = setTimeout(
+            () =>
+              resolve({
+                pairing: {
+                  pairedCount: 0,
+                  pendingCount: 0,
+                  timedOut: true,
+                  error: `Node pairing readiness exceeded ${timeoutMs}ms.`,
+                },
+              }),
+            timeoutMs,
+          );
+          timeout.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  };
 }

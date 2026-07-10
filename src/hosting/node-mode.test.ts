@@ -108,4 +108,19 @@ describe("resolveNodeModeReadinessEvidence", () => {
     await resolveEvidence({ config: {}, connectedNodes: [] });
     expect(loadPairing).toHaveBeenCalledTimes(2);
   });
+
+  it("returns timed-out pairing evidence when the pairing read never settles", async () => {
+    const resolveEvidence = createNodeModeReadinessEvidenceResolver({
+      listPairing: () => new Promise(() => {}),
+      timeoutMs: 5,
+      cacheTtlMs: 0,
+    });
+
+    await expect(resolveEvidence({ config: {}, connectedNodes: [] })).resolves.toMatchObject({
+      pairing: {
+        timedOut: true,
+        error: "Node pairing readiness exceeded 5ms.",
+      },
+    });
+  });
 });

@@ -190,6 +190,31 @@ describe("buildHostingReadiness", () => {
     ]);
     expect(connected.ready).toBe(true);
   });
+
+  it("reports a stable node pairing timeout condition", () => {
+    const readiness = buildHostingReadiness({
+      profile: "node-mode",
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+      nodeMode: {
+        pairing: {
+          pairedCount: 0,
+          pendingCount: 0,
+          timedOut: true,
+          error: "Node pairing readiness exceeded 1000ms.",
+        },
+      },
+    });
+
+    expect(readiness.conditions).toContainEqual(
+      expect.objectContaining({
+        type: "NodePairingReady",
+        status: "Unknown",
+        reason: "NodePairingTimedOut",
+      }),
+    );
+  });
 });
 
 describe("resolveHostingProfile", () => {

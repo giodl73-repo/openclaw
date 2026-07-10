@@ -2,12 +2,7 @@ import type { GatewayBindMode } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isLoopbackHost } from "../gateway/net.js";
 
-export const HOSTING_PROFILE_IDS = [
-  "local",
-  "container",
-  "reverse-proxy",
-  "node-mode",
-] as const;
+export const HOSTING_PROFILE_IDS = ["local", "container", "reverse-proxy", "node-mode"] as const;
 export type HostingProfileId = (typeof HOSTING_PROFILE_IDS)[number];
 
 export const DEFAULT_HOSTING_PROFILE: HostingProfileId = "local";
@@ -63,6 +58,7 @@ export type NodeModeReadinessEvidence = {
     pairedCount: number;
     pendingCount: number;
     error?: string;
+    timedOut?: boolean;
   };
   targets?: {
     knownCount: number;
@@ -332,9 +328,9 @@ function buildNodeModeConditions(
   const pairingCondition: HostingReadinessCondition = pairing?.error
     ? {
         type: "NodePairingReady",
-        status: "False",
+        status: "Unknown",
         requirement: "required",
-        reason: "NodePairingUnavailable",
+        reason: pairing.timedOut ? "NodePairingTimedOut" : "NodePairingUnavailable",
         message: `Node pairing state could not be read: ${pairing.error}`,
       }
     : pairedCount > 0
