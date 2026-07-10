@@ -71,7 +71,10 @@ Choose the expected ingress posture, not the packaging technology. Use
 listener. A container behind a trusted identity proxy uses `reverse-proxy`.
 For controlled execution nodes, select `node-mode`. Its readiness conditions
 require an approved pairing, a connected target, command approval posture, and
-a live node control channel.
+a live node control channel. Every built-in profile also requires the effective
+default workspace to pass a cached write, flush, and cleanup probe. A full or
+read-only workspace makes `/ready` and `/readyz` return `503` with a stable
+failure reason until the workspace recovers.
 <ParamField path="--tailscale <mode>" type="string">
   Tailscale exposure: `off`, `serve`, `funnel`.
 </ParamField>

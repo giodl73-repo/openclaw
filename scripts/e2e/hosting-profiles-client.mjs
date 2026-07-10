@@ -21,6 +21,8 @@ if (scenario === "local") {
   assert.equal(condition("ProfileSelected").requirement, "required");
   assert.equal(condition("ConfigLoaded").requirement, "required");
   assert.equal(condition("GatewayResponding").requirement, "required");
+  assert.equal(condition("WorkspaceWritable").status, "True");
+  assert.equal(condition("WorkspaceWritable").requirement, "required");
   assert.equal(condition("PluginsLoaded").requirement, "advisory");
   assert.deepEqual(body.failures, []);
   assert.ok(Array.isArray(body.advisories));
@@ -80,6 +82,21 @@ if (scenario === "local") {
     assert.equal(condition(type).requirement, "required");
   }
   assert.deepEqual(body.failures, []);
+} else if (scenario === "workspace-ready" || scenario === "workspace-recovered") {
+  assert.equal(response.status, 200);
+  assert.equal(body.profile, "local");
+  assert.equal(body.ready, true);
+  assert.equal(condition("WorkspaceWritable").status, "True");
+  assert.equal(condition("WorkspaceWritable").reason, "WorkspaceWritable");
+  assert.deepEqual(body.failures, []);
+} else if (scenario === "workspace-full") {
+  assert.equal(response.status, 503);
+  assert.equal(body.profile, "local");
+  assert.equal(body.ready, false);
+  assert.equal(condition("WorkspaceWritable").status, "False");
+  assert.equal(condition("WorkspaceWritable").requirement, "required");
+  assert.equal(condition("WorkspaceWritable").reason, "WorkspaceStorageFull");
+  assert.ok(body.failures.includes("WorkspaceStorageFull"));
 } else {
   throw new Error(`unknown hosting profile scenario: ${scenario}`);
 }

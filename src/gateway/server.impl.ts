@@ -35,6 +35,7 @@ import {
   type HostingPluginReadinessInput,
   type HostingReadinessResult,
 } from "../hosting/readiness.js";
+import { createWorkspaceReadinessEvidenceResolver } from "../hosting/workspace-readiness.js";
 import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
@@ -920,10 +921,12 @@ export async function startGatewayServer(
   });
   let listConnectedNodesForReadiness: () => NodeSession[] = () => [];
   const resolveNodeModeReadinessEvidence = createNodeModeReadinessEvidenceResolver();
+  const resolveWorkspaceReadinessEvidence = createWorkspaceReadinessEvidenceResolver();
   const getReadiness = async (): Promise<ReadinessResult & HostingReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
     const config = getRuntimeConfig();
     const profile = resolveHostingProfile({ config, env: process.env });
+    const workspace = await resolveWorkspaceReadinessEvidence({ config, env: process.env });
     const nodeMode =
       profile === "node-mode"
         ? await resolveNodeModeReadinessEvidence({
@@ -937,6 +940,8 @@ export async function startGatewayServer(
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRegistry),
+      workspaceProbeExpected: true,
+      workspace,
       runtimeGateway: {
         mode: "local",
         bind: bindMode,

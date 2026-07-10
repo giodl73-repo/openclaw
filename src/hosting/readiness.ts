@@ -16,6 +16,7 @@ export type HostingReadinessConditionType =
   | "EventLoopHealthy"
   | "ProfileSelected"
   | "ConfigLoaded"
+  | "WorkspaceWritable"
   | "GatewayResponding"
   | "PluginsLoaded"
   | "ContainerStateReady"
@@ -73,6 +74,12 @@ export type NodeModeReadinessEvidence = {
   };
 };
 
+export type WorkspaceReadinessEvidence = {
+  writable: boolean | null;
+  reason: string;
+  message: string;
+};
+
 export type HostingReadinessInput = {
   profile?: HostingProfileId;
   config?: OpenClawConfig;
@@ -80,6 +87,8 @@ export type HostingReadinessInput = {
   gateway: "responding" | "not-checked" | "unavailable";
   plugins?: HostingPluginReadinessInput;
   coreConditions?: HostingReadinessCondition[];
+  workspaceProbeExpected?: boolean;
+  workspace?: WorkspaceReadinessEvidence;
   runtimeGateway?: {
     mode: "local";
     bind: GatewayBindMode;
@@ -230,6 +239,27 @@ function buildGatewayCondition(
     requirement: "required",
     reason: "GatewayNotChecked",
     message: "This status surface did not probe the running Gateway.",
+  };
+}
+
+function buildWorkspaceCondition(
+  workspace: WorkspaceReadinessEvidence | undefined,
+): HostingReadinessCondition {
+  if (!workspace) {
+    return {
+      type: "WorkspaceWritable",
+      status: "Unknown",
+      requirement: "required",
+      reason: "WorkspaceNotChecked",
+      message: "The running Gateway has not published workspace write evidence.",
+    };
+  }
+  return {
+    type: "WorkspaceWritable",
+    status: workspace.writable === null ? "Unknown" : workspace.writable ? "True" : "False",
+    requirement: "required",
+    reason: workspace.reason,
+    message: workspace.message,
   };
 }
 
@@ -426,9 +456,11 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
         ? "Runtime configuration loaded."
         : "Runtime configuration was not loaded.",
     },
-    buildGatewayCondition(input.gateway),
-    buildPluginCondition(input.plugins),
   ];
+  if (input.workspaceProbeExpected || input.workspace) {
+    conditions.push(buildWorkspaceCondition(input.workspace));
+  }
+  conditions.push(buildGatewayCondition(input.gateway), buildPluginCondition(input.plugins));
   if (profile === "container") {
     conditions.push(buildContainerCondition(input));
   }

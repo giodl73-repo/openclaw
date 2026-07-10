@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { buildHostingReadiness, resolveHostingProfile } from "./readiness.js";
+import {
+  buildHostingReadiness as buildHostingReadinessFromEvidence,
+  resolveHostingProfile,
+  type HostingReadinessInput,
+} from "./readiness.js";
+
+function buildHostingReadiness(input: HostingReadinessInput) {
+  return buildHostingReadinessFromEvidence({
+    workspace: {
+      writable: true,
+      reason: "WorkspaceWritable",
+      message: "Workspace write probe passed.",
+    },
+    ...input,
+  });
+}
 
 describe("buildHostingReadiness", () => {
   it("reports local ready when every required condition is true", () => {
@@ -37,6 +52,46 @@ describe("buildHostingReadiness", () => {
     expect(readiness.ready).toBe(false);
     expect(readiness.failures).toEqual(["GatewayNotChecked"]);
     expect(readiness.advisories).toEqual(["PluginStatusUnavailable"]);
+  });
+
+  it("requires workspace write evidence for every built-in profile", () => {
+    for (const profile of ["local", "container", "reverse-proxy", "node-mode"] as const) {
+      const readiness = buildHostingReadinessFromEvidence({
+        profile,
+        configLoaded: true,
+        gateway: "responding",
+        workspaceProbeExpected: true,
+      });
+
+      expect(readiness.ready).toBe(false);
+      expect(readiness.conditions).toContainEqual(
+        expect.objectContaining({
+          type: "WorkspaceWritable",
+          status: "Unknown",
+          requirement: "required",
+          reason: "WorkspaceNotChecked",
+        }),
+      );
+      expect(readiness.failures).toContain("WorkspaceNotChecked");
+    }
+  });
+
+  it("blocks every built-in profile when the workspace is full", () => {
+    for (const profile of ["local", "container", "reverse-proxy", "node-mode"] as const) {
+      const readiness = buildHostingReadiness({
+        profile,
+        configLoaded: true,
+        gateway: "responding",
+        workspace: {
+          writable: false,
+          reason: "WorkspaceStorageFull",
+          message: "Workspace storage is full.",
+        },
+      });
+
+      expect(readiness.ready).toBe(false);
+      expect(readiness.failures).toContain("WorkspaceStorageFull");
+    }
   });
 
   it("ignores errors from explicitly disabled plugins", () => {
