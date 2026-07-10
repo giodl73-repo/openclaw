@@ -54,6 +54,32 @@ if (scenario === "local") {
   assert.equal(condition("TrustedProxyReady").requirement, "required");
   assert.equal(condition("TrustedProxyReady").reason, "TrustedProxyAuthMissing");
   assert.ok(body.failures.includes("TrustedProxyAuthMissing"));
+} else if (scenario === "node-not-ready") {
+  assert.equal(response.status, 503);
+  assert.equal(body.profile, "node-mode");
+  assert.equal(body.ready, false);
+  assert.equal(condition("NodePairingReady").status, "False");
+  assert.equal(condition("ControlledTargetsReady").status, "False");
+  assert.equal(condition("CommandApprovalReady").status, "False");
+  assert.equal(condition("ControlChannelReady").status, "False");
+  assert.ok(body.failures.includes("NodePairingMissing"));
+  assert.ok(body.failures.includes("ControlledTargetsDisconnected"));
+  assert.ok(body.failures.includes("CommandApprovalMissing"));
+  assert.ok(body.failures.includes("ControlChannelUnavailable"));
+} else if (scenario === "node-ready") {
+  assert.equal(response.status, 200);
+  assert.equal(body.profile, "node-mode");
+  assert.equal(body.ready, true);
+  for (const type of [
+    "NodePairingReady",
+    "ControlledTargetsReady",
+    "CommandApprovalReady",
+    "ControlChannelReady",
+  ]) {
+    assert.equal(condition(type).status, "True");
+    assert.equal(condition(type).requirement, "required");
+  }
+  assert.deepEqual(body.failures, []);
 } else {
   throw new Error(`unknown hosting profile scenario: ${scenario}`);
 }

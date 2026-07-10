@@ -38,6 +38,8 @@ run_scenario() {
   if [ "$scenario" = "reverse-proxy-ready" ]; then
     auth_args=()
     gateway_setup='node "$entry" config set --batch-json '\''[{"path":"gateway.auth.mode","value":"trusted-proxy"},{"path":"gateway.auth.trustedProxy.userHeader","value":"x-forwarded-user"},{"path":"gateway.trustedProxies","value":["127.0.0.1"]}]'\'' >/dev/null;'
+  elif [ "$scenario" = "node-not-ready" ]; then
+    gateway_setup='node "$entry" config set gateway.nodes.pairing.autoApproveCidrs '\''["127.0.0.1"]'\'' --strict-json >/dev/null;'
   fi
 
   docker_e2e_harness_mount_args
@@ -62,6 +64,19 @@ run_scenario() {
 
   docker_e2e_docker_cmd exec "$container_name" \
     node scripts/e2e/hosting-profiles-client.mjs "$scenario" "http://127.0.0.1:$PORT/readyz"
+
+  if [ "$scenario" = "node-not-ready" ]; then
+    docker_e2e_docker_cmd exec -d "$container_name" bash -lc \
+      'set -euo pipefail; source scripts/lib/openclaw-e2e-instance.sh; entry="$(openclaw_e2e_resolve_entrypoint)"; exec node "$entry" node run --host 127.0.0.1 --port 18789 --node-id hosting-profile-node --display-name "Hosting Profile Node" >/tmp/hosting-profiles-node.log 2>&1'
+    if ! docker_e2e_wait_container_bash "$container_name" 180 0.5 \
+      "source scripts/lib/openclaw-e2e-instance.sh; openclaw_e2e_probe_http http://127.0.0.1:$PORT/readyz 200 1000"; then
+      docker_e2e_tail_container_file_if_running "$container_name" /tmp/hosting-profiles.log 120
+      docker_e2e_tail_container_file_if_running "$container_name" /tmp/hosting-profiles-node.log 120
+      exit 1
+    fi
+    docker_e2e_docker_cmd exec "$container_name" \
+      node scripts/e2e/hosting-profiles-client.mjs node-ready "http://127.0.0.1:$PORT/readyz"
+  fi
 }
 
 run_scenario local "" loopback 200
@@ -69,5 +84,6 @@ run_scenario container-ready container lan 200
 run_scenario container-loopback container loopback 503
 run_scenario reverse-proxy-ready reverse-proxy loopback 200
 run_scenario reverse-proxy-auth-missing reverse-proxy loopback 503
+run_scenario node-not-ready node-mode loopback 503
 
 echo "Hosting profiles Docker E2E passed"
