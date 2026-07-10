@@ -166,7 +166,7 @@ function buildGatewayPluginReadinessInput(): HostingPluginReadinessInput | undef
       error: plugin.error ?? "unknown plugin load error",
     }))
     .toSorted((left, right) => left.id.localeCompare(right.id));
-  return errors.length > 0 ? { errors } : undefined;
+  return { errors };
 }
 
 function mergeGatewayAndHostingReadiness(
