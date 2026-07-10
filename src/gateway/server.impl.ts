@@ -185,7 +185,6 @@ function mergeGatewayAndHostingReadiness(
     conditions: hosting.conditions,
     failures,
     advisories: hosting.advisories,
-    hosting,
   };
 }
 

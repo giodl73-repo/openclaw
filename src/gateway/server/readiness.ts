@@ -1,9 +1,6 @@
 // Gateway readiness checker for channel health and startup sidecar state.
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
-import type {
-  HostingReadinessCondition,
-  HostingReadinessResult,
-} from "../../hosting/readiness.js";
+import type { HostingReadinessCondition, HostingReadinessResult } from "../../hosting/readiness.js";
 import {
   DEFAULT_CHANNEL_CONNECT_GRACE_MS,
   DEFAULT_CHANNEL_STALE_EVENT_THRESHOLD_MS,
@@ -25,7 +22,6 @@ export type ReadinessResult = {
   conditions?: HostingReadinessCondition[];
   failures?: string[];
   advisories?: string[];
-  hosting?: HostingReadinessResult;
 };
 
 /** Function form used by HTTP readiness endpoints and tests. */
