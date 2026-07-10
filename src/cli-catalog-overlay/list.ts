@@ -299,7 +299,7 @@ export function renderCatalogListMarkdown(
     );
     for (const command of list.cli.pluginCommands) {
       lines.push(
-        `| \`${command.commandPath.join(" ")}\` | \`${command.pluginId}\` | ${command.description || "None"} |`,
+        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${markdownCodeCell(command.pluginId)} | ${markdownTableCell(command.description || "None")} |`,
       );
     }
   }
@@ -313,7 +313,9 @@ export function renderCatalogListMarkdown(
       "| --- | --- |",
     );
     for (const command of list.cli.runtimeCommands) {
-      lines.push(`| \`${command.commandPath.join(" ")}\` | ${command.description || "None"} |`);
+      lines.push(
+        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${markdownTableCell(command.description || "None")} |`,
+      );
     }
   }
 

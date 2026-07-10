@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loggingState } from "../logging/state.js";
 import { registerCatalogCli } from "./catalog-cli.js";
 
-const loadPluginCliDescriptorEntriesMock = vi.hoisted(() => vi.fn(async () => []));
+const loadPluginCliDescriptorEntriesMock = vi.hoisted(() =>
+  vi.fn<typeof import("../plugins/cli-registry-loader.js").loadPluginCliDescriptorEntries>(
+    async () => [],
+  ),
+);
 
 vi.mock("../plugins/cli-registry-loader.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../plugins/cli-registry-loader.js")>();
@@ -100,6 +104,7 @@ describe("catalog cli", () => {
         {
           pluginId: "example-plugin",
           parentPath: [],
+          commands: ["example"],
           descriptors: [
             { name: "example", description: "Example plugin command", hasSubcommands: false },
           ],
@@ -136,6 +141,7 @@ describe("catalog cli", () => {
 
     expect(JSON.parse(audit).counts.commandRoutes).toBe(97);
     expect(JSON.parse(matrix).counts.routedOperations).toBe(14);
-    expect(JSON.parse(summary).counts.coverageGaps).toBeGreaterThan(0);
+    expect(JSON.parse(matrix).counts.evidencedRoutedOperations).toBe(0);
+    expect(JSON.parse(summary).counts.routedOperations).toBe(14);
   });
 });

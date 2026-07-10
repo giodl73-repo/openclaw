@@ -72,7 +72,7 @@ export function registerCatalogCli(program: Command): void {
 
   catalog
     .command("test-matrix")
-    .description("List routed-operation smoke-test candidates and coverage gaps")
+    .description("List routed-operation test-plan candidates")
     .option("--json", "Output JSON", false)
     .option("--markdown", "Output Markdown", false)
     .action((opts: { json?: boolean; markdown?: boolean }, command: Command) => {

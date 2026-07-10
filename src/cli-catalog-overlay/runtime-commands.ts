@@ -18,16 +18,17 @@ function commandDescription(command: Command): string {
 }
 
 function isHiddenCommand(command: Command): boolean {
-  return (command as Command & { _hidden?: boolean })._hidden === true;
+  return Reflect.get(command, "_hidden") === true;
 }
 
 function collectChildren(
   command: Command,
   parentPath: readonly string[],
 ): CliCatalogRuntimeCommand[] {
-  return command.commands.flatMap((child) => {
+  const result: CliCatalogRuntimeCommand[] = [];
+  for (const child of command.commands) {
     if (isHiddenCommand(child)) {
-      return [];
+      continue;
     }
     const commandPath = [...parentPath, child.name()];
     const entry: CliCatalogRuntimeCommand = {
@@ -41,8 +42,9 @@ function collectChildren(
       discoveryMode: "runtime-registered",
       visibility: ["audit", "operator", "policy"],
     };
-    return [entry, ...collectChildren(child, commandPath)];
-  });
+    result.push(entry, ...collectChildren(child, commandPath));
+  }
+  return result;
 }
 
 export function collectRuntimeCommandTree(program: Command): readonly CliCatalogRuntimeCommand[] {

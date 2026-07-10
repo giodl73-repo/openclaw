@@ -43,8 +43,8 @@ describe("cli catalog overlay audit", () => {
       count: 2,
       surfaceIds: ["gateway", "skill_workshop"],
     });
-    expect(audit.surfaces.byEffectMode.find((group) => group.id === "read")).toMatchObject({
-      surfaceIds: ["session_status"],
+    expect(audit.surfaces.byEffectMode.find((group) => group.id === "mixed")).toMatchObject({
+      surfaceIds: ["gateway", "process", "session_status", "skill_workshop"],
     });
     expect(audit.surfaces.byOwner.find((group) => group.id === "agents")).toMatchObject({
       count: 4,
@@ -73,6 +73,41 @@ describe("cli catalog overlay audit", () => {
     });
   });
 
+  it("derives approval attention from pending and confirmation state", () => {
+    const available = {
+      ...sampleNodeCommands[0]!,
+      id: "node:demo-host:mcp.available",
+      availability: "available" as const,
+      approvalKind: "none" as const,
+      confirmationRequired: false,
+    };
+    const approvedWithConfirmation = {
+      ...sampleNodeCommands[0]!,
+      id: "node:demo-host:mcp.confirm",
+      availability: "approved" as const,
+      approvalKind: "none" as const,
+      confirmationRequired: true,
+    };
+    const unavailable = {
+      ...sampleNodeCommands[0]!,
+      id: "node:demo-host:mcp.unavailable",
+      availability: "unavailable" as const,
+      approvalKind: "gateway-allowlist" as const,
+      confirmationRequired: false,
+    };
+    const audit = buildCatalogAudit(
+      buildCatalogList({
+        nodeCommands: [sampleNodeCommands[0]!, available, approvedWithConfirmation, unavailable],
+      }),
+    );
+
+    expect(audit.counts.nodeCommandsRequiringApproval).toBe(2);
+    expect(audit.nodeCommands.approvalRequiredCommandIds).toEqual([
+      "node:demo-host:mcp.confirm",
+      "node:demo-host:mcp.status",
+    ]);
+  });
+
   it("renders Markdown for operator-facing audit output", () => {
     const markdown = renderCatalogAuditMarkdown();
 
@@ -83,5 +118,7 @@ describe("cli catalog overlay audit", () => {
     expect(markdown).toContain("| Risk | `low` (3), `medium` (2) |");
     expect(markdown).toContain("| Confirmation required | `gateway`, `skill_workshop` |");
     expect(markdown).toContain("| `networkProxy` |");
+    expect(markdown).toContain("## Command routes without policy keys");
+    expect(markdown).toContain("`skills install`, `skills search`, `skills update`");
   });
 });

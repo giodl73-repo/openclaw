@@ -43,15 +43,11 @@ describe("cli catalog operator summary", () => {
         agentToolSurfaces: 5,
         confirmationRequiredSurfaces: 2,
         routePolicyKeys: 8,
-        coverageGaps: 14,
       },
     });
     expect(summary.attention.confirmationRequiredSurfaceIds).toEqual(["gateway", "skill_workshop"]);
     expect(summary.attention.mediumRiskSurfaceIds).toEqual(["gateway", "skill_workshop"]);
     expect(summary.attention.policyKeyIds).toContain("networkProxy");
-    expect(summary.nextChecks).toContain(
-      "Use catalog test-matrix output to prioritize routed-operation smoke coverage.",
-    );
   });
 
   it("surfaces node/operator approval attention", () => {
@@ -74,7 +70,6 @@ describe("cli catalog operator summary", () => {
     expect(markdown).toContain("# CLI Catalog Operator Summary");
     expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Node/operator commands: 0");
-    expect(markdown).toContain("- Test-matrix coverage gaps: 14");
     expect(markdown).toContain("- Confirmation required: `gateway`, `skill_workshop`");
     expect(markdown).toContain("- Route policy keys:");
   });

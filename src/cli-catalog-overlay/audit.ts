@@ -99,7 +99,9 @@ export function buildCatalogAudit(list = buildCatalogList()): CliCatalogAudit {
     .toSorted();
   const byPolicyKey = groupRoutesByPolicyKey(list.cli.commandRoutes);
   const approvalRequiredCommandIds = list.cli.nodeCommands
-    .filter((command) => command.approvalKind !== "none" || command.availability !== "approved")
+    .filter(
+      (command) => command.availability === "pending-approval" || command.confirmationRequired,
+    )
     .map((command) => command.id)
     .toSorted();
   const routesWithoutPolicyKeys = list.cli.commandRoutes
@@ -175,6 +177,10 @@ export function renderCatalogAuditMarkdown(): string {
     );
   }
   lines.push(
+    "",
+    "## Command routes without policy keys",
+    "",
+    audit.commandRoutes.routesWithoutPolicyKeys.map(markdownCommandPath).join(", ") || "None",
     "",
     "## Node/operator command groups",
     "",

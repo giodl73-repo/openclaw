@@ -13,7 +13,7 @@ export type CliCatalogTestCoverageEvidence = {
 export type CliCatalogTestMatrixCandidate = {
   readonly routeId: string;
   readonly commandPaths: readonly (readonly string[])[];
-  readonly smokeCommands: readonly string[];
+  readonly commandPathLabels: readonly string[];
   readonly recommendedTestName: string;
   readonly coverageEvidence: readonly CliCatalogTestCoverageEvidence[];
 };
@@ -21,7 +21,7 @@ export type CliCatalogTestMatrixCandidate = {
 export type CliCatalogNodeCommandTestCandidate = {
   readonly commandId: string;
   readonly command: string;
-  readonly smokeCommand: string;
+  readonly invocationHint: string;
   readonly recommendedTestName: string;
   readonly approvalKind: string;
   readonly availability: string;
@@ -33,22 +33,27 @@ export type CliCatalogTestMatrix = {
   readonly counts: {
     readonly routedOperations: number;
     readonly nodeCommands: number;
-    readonly smokeCandidates: number;
-    readonly nodeCommandSmokeCandidates: number;
-    readonly coveredRoutedOperations: number;
-    readonly coverageGaps: number;
+    readonly testCandidates: number;
+    readonly nodeCommandTestCandidates: number;
+    readonly evidencedRoutedOperations: number;
   };
   readonly candidates: readonly CliCatalogTestMatrixCandidate[];
   readonly nodeCommandCandidates: readonly CliCatalogNodeCommandTestCandidate[];
-  readonly coverageGaps: readonly CliCatalogTestMatrixCandidate[];
 };
 
 function commandPathLabel(path: readonly string[]): string {
   return path.join(" ");
 }
 
+function markdownTableCell(value: string): string {
+  return value.replace(/\r\n?|\n/g, " ").replace(/\|/g, "\\|");
+}
+
 function markdownCommand(value: string): string {
-  return "`" + value + "`";
+  const cell = markdownTableCell(value);
+  const longestFence = Math.max(0, ...Array.from(cell.matchAll(/`+/g), (match) => match[0].length));
+  const fence = "`".repeat(longestFence + 1);
+  return longestFence > 0 ? `${fence} ${cell} ${fence}` : `${fence}${cell}${fence}`;
 }
 
 function recommendedTestName(operation: CliCatalogListRoutedOperation): string {
@@ -91,20 +96,18 @@ export function buildCatalogTestMatrix(
   const list = params.list ?? buildCatalogList();
   const coverageByRouteId = groupCoverageByRouteId(params.coverageEvidence ?? []);
   const candidates = list.cli.routedOperations.map((operation) => {
-    const smokeCommands = operation.commandPaths.map(commandPathLabel);
     return {
       routeId: operation.id,
       commandPaths: operation.commandPaths,
-      smokeCommands,
+      commandPathLabels: operation.commandPaths.map(commandPathLabel),
       recommendedTestName: recommendedTestName(operation),
       coverageEvidence: coverageByRouteId.get(operation.id) ?? [],
     };
   });
-  const coverageGaps = candidates.filter((candidate) => candidate.coverageEvidence.length === 0);
   const nodeCommandCandidates = list.cli.nodeCommands.map((command) => ({
     commandId: command.id,
     command: command.command,
-    smokeCommand: command.invocationHint,
+    invocationHint: command.invocationHint,
     recommendedTestName: recommendedNodeCommandTestName(command.id),
     approvalKind: command.approvalKind,
     availability: command.availability,
@@ -116,36 +119,36 @@ export function buildCatalogTestMatrix(
     counts: {
       routedOperations: list.cli.routedOperations.length,
       nodeCommands: list.cli.nodeCommands.length,
-      smokeCandidates: candidates.length,
-      nodeCommandSmokeCandidates: nodeCommandCandidates.length,
-      coveredRoutedOperations: candidates.length - coverageGaps.length,
-      coverageGaps: coverageGaps.length,
+      testCandidates: candidates.length,
+      nodeCommandTestCandidates: nodeCommandCandidates.length,
+      evidencedRoutedOperations: candidates.filter(
+        (candidate) => candidate.coverageEvidence.length > 0,
+      ).length,
     },
     candidates,
     nodeCommandCandidates,
-    coverageGaps,
   };
 }
 
-export function renderCatalogTestMatrixMarkdown(): string {
-  const matrix = buildCatalogTestMatrix();
+export function renderCatalogTestMatrixMarkdown(
+  matrix: CliCatalogTestMatrix = buildCatalogTestMatrix(),
+): string {
   const lines = [
     "# CLI Catalog Overlay Test Matrix",
     "",
-    "Read-only routed-operation smoke-test candidates derived from the catalog. Coverage gaps are explicit until a test supplies coverage evidence for a route ID.",
+    "Read-only test-plan candidates derived from catalog command paths. Paths identify routes; they are not executable probes.",
     "",
     "## Counts",
     "",
     `- Routed operations: ${matrix.counts.routedOperations}`,
     `- Node/operator commands: ${matrix.counts.nodeCommands}`,
-    `- Smoke candidates: ${matrix.counts.smokeCandidates}`,
-    `- Node/operator smoke candidates: ${matrix.counts.nodeCommandSmokeCandidates}`,
-    `- Covered routed operations: ${matrix.counts.coveredRoutedOperations}`,
-    `- Coverage gaps: ${matrix.counts.coverageGaps}`,
+    `- Test candidates: ${matrix.counts.testCandidates}`,
+    `- Node/operator test candidates: ${matrix.counts.nodeCommandTestCandidates}`,
+    `- Routed operations with supplied evidence: ${matrix.counts.evidencedRoutedOperations}`,
     "",
     "## Candidates",
     "",
-    "| Route ID | Smoke commands | Recommended test name | Coverage |",
+    "| Route ID | Command paths | Recommended test name | Supplied evidence |",
     "| --- | --- | --- | --- |",
   ];
   for (const candidate of matrix.candidates) {
@@ -154,9 +157,9 @@ export function renderCatalogTestMatrixMarkdown(): string {
         ? candidate.coverageEvidence
             .map((evidence) => `${evidence.testPath} (${evidence.testName})`)
             .join("; ")
-        : "Gap";
+        : "Not supplied";
     lines.push(
-      `| \`${candidate.routeId}\` | ${candidate.smokeCommands.map(markdownCommand).join(", ")} | ${candidate.recommendedTestName} | ${coverage} |`,
+      `| \`${candidate.routeId}\` | ${candidate.commandPathLabels.map(markdownCommand).join(", ")} | ${candidate.recommendedTestName} | ${markdownTableCell(coverage)} |`,
     );
   }
   if (matrix.nodeCommandCandidates.length > 0) {
@@ -164,12 +167,12 @@ export function renderCatalogTestMatrixMarkdown(): string {
       "",
       "## Node/operator candidates",
       "",
-      "| Command ID | Smoke command | Approval | Availability | Recommended test name |",
+      "| Command ID | Invocation hint | Approval | Availability | Recommended test name |",
       "| --- | --- | --- | --- | --- |",
     );
     for (const candidate of matrix.nodeCommandCandidates) {
       lines.push(
-        `| \`${candidate.commandId}\` | ${markdownCommand(candidate.smokeCommand)} | \`${candidate.approvalKind}\` | \`${candidate.availability}\` | ${candidate.recommendedTestName} |`,
+        `| \`${candidate.commandId}\` | ${markdownCommand(candidate.invocationHint)} | \`${candidate.approvalKind}\` | \`${candidate.availability}\` | ${candidate.recommendedTestName} |`,
       );
     }
   }

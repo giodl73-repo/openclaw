@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCatalogList } from "./list.js";
+import { buildCatalogList, renderCatalogListMarkdown } from "./list.js";
 import { buildPluginCatalogCommands } from "./plugin-commands.js";
 
 describe("plugin command catalog", () => {
@@ -44,5 +44,26 @@ describe("plugin command catalog", () => {
       }),
     ]);
     expect(buildCatalogList({ pluginCommands }).counts.pluginCommands).toBe(1);
+  });
+
+  it("keeps plugin descriptions inside their Markdown table cells", () => {
+    const pluginCommands = buildPluginCatalogCommands([
+      {
+        pluginId: "example-plugin",
+        parentPath: [],
+        commands: ["camera"],
+        descriptors: [
+          {
+            name: "camera",
+            description: "Camera | controls\nfor operators",
+            hasSubcommands: true,
+          },
+        ],
+      },
+    ]);
+
+    expect(renderCatalogListMarkdown({ pluginCommands })).toContain(
+      "| `camera` | `example-plugin` | Camera \\| controls for operators |",
+    );
   });
 });

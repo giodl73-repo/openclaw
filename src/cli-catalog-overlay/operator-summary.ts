@@ -1,6 +1,5 @@
 import { buildCatalogAudit, type CliCatalogAudit } from "./audit.js";
 import { buildCatalogList, type CliCatalogList } from "./list.js";
-import { buildCatalogTestMatrix, type CliCatalogTestMatrix } from "./test-matrix.js";
 
 export type CliCatalogOperatorSummary = {
   readonly schemaVersion: 1;
@@ -14,7 +13,6 @@ export type CliCatalogOperatorSummary = {
     readonly nodeCommandsRequiringApproval: number;
     readonly confirmationRequiredSurfaces: number;
     readonly routePolicyKeys: number;
-    readonly coverageGaps: number;
   };
   readonly attention: {
     readonly confirmationRequiredSurfaceIds: readonly string[];
@@ -40,15 +38,12 @@ export function buildCatalogOperatorSummary(
   params: {
     readonly list?: CliCatalogList;
     readonly audit?: CliCatalogAudit;
-    readonly testMatrix?: CliCatalogTestMatrix;
   } = {},
 ): CliCatalogOperatorSummary {
   const list = params.list ?? buildCatalogList();
   const audit = params.audit ?? buildCatalogAudit(list);
-  const testMatrix = params.testMatrix ?? buildCatalogTestMatrix({ list });
   const policyKeyIds = audit.commandRoutes.byPolicyKey.map((group) => group.policyKey).toSorted();
   const confirmationRequiredSurfaceIds = audit.surfaces.confirmationRequiredSurfaceIds;
-  const coverageGaps = testMatrix.counts.coverageGaps;
 
   return {
     schemaVersion: 1,
@@ -62,7 +57,6 @@ export function buildCatalogOperatorSummary(
       nodeCommandsRequiringApproval: audit.counts.nodeCommandsRequiringApproval,
       confirmationRequiredSurfaces: audit.counts.confirmationRequiredSurfaces,
       routePolicyKeys: audit.counts.routePolicyKeys,
-      coverageGaps,
     },
     attention: {
       confirmationRequiredSurfaceIds,
@@ -77,9 +71,6 @@ export function buildCatalogOperatorSummary(
         : "",
       policyKeyIds.includes("networkProxy")
         ? "Review command routes with networkProxy policy before changing proxy startup behavior."
-        : "",
-      coverageGaps > 0
-        ? "Use catalog test-matrix output to prioritize routed-operation smoke coverage."
         : "",
       audit.nodeCommands.approvalRequiredCommandIds.length > 0
         ? "Review node/operator command approval state before exposing node-scoped prompt projections."
@@ -109,7 +100,6 @@ export function renderCatalogOperatorSummaryMarkdown(): string {
     `- Node/operator commands requiring approval: ${summary.counts.nodeCommandsRequiringApproval}`,
     `- Confirmation-required surfaces: ${summary.counts.confirmationRequiredSurfaces}`,
     `- Route policy keys: ${summary.counts.routePolicyKeys}`,
-    `- Test-matrix coverage gaps: ${summary.counts.coverageGaps}`,
     "",
     "## Attention",
     "",

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { describe, expect, it } from "vitest";
-import { buildCatalogList } from "./list.js";
+import { buildCatalogList, renderCatalogListMarkdown } from "./list.js";
 import { collectRuntimeCommandTree } from "./runtime-commands.js";
 
 describe("runtime command catalog", () => {
@@ -37,5 +37,15 @@ describe("runtime command catalog", () => {
       "child",
     ]);
     expect(buildCatalogList({ runtimeCommands }).counts.runtimeCommands).toBe(3);
+  });
+
+  it("keeps runtime descriptions inside their Markdown table cells", () => {
+    const program = new Command();
+    program.command("alpha").description("Alpha | command\nfor operators");
+    const runtimeCommands = collectRuntimeCommandTree(program);
+
+    expect(renderCatalogListMarkdown({ runtimeCommands })).toContain(
+      "| `alpha` | Alpha \\| command for operators |",
+    );
   });
 });
