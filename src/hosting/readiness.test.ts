@@ -71,4 +71,57 @@ describe("buildHostingReadiness", () => {
     expect(readiness.failures).toEqual([]);
     expect(readiness.advisories).toEqual(["PluginLoadFailures"]);
   });
+
+  it("requires a non-loopback local Gateway for the container profile", () => {
+    const readiness = buildHostingReadiness({
+      profile: "container",
+      config: { gateway: { mode: "local", bind: "loopback" } },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.failures).toContain("ContainerGatewayLoopback");
+  });
+
+  it("requires complete trusted-proxy posture for reverse-proxy", () => {
+    const readiness = buildHostingReadiness({
+      profile: "reverse-proxy",
+      config: {
+        gateway: {
+          mode: "local",
+          bind: "lan",
+          auth: { mode: "trusted-proxy", trustedProxy: { userHeader: "x-user" } },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.failures).toContain("TrustedProxySourcesMissing");
+  });
+
+  it("reports managed ready only with observed lifecycle readiness", () => {
+    const readiness = buildHostingReadiness({
+      profile: "managed",
+      config: {
+        gateway: {
+          mode: "local",
+          bind: "lan",
+          trustedProxies: ["10.0.0.1"],
+          auth: { mode: "trusted-proxy", trustedProxy: { userHeader: "x-user" } },
+        },
+      },
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+      managedLifecycle: "ready",
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(readiness.failures).toEqual([]);
+  });
 });

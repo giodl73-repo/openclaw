@@ -28,7 +28,11 @@ import { applyConfigOverrides } from "../config/runtime-overrides.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
-import { buildHostingReadiness, type HostingPluginReadinessInput } from "../hosting/readiness.js";
+import {
+  buildHostingReadiness,
+  resolveHostingProfile,
+  type HostingPluginReadinessInput,
+} from "../hosting/readiness.js";
 import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
@@ -906,7 +910,10 @@ export async function startGatewayServer(
   });
   const getReadiness = async (): Promise<ReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
+    const config = getRuntimeConfig();
     const hostingReadiness = buildHostingReadiness({
+      profile: resolveHostingProfile({ config, env: process.env }),
+      config,
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRegistry),

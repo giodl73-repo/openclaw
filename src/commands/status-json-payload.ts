@@ -4,6 +4,7 @@
 import {
   buildHostingReadiness,
   buildUnobservedGatewayConditions,
+  resolveHostingProfile,
   type HostingReadinessResult,
 } from "../hosting/readiness.js";
 import { resolveStatusUpdateChannelInfo } from "./status-all/format.js";
@@ -108,9 +109,12 @@ export function buildStatusJsonPayload(params: {
       ? withScannedGatewayReadiness(summaryReadiness, params.surface.gatewayReachable)
       : undefined) ??
     buildHostingReadiness({
+      profile: resolveHostingProfile({ config: params.surface.cfg, env: process.env }),
+      config: params.surface.cfg,
       configLoaded: true,
       gateway: params.surface.gatewayReachable ? "responding" : "unavailable",
       coreConditions: buildUnobservedGatewayConditions(),
+      managedLifecycle: "not-checked",
     });
   return {
     ...params.summary,

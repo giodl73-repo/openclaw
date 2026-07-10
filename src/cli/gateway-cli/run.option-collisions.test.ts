@@ -1352,7 +1352,7 @@ describe("gateway run option collisions", () => {
     ).rejects.toThrow("__exit__:1");
 
     expect(runtimeErrors).toContain(
-      'Invalid --hosting-profile. Use "local", "container", "reverse-proxy", "managed", "node-mode".',
+      'Invalid --hosting-profile. Use "local", "container", "reverse-proxy", "managed".',
     );
     expect(startGatewayServer).not.toHaveBeenCalled();
   });

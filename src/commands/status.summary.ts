@@ -15,7 +15,11 @@ import { resolveSessionTotalTokens, type SessionEntry } from "../config/sessions
 import type { OpenClawConfig } from "../config/types.js";
 import { resolveCronJobsStorePath } from "../cron/store.js";
 import { listGatewayAgentsBasic } from "../gateway/agent-list.js";
-import { buildHostingReadiness, buildUnobservedGatewayConditions } from "../hosting/readiness.js";
+import {
+  buildHostingReadiness,
+  buildUnobservedGatewayConditions,
+  resolveHostingProfile,
+} from "../hosting/readiness.js";
 import { resolveHeartbeatSummaryForAgent } from "../infra/heartbeat-summary.js";
 import { peekSystemEvents } from "../infra/system-events.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
@@ -556,9 +560,12 @@ export async function getStatusSummary(
   const summary: StatusSummary = {
     runtimeVersion: resolveRuntimeServiceVersion(process.env),
     readiness: buildHostingReadiness({
+      profile: resolveHostingProfile({ config: cfg, env: process.env }),
+      config: cfg,
       configLoaded: true,
       gateway: "not-checked",
       coreConditions: buildUnobservedGatewayConditions(),
+      managedLifecycle: "not-checked",
     }),
     linkChannel: linkContext
       ? {
