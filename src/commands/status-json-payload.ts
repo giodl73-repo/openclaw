@@ -3,6 +3,7 @@
 
 import {
   buildHostingReadiness,
+  buildUnobservedGatewayConditions,
   type HostingReadinessResult,
 } from "../hosting/readiness.js";
 import { resolveStatusUpdateChannelInfo } from "./status-all/format.js";
@@ -58,18 +59,14 @@ function withScannedGatewayReadiness(
   const failures = Array.from(
     new Set(
       conditions
-        .filter(
-          (condition) => condition.requirement === "required" && condition.status !== "True",
-        )
+        .filter((condition) => condition.requirement === "required" && condition.status !== "True")
         .map((entry) => entry.reason),
     ),
   );
   const advisories = Array.from(
     new Set(
       conditions
-        .filter(
-          (condition) => condition.requirement === "advisory" && condition.status !== "True",
-        )
+        .filter((condition) => condition.requirement === "advisory" && condition.status !== "True")
         .map((entry) => entry.reason),
     ),
   );
@@ -113,6 +110,7 @@ export function buildStatusJsonPayload(params: {
     buildHostingReadiness({
       configLoaded: true,
       gateway: params.surface.gatewayReachable ? "responding" : "unavailable",
+      coreConditions: buildUnobservedGatewayConditions(),
     });
   return {
     ...params.summary,

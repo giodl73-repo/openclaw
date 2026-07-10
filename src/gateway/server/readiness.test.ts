@@ -135,12 +135,19 @@ function readySnapshot(
     ready: true,
     failing: [],
     uptimeMs,
-    conditions: coreConditions({ eventLoop }),
+    conditions: coreConditions({
+      eventLoop,
+      suppressed: extra.suppressed as string[] | undefined,
+    }),
     ...extra,
   };
 }
 
-function failingSnapshot(failing: string[], uptimeMs = FIVE_MIN_MS): Record<string, unknown> {
+function failingSnapshot(
+  failing: string[],
+  uptimeMs = FIVE_MIN_MS,
+  startupPendingReason?: string,
+): Record<string, unknown> {
   const draining = failing.includes("gateway-draining");
   const startupPending = !draining && failing.includes("startup-sidecars");
   return {
@@ -149,6 +156,7 @@ function failingSnapshot(failing: string[], uptimeMs = FIVE_MIN_MS): Record<stri
     uptimeMs,
     conditions: coreConditions({
       startupPending,
+      startupPendingReason,
       draining,
       channelFailing: startupPending || draining ? undefined : failing,
     }),
@@ -158,8 +166,10 @@ function failingSnapshot(failing: string[], uptimeMs = FIVE_MIN_MS): Record<stri
 function coreConditions(
   params: {
     startupPending?: boolean;
+    startupPendingReason?: string;
     draining?: boolean;
     channelFailing?: string[];
+    suppressed?: string[];
     eventLoop?: { degraded: boolean; reasons: string[] };
   } = {},
 ) {
@@ -174,7 +184,7 @@ function coreConditions(
       requirement: "required",
       reason: params.startupPending ? "GatewayStartupPending" : "GatewayStartupComplete",
       message: params.startupPending
-        ? "Gateway startup dependencies are still pending."
+        ? `Gateway startup dependencies are still pending${params.startupPendingReason ? `: ${params.startupPendingReason}` : ""}.`
         : "Gateway startup dependencies are complete.",
     },
     {
@@ -201,6 +211,17 @@ function coreConditions(
           ? `Selected channels are not ready: ${channelFailing.join(", ")}.`
           : "Selected channel runtimes are ready.",
     },
+    ...(params.suppressed?.length
+      ? [
+          {
+            type: "ChannelRuntimeSuppressed",
+            status: "False",
+            requirement: "advisory",
+            reason: "ChannelRuntimeSuppressed",
+            message: `Channel runtime failures are suppressed: ${params.suppressed.join(", ")}.`,
+          },
+        ]
+      : []),
     {
       type: "EventLoopHealthy",
       status: !eventLoop ? "Unknown" : eventLoop.degraded ? "False" : "True",
@@ -245,7 +266,9 @@ describe("createReadinessChecker", () => {
         getStartupPending: () => true,
         getStartupPendingReason: () => "startup-sidecars",
       });
-      expect(readiness()).toEqual(failingSnapshot(["startup-sidecars"]));
+      expect(readiness()).toEqual(
+        failingSnapshot(["startup-sidecars"], FIVE_MIN_MS, "startup-sidecars"),
+      );
     });
   });
 

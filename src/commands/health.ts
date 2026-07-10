@@ -37,7 +37,7 @@ import { getGatewayModelPricingHealth } from "../gateway/model-pricing-cache-sta
 import { isGatewayModelPricingEnabled } from "../gateway/model-pricing-config.js";
 import type { ChannelRuntimeSnapshot } from "../gateway/server-channel-runtime.types.js";
 import { info } from "../globals.js";
-import { buildHostingReadiness } from "../hosting/readiness.js";
+import { buildHostingReadiness, buildUnobservedGatewayConditions } from "../hosting/readiness.js";
 import { countFailedDeliveryQueueEntries } from "../infra/delivery-queue-sqlite.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -721,6 +721,7 @@ export async function getHealthSnapshot(params?: {
       configLoaded: true,
       gateway: "responding",
       plugins: pluginHealth,
+      coreConditions: buildUnobservedGatewayConditions(),
     }),
     ...(params?.eventLoop ? { eventLoop: params.eventLoop } : {}),
     ...(pluginHealth ? { plugins: pluginHealth } : {}),

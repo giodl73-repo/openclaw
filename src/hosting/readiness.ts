@@ -6,6 +6,7 @@ export type HostingReadinessConditionType =
   | "GatewayStartupComplete"
   | "GatewayAcceptingWork"
   | "ChannelRuntimeReady"
+  | "ChannelRuntimeSuppressed"
   | "EventLoopHealthy"
   | "ProfileSelected"
   | "ConfigLoaded"
@@ -44,7 +45,41 @@ export type HostingReadinessInput = {
   configLoaded: boolean;
   gateway: "responding" | "not-checked" | "unavailable";
   plugins?: HostingPluginReadinessInput;
+  coreConditions?: HostingReadinessCondition[];
 };
+
+export function buildUnobservedGatewayConditions(): HostingReadinessCondition[] {
+  return [
+    {
+      type: "GatewayStartupComplete",
+      status: "Unknown",
+      requirement: "required",
+      reason: "GatewayStartupNotChecked",
+      message: "This surface did not observe Gateway startup state.",
+    },
+    {
+      type: "GatewayAcceptingWork",
+      status: "Unknown",
+      requirement: "required",
+      reason: "GatewayAdmissionNotChecked",
+      message: "This surface did not observe Gateway drain state.",
+    },
+    {
+      type: "ChannelRuntimeReady",
+      status: "Unknown",
+      requirement: "required",
+      reason: "ChannelRuntimeNotChecked",
+      message: "This surface did not observe Gateway channel runtime state.",
+    },
+    {
+      type: "EventLoopHealthy",
+      status: "Unknown",
+      requirement: "advisory",
+      reason: "EventLoopStatusUnavailable",
+      message: "This surface did not observe Gateway event-loop health.",
+    },
+  ];
+}
 
 function resolvePluginFailures(plugins: HostingPluginReadinessInput): string[] {
   return plugins.errors
@@ -111,6 +146,7 @@ function buildGatewayCondition(
 
 export function buildHostingReadiness(input: HostingReadinessInput): HostingReadinessResult {
   const conditions: HostingReadinessCondition[] = [
+    ...(input.coreConditions ?? []),
     {
       type: "ProfileSelected",
       status: "True",

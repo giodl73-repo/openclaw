@@ -162,38 +162,43 @@ describe("status-json-payload", () => {
 
   it("omits optional sections when they are absent", () => {
     const payload = buildStatusJsonPayload({
-        summary: { ok: true },
-        surface: {
-          cfg: { gateway: {} },
-          update: {
-            root: "/tmp/openclaw",
-            installKind: "package",
-            packageManager: "npm",
-          } as never,
-          tailscaleMode: "off",
-          gatewayMode: "local",
-          remoteUrlMissing: false,
-          gatewayConnection: { url: "ws://127.0.0.1:18789" },
-          gatewayReachable: false,
-          gatewayProbe: null,
-          gatewayProbeAuth: null,
-          gatewaySelf: null,
-          gatewayProbeAuthWarning: null,
-          gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
-          nodeService: { label: "node", installed: false, loadedText: "not installed" },
-        },
-        osSummary: { platform: "linux" },
-        memory: null,
-        memoryPlugin: null,
-        agents: [],
-        secretDiagnostics: [],
-      });
+      summary: { ok: true },
+      surface: {
+        cfg: { gateway: {} },
+        update: {
+          root: "/tmp/openclaw",
+          installKind: "package",
+          packageManager: "npm",
+        } as never,
+        tailscaleMode: "off",
+        gatewayMode: "local",
+        remoteUrlMissing: false,
+        gatewayConnection: { url: "ws://127.0.0.1:18789" },
+        gatewayReachable: false,
+        gatewayProbe: null,
+        gatewayProbeAuth: null,
+        gatewaySelf: null,
+        gatewayProbeAuthWarning: null,
+        gatewayService: { label: "LaunchAgent", installed: false, loadedText: "not installed" },
+        nodeService: { label: "node", installed: false, loadedText: "not installed" },
+      },
+      osSummary: { platform: "linux" },
+      memory: null,
+      memoryPlugin: null,
+      agents: [],
+      secretDiagnostics: [],
+    });
     expect(payload).not.toHaveProperty("securityAudit");
     expect(payload.readiness).toMatchObject({
       profile: "local",
       ready: false,
-      failures: ["GatewayUnavailable"],
-      advisories: ["PluginStatusUnavailable"],
+      failures: [
+        "GatewayStartupNotChecked",
+        "GatewayAdmissionNotChecked",
+        "ChannelRuntimeNotChecked",
+        "GatewayUnavailable",
+      ],
+      advisories: ["EventLoopStatusUnavailable", "PluginStatusUnavailable"],
     });
   });
 

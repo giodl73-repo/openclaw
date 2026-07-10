@@ -45,14 +45,32 @@ function buildCoreCondition(params: {
   };
 }
 
-function buildStartupCondition(pending: boolean): HostingReadinessCondition {
+function buildStartupCondition(
+  pending: boolean,
+  pendingReason?: string,
+): HostingReadinessCondition {
   return buildCoreCondition({
     type: "GatewayStartupComplete",
     status: pending ? "False" : "True",
     reason: pending ? "GatewayStartupPending" : "GatewayStartupComplete",
     message: pending
-      ? "Gateway startup dependencies are still pending."
+      ? `Gateway startup dependencies are still pending${pendingReason ? `: ${pendingReason}` : ""}.`
       : "Gateway startup dependencies are complete.",
+  });
+}
+
+function buildSuppressedChannelCondition(
+  suppressed: string[],
+): HostingReadinessCondition | undefined {
+  if (suppressed.length === 0) {
+    return undefined;
+  }
+  return buildCoreCondition({
+    type: "ChannelRuntimeSuppressed",
+    status: "False",
+    requirement: "advisory",
+    reason: "ChannelRuntimeSuppressed",
+    message: `Channel runtime failures are suppressed: ${suppressed.join(", ")}.`,
   });
 }
 
@@ -155,13 +173,14 @@ export function createReadinessChecker(deps: {
     const now = Date.now();
     const uptimeMs = now - startedAt;
     const startupPending = deps.getStartupPending?.() === true;
+    const startupPendingReason = startupPending ? deps.getStartupPendingReason?.() : undefined;
     const gatewayDraining = deps.getGatewayDraining?.() === true;
     const lifecycleConditions = [
-      buildStartupCondition(startupPending),
+      buildStartupCondition(startupPending, startupPendingReason),
       buildAcceptingWorkCondition(gatewayDraining),
     ];
     if (startupPending) {
-      const reason = deps.getStartupPendingReason?.() ?? "startup-sidecars";
+      const reason = startupPendingReason ?? "startup-sidecars";
       return withEventLoopHealth(
         {
           ready: false,
@@ -244,11 +263,16 @@ export function createReadinessChecker(deps: {
     }
 
     cachedAt = now;
+    const suppressedCondition = buildSuppressedChannelCondition(suppressed);
     cachedState = {
       ready: failing.length === 0,
       failing,
       ...(suppressed.length > 0 ? { suppressed } : {}),
-      conditions: [...lifecycleConditions, buildChannelCondition({ checked: true, failing })],
+      conditions: [
+        ...lifecycleConditions,
+        buildChannelCondition({ checked: true, failing }),
+        ...(suppressedCondition ? [suppressedCondition] : []),
+      ],
     };
     return withEventLoopHealth({ ...cachedState, uptimeMs }, deps.getEventLoopHealth);
   };
