@@ -12,6 +12,14 @@ const subCliCommandCatalog = defineCommandDescriptorCatalog([
     name: "gateway",
     description: "Run, inspect, and query the WebSocket Gateway",
     hasSubcommands: true,
+    catalogExposure: {
+      tier: "public",
+    },
+    effectProfile: {
+      risk: "medium",
+      confirmationRequired: true,
+      effectMode: "mixed",
+    },
   },
   {
     name: "daemon",

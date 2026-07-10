@@ -1,13 +1,15 @@
-import { cliCommandCatalog } from "../cli/command-catalog.js";
+import { cliCommandCatalog, type CliCommandCatalogEntry } from "../cli/command-catalog.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
 import { buildNodeCommandCatalog, type CliCatalogNodeCommand } from "./node-commands.js";
+import type { CliCatalogPluginCommand } from "./plugin-commands.js";
 import {
   listCliCatalogSurfaces,
   type CliCatalogDiscoveryMode,
   type CliCatalogSourceKind,
   type CliCatalogVisibility,
 } from "./registry.js";
+import type { CliCatalogRuntimeCommand } from "./runtime-commands.js";
 
 export type CliCatalogListSurface = {
   readonly id: string;
@@ -59,7 +61,7 @@ export type CliCatalogListDescriptor = {
 export type CliCatalogListCommandRoute = {
   readonly commandPath: readonly string[];
   readonly exact: boolean;
-  readonly routeId?: string;
+  readonly routeId?: NonNullable<CliCommandCatalogEntry["route"]>["id"];
   readonly policyKeys: readonly string[];
   readonly sourceKind: "route-policy";
   readonly sourceId: string;
@@ -70,10 +72,17 @@ export type CliCatalogListCommandRoute = {
 export type CliCatalogListRoutedOperation = {
   readonly id: string;
   readonly commandPaths: readonly (readonly string[])[];
+  readonly risk: string;
+  readonly confirmationRequired: boolean;
+  readonly effectMode: string;
   readonly sourceKind: "route-policy";
   readonly discoveryMode: "route-policy";
   readonly visibility: readonly CliCatalogVisibility[];
 };
+
+export type CliCatalogRuntimeCommandScope = "current-invocation-registered-tree";
+
+const RUNTIME_COMMAND_SCOPE: CliCatalogRuntimeCommandScope = "current-invocation-registered-tree";
 
 export type CliCatalogList = {
   readonly schemaVersion: 1;
@@ -83,21 +92,20 @@ export type CliCatalogList = {
     readonly commandRoutes: number;
     readonly routedOperations: number;
     readonly agentToolSurfaces: number;
-    readonly promptProjection: number;
+    readonly runtimeCommands: number;
+    readonly pluginCommands: number;
     readonly nodeCommands: number;
   };
   readonly cli: {
     readonly descriptors: readonly CliCatalogListDescriptor[];
     readonly commandRoutes: readonly CliCatalogListCommandRoute[];
     readonly routedOperations: readonly CliCatalogListRoutedOperation[];
+    readonly runtimeCommandScope: CliCatalogRuntimeCommandScope;
+    readonly runtimeCommands: readonly CliCatalogRuntimeCommand[];
+    readonly pluginCommands: readonly CliCatalogPluginCommand[];
     readonly nodeCommands: readonly CliCatalogNodeCommand[];
   };
   readonly agentToolSurfaces: readonly CliCatalogListSurface[];
-  readonly promptProjection: {
-    readonly routedOperationIds: readonly string[];
-    readonly agentToolSurfaceIds: readonly string[];
-    readonly nodeCommandIds: readonly string[];
-  };
 };
 
 function mapSurfaces(): readonly CliCatalogListSurface[] {
@@ -180,21 +188,34 @@ function buildCommandRoutes(): readonly CliCatalogListCommandRoute[] {
 function buildRoutedOperations(
   routes = buildCommandRoutes(),
 ): readonly CliCatalogListRoutedOperation[] {
+  const effectProfiles = new Map(
+    cliCommandCatalog.flatMap((entry) =>
+      entry.route?.effectProfile ? [[entry.route.id, entry.route.effectProfile] as const] : [],
+    ),
+  );
   return [...new Set(routes.flatMap((route) => (route.routeId ? [route.routeId] : [])))]
     .toSorted()
-    .map((id) => ({
-      id,
-      sourceKind: "route-policy" as const,
-      discoveryMode: "route-policy" as const,
-      visibility: ["prompt", "audit", "operator", "policy"] as const,
-      commandPaths: routes
-        .filter((route) => route.routeId === id)
-        .map((route) => route.commandPath),
-    }));
+    .map((id) => {
+      const effectProfile = effectProfiles.get(id);
+      return {
+        id,
+        risk: effectProfile?.risk ?? "low",
+        confirmationRequired: effectProfile?.confirmationRequired ?? false,
+        effectMode: effectProfile?.effectMode ?? "read",
+        sourceKind: "route-policy" as const,
+        discoveryMode: "route-policy" as const,
+        visibility: ["audit", "operator", "policy"] as const,
+        commandPaths: routes
+          .filter((route) => route.routeId === id)
+          .map((route) => route.commandPath),
+      };
+    });
 }
 
 export function buildCatalogList(
   params: {
+    runtimeCommands?: readonly CliCatalogRuntimeCommand[];
+    pluginCommands?: readonly CliCatalogPluginCommand[];
     nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): CliCatalogList {
@@ -202,14 +223,9 @@ export function buildCatalogList(
   const commandRoutes = buildCommandRoutes();
   const routedOperations = buildRoutedOperations(commandRoutes);
   const agentToolSurfaces = mapSurfaces();
+  const runtimeCommands = params.runtimeCommands ?? [];
+  const pluginCommands = params.pluginCommands ?? [];
   const nodeCommands = buildNodeCommandCatalog(params.nodeCommands);
-  const promptProjection = {
-    routedOperationIds: routedOperations.map((operation) => operation.id),
-    agentToolSurfaceIds: agentToolSurfaces.map((surface) => surface.id),
-    nodeCommandIds: nodeCommands
-      .filter((command) => command.visibility.includes("prompt"))
-      .map((command) => command.id),
-  };
   return {
     schemaVersion: 1,
     generatedFrom: "cli-catalog-overlay",
@@ -218,25 +234,27 @@ export function buildCatalogList(
       commandRoutes: commandRoutes.length,
       routedOperations: routedOperations.length,
       agentToolSurfaces: agentToolSurfaces.length,
-      promptProjection:
-        promptProjection.routedOperationIds.length +
-        promptProjection.agentToolSurfaceIds.length +
-        promptProjection.nodeCommandIds.length,
+      runtimeCommands: runtimeCommands.length,
+      pluginCommands: pluginCommands.length,
       nodeCommands: nodeCommands.length,
     },
     cli: {
       descriptors,
       commandRoutes,
       routedOperations,
+      runtimeCommandScope: RUNTIME_COMMAND_SCOPE,
+      runtimeCommands,
+      pluginCommands,
       nodeCommands,
     },
     agentToolSurfaces,
-    promptProjection,
   };
 }
 
 export function renderCatalogListMarkdown(
   params: {
+    runtimeCommands?: readonly CliCatalogRuntimeCommand[];
+    pluginCommands?: readonly CliCatalogPluginCommand[];
     nodeCommands?: readonly CliCatalogNodeCommand[];
   } = {},
 ): string {
@@ -252,17 +270,50 @@ export function renderCatalogListMarkdown(
     `- Command routes: ${list.counts.commandRoutes}`,
     `- Routed operations: ${list.counts.routedOperations}`,
     `- Agent/tool surfaces: ${list.counts.agentToolSurfaces}`,
-    `- Prompt projection items: ${list.counts.promptProjection}`,
+    `- Runtime commands: ${list.counts.runtimeCommands}`,
+    `- Runtime command scope: ${list.cli.runtimeCommandScope}`,
+    `- Plugin descriptor commands: ${list.counts.pluginCommands}`,
     `- Node/operator commands: ${list.counts.nodeCommands}`,
     "",
     "## Routed operations",
     "",
-    "| Operation | Command paths |",
-    "| --- | --- |",
+    "| Operation | Risk | Effect mode | Confirmation | Command paths |",
+    "| --- | --- | --- | --- | --- |",
   ];
   for (const operation of list.cli.routedOperations) {
     const paths = operation.commandPaths.map((path) => markdownCodeCell(path.join(" "))).join(", ");
-    lines.push(`| ${markdownCodeCell(operation.id)} | ${paths || "None"} |`);
+    lines.push(
+      `| ${markdownCodeCell(operation.id)} | ${markdownCodeCell(operation.risk)} | ${markdownCodeCell(operation.effectMode)} | ${operation.confirmationRequired ? "yes" : "no"} | ${paths || "None"} |`,
+    );
+  }
+  if (list.cli.pluginCommands.length > 0) {
+    lines.push(
+      "",
+      "## Plugin descriptor commands",
+      "",
+      "| Command path | Parent | Depth | Plugin | Risk | Effect mode | Confirmation | Visibility | Description |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    );
+    for (const command of list.cli.pluginCommands) {
+      lines.push(
+        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${command.parentPath.length > 0 ? markdownCodeCell(command.parentPath.join(" ")) : "None"} | ${command.depth} | ${markdownCodeCell(command.pluginId)} | ${markdownCodeCell(command.risk)} | ${markdownCodeCell(command.effectMode)} | ${command.confirmationRequired ? "yes" : "no"} | ${command.visibility.map(markdownCodeCell).join(", ")} | ${markdownTableCell(command.description || "None")} |`,
+      );
+    }
+  }
+
+  if (list.cli.runtimeCommands.length > 0) {
+    lines.push(
+      "",
+      "## Runtime registered commands",
+      "",
+      "| Command path | Parent | Depth | Visible subcommands | Description |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    for (const command of list.cli.runtimeCommands) {
+      lines.push(
+        `| ${markdownCodeCell(command.commandPath.join(" "))} | ${command.parentPath.length > 0 ? markdownCodeCell(command.parentPath.join(" ")) : "None"} | ${command.depth} | ${command.visibleSubcommandCount} | ${markdownTableCell(command.description || "None")} |`,
+      );
+    }
   }
 
   if (list.cli.nodeCommands.length > 0) {

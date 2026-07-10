@@ -1,19 +1,17 @@
+import type {
+  CliCatalogEffectMode,
+  CliCatalogRisk,
+  CliCatalogVisibility,
+} from "../cli/catalog-metadata.js";
 import type { NamedCommandDescriptor } from "../cli/program/command-group-descriptors.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
+export type {
+  CliCatalogEffectMode,
+  CliCatalogRisk,
+  CliCatalogVisibility,
+} from "../cli/catalog-metadata.js";
 
-export type CliCatalogSurfaceId =
-  | "skill_workshop"
-  | "session_status"
-  | "sessions_spawn"
-  | "process"
-  | "gateway";
-
-export type CliCatalogSurfaceKind = "tool" | "command" | "workflow";
-export type CliCatalogDispatchMode = "direct" | "metadata-first" | "hybrid";
-export type CliCatalogRisk = "low" | "medium" | "high";
-export type CliCatalogSurfaceStatus = "draft" | "stable" | "deprecated";
-export type CliCatalogEffectMode = "read" | "mutating" | "mixed";
 export type CliCatalogSourceKind =
   | "core"
   | "subcli"
@@ -27,13 +25,12 @@ export type CliCatalogDiscoveryMode =
   | "explicit-overlay"
   | "runtime-registered"
   | "plugin-descriptor";
-export type CliCatalogVisibility = "docs" | "prompt" | "audit" | "operator" | "policy";
 
 export type CliCatalogSurfaceDefinition = {
-  readonly id: CliCatalogSurfaceId;
+  readonly id: string;
   readonly title: string;
-  readonly kind: CliCatalogSurfaceKind;
-  readonly dispatchMode: CliCatalogDispatchMode;
+  readonly kind: "tool" | "command" | "workflow";
+  readonly dispatchMode: "direct" | "metadata-first" | "hybrid";
   readonly target: string;
   readonly source: string;
   readonly sourceKind: CliCatalogSourceKind;
@@ -44,7 +41,7 @@ export type CliCatalogSurfaceDefinition = {
   readonly examples: readonly string[];
   readonly aliases: readonly string[];
   readonly owner: string;
-  readonly status: CliCatalogSurfaceStatus;
+  readonly status: "draft" | "stable" | "deprecated";
   readonly confidence: "low" | "medium" | "high";
   readonly risk: CliCatalogRisk;
   readonly confirmationRequired: boolean;
@@ -54,41 +51,83 @@ export type CliCatalogSurfaceDefinition = {
   readonly cliDescriptor?: NamedCommandDescriptor;
 };
 
-type CliCatalogSurfaceInput = Omit<CliCatalogSurfaceDefinition, "cliDescriptor"> & {
-  readonly cliDescriptorName?: string;
-};
+const DESCRIPTOR_NORMALIZATION = {
+  gateway: {
+    title: "Gateway control",
+    dispatchMode: "hybrid",
+    owner: "runtime",
+    intent: "Inspect, reconfigure, or restart the OpenClaw gateway.",
+    examples: ["restart the gateway", "inspect gateway config"],
+    aliases: ["gateway", "restart gateway"],
+    effects: ["gateway.restart", "gateway.config"],
+    commandHints: [
+      "gateway status",
+      "gateway restart",
+      "gateway config.schema.lookup",
+      "gateway config.apply",
+    ],
+  },
+} as const;
 
-function getCliDescriptors(): readonly NamedCommandDescriptor[] {
-  return [...getCoreCliCommandDescriptors(), ...getSubCliEntries()];
+function descriptorVisibility(descriptor: NamedCommandDescriptor): readonly CliCatalogVisibility[] {
+  const base: CliCatalogVisibility[] =
+    descriptor.catalogExposure?.tier === "internal"
+      ? ["audit", "operator", "policy"]
+      : ["docs", "audit", "operator", "policy"];
+  return base;
 }
 
-function findCliDescriptor(name: string): NamedCommandDescriptor {
-  const descriptor = getCliDescriptors().find((entry) => entry.name === name);
-  if (!descriptor) {
-    throw new Error(`Missing CLI descriptor for catalog overlay surface: ${name}`);
+function surfaceFromDescriptor(
+  descriptor: NamedCommandDescriptor,
+  sourceKind: "core" | "subcli",
+): CliCatalogSurfaceDefinition | undefined {
+  const effectProfile = descriptor.effectProfile;
+  const exposure = descriptor.catalogExposure;
+  if (!effectProfile && !exposure) {
+    return undefined;
   }
-  return descriptor;
-}
-
-function defineCliCatalogSurface(input: CliCatalogSurfaceInput): CliCatalogSurfaceDefinition {
-  const { cliDescriptorName, ...surface } = input;
-  if (!cliDescriptorName) {
-    return surface;
-  }
-  const descriptor = findCliDescriptor(cliDescriptorName);
+  const normalized =
+    DESCRIPTOR_NORMALIZATION[descriptor.name as keyof typeof DESCRIPTOR_NORMALIZATION];
   return {
-    ...surface,
+    id: descriptor.name,
+    title: normalized?.title ?? descriptor.description,
+    kind: "command",
+    dispatchMode: normalized?.dispatchMode ?? "direct",
+    target: descriptor.name,
     source: `CLI descriptor: ${descriptor.name}`,
-    sourceKind: "subcli",
+    sourceKind,
     sourceId: descriptor.name,
     discoveryMode: "static-descriptor",
-    target: descriptor.name,
-    intent: surface.intent || descriptor.description,
+    visibility: descriptorVisibility(descriptor),
+    intent: normalized?.intent ?? descriptor.description,
+    examples: normalized?.examples ?? [],
+    aliases: normalized?.aliases ?? [],
+    owner: normalized?.owner ?? "cli",
+    status: "stable",
+    confidence: "high",
+    risk: effectProfile?.risk ?? "low",
+    confirmationRequired: effectProfile?.confirmationRequired ?? false,
+    effectMode: effectProfile?.effectMode ?? "read",
+    effects: normalized?.effects ?? [],
+    commandHints: normalized?.commandHints ?? [descriptor.name],
     cliDescriptor: descriptor,
   };
 }
 
-const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
+function listDescriptorCatalogSurfaces(): readonly CliCatalogSurfaceDefinition[] {
+  return [
+    ...getCoreCliCommandDescriptors().flatMap((descriptor) => {
+      const surface = surfaceFromDescriptor(descriptor, "core");
+      return surface ? [surface] : [];
+    }),
+    ...getSubCliEntries().flatMap((descriptor) => {
+      const surface = surfaceFromDescriptor(descriptor, "subcli");
+      return surface ? [surface] : [];
+    }),
+  ];
+}
+
+const CLI_CATALOG_ADAPTER_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
   {
     id: "skill_workshop",
     title: "Skill Workshop proposals",
@@ -99,7 +138,7 @@ const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
     sourceKind: "explicit-overlay",
     sourceId: "skill_workshop",
     discoveryMode: "explicit-overlay",
-    visibility: ["docs", "prompt", "audit", "operator", "policy"],
+    visibility: ["docs", "audit", "operator", "policy"],
     intent: "Create, revise, apply, reject, or quarantine durable skill proposals.",
     examples: ["create a reusable skill", "reject a pending skill proposal"],
     aliases: ["skill workshop", "skill proposals"],
@@ -125,7 +164,7 @@ const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
     sourceKind: "explicit-overlay",
     sourceId: "session_status",
     discoveryMode: "explicit-overlay",
-    visibility: ["docs", "prompt", "audit", "operator", "policy"],
+    visibility: ["docs", "audit", "operator", "policy"],
     intent: "Report the current session state or set its model override.",
     examples: ["what model am I using", "show session status", "use this model for the session"],
     aliases: ["status", "session status"],
@@ -148,7 +187,7 @@ const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
     sourceKind: "explicit-overlay",
     sourceId: "sessions_spawn",
     discoveryMode: "explicit-overlay",
-    visibility: ["docs", "prompt", "audit", "operator", "policy"],
+    visibility: ["docs", "audit", "operator", "policy"],
     intent:
       "Delegate work to a sub-agent or ACP session when the task is broader than a direct reply.",
     examples: ["delegate file review", "spawn a sub-agent for debugging"],
@@ -172,7 +211,7 @@ const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
     sourceKind: "explicit-overlay",
     sourceId: "process",
     discoveryMode: "explicit-overlay",
-    visibility: ["docs", "prompt", "audit", "operator", "policy"],
+    visibility: ["docs", "audit", "operator", "policy"],
     intent: "Inspect and manage active exec/process work.",
     examples: ["show process logs", "poll a running command"],
     aliases: ["proc", "running process"],
@@ -185,43 +224,12 @@ const CLI_CATALOG_SURFACES: readonly CliCatalogSurfaceDefinition[] = [
     effects: ["process.lifecycle"],
     commandHints: ["process list", "process poll", "process log", "process write"],
   },
-  defineCliCatalogSurface({
-    id: "gateway",
-    title: "Gateway control",
-    kind: "command",
-    dispatchMode: "hybrid",
-    cliDescriptorName: "gateway",
-    target: "gateway",
-    source: "",
-    sourceKind: "subcli",
-    sourceId: "gateway",
-    discoveryMode: "static-descriptor",
-    visibility: ["docs", "prompt", "audit", "operator", "policy"],
-    intent: "Inspect, reconfigure, or restart the OpenClaw gateway.",
-    examples: ["restart the gateway", "inspect gateway config"],
-    aliases: ["gateway", "restart gateway"],
-    owner: "runtime",
-    status: "stable",
-    confidence: "high",
-    risk: "medium",
-    confirmationRequired: true,
-    effectMode: "mixed",
-    effects: ["gateway.restart", "gateway.config"],
-    commandHints: [
-      "gateway status",
-      "gateway restart",
-      "gateway config.schema.lookup",
-      "gateway config.apply",
-    ],
-  }),
 ] as const;
 
 export function listCliCatalogSurfaces(): readonly CliCatalogSurfaceDefinition[] {
-  return CLI_CATALOG_SURFACES;
+  return [...CLI_CATALOG_ADAPTER_SURFACES, ...listDescriptorCatalogSurfaces()];
 }
 
-export function getCliCatalogSurface(
-  surfaceId: CliCatalogSurfaceId,
-): CliCatalogSurfaceDefinition | undefined {
-  return CLI_CATALOG_SURFACES.find((surface) => surface.id === surfaceId);
+export function getCliCatalogSurface(surfaceId: string): CliCatalogSurfaceDefinition | undefined {
+  return listCliCatalogSurfaces().find((surface) => surface.id === surfaceId);
 }

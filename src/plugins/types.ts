@@ -22,6 +22,7 @@ import type { PromptMode } from "../agents/system-prompt.types.js";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { ReplyPayload } from "../auto-reply/reply-payload.js";
 import type { ThinkLevel } from "../auto-reply/thinking.shared.js";
+import type { CatalogExposure, CommandEffectProfile } from "../cli/catalog-metadata.js";
 import type { ModelProviderConfig } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { OperatorScope } from "../gateway/operator-scopes.js";
@@ -2200,6 +2201,10 @@ export type OpenClawPluginCliCommandDescriptor = {
   name: string;
   description: string;
   hasSubcommands: boolean;
+  effectProfile?: CommandEffectProfile;
+  catalogExposure?: CatalogExposure;
+  /** Hide the placeholder from generated catalogs while preserving command ownership metadata. */
+  hidden?: boolean;
 };
 
 export type OpenClawPluginNodeCliFeatureOptions = {
