@@ -15,6 +15,16 @@ function resolveReadiness(value: unknown): HostingReadinessResult | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
+  const direct = value as Partial<HostingReadinessResult>;
+  if (
+    typeof direct.profile === "string" &&
+    typeof direct.ready === "boolean" &&
+    Array.isArray(direct.conditions) &&
+    Array.isArray(direct.failures) &&
+    Array.isArray(direct.advisories)
+  ) {
+    return direct as HostingReadinessResult;
+  }
   const readiness = (value as { readiness?: unknown }).readiness;
   if (!readiness || typeof readiness !== "object" || Array.isArray(readiness)) {
     return undefined;

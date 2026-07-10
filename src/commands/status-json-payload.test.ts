@@ -79,6 +79,21 @@ describe("status-json-payload", () => {
         memoryPlugin: { enabled: true },
         agents: [{ id: "main" }],
         secretDiagnostics: ["diag"],
+        readiness: {
+          profile: "local",
+          ready: true,
+          conditions: [
+            {
+              type: "PluginsLoaded",
+              status: "False",
+              requirement: "advisory",
+              reason: "PluginLoadFailures",
+              message: "One selected plugin failed to load.",
+            },
+          ],
+          failures: [],
+          advisories: ["PluginLoadFailures"],
+        },
         securityAudit: { summary: { critical: 1 } },
         health: { ok: true },
         usage: { providers: [] },
@@ -99,7 +114,7 @@ describe("status-json-payload", () => {
         profile: "local",
         ready: true,
         failures: [],
-        advisories: ["PluginStatusUnavailable"],
+        advisories: ["PluginLoadFailures"],
         conditions: expect.any(Array),
       },
       update: {

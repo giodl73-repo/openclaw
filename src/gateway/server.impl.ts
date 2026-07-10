@@ -152,11 +152,9 @@ ensureOpenClawCliOnPath();
 const MAX_MEDIA_TTL_HOURS = 24 * 7;
 const POST_READY_MAINTENANCE_DELAY_MS = 250;
 
-function buildGatewayPluginReadinessInput(): HostingPluginReadinessInput | undefined {
-  const registry = getActivePluginRegistry();
-  if (!registry) {
-    return undefined;
-  }
+function buildGatewayPluginReadinessInput(
+  registry: NonNullable<ReturnType<typeof getActivePluginRegistry>>,
+): HostingPluginReadinessInput {
   const errors = registry.plugins
     .filter((plugin) => plugin.status === "error")
     .map((plugin) => ({
@@ -933,7 +931,7 @@ export async function startGatewayServer(
     const hostingReadiness = buildHostingReadiness({
       configLoaded: true,
       gateway: "responding",
-      plugins: buildGatewayPluginReadinessInput(),
+      plugins: buildGatewayPluginReadinessInput(pluginRegistry),
     });
     return mergeGatewayAndHostingReadiness(gatewayReadiness, hostingReadiness);
   };
