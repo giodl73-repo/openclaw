@@ -13,6 +13,7 @@ describe("buildHostingReadiness", () => {
       profile: "local",
       ready: true,
       failures: [],
+      advisories: [],
     });
   });
 
@@ -34,7 +35,8 @@ describe("buildHostingReadiness", () => {
     });
 
     expect(readiness.ready).toBe(false);
-    expect(readiness.failures).toEqual(["GatewayNotChecked", "PluginStatusUnavailable"]);
+    expect(readiness.failures).toEqual(["GatewayNotChecked"]);
+    expect(readiness.advisories).toEqual(["PluginStatusUnavailable"]);
   });
 
   it("ignores errors from explicitly disabled plugins", () => {
@@ -65,7 +67,8 @@ describe("buildHostingReadiness", () => {
       },
     });
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.failures).toEqual(["PluginLoadFailures"]);
+    expect(readiness.ready).toBe(true);
+    expect(readiness.failures).toEqual([]);
+    expect(readiness.advisories).toEqual(["PluginLoadFailures"]);
   });
 });

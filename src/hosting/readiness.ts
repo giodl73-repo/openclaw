@@ -9,10 +9,12 @@ export type HostingReadinessConditionType =
   | "PluginsLoaded";
 
 export type HostingReadinessConditionStatus = "True" | "False" | "Unknown";
+export type HostingReadinessRequirement = "required" | "advisory";
 
 export type HostingReadinessCondition = {
   type: HostingReadinessConditionType;
   status: HostingReadinessConditionStatus;
+  requirement: HostingReadinessRequirement;
   reason: string;
   message: string;
 };
@@ -22,6 +24,7 @@ export type HostingReadinessResult = {
   ready: boolean;
   conditions: HostingReadinessCondition[];
   failures: string[];
+  advisories: string[];
 };
 
 export type HostingPluginReadinessInput = {
@@ -54,6 +57,7 @@ function buildPluginCondition(
     return {
       type: "PluginsLoaded",
       status: "Unknown",
+      requirement: "advisory",
       reason: "PluginStatusUnavailable",
       message: "Plugin registry status is not available on this surface.",
     };
@@ -62,6 +66,7 @@ function buildPluginCondition(
   return {
     type: "PluginsLoaded",
     status: failures.length === 0 ? "True" : "False",
+    requirement: "advisory",
     reason: failures.length === 0 ? "PluginsLoaded" : "PluginLoadFailures",
     message:
       failures.length === 0
@@ -77,6 +82,7 @@ function buildGatewayCondition(
     return {
       type: "GatewayResponding",
       status: "True",
+      requirement: "required",
       reason: "GatewayResponding",
       message: "Gateway accepted the readiness request.",
     };
@@ -85,6 +91,7 @@ function buildGatewayCondition(
     return {
       type: "GatewayResponding",
       status: "False",
+      requirement: "required",
       reason: "GatewayUnavailable",
       message: "Gateway did not respond to the readiness request.",
     };
@@ -92,6 +99,7 @@ function buildGatewayCondition(
   return {
     type: "GatewayResponding",
     status: "Unknown",
+    requirement: "required",
     reason: "GatewayNotChecked",
     message: "This status surface did not probe the running Gateway.",
   };
@@ -102,12 +110,14 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
     {
       type: "ProfileSelected",
       status: "True",
+      requirement: "required",
       reason: "ProfileSelected",
       message: "Runtime selected the local hosting profile.",
     },
     {
       type: "ConfigLoaded",
       status: input.configLoaded ? "True" : "False",
+      requirement: "required",
       reason: input.configLoaded ? "ConfigLoaded" : "ConfigNotLoaded",
       message: input.configLoaded
         ? "Runtime configuration loaded."
@@ -117,12 +127,16 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
     buildPluginCondition(input.plugins),
   ];
   const failures = conditions
-    .filter((entry) => entry.status !== "True")
+    .filter((entry) => entry.requirement === "required" && entry.status !== "True")
+    .map((entry) => entry.reason);
+  const advisories = conditions
+    .filter((entry) => entry.requirement === "advisory" && entry.status !== "True")
     .map((entry) => entry.reason);
   return {
     profile: DEFAULT_HOSTING_PROFILE,
     ready: failures.length === 0,
     conditions,
     failures,
+    advisories,
   };
 }

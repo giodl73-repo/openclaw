@@ -271,7 +271,8 @@ describe("getStatusSummary", () => {
     expect(summary.readiness).toMatchObject({
       profile: "local",
       ready: false,
-      failures: ["GatewayNotChecked", "PluginStatusUnavailable"],
+      failures: ["GatewayNotChecked"],
+      advisories: ["PluginStatusUnavailable"],
     });
     expect(summary.heartbeat.defaultAgentId).toBe("main");
     expect(summary.channelSummary).toEqual(["ok"]);

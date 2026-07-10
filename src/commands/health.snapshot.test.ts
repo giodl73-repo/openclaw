@@ -534,8 +534,9 @@ describe("getHealthSnapshot", () => {
     expect(snap.plugins?.loaded).toEqual(["telegram"]);
     expect(snap.readiness).toMatchObject({
       profile: "local",
-      ready: false,
-      failures: ["PluginLoadFailures"],
+      ready: true,
+      failures: [],
+      advisories: ["PluginLoadFailures"],
     });
     expect(snap.plugins?.errors).toEqual([
       {
@@ -628,8 +629,9 @@ describe("getHealthSnapshot", () => {
     expect(snap.ok).toBe(true);
     expect(snap.readiness).toMatchObject({
       profile: "local",
-      ready: false,
-      failures: ["PluginStatusUnavailable"],
+      ready: true,
+      failures: [],
+      advisories: ["PluginStatusUnavailable"],
     });
     const telegram = snap.channels.telegram as {
       configured?: boolean;

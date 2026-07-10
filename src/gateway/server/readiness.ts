@@ -24,6 +24,7 @@ export type ReadinessResult = {
   profile?: HostingReadinessResult["profile"];
   conditions?: HostingReadinessCondition[];
   failures?: string[];
+  advisories?: string[];
   hosting?: HostingReadinessResult;
 };
 

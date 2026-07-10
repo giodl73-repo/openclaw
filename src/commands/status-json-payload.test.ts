@@ -97,8 +97,9 @@ describe("status-json-payload", () => {
       os: { platform: "linux" },
       readiness: {
         profile: "local",
-        ready: false,
-        failures: ["PluginStatusUnavailable"],
+        ready: true,
+        failures: [],
+        advisories: ["PluginStatusUnavailable"],
         conditions: expect.any(Array),
       },
       update: {
@@ -176,7 +177,8 @@ describe("status-json-payload", () => {
     expect(payload.readiness).toMatchObject({
       profile: "local",
       ready: false,
-      failures: ["GatewayUnavailable", "PluginStatusUnavailable"],
+      failures: ["GatewayUnavailable"],
+      advisories: ["PluginStatusUnavailable"],
     });
   });
 

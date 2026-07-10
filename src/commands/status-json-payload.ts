@@ -30,12 +30,14 @@ function withScannedGatewayReadiness(
     ? {
         type: "GatewayResponding",
         status: "True",
+        requirement: "required",
         reason: "GatewayResponding",
         message: "Gateway accepted the readiness request.",
       }
     : {
         type: "GatewayResponding",
         status: "False",
+        requirement: "required",
         reason: "GatewayUnavailable",
         message: "Gateway did not respond to the readiness request.",
       };
@@ -45,13 +47,27 @@ function withScannedGatewayReadiness(
   ];
   const failures = Array.from(
     new Set(
-      conditions.filter((condition) => condition.status !== "True").map((entry) => entry.reason),
+      conditions
+        .filter(
+          (condition) => condition.requirement === "required" && condition.status !== "True",
+        )
+        .map((entry) => entry.reason),
+    ),
+  );
+  const advisories = Array.from(
+    new Set(
+      conditions
+        .filter(
+          (condition) => condition.requirement === "advisory" && condition.status !== "True",
+        )
+        .map((entry) => entry.reason),
     ),
   );
   return {
     ...readiness,
     conditions,
     failures,
+    advisories,
     ready: failures.length === 0,
   };
 }

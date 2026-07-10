@@ -74,6 +74,7 @@ describe("gateway probe endpoints", () => {
         {
           type: "ProfileSelected",
           status: "True",
+          requirement: "required",
           reason: "ProfileSelected",
           message: "Runtime selected the local hosting profile.",
         },
@@ -98,6 +99,7 @@ describe("gateway probe endpoints", () => {
             {
               type: "ProfileSelected",
               status: "True",
+              requirement: "required",
               reason: "ProfileSelected",
               message: "Runtime selected the local hosting profile.",
             },
