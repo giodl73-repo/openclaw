@@ -99,6 +99,16 @@ describe("captured plugin registration", () => {
               },
               hidden: true,
             },
+            {
+              name: "captured-malformed-cli",
+              description: "Captured malformed CLI",
+              hasSubcommands: false,
+              effectProfile: {
+                effectMode: "read",
+                commandHints: "not-an-array",
+              } as never,
+              catalogExposure: { tier: "private" } as never,
+            },
           ],
         });
         api.registerAgentToolResultMiddleware(() => undefined, {
@@ -136,6 +146,11 @@ describe("captured plugin registration", () => {
         hidden: true,
       }),
     );
+    expect(captured.cliRegistrars.flatMap((entry) => entry.descriptors)).toContainEqual({
+      name: "captured-malformed-cli",
+      description: "Captured malformed CLI",
+      hasSubcommands: false,
+    });
     expect(captured.api.registerMemoryEmbeddingProvider).toBeTypeOf("function");
   });
 

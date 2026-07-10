@@ -1,7 +1,9 @@
 /** CLI integration coverage for plugin commands, setup, status, and registry flows. */
 import { Command } from "commander";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { collectRuntimeCommandTree } from "../cli-catalog-overlay/runtime-commands.js";
 import type { OpenClawConfig } from "../config/config.js";
+import type { OpenClawPluginCliCommandDescriptor } from "./types.js";
 
 const mocks = vi.hoisted(() => ({
   memoryRegister: vi.fn(),
@@ -57,11 +59,7 @@ function createProgram(existingCommandName?: string) {
 
 function createCliRegistry(params?: {
   memoryCommands?: string[];
-  memoryDescriptors?: Array<{
-    name: string;
-    description: string;
-    hasSubcommands: boolean;
-  }>;
+  memoryDescriptors?: OpenClawPluginCliCommandDescriptor[];
   memoryParentPath?: string[];
 }) {
   return {
@@ -391,6 +389,31 @@ describe("registerPluginCliCommands", () => {
 
     expect(mocks.memoryRegister).toHaveBeenCalledTimes(1);
     expect(mocks.memoryListAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps hidden plugin descriptors hidden in lazy Commander placeholders", async () => {
+    mocks.loadOpenClawPlugins.mockReturnValue(
+      createCliRegistry({
+        memoryCommands: ["memory"],
+        memoryDescriptors: [
+          {
+            name: "memory",
+            description: "Memory commands",
+            hasSubcommands: true,
+            hidden: true,
+          },
+        ],
+      }),
+    );
+    const program = createProgram();
+
+    await registerPluginCliCommands(program, {} as OpenClawConfig, undefined, undefined, {
+      mode: "lazy",
+    });
+
+    expect(
+      collectRuntimeCommandTree(program).map((command) => command.commandPath),
+    ).not.toContainEqual(["memory"]);
   });
 
   it("falls back to eager registration when descriptors do not cover every command root", async () => {

@@ -32,7 +32,9 @@ describe("cli-catalog-overlay-list script", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("# CLI Catalog Overlay List");
-    expect(result.stdout).toContain("| `gateway-status` | `gateway status` |");
+    expect(result.stdout).toContain(
+      "| `gateway-status` | `low` | `read` | no | `gateway status` |",
+    );
     expect(result.stdout).toContain(
       "| `gateway` | `runtime` | `medium` | `mixed` | yes | `gateway` | CLI descriptor: gateway |",
     );

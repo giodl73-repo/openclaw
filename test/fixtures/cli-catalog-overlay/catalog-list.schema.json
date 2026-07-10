@@ -231,8 +231,11 @@
     "count": 14,
     "itemFields": [
       "commandPaths",
+      "confirmationRequired",
       "discoveryMode",
+      "effectMode",
       "id",
+      "risk",
       "sourceKind",
       "visibility"
     ],

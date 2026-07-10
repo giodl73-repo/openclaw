@@ -940,6 +940,16 @@ module.exports = {
           description: "Bad descriptor",
           hasSubcommands: false,
         },
+        {
+          name: "malformed-metadata",
+          description: "Malformed catalog metadata",
+          hasSubcommands: false,
+          catalogExposure: { tier: "private" },
+          effectProfile: {
+            effectMode: "read",
+            commandHints: "not-an-array",
+          },
+        },
       ],
     });
   },
@@ -957,7 +967,7 @@ module.exports = {
     });
 
     expect(registry.cliRegistrars).toHaveLength(1);
-    expect(registry.cliRegistrars[0]?.commands).toEqual(["safe-command"]);
+    expect(registry.cliRegistrars[0]?.commands).toEqual(["safe-command", "malformed-metadata"]);
     expect(registry.cliRegistrars[0]?.descriptors).toEqual([
       {
         name: "safe-command",
@@ -971,6 +981,11 @@ module.exports = {
           risk: "low",
           confirmationRequired: false,
         },
+      },
+      {
+        name: "malformed-metadata",
+        description: "Malformed catalog metadata",
+        hasSubcommands: false,
       },
     ]);
     expect(registry.diagnostics.map((diag) => diag.message)).toEqual([

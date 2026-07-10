@@ -230,9 +230,12 @@ export function buildCliCatalogReferenceMarkdown(): string {
       "## Routed operations",
       "",
       ...markdownTable(
-        ["Operation", "Command paths"],
+        ["Operation", "Risk", "Effect mode", "Confirmation", "Command paths"],
         list.cli.routedOperations.map((operation) => [
           code(operation.id),
+          code(operation.risk),
+          code(operation.effectMode),
+          operation.confirmationRequired ? "yes" : "no",
           commandPathList(operation.commandPaths),
         ]),
       ),

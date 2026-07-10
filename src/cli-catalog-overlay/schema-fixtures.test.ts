@@ -117,6 +117,7 @@ const samplePluginCommands = buildPluginCatalogCommands([
   {
     pluginId: "demo-plugin",
     parentPath: ["demo"],
+    commands: ["plugin"],
     descriptors: [
       {
         name: "plugin",

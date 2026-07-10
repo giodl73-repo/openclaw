@@ -11,7 +11,7 @@
   ],
   "counts": {
     "agentToolSurfaces": 5,
-    "confirmationRequiredSurfaces": 2,
+    "confirmationRequiredSurfaces": 3,
     "commandRoutes": 97,
     "commandRoutesWithPolicyKeys": 94,
     "nodeCommands": 1,
@@ -46,7 +46,7 @@
     ]
   },
   "byEffectMode": {
-    "count": 2,
+    "count": 3,
     "itemFields": [
       "count",
       "id",
@@ -54,7 +54,8 @@
     ],
     "ids": [
       "mixed",
-      "mutating"
+      "mutating",
+      "read"
     ]
   },
   "byOwner": {
@@ -70,6 +71,7 @@
     ]
   },
   "confirmationRequiredSurfaceIds": [
+    "config-unset",
     "gateway",
     "skill_workshop"
   ],

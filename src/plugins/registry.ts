@@ -19,6 +19,10 @@ import type { AnyAgentTool } from "../agents/tools/common.js";
 import { createChannelIngressQueue } from "../channels/message/ingress-queue.js";
 import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
 import {
+  normalizeCatalogExposure,
+  normalizeCommandEffectProfile,
+} from "../cli/catalog-metadata.js";
+import {
   normalizeCommandDescriptorName,
   sanitizeCommandDescriptorDescription,
 } from "../cli/program/command-descriptor-utils.js";
@@ -1502,18 +1506,26 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       .map((descriptor) => {
         const name = normalizeCommandRoot(descriptor.name, "descriptor");
         const description = sanitizeCommandDescriptorDescription(descriptor.description);
-        return name && description
-          ? {
-              name,
-              description,
-              hasSubcommands: descriptor.hasSubcommands,
-              ...(descriptor.effectProfile ? { effectProfile: descriptor.effectProfile } : {}),
-              ...(descriptor.catalogExposure
-                ? { catalogExposure: descriptor.catalogExposure }
-                : {}),
-              ...(descriptor.hidden === true ? { hidden: true } : {}),
-            }
-          : null;
+        const effectProfile = normalizeCommandEffectProfile(descriptor.effectProfile);
+        const catalogExposure = normalizeCatalogExposure(descriptor.catalogExposure);
+        if (!name || !description) {
+          return null;
+        }
+        const normalized: OpenClawPluginCliCommandDescriptor = {
+          name,
+          description,
+          hasSubcommands: descriptor.hasSubcommands,
+        };
+        if (effectProfile) {
+          normalized.effectProfile = effectProfile;
+        }
+        if (catalogExposure) {
+          normalized.catalogExposure = catalogExposure;
+        }
+        if (descriptor.hidden === true) {
+          normalized.hidden = true;
+        }
+        return normalized;
       })
       .filter(
         (descriptor): descriptor is OpenClawPluginCliCommandDescriptor => descriptor !== null,

@@ -41,12 +41,20 @@ describe("cli catalog operator summary", () => {
         commandRoutes: 97,
         routedOperations: 14,
         agentToolSurfaces: 5,
-        confirmationRequiredSurfaces: 2,
+        confirmationRequiredSurfaces: 3,
         routePolicyKeys: 8,
       },
     });
-    expect(summary.attention.confirmationRequiredSurfaceIds).toEqual(["gateway", "skill_workshop"]);
-    expect(summary.attention.mediumRiskSurfaceIds).toEqual(["gateway", "skill_workshop"]);
+    expect(summary.attention.confirmationRequiredSurfaceIds).toEqual([
+      "config-unset",
+      "gateway",
+      "skill_workshop",
+    ]);
+    expect(summary.attention.mediumRiskSurfaceIds).toEqual([
+      "config-unset",
+      "gateway",
+      "skill_workshop",
+    ]);
     expect(summary.attention.policyKeyIds).toContain("networkProxy");
   });
 
@@ -70,7 +78,9 @@ describe("cli catalog operator summary", () => {
     expect(markdown).toContain("# CLI Catalog Operator Summary");
     expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Node/operator commands: 0");
-    expect(markdown).toContain("- Confirmation required: `gateway`, `skill_workshop`");
+    expect(markdown).toContain(
+      "- Confirmation required: `config-unset`, `gateway`, `skill_workshop`",
+    );
     expect(markdown).toContain("- Route policy keys:");
   });
 });

@@ -95,9 +95,8 @@ export function buildCliCatalogConsumerContract(): CliCatalogConsumerContract {
           "counts",
           "candidates",
           "nodeCommandCandidates",
-          "coverageGaps",
         ],
-        snapshotFields: ["counts.*", "candidates", "nodeCommandCandidates", "coverageGaps"],
+        snapshotFields: ["counts.*", "candidates", "nodeCommandCandidates"],
       },
       {
         id: "summary",

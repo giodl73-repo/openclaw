@@ -12,7 +12,7 @@ import {
   renderCatalogTestMatrixMarkdown,
 } from "../cli-catalog-overlay/test-matrix.js";
 import { loadPluginCliDescriptorEntries } from "../plugins/cli-registry-loader.js";
-import { withConsoleLogsRoutedToStderrForJson } from "./json-output-mode.js";
+import { withConsoleLogsRoutedToStderr } from "./json-output-mode.js";
 import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
 
 export function registerCatalogCli(program: Command): void {
@@ -35,8 +35,7 @@ export function registerCatalogCli(program: Command): void {
         }
         const runtimeCommands = collectRuntimeCommandTree(program);
         const pluginDescriptorEntries = opts.pluginDescriptors
-          ? await withConsoleLogsRoutedToStderrForJson(
-              opts.json ? ["--json"] : [],
+          ? await withConsoleLogsRoutedToStderr(
               async () => await loadPluginCliDescriptorEntries({}),
             )
           : [];

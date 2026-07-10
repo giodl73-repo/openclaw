@@ -800,12 +800,14 @@ describe("buildAgentSystemPrompt", () => {
   it("can render node command catalog prompt entries for node-operator scope", () => {
     const defaultPrompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
+      toolNames: ["nodes"],
       cliCatalogOverlay: {
         nodeCommands: sampleNodeCommands,
       },
     });
     const nodeOperatorPrompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
+      toolNames: ["nodes"],
       cliCatalogOverlay: {
         nodeCommands: sampleNodeCommands,
         scope: "node-operator",

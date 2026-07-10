@@ -128,6 +128,29 @@ describe("catalog cli", () => {
     expect(loggingState.forceConsoleToStderr).toBe(false);
   });
 
+  it("routes plugin descriptor loading logs away from Markdown stdout", async () => {
+    const forceStderrSnapshots: boolean[] = [];
+    loadPluginCliDescriptorEntriesMock.mockImplementationOnce(async () => {
+      forceStderrSnapshots.push(loggingState.forceConsoleToStderr);
+      return [];
+    });
+
+    const output = await captureStdout(async () => {
+      await createProgram().parseAsync([
+        "node",
+        "openclaw",
+        "catalog",
+        "list",
+        "--markdown",
+        "--plugin-descriptors",
+      ]);
+    });
+
+    expect(forceStderrSnapshots).toEqual([true]);
+    expect(output).toContain("# CLI Catalog Overlay List");
+    expect(loggingState.forceConsoleToStderr).toBe(false);
+  });
+
   it("prints catalog audit, test matrix, and summary JSON", async () => {
     const audit = await captureStdout(async () => {
       await createProgram().parseAsync(["node", "openclaw", "catalog", "audit", "--json"]);

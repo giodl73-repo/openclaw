@@ -72,6 +72,9 @@ export type CliCatalogListCommandRoute = {
 export type CliCatalogListRoutedOperation = {
   readonly id: string;
   readonly commandPaths: readonly (readonly string[])[];
+  readonly risk: string;
+  readonly confirmationRequired: boolean;
+  readonly effectMode: string;
   readonly sourceKind: "route-policy";
   readonly discoveryMode: "route-policy";
   readonly visibility: readonly CliCatalogVisibility[];
@@ -191,17 +194,28 @@ function buildCommandRoutes(): readonly CliCatalogListCommandRoute[] {
 function buildRoutedOperations(
   routes = buildCommandRoutes(),
 ): readonly CliCatalogListRoutedOperation[] {
+  const effectProfiles = new Map(
+    cliCommandCatalog.flatMap((entry) =>
+      entry.route?.effectProfile ? [[entry.route.id, entry.route.effectProfile] as const] : [],
+    ),
+  );
   return [...new Set(routes.flatMap((route) => (route.routeId ? [route.routeId] : [])))]
     .toSorted()
-    .map((id) => ({
-      id,
-      sourceKind: "route-policy" as const,
-      discoveryMode: "route-policy" as const,
-      visibility: ["prompt", "audit", "operator", "policy"] as const,
-      commandPaths: routes
-        .filter((route) => route.routeId === id)
-        .map((route) => route.commandPath),
-    }));
+    .map((id) => {
+      const effectProfile = effectProfiles.get(id);
+      return {
+        id,
+        risk: effectProfile?.risk ?? "low",
+        confirmationRequired: effectProfile?.confirmationRequired ?? false,
+        effectMode: effectProfile?.effectMode ?? "read",
+        sourceKind: "route-policy" as const,
+        discoveryMode: "route-policy" as const,
+        visibility: ["prompt", "audit", "operator", "policy"] as const,
+        commandPaths: routes
+          .filter((route) => route.routeId === id)
+          .map((route) => route.commandPath),
+      };
+    });
 }
 
 export function buildCatalogList(
@@ -282,12 +296,14 @@ export function renderCatalogListMarkdown(
     "",
     "## Routed operations",
     "",
-    "| Operation | Command paths |",
-    "| --- | --- |",
+    "| Operation | Risk | Effect mode | Confirmation | Command paths |",
+    "| --- | --- | --- | --- | --- |",
   ];
   for (const operation of list.cli.routedOperations) {
     const paths = operation.commandPaths.map((path) => markdownCodeCell(path.join(" "))).join(", ");
-    lines.push(`| ${markdownCodeCell(operation.id)} | ${paths || "None"} |`);
+    lines.push(
+      `| ${markdownCodeCell(operation.id)} | ${markdownCodeCell(operation.risk)} | ${markdownCodeCell(operation.effectMode)} | ${operation.confirmationRequired ? "yes" : "no"} | ${paths || "None"} |`,
+    );
   }
   if (list.cli.pluginCommands.length > 0) {
     lines.push(

@@ -57,7 +57,7 @@ describe("runtime command catalog", () => {
     const runtimeCommands = collectRuntimeCommandTree(program);
 
     expect(renderCatalogListMarkdown({ runtimeCommands })).toContain(
-      "| `alpha` | Alpha \\| command for operators |",
+      "| `alpha` | None | 1 | 0 | Alpha \\| command for operators |",
     );
   });
 });

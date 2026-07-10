@@ -93,7 +93,8 @@ function groupRoutesByPolicyKey(
 }
 
 export function buildCatalogAudit(list = buildCatalogList()): CliCatalogAudit {
-  const confirmationRequiredSurfaceIds = list.agentToolSurfaces
+  const effectSurfaces = [...list.cli.routedOperations, ...list.agentToolSurfaces];
+  const confirmationRequiredSurfaceIds = effectSurfaces
     .filter((surface) => surface.confirmationRequired)
     .map((surface) => surface.id)
     .toSorted();
@@ -122,8 +123,8 @@ export function buildCatalogAudit(list = buildCatalogList()): CliCatalogAudit {
       routePolicyKeys: byPolicyKey.length,
     },
     surfaces: {
-      byRisk: groupSurfacesBy(list.agentToolSurfaces, (surface) => surface.risk),
-      byEffectMode: groupSurfacesBy(list.agentToolSurfaces, (surface) => surface.effectMode),
+      byRisk: groupSurfacesBy(effectSurfaces, (surface) => surface.risk),
+      byEffectMode: groupSurfacesBy(effectSurfaces, (surface) => surface.effectMode),
       byOwner: groupSurfacesBy(list.agentToolSurfaces, (surface) => surface.owner),
       confirmationRequiredSurfaceIds,
     },

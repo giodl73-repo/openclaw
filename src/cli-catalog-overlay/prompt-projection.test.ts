@@ -74,6 +74,7 @@ describe("CLI catalog overlay prompt projection", () => {
       {
         pluginId: "demo-plugin",
         parentPath: [],
+        commands: ["demo", "audit-only"],
         descriptors: [
           {
             name: "demo",
@@ -120,9 +121,17 @@ describe("CLI catalog overlay prompt projection", () => {
         {
           pluginId: "demo-plugin",
           commandPath: ["demo"],
+          parentPath: [],
+          depth: 1,
           name: "demo",
+          descriptorName: "demo",
           description,
           hasSubcommands: false,
+          hidden: false,
+          risk: "medium",
+          confirmationRequired: true,
+          effectMode: "mixed",
+          commandHints: ["demo"],
           sourceKind: "plugin" as const,
           sourceId: "demo-plugin:demo",
           discoveryMode: "plugin-descriptor" as const,

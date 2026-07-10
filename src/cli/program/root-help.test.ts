@@ -9,6 +9,12 @@ const getPluginCliCommandDescriptorsMock = vi.fn(
       description: "Matrix channel utilities",
       hasSubcommands: true,
     },
+    {
+      name: "internal-plugin-command",
+      description: "Internal plugin command",
+      hasSubcommands: false,
+      hidden: true,
+    },
   ],
 );
 
@@ -83,6 +89,8 @@ describe("root help", () => {
     expect(text).toContain("matrix");
     expect(text).toContain("matrix *");
     expect(text).toContain("Matrix channel utilities");
+    expect(text).not.toContain("internal-plugin-command");
+    expect(text).not.toContain("Internal plugin command");
   });
 
   it("does not load plugin CLI descriptors by default", async () => {

@@ -79,7 +79,7 @@ describe("plugin command catalog", () => {
     ]);
 
     expect(renderCatalogListMarkdown({ pluginCommands })).toContain(
-      "| `camera` | `example-plugin` | Camera \\| controls for operators |",
+      "| `camera` | None | 1 | `example-plugin` | Camera \\| controls for operators |",
     );
   });
 });

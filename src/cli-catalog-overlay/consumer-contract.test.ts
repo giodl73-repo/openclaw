@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { buildCatalogAudit } from "./audit.js";
 import { buildCliCatalogConsumerContract } from "./consumer-contract.js";
+import { buildCatalogList } from "./list.js";
+import { buildCatalogOperatorSummary } from "./operator-summary.js";
+import { buildCatalogTestMatrix } from "./test-matrix.js";
 
 describe("CLI catalog consumer contract", () => {
   it("documents read-only policy and admin consumer surfaces", () => {
@@ -36,5 +40,22 @@ describe("CLI catalog consumer contract", () => {
     expect(contract.jsonOutputs.every((output) => output.snapshotFields.includes("counts.*"))).toBe(
       true,
     );
+  });
+
+  it("lists only top-level fields emitted by each JSON builder", () => {
+    const list = buildCatalogList();
+    const audit = buildCatalogAudit(list);
+    const outputs = new Map<string, object>([
+      ["list", list],
+      ["audit", audit],
+      ["test-matrix", buildCatalogTestMatrix({ list })],
+      ["summary", buildCatalogOperatorSummary({ list, audit })],
+    ]);
+
+    for (const contract of buildCliCatalogConsumerContract().jsonOutputs) {
+      const output = outputs.get(contract.id);
+      expect(output, contract.id).toBeDefined();
+      expect(contract.stableFields.every((field) => Object.hasOwn(output!, field))).toBe(true);
+    }
   });
 });

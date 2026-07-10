@@ -13,8 +13,6 @@ import type { ReplyOperation } from "../../../auto-reply/reply/reply-run-registr
 import type { ReasoningLevel, ThinkLevel, VerboseLevel } from "../../../auto-reply/thinking.js";
 import type { ChatType } from "../../../channels/chat-type.js";
 import type { InboundEventKind } from "../../../channels/inbound-event/kind.js";
-import type { CliCatalogNodeCommand } from "../../../cli-catalog-overlay/node-commands.js";
-import type { CliCatalogPluginCommand } from "../../../cli-catalog-overlay/plugin-commands.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { ImageContent } from "../../../llm/types.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
@@ -134,13 +132,6 @@ export type RunEmbeddedAgentParams = {
   modelRun?: boolean;
   /** Explicit system prompt mode override for trusted callers. */
   promptMode?: PromptMode;
-  /** Optional catalog overlay inputs for scoped prompt projections such as node-operator mode. */
-  cliCatalogOverlay?: {
-    pluginCommands?: readonly CliCatalogPluginCommand[];
-    promptPluginIds?: ReadonlySet<string>;
-    nodeCommands?: readonly CliCatalogNodeCommand[];
-    scope?: "default" | "node-operator";
-  };
   /** Keep the message tool available even when a narrow profile would omit it. */
   forceMessageTool?: boolean;
   /** Include the heartbeat response tool for structured heartbeat outcomes. */

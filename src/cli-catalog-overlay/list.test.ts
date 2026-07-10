@@ -53,6 +53,13 @@ describe("cli catalog overlay list", () => {
     expect(
       list.cli.routedOperations.find((operation) => operation.id === "gateway-status"),
     ).toMatchObject({ commandPaths: [["gateway", "status"]] });
+    expect(
+      list.cli.routedOperations.find((operation) => operation.id === "config-unset"),
+    ).toMatchObject({
+      risk: "medium",
+      confirmationRequired: true,
+      effectMode: "mutating",
+    });
     expect(list.agentToolSurfaces.find((surface) => surface.id === "gateway")).toMatchObject({
       owner: "runtime",
       risk: "medium",
@@ -93,7 +100,7 @@ describe("cli catalog overlay list", () => {
     expect(markdown).toContain("- Command routes: 97");
     expect(markdown).toContain("- Runtime command scope: current-invocation-registered-tree");
     expect(markdown).toContain("- Node/operator commands: 0");
-    expect(markdown).toContain("| `gateway-status` | `gateway status` |");
+    expect(markdown).toContain("| `gateway-status` | `low` | `read` | no | `gateway status` |");
     expect(markdown).toContain(
       "| `gateway` | `runtime` | `medium` | `mixed` | yes | `gateway` | CLI descriptor: gateway |",
     );

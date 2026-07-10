@@ -62,6 +62,8 @@ describe("buildCliCatalogOverlayPromptSection", () => {
     expect(section).toContain("session_status");
     expect(section).not.toContain("- gateway:");
     expect(section).not.toContain("gateway-status->");
+    expect(section).not.toContain("agents-list->");
+    expect(section).not.toContain("config-unset->");
     expect(section).not.toContain("skill_workshop");
     expect(section).not.toContain("sessions_spawn");
     expect(section).not.toContain("commands=process");
@@ -72,9 +74,17 @@ describe("buildCliCatalogOverlayPromptSection", () => {
       {
         pluginId: "demo-plugin",
         commandPath: ["demo"],
+        parentPath: [],
+        depth: 1,
         name: "demo",
+        descriptorName: "demo",
         description: "Demo plugin command",
         hasSubcommands: false,
+        hidden: false as const,
+        risk: "medium",
+        confirmationRequired: true,
+        effectMode: "mixed",
+        commandHints: ["demo"],
         sourceKind: "plugin" as const,
         sourceId: "demo-plugin:demo",
         discoveryMode: "plugin-descriptor" as const,
@@ -95,6 +105,8 @@ describe("buildCliCatalogOverlayPromptSection", () => {
     expect(withoutExec).not.toContain("gateway-status->");
     expect(withoutExec).not.toContain("demo-plugin:demo");
     expect(withExec).toContain("gateway-status->openclaw gateway status");
+    expect(withExec).toContain("agents-list->openclaw agents");
+    expect(withExec).toContain("config-unset->openclaw config unset");
     expect(withExec).toContain("target=openclaw demo");
     expect(withExec).not.toContain("- gateway:");
   });

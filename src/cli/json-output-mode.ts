@@ -22,6 +22,11 @@ export async function withConsoleLogsRoutedToStderrForJson<T>(
   if (!hasJsonOutputFlag(argv)) {
     return run();
   }
+  return withConsoleLogsRoutedToStderr(run);
+}
+
+/** Keeps report stdout clean while code with incidental console logs runs. */
+export async function withConsoleLogsRoutedToStderr<T>(run: () => Promise<T>): Promise<T> {
   const previousForceStderr = loggingState.forceConsoleToStderr;
   loggingState.forceConsoleToStderr = true;
   try {

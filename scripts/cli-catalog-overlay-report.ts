@@ -32,7 +32,7 @@ export type CliCatalogOverlayReport = {
     readonly confirmationRequiredSurfaces: number;
     readonly routePolicyKeys: number;
     readonly routesWithoutPolicyKeys: number;
-    readonly coverageGaps: number;
+    readonly evidencedRoutedOperations: number;
   };
   readonly auditSignals: {
     readonly confirmationRequiredSurfaceIds: readonly string[];
@@ -41,7 +41,7 @@ export type CliCatalogOverlayReport = {
     readonly nodeCommandApprovalIds: readonly string[];
     readonly routePolicyKeys: readonly string[];
     readonly routesWithoutPolicyKeys: readonly string[];
-    readonly coverageGapRouteIds: readonly string[];
+    readonly evidencedRouteIds: readonly string[];
   };
   readonly notes: readonly string[];
 };
@@ -96,7 +96,7 @@ export function buildCliCatalogOverlayReport(
       confirmationRequiredSurfaces: audit.counts.confirmationRequiredSurfaces,
       routePolicyKeys: audit.counts.routePolicyKeys,
       routesWithoutPolicyKeys: audit.commandRoutes.routesWithoutPolicyKeys.length,
-      coverageGaps: testMatrix.counts.coverageGaps,
+      evidencedRoutedOperations: testMatrix.counts.evidencedRoutedOperations,
     },
     auditSignals: {
       confirmationRequiredSurfaceIds: audit.surfaces.confirmationRequiredSurfaceIds,
@@ -105,11 +105,13 @@ export function buildCliCatalogOverlayReport(
       nodeCommandApprovalIds: audit.nodeCommands.approvalRequiredCommandIds,
       routePolicyKeys: audit.commandRoutes.byPolicyKey.map((group) => group.policyKey).toSorted(),
       routesWithoutPolicyKeys: commandPathLabels(audit.commandRoutes.routesWithoutPolicyKeys),
-      coverageGapRouteIds: testMatrix.coverageGaps.map((gap) => gap.routeId),
+      evidencedRouteIds: testMatrix.candidates
+        .filter((candidate) => candidate.coverageEvidence.length > 0)
+        .map((candidate) => candidate.routeId),
     },
     notes: [
       "Catalog reports are advisory artifacts for review and automation consumers.",
-      "Coverage gaps are reported but do not fail validation by themselves.",
+      "Coverage evidence is reported only when supplied and does not gate validation.",
       "Audit signals identify review targets but do not enforce policy.",
       "Use schema fixtures to review intentional JSON contract drift.",
     ],
@@ -122,7 +124,7 @@ export function renderCliCatalogOverlayReportMarkdown(
   return [
     "# CLI Catalog Overlay Report",
     "",
-    "Advisory report for command catalog drift, routed-operation coverage, and operator handoff review.",
+    "Advisory report for command catalog drift, supplied routed-operation evidence, and operator handoff review.",
     "",
     "## Status",
     "",
@@ -140,7 +142,7 @@ export function renderCliCatalogOverlayReportMarkdown(
     `- Confirmation-required surfaces: ${report.counts.confirmationRequiredSurfaces}`,
     `- Route policy keys: ${report.counts.routePolicyKeys}`,
     `- Routes without policy keys: ${report.counts.routesWithoutPolicyKeys}`,
-    `- Test-matrix coverage gaps: ${report.counts.coverageGaps}`,
+    `- Routed operations with supplied evidence: ${report.counts.evidencedRoutedOperations}`,
     "",
     "## Audit signals",
     "",
@@ -150,7 +152,7 @@ export function renderCliCatalogOverlayReportMarkdown(
     `- Node/operator approval: ${inlineCodeList(report.auditSignals.nodeCommandApprovalIds)}`,
     `- Route policy keys: ${inlineCodeList(report.auditSignals.routePolicyKeys)}`,
     `- Routes without policy keys: ${inlineCodeList(report.auditSignals.routesWithoutPolicyKeys)}`,
-    `- Coverage gap route IDs: ${inlineCodeList(report.auditSignals.coverageGapRouteIds)}`,
+    `- Routes with supplied evidence: ${inlineCodeList(report.auditSignals.evidencedRouteIds)}`,
     "",
     "## Output files",
     "",
@@ -172,7 +174,7 @@ export function writeCliCatalogOverlayReport(
   const list = buildCatalogList();
   const audit = buildCatalogAudit(list);
   const testMatrix = buildCatalogTestMatrix({ list });
-  const summary = buildCatalogOperatorSummary({ list, audit, testMatrix });
+  const summary = buildCatalogOperatorSummary({ list, audit });
   const report = buildCliCatalogOverlayReport({ list, audit, testMatrix });
   mkdirSync(outDir, { recursive: true });
   writeFileSync(path.join(outDir, report.files.auditJson), `${JSON.stringify(audit, null, 2)}\n`);

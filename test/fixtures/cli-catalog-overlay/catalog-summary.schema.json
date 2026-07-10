@@ -15,7 +15,7 @@
     "agentToolSurfaces": 5,
     "nodeCommands": 1,
     "nodeCommandsRequiringApproval": 1,
-    "confirmationRequiredSurfaces": 2,
+    "confirmationRequiredSurfaces": 3,
     "routePolicyKeys": 8
   },
   "countFields": [
@@ -37,10 +37,12 @@
   ],
   "attention": {
     "confirmationRequiredSurfaceIds": [
+      "config-unset",
       "gateway",
       "skill_workshop"
     ],
     "mediumRiskSurfaceIds": [
+      "config-unset",
       "gateway",
       "skill_workshop"
     ],

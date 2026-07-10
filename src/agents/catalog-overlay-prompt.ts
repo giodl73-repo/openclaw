@@ -54,6 +54,9 @@ function shouldRenderSurface(
   if (surface.kind === "routed-operation" || surface.kind === "plugin-command") {
     return availableTools.has("exec");
   }
+  if (surface.kind === "node-command") {
+    return availableTools.has("nodes");
+  }
   if (!TOOL_BACKED_SURFACE_TARGETS.has(surface.target)) {
     return true;
   }

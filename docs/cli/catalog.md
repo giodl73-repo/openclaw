@@ -30,9 +30,9 @@ Use `--check` in validation to verify the checked-in page is current.
 | Lens              | Generated from                         | Key counts                                                                                                                                                               |
 | ----------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | List              | `cli-catalog-overlay`                  | descriptors 61; routes 97; routed operations 14; catalog surfaces 5; runtime commands dynamic; plugin commands opt-in; node/operator commands supplied by runtime owners |
-| Audit             | `cli-catalog-overlay-audit`            | confirmation-required surfaces 2; route policy keys 8                                                                                                                    |
+| Audit             | `cli-catalog-overlay-audit`            | confirmation-required surfaces 3; route policy keys 8                                                                                                                    |
 | Test matrix       | `cli-catalog-overlay-test-matrix`      | test candidates 14; routed operations with supplied evidence 0                                                                                                           |
-| Summary           | `cli-catalog-overlay-operator-summary` | policy keys 8; confirmation-required surfaces 2                                                                                                                          |
+| Summary           | `cli-catalog-overlay-operator-summary` | policy keys 8; confirmation-required surfaces 3                                                                                                                          |
 | Prompt projection | `cli-catalog-overlay-prompt`           | prompt surfaces 19                                                                                                                                                       |
 
 ## JSON contracts
@@ -124,22 +124,22 @@ The generated reference intentionally snapshots static descriptors, command rout
 
 ## Routed operations
 
-| Operation         | Command paths           |
-| ----------------- | ----------------------- |
-| `agents-list`     | `agents`, `agents list` |
-| `channels-list`   | `channels list`         |
-| `channels-status` | `channels status`       |
-| `config-get`      | `config get`            |
-| `config-unset`    | `config unset`          |
-| `gateway-status`  | `gateway status`        |
-| `health`          | `health`                |
-| `models-list`     | `models list`           |
-| `models-status`   | `models status`         |
-| `plugins-list`    | `plugins list`          |
-| `sessions`        | `sessions`              |
-| `status`          | `status`                |
-| `tasks-audit`     | `tasks audit`           |
-| `tasks-list`      | `tasks list`, `tasks`   |
+| Operation         | Risk     | Effect mode | Confirmation | Command paths           |
+| ----------------- | -------- | ----------- | ------------ | ----------------------- |
+| `agents-list`     | `low`    | `read`      | no           | `agents`, `agents list` |
+| `channels-list`   | `low`    | `read`      | no           | `channels list`         |
+| `channels-status` | `low`    | `read`      | no           | `channels status`       |
+| `config-get`      | `low`    | `read`      | no           | `config get`            |
+| `config-unset`    | `medium` | `mutating`  | yes          | `config unset`          |
+| `gateway-status`  | `low`    | `read`      | no           | `gateway status`        |
+| `health`          | `low`    | `read`      | no           | `health`                |
+| `models-list`     | `low`    | `read`      | no           | `models list`           |
+| `models-status`   | `low`    | `read`      | no           | `models status`         |
+| `plugins-list`    | `low`    | `read`      | no           | `plugins list`          |
+| `sessions`        | `low`    | `read`      | no           | `sessions`              |
+| `status`          | `low`    | `read`      | no           | `status`                |
+| `tasks-audit`     | `low`    | `read`      | no           | `tasks audit`           |
+| `tasks-list`      | `low`    | `read`      | no           | `tasks list`, `tasks`   |
 
 ## Agent and tool surfaces
 
@@ -188,18 +188,18 @@ The catalog contract is read-only. External consumers should use the JSON comman
 | Contract notes            | Use the catalog JSON commands as the stable external read path.; Treat advisory report artifacts as review outputs, not as the durable public API.; Add package exports deliberately before importing catalog builders outside the repo.                       |
 | Non-goals                 | The catalog does not execute commands.; The catalog does not enforce policy decisions.; The catalog does not make inventory counts permanent compatibility promises.                                                                                           |
 
-| JSON output                           | Stable fields                                                                                     | Snapshot fields                                                                                                     |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `openclaw catalog list --json`        | `schemaVersion`, `generatedFrom`, `counts`, `cli`, `agentToolSurfaces`, `promptProjection`        | `counts.*`, `cli.descriptors`, `cli.commandRoutes`, `cli.runtimeCommands`, `cli.pluginCommands`, `cli.nodeCommands` |
-| `openclaw catalog audit --json`       | `schemaVersion`, `generatedFrom`, `counts`, `surfaces`, `commandRoutes`, `nodeCommands`           | `counts.*`, `surfaces.*`, `commandRoutes.byPolicyKey`, `commandRoutes.routesWithoutPolicyKeys`, `nodeCommands.*`    |
-| `openclaw catalog test-matrix --json` | `schemaVersion`, `generatedFrom`, `counts`, `candidates`, `nodeCommandCandidates`, `coverageGaps` | `counts.*`, `candidates`, `nodeCommandCandidates`, `coverageGaps`                                                   |
-| `openclaw catalog summary --json`     | `schemaVersion`, `generatedFrom`, `counts`, `attention`, `nextChecks`                             | `counts.*`, `attention.*`, `nextChecks`                                                                             |
+| JSON output                           | Stable fields                                                                              | Snapshot fields                                                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `openclaw catalog list --json`        | `schemaVersion`, `generatedFrom`, `counts`, `cli`, `agentToolSurfaces`, `promptProjection` | `counts.*`, `cli.descriptors`, `cli.commandRoutes`, `cli.runtimeCommands`, `cli.pluginCommands`, `cli.nodeCommands` |
+| `openclaw catalog audit --json`       | `schemaVersion`, `generatedFrom`, `counts`, `surfaces`, `commandRoutes`, `nodeCommands`    | `counts.*`, `surfaces.*`, `commandRoutes.byPolicyKey`, `commandRoutes.routesWithoutPolicyKeys`, `nodeCommands.*`    |
+| `openclaw catalog test-matrix --json` | `schemaVersion`, `generatedFrom`, `counts`, `candidates`, `nodeCommandCandidates`          | `counts.*`, `candidates`, `nodeCommandCandidates`                                                                   |
+| `openclaw catalog summary --json`     | `schemaVersion`, `generatedFrom`, `counts`, `attention`, `nextChecks`                      | `counts.*`, `attention.*`, `nextChecks`                                                                             |
 
 ## Audit and operator attention
 
 | Area                  | Values                                                                                                                                        |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Confirmation required | `gateway`, `skill_workshop`                                                                                                                   |
-| Medium risk           | `gateway`, `skill_workshop`                                                                                                                   |
+| Confirmation required | `config-unset`, `gateway`, `skill_workshop`                                                                                                   |
+| Medium risk           | `config-unset`, `gateway`, `skill_workshop`                                                                                                   |
 | Mixed effect mode     | `gateway`, `process`, `session_status`, `skill_workshop`                                                                                      |
 | Route policy keys     | `bypassConfigGuard`, `ensureCliPath`, `hideBanner`, `loadPlugins`, `networkProxy`, `ownsProtocolStdout`, `pluginRegistry`, `routeConfigGuard` |

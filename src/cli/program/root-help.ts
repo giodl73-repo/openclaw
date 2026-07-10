@@ -21,12 +21,13 @@ export type RootHelpRenderOptions = Pick<PluginLoadOptions, "pluginSdkResolution
 
 async function buildRootHelpProgram(renderOptions?: RootHelpRenderOptions): Promise<Command> {
   const program = new Command();
-  const pluginDescriptors =
+  const pluginDescriptors = (
     renderOptions?.includePluginDescriptors === true || renderOptions?.config
       ? await getPluginCliCommandDescriptors(renderOptions.config, renderOptions.env, {
           pluginSdkResolution: renderOptions.pluginSdkResolution,
         })
-      : [];
+      : []
+  ).filter((descriptor) => descriptor.hidden !== true);
   configureProgramHelp(
     program,
     {
