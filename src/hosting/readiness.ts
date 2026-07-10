@@ -114,15 +114,31 @@ export function formatHostingProfileIds(): string {
   return HOSTING_PROFILE_IDS.map((profile) => `"${profile}"`).join(", ");
 }
 
+function resolveExplicitHostingProfile(
+  value: unknown,
+  source: string,
+): HostingProfileId | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const profile = parseHostingProfileId(value);
+  if (!profile) {
+    throw new Error(
+      `Invalid hosting profile from ${source}: ${JSON.stringify(value)}. Expected ${formatHostingProfileIds()}.`,
+    );
+  }
+  return profile;
+}
+
 export function resolveHostingProfile(params: {
   config?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   override?: unknown;
 } = {}): HostingProfileId {
   return (
-    parseHostingProfileId(params.override) ??
-    parseHostingProfileId(params.env?.[HOSTING_PROFILE_ENV]) ??
-    parseHostingProfileId(params.config?.hosting?.profile) ??
+    resolveExplicitHostingProfile(params.override, "gateway startup override") ??
+    resolveExplicitHostingProfile(params.env?.[HOSTING_PROFILE_ENV], HOSTING_PROFILE_ENV) ??
+    resolveExplicitHostingProfile(params.config?.hosting?.profile, "hosting.profile") ??
     DEFAULT_HOSTING_PROFILE
   );
 }
@@ -196,6 +212,7 @@ function buildContainerCondition(input: HostingReadinessInput): HostingReadiness
     return {
       type: "ContainerStateReady",
       status: "False",
+      requirement: "required",
       reason: "ContainerGatewayRemote",
       message: "Container profile requires this process to host the Gateway locally.",
     };
@@ -208,6 +225,7 @@ function buildContainerCondition(input: HostingReadinessInput): HostingReadiness
     return {
       type: "ContainerStateReady",
       status: "False",
+      requirement: "required",
       reason: "ContainerGatewayLoopback",
       message: "Container profile requires a non-loopback Gateway bind.",
     };
@@ -216,6 +234,7 @@ function buildContainerCondition(input: HostingReadinessInput): HostingReadiness
     return {
       type: "ContainerStateReady",
       status: "Unknown",
+      requirement: "required",
       reason: "ContainerBindNotResolved",
       message: "Container profile requires the resolved Gateway bind host.",
     };
@@ -223,6 +242,7 @@ function buildContainerCondition(input: HostingReadinessInput): HostingReadiness
   return {
     type: "ContainerStateReady",
     status: "True",
+    requirement: "required",
     reason: "ContainerStateReady",
     message: `Gateway is hosted locally at ${bindHost ?? bind}:${input.runtimeGateway?.port ?? input.config?.gateway?.port ?? 18789}.`,
   };
@@ -235,6 +255,7 @@ function buildTrustedProxyCondition(input: HostingReadinessInput): HostingReadin
     return {
       type: "TrustedProxyReady",
       status: "False",
+      requirement: "required",
       reason: "TrustedProxyAuthMissing",
       message: "Reverse-proxy profile requires gateway.auth.mode=trusted-proxy.",
     };
@@ -245,6 +266,7 @@ function buildTrustedProxyCondition(input: HostingReadinessInput): HostingReadin
     return {
       type: "TrustedProxyReady",
       status: "False",
+      requirement: "required",
       reason: "TrustedProxyHeaderMissing",
       message: "Trusted-proxy auth requires a non-empty userHeader.",
     };
@@ -255,6 +277,7 @@ function buildTrustedProxyCondition(input: HostingReadinessInput): HostingReadin
     return {
       type: "TrustedProxyReady",
       status: "False",
+      requirement: "required",
       reason: "TrustedProxySourcesMissing",
       message: "Reverse-proxy profile requires at least one trusted proxy address or CIDR.",
     };
@@ -262,6 +285,7 @@ function buildTrustedProxyCondition(input: HostingReadinessInput): HostingReadin
   return {
     type: "TrustedProxyReady",
     status: "True",
+    requirement: "required",
     reason: "TrustedProxyReady",
     message: `Trusted-proxy auth accepts ${userHeader} from ${trustedProxyCount} configured source${trustedProxyCount === 1 ? "" : "s"}.`,
   };

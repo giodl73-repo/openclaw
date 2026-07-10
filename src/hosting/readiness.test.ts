@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHostingReadiness } from "./readiness.js";
+import { buildHostingReadiness, resolveHostingProfile } from "./readiness.js";
 
 describe("buildHostingReadiness", () => {
   it("reports local ready when every required condition is true", () => {
@@ -177,5 +177,36 @@ describe("buildHostingReadiness", () => {
     expect(readiness.ready).toBe(true);
     expect(readiness.failures).toEqual([]);
     expect(readiness.conditions.map((condition) => condition.type)).toContain("TrustedProxyReady");
+  });
+});
+
+describe("resolveHostingProfile", () => {
+  it("uses startup override, environment, config, then local precedence", () => {
+    expect(
+      resolveHostingProfile({
+        override: "managed",
+        env: { OPENCLAW_HOSTING_PROFILE: "container" },
+        config: { hosting: { profile: "reverse-proxy" } },
+      }),
+    ).toBe("managed");
+    expect(
+      resolveHostingProfile({
+        env: { OPENCLAW_HOSTING_PROFILE: "container" },
+        config: { hosting: { profile: "reverse-proxy" } },
+      }),
+    ).toBe("container");
+    expect(resolveHostingProfile({ config: { hosting: { profile: "reverse-proxy" } } })).toBe(
+      "reverse-proxy",
+    );
+    expect(resolveHostingProfile()).toBe("local");
+  });
+
+  it("fails closed for an invalid explicit environment profile", () => {
+    expect(() =>
+      resolveHostingProfile({
+        env: { OPENCLAW_HOSTING_PROFILE: "unknown" },
+        config: { hosting: { profile: "container" } },
+      }),
+    ).toThrow(/Invalid hosting profile from OPENCLAW_HOSTING_PROFILE/);
   });
 });
