@@ -4,7 +4,8 @@ const listNodePairing = vi.hoisted(() => vi.fn());
 
 vi.mock("../infra/node-pairing.js", () => ({ listNodePairing }));
 
-const { resolveNodeModeReadinessEvidence } = await import("./node-mode.js");
+const { createNodeModeReadinessEvidenceResolver, resolveNodeModeReadinessEvidence } =
+  await import("./node-mode.js");
 
 describe("resolveNodeModeReadinessEvidence", () => {
   it("keeps paired but disconnected nodes out of connected target evidence", async () => {
@@ -78,5 +79,33 @@ describe("resolveNodeModeReadinessEvidence", () => {
       configured: false,
       approvedCommandCount: 0,
     });
+  });
+
+  it("coalesces pairing reads while reevaluating live sessions and config", async () => {
+    let now = 1_000;
+    const loadPairing = vi.fn().mockResolvedValue({
+      paired: [{ nodeId: "node-1", commands: ["system.run"] }],
+      pending: [],
+    });
+    const resolveEvidence = createNodeModeReadinessEvidenceResolver({
+      listPairing: loadPairing,
+      now: () => now,
+      cacheTtlMs: 1_000,
+    });
+
+    const disconnected = await resolveEvidence({ config: {}, connectedNodes: [] });
+    const connected = await resolveEvidence({
+      config: { gateway: { nodes: { denyCommands: ["system.run"] } } },
+      connectedNodes: [{ nodeId: "node-1", commands: ["system.run"] } as never],
+    });
+
+    expect(loadPairing).toHaveBeenCalledTimes(1);
+    expect(disconnected.targets?.connectedCount).toBe(0);
+    expect(connected.targets?.connectedCount).toBe(1);
+    expect(connected.commandApproval?.configured).toBe(false);
+
+    now += 1_000;
+    await resolveEvidence({ config: {}, connectedNodes: [] });
+    expect(loadPairing).toHaveBeenCalledTimes(2);
   });
 });

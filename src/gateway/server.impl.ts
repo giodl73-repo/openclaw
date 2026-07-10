@@ -28,13 +28,13 @@ import { applyConfigOverrides } from "../config/runtime-overrides.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
+import { createNodeModeReadinessEvidenceResolver } from "../hosting/node-mode.js";
 import {
   buildHostingReadiness,
   resolveHostingProfile,
   type HostingPluginReadinessInput,
   type HostingReadinessResult,
 } from "../hosting/readiness.js";
-import { resolveNodeModeReadinessEvidence } from "../hosting/node-mode.js";
 import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
@@ -91,6 +91,7 @@ import {
 } from "./methods/registry.js";
 import { isLoopbackHost } from "./net.js";
 import { createNodeReapprovalCoordinator } from "./node-reapproval-coordinator.js";
+import type { NodeSession } from "./node-registry.js";
 import {
   listChannelPluginConfigTargetIds,
   pluginConfigTargetsChanged,
@@ -919,6 +920,7 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   let listConnectedNodesForReadiness: () => NodeSession[] = () => [];
+  const resolveNodeModeReadinessEvidence = createNodeModeReadinessEvidenceResolver();
   const getReadiness = async (): Promise<ReadinessResult & HostingReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
     const config = getRuntimeConfig();

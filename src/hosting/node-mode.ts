@@ -3,18 +3,25 @@ import type { NodeSession } from "../gateway/node-registry.js";
 import { listNodePairing } from "../infra/node-pairing.js";
 import type { NodeModeReadinessEvidence } from "./readiness.js";
 
+const DEFAULT_NODE_MODE_PAIRING_CACHE_TTL_MS = 1_000;
+
+type NodeModeReadinessParams = {
+  config: OpenClawConfig;
+  connectedNodes: readonly NodeSession[];
+};
+
 function commandSet(value: unknown): Set<string> {
   return new Set(
     Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [],
   );
 }
 
-export async function resolveNodeModeReadinessEvidence(params: {
-  config: OpenClawConfig;
-  connectedNodes: readonly NodeSession[];
-}): Promise<NodeModeReadinessEvidence> {
+async function resolveNodeModeReadinessEvidenceWith(
+  params: NodeModeReadinessParams,
+  loadPairing: typeof listNodePairing,
+): Promise<NodeModeReadinessEvidence> {
   try {
-    const pairing = await listNodePairing();
+    const pairing = await loadPairing();
     const pairedByNodeId = new Map(pairing.paired.map((entry) => [entry.nodeId, entry]));
     const connectedPairedNodes = params.connectedNodes.filter((entry) =>
       pairedByNodeId.has(entry.nodeId),
@@ -28,8 +35,8 @@ export async function resolveNodeModeReadinessEvidence(params: {
         approvedCommands.add(command);
       }
       const liveCommands = commandSet(node.commands);
-      executableApprovedCommandCount += [...approvedCommands].filter((command) =>
-        liveCommands.has(command) && !deniedCommands.has(command),
+      executableApprovedCommandCount += [...approvedCommands].filter(
+        (command) => liveCommands.has(command) && !deniedCommands.has(command),
       ).length;
     }
     const connectedCount = connectedPairedNodes.length;
@@ -71,4 +78,41 @@ export async function resolveNodeModeReadinessEvidence(params: {
       },
     };
   }
+}
+
+export async function resolveNodeModeReadinessEvidence(
+  params: NodeModeReadinessParams,
+): Promise<NodeModeReadinessEvidence> {
+  return await resolveNodeModeReadinessEvidenceWith(params, listNodePairing);
+}
+
+export function createNodeModeReadinessEvidenceResolver(
+  deps: {
+    listPairing?: typeof listNodePairing;
+    now?: () => number;
+    cacheTtlMs?: number;
+  } = {},
+): (params: NodeModeReadinessParams) => Promise<NodeModeReadinessEvidence> {
+  const listPairing = deps.listPairing ?? listNodePairing;
+  const now = deps.now ?? Date.now;
+  const cacheTtlMs = Math.max(0, deps.cacheTtlMs ?? DEFAULT_NODE_MODE_PAIRING_CACHE_TTL_MS);
+  let cached:
+    | {
+        expiresAt: number;
+        value: ReturnType<typeof listNodePairing>;
+      }
+    | undefined;
+
+  const loadCachedPairing: typeof listNodePairing = () => {
+    const observedAt = now();
+    if (!cached || observedAt >= cached.expiresAt) {
+      cached = {
+        expiresAt: observedAt + cacheTtlMs,
+        value: listPairing(),
+      };
+    }
+    return cached.value;
+  };
+
+  return async (params) => await resolveNodeModeReadinessEvidenceWith(params, loadCachedPairing);
 }
