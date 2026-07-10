@@ -138,7 +138,6 @@ import {
   mergeGatewayAndHostingReadiness,
   type ReadinessResult,
 } from "./server/readiness.js";
-import type { NodeSession } from "./node-registry.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 import { maybeSeedControlUiAllowedOriginsAtStartup } from "./startup-control-ui-origins.js";
