@@ -56,6 +56,14 @@ describe("gateway server health/presence", () => {
       expect(status.ok).toBe(true);
       expect(presence.ok).toBe(true);
       expect(Array.isArray(presence.payload)).toBe(true);
+      expect(health.payload).toMatchObject({
+        readiness: {
+          profile: "local",
+          ready: true,
+          failures: [],
+          advisories: [],
+        },
+      });
 
       ws.close();
     },

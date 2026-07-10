@@ -32,6 +32,7 @@ import {
   buildHostingReadiness,
   resolveHostingProfile,
   type HostingPluginReadinessInput,
+  type HostingReadinessResult,
 } from "../hosting/readiness.js";
 import {
   isDiagnosticsEnabled,
@@ -171,6 +172,12 @@ function buildGatewayPluginReadinessInput(
   return { errors };
 }
 
+function projectHostingReadiness(
+  readiness: ReadinessResult & HostingReadinessResult,
+): HostingReadinessResult {
+  const { profile, ready, conditions, failures, advisories } = readiness;
+  return { profile, ready, conditions, failures, advisories };
+}
 type GatewayStartupChannelPlugin = {
   id: ChannelId;
   gatewayMethods?: readonly string[];
@@ -909,7 +916,7 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
-  const getReadiness = async (): Promise<ReadinessResult> => {
+  const getReadiness = async (): Promise<ReadinessResult & HostingReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
     const config = getRuntimeConfig();
     const hostingReadiness = buildHostingReadiness({
@@ -1128,7 +1135,7 @@ export async function startGatewayServer(
       getRuntimeSnapshot,
       getEventLoopHealth: readinessEventLoopHealth.snapshot,
       getConfigReloaderHotReloadStatus: () => runtimeState?.configReloader.hotReloadStatus?.(),
-      getHostingReadiness: async () => (await getReadiness()).hosting!,
+      getHostingReadiness: async () => projectHostingReadiness(await getReadiness()),
     });
   const stopRegisteredPostReadySidecars = async () => {
     const postReadySidecars = runtimeState.postReadySidecars;

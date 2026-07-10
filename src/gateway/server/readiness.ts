@@ -296,7 +296,7 @@ function withEventLoopHealth(
 export function mergeGatewayAndHostingReadiness(
   gateway: ReadinessResult,
   hosting: HostingReadinessResult,
-): ReadinessResult {
+): ReadinessResult & HostingReadinessResult {
   const conditions = [...(gateway.conditions ?? []), ...hosting.conditions];
   const failures = Array.from(
     new Set(

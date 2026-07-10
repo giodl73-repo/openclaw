@@ -130,6 +130,7 @@ describe("refreshGatewayHealthSnapshot", () => {
       ready: true,
       conditions: [],
       failures: [],
+      advisories: [],
     };
 
     const snapshot = await healthState.refreshGatewayHealthSnapshot({
