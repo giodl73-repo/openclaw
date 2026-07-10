@@ -142,7 +142,7 @@ describe("buildHostingReadiness", () => {
     expect(readiness.ready).toBe(true);
   });
 
-  it("reports managed ready only with observed lifecycle readiness", () => {
+  it("reports managed ready with trusted-proxy hosting requirements", () => {
     const readiness = buildHostingReadiness({
       profile: "managed",
       config: {
@@ -156,10 +156,10 @@ describe("buildHostingReadiness", () => {
       configLoaded: true,
       gateway: "responding",
       plugins: { errors: [] },
-      managedLifecycle: "ready",
     });
 
     expect(readiness.ready).toBe(true);
     expect(readiness.failures).toEqual([]);
+    expect(readiness.conditions.map((condition) => condition.type)).toContain("TrustedProxyReady");
   });
 });

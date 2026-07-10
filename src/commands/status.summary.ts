@@ -565,7 +565,6 @@ export async function getStatusSummary(
       configLoaded: true,
       gateway: "not-checked",
       coreConditions: buildUnobservedGatewayConditions(),
-      managedLifecycle: "not-checked",
     }),
     linkChannel: linkContext
       ? {

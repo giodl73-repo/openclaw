@@ -114,7 +114,6 @@ export function buildStatusJsonPayload(params: {
       configLoaded: true,
       gateway: params.surface.gatewayReachable ? "responding" : "unavailable",
       coreConditions: buildUnobservedGatewayConditions(),
-      managedLifecycle: "not-checked",
     });
   return {
     ...params.summary,

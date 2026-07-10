@@ -18,8 +18,7 @@ export type HostingReadinessConditionType =
   | "GatewayResponding"
   | "PluginsLoaded"
   | "ContainerStateReady"
-  | "TrustedProxyReady"
-  | "ManagedLifecycleReady";
+  | "TrustedProxyReady";
 
 export type HostingReadinessConditionStatus = "True" | "False" | "Unknown";
 export type HostingReadinessRequirement = "required" | "advisory";
@@ -56,7 +55,6 @@ export type HostingReadinessInput = {
   gateway: "responding" | "not-checked" | "unavailable";
   plugins?: HostingPluginReadinessInput;
   coreConditions?: HostingReadinessCondition[];
-  managedLifecycle?: "ready" | "not-ready" | "not-checked";
   runtimeGateway?: {
     mode: "local";
     bind: GatewayBindMode;
@@ -256,33 +254,6 @@ function buildTrustedProxyCondition(input: HostingReadinessInput): HostingReadin
   };
 }
 
-function buildManagedLifecycleCondition(
-  lifecycle: HostingReadinessInput["managedLifecycle"],
-): HostingReadinessCondition {
-  if (lifecycle === "ready") {
-    return {
-      type: "ManagedLifecycleReady",
-      status: "True",
-      reason: "ManagedLifecycleReady",
-      message: "Gateway startup completed and the runtime is not draining.",
-    };
-  }
-  if (lifecycle === "not-ready") {
-    return {
-      type: "ManagedLifecycleReady",
-      status: "False",
-      reason: "ManagedLifecycleNotReady",
-      message: "Gateway startup, channel, or drain state is not ready.",
-    };
-  }
-  return {
-    type: "ManagedLifecycleReady",
-    status: "Unknown",
-    reason: "ManagedLifecycleNotChecked",
-    message: "This status surface did not inspect Gateway lifecycle state.",
-  };
-}
-
 export function buildHostingReadiness(input: HostingReadinessInput): HostingReadinessResult {
   const profile = input.profile ?? DEFAULT_HOSTING_PROFILE;
   const conditions: HostingReadinessCondition[] = [
@@ -311,9 +282,6 @@ export function buildHostingReadiness(input: HostingReadinessInput): HostingRead
   }
   if (profile === "reverse-proxy" || profile === "managed") {
     conditions.push(buildTrustedProxyCondition(input));
-  }
-  if (profile === "managed") {
-    conditions.push(buildManagedLifecycleCondition(input.managedLifecycle));
   }
   const failures = conditions
     .filter((entry) => entry.requirement === "required" && entry.status !== "True")

@@ -728,7 +728,6 @@ export async function getHealthSnapshot(params?: {
       gateway: "responding",
       plugins: pluginHealth,
       coreConditions: buildUnobservedGatewayConditions(),
-      managedLifecycle: "not-checked",
     }),
     ...(params?.eventLoop ? { eventLoop: params.eventLoop } : {}),
     ...(pluginHealth ? { plugins: pluginHealth } : {}),
