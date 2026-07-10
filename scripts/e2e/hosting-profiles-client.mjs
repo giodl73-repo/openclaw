@@ -24,6 +24,21 @@ if (scenario === "local") {
   assert.equal(condition("PluginsLoaded").requirement, "advisory");
   assert.deepEqual(body.failures, []);
   assert.ok(Array.isArray(body.advisories));
+} else if (scenario === "container-ready") {
+  assert.equal(response.status, 200);
+  assert.equal(body.profile, "container");
+  assert.equal(body.ready, true);
+  assert.equal(condition("ContainerStateReady").status, "True");
+  assert.equal(condition("ContainerStateReady").requirement, "required");
+  assert.deepEqual(body.failures, []);
+} else if (scenario === "container-loopback") {
+  assert.equal(response.status, 503);
+  assert.equal(body.profile, "container");
+  assert.equal(body.ready, false);
+  assert.equal(condition("ContainerStateReady").status, "False");
+  assert.equal(condition("ContainerStateReady").requirement, "required");
+  assert.equal(condition("ContainerStateReady").reason, "ContainerGatewayLoopback");
+  assert.ok(body.failures.includes("ContainerGatewayLoopback"));
 } else {
   throw new Error(`unknown hosting profile scenario: ${scenario}`);
 }
