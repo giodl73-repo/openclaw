@@ -45,7 +45,7 @@ function withScannedGatewayReadiness(
   ];
   const failures = Array.from(
     new Set(
-      conditions.filter((condition) => condition.status === "False").map((entry) => entry.reason),
+      conditions.filter((condition) => condition.status !== "True").map((entry) => entry.reason),
     ),
   );
   return {
