@@ -333,6 +333,7 @@ function buildNodeModeConditions(
     ? {
         type: "NodePairingReady",
         status: "False",
+        requirement: "required",
         reason: "NodePairingUnavailable",
         message: `Node pairing state could not be read: ${pairing.error}`,
       }
@@ -340,12 +341,14 @@ function buildNodeModeConditions(
       ? {
           type: "NodePairingReady",
           status: "True",
+          requirement: "required",
           reason: "NodePairingReady",
           message: `Node pairing has ${pairedCount} approved node${pairedCount === 1 ? "" : "s"}.`,
         }
       : {
           type: "NodePairingReady",
           status: "False",
+          requirement: "required",
           reason: pendingCount > 0 ? "NodePairingPending" : "NodePairingMissing",
           message:
             pendingCount > 0
@@ -357,12 +360,14 @@ function buildNodeModeConditions(
       ? {
           type: "ControlledTargetsReady",
           status: "True",
+          requirement: "required",
           reason: "ControlledTargetsReady",
           message: `${connectedCount} controlled target${connectedCount === 1 ? " is" : "s are"} connected.`,
         }
       : {
           type: "ControlledTargetsReady",
           status: "False",
+          requirement: "required",
           reason: "ControlledTargetsDisconnected",
           message: "Node-mode requires at least one connected controlled target.",
         };
@@ -371,6 +376,7 @@ function buildNodeModeConditions(
     ? {
         type: "CommandApprovalReady",
         status: "True",
+        requirement: "required",
         reason: "CommandApprovalReady",
         message:
           commandApproval.approvedCommandCount > 0
@@ -380,6 +386,7 @@ function buildNodeModeConditions(
     : {
         type: "CommandApprovalReady",
         status: "False",
+        requirement: "required",
         reason: "CommandApprovalMissing",
         message: "Node-mode requires paired command grants or gateway.nodes.allowCommands.",
       };
@@ -389,12 +396,14 @@ function buildNodeModeConditions(
       ? {
           type: "ControlChannelReady",
           status: "True",
+          requirement: "required",
           reason: "ControlChannelReady",
           message: `${controlConnectedCount} node control channel${controlConnectedCount === 1 ? " is" : "s are"} connected.`,
         }
       : {
           type: "ControlChannelReady",
           status: "False",
+          requirement: "required",
           reason: "ControlChannelUnavailable",
           message: "No node control channel is connected.",
         };
