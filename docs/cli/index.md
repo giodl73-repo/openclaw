@@ -10,6 +10,13 @@ title: "CLI reference"
 reference page or is documented with the command it aliases; this index lists
 the commands, global flags, and output styling rules that apply across the CLI.
 
+## Command inventory
+
+The generated [command inventory](/cli/commands) lists top-level command
+descriptions, provenance, and declared effects from the static command
+descriptors. Run `openclaw commands list` for the current runtime tree and
+opt-in plugin descriptors.
+
 Setup commands by intent:
 
 - `openclaw setup` and `openclaw onboard` run the full guided first-run path for gateway, model auth, workspace, channels, skills, and health.

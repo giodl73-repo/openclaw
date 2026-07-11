@@ -42,8 +42,12 @@ runs:
             test/fixtures/*)
               non_docs=true
               ;;
-            docs/* | *.md | *.mdx)
+            docs/* | *.md | *.mdx | src/cli/program/subcli-descriptors.ts | scripts/generate-command-reference-doc.ts)
               docs_changed=true
+              case "$changed_path" in
+                docs/* | *.md | *.mdx) ;;
+                *) non_docs=true ;;
+              esac
               ;;
             *)
               non_docs=true
