@@ -1,5 +1,10 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import {
+  CLASSIC_TYPESCRIPT_COMPILER_API_REQUIREMENTS,
+  summarizeTypeScriptNativeApiCoverage,
+} from "./native-api-coverage.js";
+export { CLASSIC_TYPESCRIPT_COMPILER_API_REQUIREMENTS } from "./native-api-coverage.js";
 
 const require = createRequire(import.meta.url);
 
@@ -56,16 +61,6 @@ export type TypeScriptPackageInfo = {
   version: string;
 };
 
-export const CLASSIC_TYPESCRIPT_COMPILER_API_REQUIREMENTS = [
-  "transpileModule",
-  "createProgram",
-  "createPrinter",
-  "parseJsonConfigFileContent",
-  "readConfigFile",
-  "sys",
-  "SyntaxKind",
-] as const;
-
 let cachedClassicApi: TypeScriptCompilerApi | null = null;
 
 export function loadClassicTypeScriptCompilerApi(): TypeScriptCompilerApi {
@@ -95,6 +90,7 @@ export function formatTypeScriptCompilerApiLoadError(
     `OpenClaw currently requires the classic TypeScript compiler API from the root "typescript" module.` +
     installed +
     ` Required classic APIs include ${CLASSIC_TYPESCRIPT_COMPILER_API_REQUIREMENTS.join(", ")}.` +
+    ` Current TS7/native coverage map: ${summarizeTypeScriptNativeApiCoverage()}.` +
     ` TypeScript native/TS7 packages that expose only "typescript/unstable/*" need an OpenClaw adapter before they can replace the classic root API.` +
     ` Original error: ${error instanceof Error ? error.message : String(error)}`
   );
