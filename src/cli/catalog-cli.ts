@@ -1,9 +1,11 @@
 import type { Command } from "commander";
 import { inspectCommand, renderCommandInspectionMarkdown } from "../cli-catalog-overlay/inspect.js";
 import { buildCatalogList, renderCatalogListMarkdown } from "../cli-catalog-overlay/list.js";
+import { buildLiveNodeCommandObservation } from "../cli-catalog-overlay/live-node-commands.js";
 import { buildPluginCatalogCommands } from "../cli-catalog-overlay/plugin-commands.js";
 import { collectRuntimeCommandTree } from "../cli-catalog-overlay/runtime-commands.js";
 import { loadPluginCliDescriptorEntries } from "../plugins/cli-registry-loader.js";
+import { callGatewayCli, type GatewayRpcOpts } from "./gateway-cli/call.js";
 import { withConsoleLogsRoutedToStderrForJson } from "./json-output-mode.js";
 import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
 
@@ -13,6 +15,29 @@ async function loadPluginCommands() {
     async () => await loadPluginCliDescriptorEntries({}),
   );
   return buildPluginCatalogCommands(entries);
+}
+
+type NodeInventoryOpts = GatewayRpcOpts & { node?: string };
+
+function addNodeInventoryOptions(command: Command): Command {
+  return command
+    .option("--node <node-id>", "Include commands advertised by one connected paired node")
+    .option("--url <url>", "Gateway WebSocket URL")
+    .option("--token <token>", "Gateway token")
+    .option("--password <password>", "Gateway password")
+    .option("--timeout <ms>", "Gateway timeout in ms", "10000");
+}
+
+async function loadNodeCommands(opts: NodeInventoryOpts) {
+  if (!opts.node) {
+    return [];
+  }
+  const result = await callGatewayCli(
+    "node.describe",
+    { ...opts, json: true },
+    { nodeId: opts.node },
+  );
+  return buildLiveNodeCommandObservation(result, opts.node).commands;
 }
 
 function validateOutputOptions(
@@ -48,58 +73,62 @@ async function loadInspectedCommandGroup(
 export function registerCommandsCli(program: Command): void {
   const commands = program.command("commands").description("List and inspect OpenClaw commands");
 
-  commands
+  const listCommand = commands
     .command("list")
     .description("List CLI, routed, runtime, and opt-in plugin commands")
     .option("--json", "Output JSON", false)
     .option("--markdown", "Output Markdown", false)
-    .option("--plugin-descriptors", "Include plugin CLI descriptor metadata", false)
-    .action(
-      async (
-        opts: { json?: boolean; markdown?: boolean; pluginDescriptors?: boolean },
-        command: Command,
-      ) => {
-        validateOutputOptions(opts, command);
-        const runtimeCommands = collectRuntimeCommandTree(program);
-        const pluginCommands = opts.pluginDescriptors ? await loadPluginCommands() : [];
-        if (opts.json) {
-          process.stdout.write(
-            `${JSON.stringify(buildCatalogList({ runtimeCommands, pluginCommands }), null, 2)}\n`,
-          );
-          return;
-        }
-        process.stdout.write(`${renderCatalogListMarkdown({ runtimeCommands, pluginCommands })}\n`);
-      },
-    );
+    .option("--plugin-descriptors", "Include plugin CLI descriptor metadata", false);
+  addNodeInventoryOptions(listCommand).action(
+    async (
+      opts: NodeInventoryOpts & { json?: boolean; markdown?: boolean; pluginDescriptors?: boolean },
+      command: Command,
+    ) => {
+      validateOutputOptions(opts, command);
+      const runtimeCommands = collectRuntimeCommandTree(program);
+      const pluginCommands = opts.pluginDescriptors ? await loadPluginCommands() : [];
+      const nodeCommands = await loadNodeCommands(opts);
+      if (opts.json) {
+        process.stdout.write(
+          `${JSON.stringify(buildCatalogList({ runtimeCommands, pluginCommands, nodeCommands }), null, 2)}\n`,
+        );
+        return;
+      }
+      process.stdout.write(
+        `${renderCatalogListMarkdown({ runtimeCommands, pluginCommands, nodeCommands })}\n`,
+      );
+    },
+  );
 
-  commands
+  const inspectCommandCli = commands
     .command("inspect")
     .description("Inspect one exact command path")
     .argument("<command-path...>", "Command path to inspect")
     .option("--json", "Output JSON", false)
     .option("--markdown", "Output Markdown", false)
-    .option("--plugin-descriptors", "Include plugin CLI descriptor metadata", false)
-    .action(
-      async (
-        commandPath: string[],
-        opts: { json?: boolean; markdown?: boolean; pluginDescriptors?: boolean },
-        command: Command,
-      ) => {
-        validateOutputOptions(opts, command);
-        await loadInspectedCommandGroup(program, commandPath);
-        const runtimeCommands = collectRuntimeCommandTree(program);
-        const pluginCommands = opts.pluginDescriptors ? await loadPluginCommands() : [];
-        const inspection = inspectCommand(
-          buildCatalogList({ runtimeCommands, pluginCommands }),
-          commandPath,
-        );
-        if (opts.json) {
-          process.stdout.write(`${JSON.stringify(inspection, null, 2)}\n`);
-          return;
-        }
-        process.stdout.write(`${renderCommandInspectionMarkdown(inspection)}\n`);
-      },
-    );
+    .option("--plugin-descriptors", "Include plugin CLI descriptor metadata", false);
+  addNodeInventoryOptions(inspectCommandCli).action(
+    async (
+      commandPath: string[],
+      opts: NodeInventoryOpts & { json?: boolean; markdown?: boolean; pluginDescriptors?: boolean },
+      command: Command,
+    ) => {
+      validateOutputOptions(opts, command);
+      await loadInspectedCommandGroup(program, commandPath);
+      const runtimeCommands = collectRuntimeCommandTree(program);
+      const pluginCommands = opts.pluginDescriptors ? await loadPluginCommands() : [];
+      const nodeCommands = await loadNodeCommands(opts);
+      const inspection = inspectCommand(
+        buildCatalogList({ runtimeCommands, pluginCommands, nodeCommands }),
+        commandPath,
+      );
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify(inspection, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(`${renderCommandInspectionMarkdown(inspection)}\n`);
+    },
+  );
 
   applyParentDefaultHelpAction(commands);
 }
