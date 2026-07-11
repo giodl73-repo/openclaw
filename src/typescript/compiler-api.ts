@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -60,14 +61,43 @@ export function loadClassicTypeScriptCompilerApi(): TypeScriptCompilerApi {
     cachedClassicApi = require("typescript") as TypeScriptCompilerApi;
     return cachedClassicApi;
   } catch (error) {
-    throw new Error(
-      `OpenClaw currently requires the classic TypeScript compiler API from the root "typescript" module. ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+    throw new Error(formatTypeScriptCompilerApiLoadError(error));
   }
 }
 
 export async function loadClassicTypeScriptCompilerApiAsync(): Promise<TypeScriptCompilerApi> {
   return loadClassicTypeScriptCompilerApi();
+}
+
+export function formatTypeScriptCompilerApiLoadError(error: unknown): string {
+  const packageInfo = readInstalledTypeScriptPackageInfo();
+  const installed = packageInfo
+    ? ` Installed package: typescript@${packageInfo.version}; exports: ${packageInfo.exports.join(", ") || "<none>"}.`
+    : "";
+  return (
+    `OpenClaw currently requires the classic TypeScript compiler API from the root "typescript" module.` +
+    installed +
+    ` Required classic APIs include transpileModule, createProgram, createPrinter, parseJsonConfigFileContent, readConfigFile, sys, and SyntaxKind.` +
+    ` TypeScript native/TS7 packages that expose only "typescript/unstable/*" need an OpenClaw adapter before they can replace the classic root API.` +
+    ` Original error: ${error instanceof Error ? error.message : String(error)}`
+  );
+}
+
+function readInstalledTypeScriptPackageInfo(): { exports: string[]; version: string } | null {
+  try {
+    const packageJsonPath = require.resolve("typescript/package.json");
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
+      exports?: unknown;
+      version?: unknown;
+    };
+    return {
+      exports:
+        packageJson.exports && typeof packageJson.exports === "object"
+          ? Object.keys(packageJson.exports)
+          : [],
+      version: typeof packageJson.version === "string" ? packageJson.version : "<unknown>",
+    };
+  } catch {
+    return null;
+  }
 }
