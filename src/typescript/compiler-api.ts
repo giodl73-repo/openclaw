@@ -51,6 +51,21 @@ export type TsPrinter = any;
 export type TsProgram = any;
 export type TsSymbol = any;
 
+export type TypeScriptPackageInfo = {
+  exports: string[];
+  version: string;
+};
+
+export const CLASSIC_TYPESCRIPT_COMPILER_API_REQUIREMENTS = [
+  "transpileModule",
+  "createProgram",
+  "createPrinter",
+  "parseJsonConfigFileContent",
+  "readConfigFile",
+  "sys",
+  "SyntaxKind",
+] as const;
+
 let cachedClassicApi: TypeScriptCompilerApi | null = null;
 
 export function loadClassicTypeScriptCompilerApi(): TypeScriptCompilerApi {
@@ -69,21 +84,23 @@ export async function loadClassicTypeScriptCompilerApiAsync(): Promise<TypeScrip
   return loadClassicTypeScriptCompilerApi();
 }
 
-export function formatTypeScriptCompilerApiLoadError(error: unknown): string {
-  const packageInfo = readInstalledTypeScriptPackageInfo();
+export function formatTypeScriptCompilerApiLoadError(
+  error: unknown,
+  packageInfo: TypeScriptPackageInfo | null = readInstalledTypeScriptPackageInfo(),
+): string {
   const installed = packageInfo
     ? ` Installed package: typescript@${packageInfo.version}; exports: ${packageInfo.exports.join(", ") || "<none>"}.`
     : "";
   return (
     `OpenClaw currently requires the classic TypeScript compiler API from the root "typescript" module.` +
     installed +
-    ` Required classic APIs include transpileModule, createProgram, createPrinter, parseJsonConfigFileContent, readConfigFile, sys, and SyntaxKind.` +
+    ` Required classic APIs include ${CLASSIC_TYPESCRIPT_COMPILER_API_REQUIREMENTS.join(", ")}.` +
     ` TypeScript native/TS7 packages that expose only "typescript/unstable/*" need an OpenClaw adapter before they can replace the classic root API.` +
     ` Original error: ${error instanceof Error ? error.message : String(error)}`
   );
 }
 
-function readInstalledTypeScriptPackageInfo(): { exports: string[]; version: string } | null {
+function readInstalledTypeScriptPackageInfo(): TypeScriptPackageInfo | null {
   try {
     const packageJsonPath = require.resolve("typescript/package.json");
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as {
