@@ -4,7 +4,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
-import ts from "typescript";
 import {
   pluginSdkDocMetadata,
   resolvePluginSdkDocImportSpecifier,
@@ -12,6 +11,16 @@ import {
   type PluginSdkDocEntrypoint,
 } from "../../scripts/lib/plugin-sdk-doc-metadata.ts";
 import { publicPluginSdkEntrypoints } from "../../scripts/lib/plugin-sdk-entries.mjs";
+import {
+  loadClassicTypeScriptCompilerApi,
+  type TsChecker,
+  type TsDeclaration,
+  type TsPrinter,
+  type TsProgram,
+  type TsSymbol,
+} from "../typescript/compiler-api.js";
+
+const ts = loadClassicTypeScriptCompilerApi();
 
 /** Declaration kind recorded for each public SDK export in the API baseline. */
 export type PluginSdkApiExportKind =
@@ -163,16 +172,16 @@ export function normalizePluginSdkApiDeclarationText(repoRoot: string, value: st
 function createCompilerContext(repoRoot: string) {
   const configPath = ts.findConfigFile(
     repoRoot,
-    (filePath) => ts.sys.fileExists(filePath),
+    (filePath: string) => ts.sys.fileExists(filePath),
     "tsconfig.json",
   );
   assert(configPath, "Could not find tsconfig.json");
-  const configFile = ts.readConfigFile(configPath, (filePath) => ts.sys.readFile(filePath));
+  const configFile = ts.readConfigFile(configPath, (filePath: string) => ts.sys.readFile(filePath));
   if (configFile.error) {
     throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, "\n"));
   }
   const parsedConfig = ts.parseJsonConfigFileContent(configFile.config, ts.sys, repoRoot);
-  const fileNames = parsedConfig.fileNames.toSorted((left, right) =>
+  const fileNames = parsedConfig.fileNames.toSorted((left: string, right: string) =>
     compareText(
       relativePath(repoRoot, path.resolve(left)),
       relativePath(repoRoot, path.resolve(right)),
@@ -188,7 +197,7 @@ function createCompilerContext(repoRoot: string) {
 
 function buildSourceLink(
   repoRoot: string,
-  program: ts.Program,
+  program: TsProgram,
   filePath: string,
   start: number,
 ): PluginSdkApiSourceLink {
@@ -202,8 +211,8 @@ function buildSourceLink(
 }
 
 function inferExportKind(
-  symbol: ts.Symbol,
-  declaration: ts.Declaration | undefined,
+  symbol: TsSymbol,
+  declaration: TsDeclaration | undefined,
 ): PluginSdkApiExportKind {
   if (declaration) {
     switch (declaration.kind) {
@@ -260,12 +269,12 @@ function inferExportKind(
 }
 
 function resolveSymbolAndDeclaration(
-  checker: ts.TypeChecker,
+  checker: TsChecker,
   repoRoot: string,
-  symbol: ts.Symbol,
+  symbol: TsSymbol,
 ): {
-  declaration: ts.Declaration | undefined;
-  resolvedSymbol: ts.Symbol;
+  declaration: TsDeclaration | undefined;
+  resolvedSymbol: TsSymbol;
 } {
   const resolvedSymbol =
     symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
@@ -273,16 +282,20 @@ function resolveSymbolAndDeclaration(
     resolvedSymbol.getDeclarations() ??
     symbol.getDeclarations() ??
     []
-  ).toSorted((left, right) => compareDeclarations(repoRoot, left, right));
-  const declaration = declarations.find((candidate) => candidate.kind !== ts.SyntaxKind.SourceFile);
+  ).toSorted((left: TsDeclaration, right: TsDeclaration) =>
+    compareDeclarations(repoRoot, left, right),
+  );
+  const declaration = declarations.find(
+    (candidate: TsDeclaration) => candidate.kind !== ts.SyntaxKind.SourceFile,
+  );
   return { declaration, resolvedSymbol };
 }
 
 function printNode(
   repoRoot: string,
-  checker: ts.TypeChecker,
-  printer: ts.Printer,
-  declaration: ts.Declaration,
+  checker: TsChecker,
+  printer: TsPrinter,
+  declaration: TsDeclaration,
 ): string | null {
   if (ts.isFunctionDeclaration(declaration)) {
     const signatures = checker.getTypeAtLocation(declaration).getCallSignatures();
@@ -293,7 +306,7 @@ function printNode(
       repoRoot,
       signatures
         .map(
-          (signature) =>
+          (signature: unknown) =>
             `export function ${declaration.name?.text ?? "anonymous"}${checker.signatureToString(signature)};`,
         )
         .join("\n"),
@@ -367,11 +380,7 @@ function compareText(left: string, right: string): number {
   return 0;
 }
 
-function compareDeclarations(
-  repoRoot: string,
-  left: ts.Declaration,
-  right: ts.Declaration,
-): number {
+function compareDeclarations(repoRoot: string, left: TsDeclaration, right: TsDeclaration): number {
   const byPath = compareText(
     relativePath(repoRoot, left.getSourceFile().fileName),
     relativePath(repoRoot, right.getSourceFile().fileName),
@@ -389,11 +398,11 @@ function compareDeclarations(
 }
 
 function buildExportSurface(params: {
-  checker: ts.TypeChecker;
-  printer: ts.Printer;
-  program: ts.Program;
+  checker: TsChecker;
+  printer: TsPrinter;
+  program: TsProgram;
   repoRoot: string;
-  symbol: ts.Symbol;
+  symbol: TsSymbol;
 }): PluginSdkApiExport {
   const { checker, printer, program, repoRoot, symbol } = params;
   const { declaration, resolvedSymbol } = resolveSymbolAndDeclaration(checker, repoRoot, symbol);
@@ -433,9 +442,9 @@ function sortExports(left: PluginSdkApiExport, right: PluginSdkApiExport): numbe
 }
 
 function buildModuleSurface(params: {
-  checker: ts.TypeChecker;
-  printer: ts.Printer;
-  program: ts.Program;
+  checker: TsChecker;
+  printer: TsPrinter;
+  program: TsProgram;
   repoRoot: string;
   entrypoint: PluginSdkDocEntrypoint;
 }): PluginSdkApiModule {
@@ -451,8 +460,8 @@ function buildModuleSurface(params: {
 
   const exports = checker
     .getExportsOfModule(moduleSymbol)
-    .filter((symbol) => symbol.getName() !== "__esModule")
-    .map((symbol) =>
+    .filter((symbol: TsSymbol) => symbol.getName() !== "__esModule")
+    .map((symbol: TsSymbol) =>
       buildExportSurface({
         checker,
         printer,

@@ -15,6 +15,10 @@ import { uniqueValues } from "@openclaw/normalization-core/string-normalization"
 import { Type } from "typebox";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createLazyPromiseLoader } from "../shared/lazy-runtime.js";
+import {
+  loadClassicTypeScriptCompilerApiAsync,
+  type TypeScriptCompilerApi,
+} from "../typescript/compiler-api.js";
 import { clampNumber } from "../utils.js";
 import { resolveAgentConfig } from "./agent-scope-config.js";
 import type { HookContext } from "./agent-tools.before-tool-call.js";
@@ -171,10 +175,10 @@ type CodeModeWorkerResult =
 const activeRuns = new Map<string, CodeModeRunState>();
 const resumingRunIds = new Set<string>();
 let activeRunReservations = 0;
-const typescriptRuntimeLoader = createLazyPromiseLoader(() => import("typescript"), {
+const typescriptRuntimeLoader = createLazyPromiseLoader(loadClassicTypeScriptCompilerApiAsync, {
   cacheRejections: true,
 });
-let typescriptRuntimeForTest: typeof import("typescript") | null = null;
+let typescriptRuntimeForTest: TypeScriptCompilerApi | null = null;
 
 function normalizeCodeModeRawConfig(value: unknown): Record<string, unknown> | undefined {
   const codeMode = value;
@@ -492,7 +496,7 @@ function rejectsModuleAccess(code: string): boolean {
   return /\bimport\b\s*(?:\.|\(|["'`{*]|\w)|\brequire\b\s*\(/u.test(source);
 }
 
-async function loadTypeScriptRuntime(): Promise<typeof import("typescript")> {
+async function loadTypeScriptRuntime(): Promise<TypeScriptCompilerApi> {
   if (typescriptRuntimeForTest) {
     return typescriptRuntimeForTest;
   }
@@ -653,15 +657,39 @@ async function runBridgeRequest(params: {
 }
 
 function resolveCodeModeWorkerUrl(currentModuleUrl: string): URL {
-  const currentPath = fileURLToPath(currentModuleUrl);
-  const distMarker = `${path.sep}dist${path.sep}`;
-  const distIndex = currentPath.lastIndexOf(distMarker);
+  const parsedUrl = new URL(currentModuleUrl);
+  const parsedPath = decodeURIComponent(parsedUrl.pathname);
+  const usePosixFixturePath =
+    process.platform === "win32" &&
+    !/^\/[A-Za-z]:/u.test(parsedPath) &&
+    parsedPath.includes("/dist/");
+  const currentPath = usePosixFixturePath ? parsedPath : filePathFromUrl(currentModuleUrl);
+  const normalizedPath = currentPath.replaceAll("\\", "/");
+  const distMarker = "/dist/";
+  const distIndex = normalizedPath.lastIndexOf(distMarker);
   if (distIndex >= 0) {
-    const distRoot = currentPath.slice(0, distIndex + distMarker.length - 1);
-    return pathToFileURL(path.join(distRoot, "agents", "code-mode.worker.js"));
+    const distRoot = normalizedPath.slice(0, distIndex + distMarker.length - 1);
+    if (!usePosixFixturePath && path.isAbsolute(currentPath)) {
+      return pathToFileURL(
+        path.join(
+          currentPath.slice(0, distIndex + distMarker.length - 1),
+          "agents",
+          "code-mode.worker.js",
+        ),
+      );
+    }
+    return new URL(`file://${distRoot}/agents/code-mode.worker.js`);
   }
   const extension = path.extname(currentPath) || ".js";
   return new URL(`./code-mode.worker${extension}`, currentModuleUrl);
+}
+
+function filePathFromUrl(value: string): string {
+  try {
+    return fileURLToPath(value);
+  } catch {
+    return decodeURIComponent(new URL(value).pathname);
+  }
 }
 
 function codeModeWorkerUrl(): URL {
@@ -1662,9 +1690,9 @@ export const testing = {
   resolveCodeModeHeadlessConfig,
   resolveCodeModeWorkerUrl,
   resolveCodeModeConfig,
-  getTypescriptRuntimePromise: (): Promise<typeof import("typescript")> | null =>
+  getTypescriptRuntimePromise: (): Promise<TypeScriptCompilerApi> | null =>
     typescriptRuntimeLoader.peek() ?? null,
-  setTypescriptRuntimeForTest: (runtime: typeof import("typescript") | null) => {
+  setTypescriptRuntimeForTest: (runtime: TypeScriptCompilerApi | null) => {
     typescriptRuntimeForTest = runtime;
   },
 };
