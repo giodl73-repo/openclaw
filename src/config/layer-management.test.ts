@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createLayerGenerationJournal,
   identifyAuthorityChain,
   writeConfigLayer,
+  type PersistConfigLayer,
 } from "./layer-management.js";
 import type { ConfigLayerDescriptor } from "./layer-sources.js";
 
@@ -18,6 +19,16 @@ const descriptors: ConfigLayerDescriptor<string>[] = [
 const resolveSource = async (source: string) => ({
   content: documents[source],
   sourceIdentity: `source:${source}`,
+});
+
+const persistContent: PersistConfigLayer<string> = async ({ content }) => {
+  documents.operator = new TextDecoder().decode(content);
+  return { persistedContent: content };
+};
+
+beforeEach(() => {
+  documents.managed = JSON.stringify({ gateway: { mode: "local" } });
+  documents.operator = JSON.stringify({ gateway: { port: 19001 } });
 });
 
 async function currentIdentities() {
@@ -44,12 +55,77 @@ describe("managed layer writes", () => {
       expectedAuthorityChainIdentity: identities.chainIdentity,
       resolveSource,
       parseSource: parseJson,
-      persist: async () => void calls.push("persist"),
+      persist: async (persistence) => {
+        calls.push("persist");
+        return await persistContent(persistence);
+      },
       publish: async () => void calls.push("publish"),
     });
     expect(result.valid).toBe(true);
     expect(calls).toEqual(["persist", "publish"]);
     expect(result).not.toMatchObject({ authorityChainIdentity: identities.chainIdentity });
+  });
+
+  it("re-resolves the complete authority chain after persistence", async () => {
+    const identities = await currentIdentities();
+    const publish = vi.fn();
+    const originalManaged = documents.managed;
+    try {
+      const result = await writeConfigLayer({
+        descriptors,
+        targetLayerId: "operator",
+        proposedContent: JSON.stringify({ gateway: { port: 19002 } }),
+        expectedTargetDigest: identities.targetDigest,
+        expectedAuthorityChainIdentity: identities.chainIdentity,
+        resolveSource,
+        parseSource: parseJson,
+        persist: async (persistence) => {
+          documents.managed = JSON.stringify({ gateway: { mode: "remote" } });
+          return await persistContent(persistence);
+        },
+        publish,
+      });
+      expect(result).toMatchObject({
+        valid: true,
+        candidate: {
+          sourceConfig: {
+            gateway: { mode: "remote", port: 19002 },
+          },
+        },
+      });
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceConfig: { gateway: { mode: "remote", port: 19002 } },
+        }),
+      );
+    } finally {
+      documents.managed = originalManaged;
+    }
+  });
+
+  it("rejects a target changed after persistence", async () => {
+    const identities = await currentIdentities();
+    const publish = vi.fn();
+    const result = await writeConfigLayer({
+      descriptors,
+      targetLayerId: "operator",
+      proposedContent: JSON.stringify({ gateway: { port: 19002 } }),
+      expectedTargetDigest: identities.targetDigest,
+      expectedAuthorityChainIdentity: identities.chainIdentity,
+      resolveSource,
+      parseSource: parseJson,
+      persist: async (persistence) => {
+        await persistContent(persistence);
+        documents.operator = JSON.stringify({ gateway: { port: 19004 } });
+        return { persistedContent: persistence.content };
+      },
+      publish,
+    });
+    expect(result).toMatchObject({
+      valid: false,
+      findings: [{ reason: "TargetChangedAfterPersistence" }],
+    });
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it("rejects a read-only target without persistence", async () => {
@@ -67,6 +143,27 @@ describe("managed layer writes", () => {
       publish: vi.fn(),
     });
     expect(result).toMatchObject({ valid: false, findings: [{ reason: "ReadOnlyLayer" }] });
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("rejects a digest-pinned writable target without persistence", async () => {
+    const identities = await currentIdentities();
+    const persist = vi.fn();
+    const result = await writeConfigLayer({
+      descriptors: [descriptors[0], { ...descriptors[1], expectedDigest: identities.targetDigest }],
+      targetLayerId: "operator",
+      proposedContent: documents.operator,
+      expectedTargetDigest: identities.targetDigest,
+      expectedAuthorityChainIdentity: identities.chainIdentity,
+      resolveSource,
+      parseSource: parseJson,
+      persist,
+      publish: vi.fn(),
+    });
+    expect(result).toMatchObject({
+      valid: false,
+      findings: [{ reason: "DigestPinnedWritableLayer" }],
+    });
     expect(persist).not.toHaveBeenCalled();
   });
 
@@ -148,7 +245,7 @@ describe("managed layer writes", () => {
       expectedAuthorityChainIdentity: identities.chainIdentity,
       resolveSource,
       parseSource: parseJson,
-      persist: vi.fn(),
+      persist: persistContent,
       publish: async () => {
         throw new Error("publisher unavailable");
       },

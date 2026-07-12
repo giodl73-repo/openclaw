@@ -17,7 +17,10 @@ import {
 
 export type LayerWriteFinding =
   | ConfigLayerSourceFinding
-  | { reason: "UnknownTargetLayer" | "ReadOnlyLayer"; layer: string }
+  | {
+      reason: "UnknownTargetLayer" | "ReadOnlyLayer" | "DigestPinnedWritableLayer";
+      layer: string;
+    }
   | {
       reason: "StaleTargetGeneration" | "StaleAuthorityChain";
       layer: string;
@@ -38,9 +41,8 @@ export type PersistConfigLayer<Source> = (params: {
   expectedTargetDigest: string;
   expectedAuthorityChainIdentity: string;
 }) =>
-  | void
   | { persistedContent: string | Uint8Array }
-  | Promise<void | { persistedContent: string | Uint8Array }>;
+  | Promise<{ persistedContent: string | Uint8Array }>;
 
 export type LayerWriteResult =
   | {
@@ -138,6 +140,12 @@ export async function writeConfigLayer<Source>(params: {
   if (target.access !== "read-write") {
     return { valid: false, findings: [{ reason: "ReadOnlyLayer", layer: target.id }] };
   }
+  if (descriptor.expectedDigest !== undefined) {
+    return {
+      valid: false,
+      findings: [{ reason: "DigestPinnedWritableLayer", layer: target.id }],
+    };
+  }
 
   const authorityChainIdentity = identifyAuthorityChain(resolved.layers);
   if (target.contentDigest !== params.expectedTargetDigest) {
@@ -196,7 +204,7 @@ export async function writeConfigLayer<Source>(params: {
     return prepared;
   }
 
-  let persistedContent: string | Uint8Array | undefined;
+  let committedContent: Uint8Array;
   try {
     const persistence = await params.persist({
       targetLayerId: target.id,
@@ -205,7 +213,7 @@ export async function writeConfigLayer<Source>(params: {
       expectedTargetDigest: params.expectedTargetDigest,
       expectedAuthorityChainIdentity: params.expectedAuthorityChainIdentity,
     });
-    persistedContent = persistence?.persistedContent;
+    committedContent = bytes(persistence.persistedContent);
   } catch (error) {
     return {
       valid: false,
@@ -218,53 +226,58 @@ export async function writeConfigLayer<Source>(params: {
     };
   }
 
-  let persistedCandidate = prepared.candidate;
-  if (persistedContent !== undefined) {
-    const committedContent = bytes(persistedContent);
-    const committedDigest = digest(committedContent);
-    proposedLayers[targetIndex] = {
-      ...proposedLayers[targetIndex],
-      contentDigest: committedDigest,
+  const committedDigest = digest(committedContent);
+  proposedLayers[targetIndex] = {
+    ...proposedLayers[targetIndex],
+    contentDigest: committedDigest,
+  };
+  const refreshed = await resolveConfigLayerSources(
+    params.descriptors,
+    params.resolveSource,
+    params.parseSource,
+  );
+  if (!refreshed.valid) {
+    return {
+      valid: false,
+      findings: refreshed.findings,
+      persisted: {
+        targetDigest: committedDigest,
+        authorityChainIdentity: identifyAuthorityChain(proposedLayers),
+      },
     };
-    try {
-      const committedConfig = await params.parseSource(committedContent, {
-        layerId: target.id,
-        sourceIdentity: target.sourceIdentity,
-      });
-      proposedLayers[targetIndex] = {
-        ...target,
-        config: committedConfig,
-        contentDigest: committedDigest,
-      };
-      const committed = activationCandidate(proposedLayers, params.configIO);
-      if (!committed.valid) {
-        return {
-          valid: false,
-          findings: committed.findings,
-          persisted: {
-            targetDigest: proposedLayers[targetIndex].contentDigest,
-            authorityChainIdentity: identifyAuthorityChain(proposedLayers),
-          },
-        };
-      }
-      persistedCandidate = committed.candidate;
-    } catch (error) {
-      return {
-        valid: false,
-        findings: [
-          {
-            reason: "LayerPersistedButActivationFailed",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        ],
-        persisted: {
-          targetDigest: committedDigest,
-          authorityChainIdentity: identifyAuthorityChain(proposedLayers),
-        },
-      };
-    }
   }
-  const persistedAuthorityChainIdentity = identifyAuthorityChain(proposedLayers);
+
+  const committedLayers = refreshed.layers;
+  const refreshedTarget = committedLayers.find((layer) => layer.id === target.id);
+  if (refreshedTarget?.contentDigest !== committedDigest) {
+    return {
+      valid: false,
+      findings: [
+        {
+          reason: "TargetChangedAfterPersistence",
+          layer: target.id,
+          message: "the writable source changed after commit; reload and retry",
+        },
+      ],
+      persisted: {
+        targetDigest: refreshedTarget?.contentDigest ?? committedDigest,
+        authorityChainIdentity: identifyAuthorityChain(committedLayers),
+      },
+    };
+  }
+  const committed = activationCandidate(committedLayers, params.configIO);
+  if (!committed.valid) {
+    return {
+      valid: false,
+      findings: committed.findings,
+      persisted: {
+        targetDigest: committedDigest,
+        authorityChainIdentity: identifyAuthorityChain(committedLayers),
+      },
+    };
+  }
+  const persistedCandidate = committed.candidate;
+  const persistedAuthorityChainIdentity = identifyAuthorityChain(committedLayers);
 
   try {
     await params.publish(persistedCandidate);
@@ -278,7 +291,7 @@ export async function writeConfigLayer<Source>(params: {
         },
       ],
       persisted: {
-        targetDigest: proposedLayers[targetIndex].contentDigest,
+        targetDigest: committedDigest,
         authorityChainIdentity: persistedAuthorityChainIdentity,
       },
     };
