@@ -1,3 +1,4 @@
+import { CredentialSlotError, type PreparedCredentialSlotBindingsV1 } from "./credential-slot.js";
 import {
   assertLocalNetworkGuardPrepared,
   type NetworkGuardProfileV1,
@@ -8,6 +9,7 @@ export type OneHopFetchRequest = {
   url: string;
   init: DispatcherAwareRequestInit & { redirect: "manual" };
   networkGuard: NetworkGuardProfileV1;
+  credentialSlotRefs?: string[];
 };
 
 export type OneHopFetchDispatcher = {
@@ -20,15 +22,32 @@ type LocalOneHopFetch = (url: string, init: OneHopFetchRequest["init"]) => Promi
 
 export function createLocalOneHopFetchDispatcher(
   fetchImpl: LocalOneHopFetch,
+  credentialSlots?: PreparedCredentialSlotBindingsV1,
 ): OneHopFetchDispatcher {
   return {
-    dispatch: async ({ url, init, networkGuard }) => {
+    dispatch: async ({ url, init, networkGuard, credentialSlotRefs = [] }) => {
       assertLocalNetworkGuardPrepared({
         profile: networkGuard,
         requestUrl: url,
         hasDispatcher: Boolean(init.dispatcher),
       });
-      return await fetchImpl(url, init);
+      if (credentialSlotRefs.length > 0 && !credentialSlots) {
+        throw new CredentialSlotError(
+          "missing-resolver",
+          "Credential slots were requested without a prepared resolver binding",
+          credentialSlotRefs[0],
+        );
+      }
+      const resolvedInit =
+        credentialSlots && credentialSlotRefs.length > 0
+          ? ((await credentialSlots.apply({
+              slotRefs: credentialSlotRefs,
+              url,
+              init,
+              signal: init.signal ?? undefined,
+            })) as OneHopFetchRequest["init"])
+          : init;
+      return await fetchImpl(url, resolvedInit);
     },
   };
 }
