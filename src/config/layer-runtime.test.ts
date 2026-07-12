@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  activateLayeredRuntimeConfig,
   prepareLayeredRuntimeConfig,
   projectValidatedConfigOntoDeclaredShape,
 } from "./layer-runtime.js";
@@ -173,5 +174,213 @@ describe("prepareLayeredRuntimeConfig", () => {
       valid: true,
       sourceConfig: { tools: { alsoAllow: ["read"] } },
     });
+  });
+});
+
+describe("activateLayeredRuntimeConfig", () => {
+  const parseJson = (content: Uint8Array) => JSON.parse(new TextDecoder().decode(content));
+
+  it("publishes one complete candidate after every layer succeeds", async () => {
+    const publish = vi.fn();
+    const result = await activateLayeredRuntimeConfig({
+      descriptors: [
+        {
+          id: "first",
+          source: { gateway: { port: 18789 } },
+          access: "read-only",
+          contractVersion: 1,
+        },
+        {
+          id: "second",
+          source: { logging: { level: "info" } },
+          access: "read-write",
+          contractVersion: 1,
+        },
+      ],
+      resolveSource: async (config, { layerId }) => ({
+        content: JSON.stringify(config),
+        sourceIdentity: "source:" + layerId,
+      }),
+      parseSource: parseJson,
+      publish,
+    });
+
+    expect(result).toMatchObject({
+      valid: true,
+      candidate: {
+        sourceConfig: { gateway: { port: 18789 }, logging: { level: "info" } },
+        layers: [
+          { id: "first", access: "read-only", sourceIdentity: "source:first" },
+          { id: "second", access: "read-write", sourceIdentity: "source:second" },
+        ],
+      },
+    });
+    expect(publish).toHaveBeenCalledOnce();
+  });
+
+  it("does not publish when a source fails", async () => {
+    const publish = vi.fn();
+    const result = await activateLayeredRuntimeConfig({
+      descriptors: [{ id: "bad", source: "bad", access: "read-only", contractVersion: 1 }],
+      resolveSource: async () => {
+        throw new Error("source unavailable");
+      },
+      parseSource: parseJson,
+      publish,
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      findings: [{ reason: "LayerSourceResolutionFailed", layer: "bad" }],
+    });
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("does not publish when authority admission fails", async () => {
+    const publish = vi.fn();
+    const result = await activateLayeredRuntimeConfig({
+      descriptors: [
+        { id: "first", source: 18789, access: "read-only", contractVersion: 1 },
+        { id: "second", source: 19000, access: "read-write", contractVersion: 1 },
+      ],
+      resolveSource: async (port, { layerId }) => ({
+        content: JSON.stringify({ gateway: { port } }),
+        sourceIdentity: layerId,
+      }),
+      parseSource: parseJson,
+      publish,
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      findings: [{ reason: "ControlledByEarlierLayer" }],
+    });
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("does not parse or publish a digest mismatch", async () => {
+    const publish = vi.fn();
+    const parseSource = vi.fn(parseJson);
+    const result = await activateLayeredRuntimeConfig({
+      descriptors: [
+        {
+          id: "tampered",
+          source: "{}",
+          access: "read-only",
+          contractVersion: 1,
+          expectedDigest: ("sha256:" + "0".repeat(64)) as `sha256:${string}`,
+        },
+      ],
+      resolveSource: async (content) => ({ content, sourceIdentity: "tampered" }),
+      parseSource,
+      publish,
+    });
+
+    expect(result).toMatchObject({
+      valid: false,
+      findings: [{ reason: "LayerSourceDigestMismatch", layer: "tampered" }],
+    });
+    expect(parseSource).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it("reports publisher failure without returning an active candidate", async () => {
+    const result = await activateLayeredRuntimeConfig({
+      descriptors: [{ id: "only", source: {}, access: "read-only", contractVersion: 1 }],
+      resolveSource: async (config) => ({
+        content: JSON.stringify(config),
+        sourceIdentity: "only",
+      }),
+      parseSource: parseJson,
+      publish: async () => {
+        throw new Error("snapshot rejected");
+      },
+    });
+
+    expect(result).toEqual({
+      valid: false,
+      findings: [{ reason: "RuntimeSnapshotPublishFailed", message: "snapshot rejected" }],
+    });
+  });
+
+  it("reports an advisory for a whole layer with no declarations", async () => {
+    const result = await activateLayeredRuntimeConfig({
+      descriptors: [
+        { id: "staged", source: {}, access: "read-only", contractVersion: 1 },
+        {
+          id: "active",
+          source: { gateway: { port: 18789 } },
+          access: "read-write",
+          contractVersion: 1,
+        },
+      ],
+      resolveSource: async (config, { layerId }) => ({
+        content: JSON.stringify(config),
+        sourceIdentity: layerId,
+      }),
+      parseSource: parseJson,
+      publish: () => undefined,
+    });
+
+    expect(result).toMatchObject({
+      valid: true,
+      candidate: {
+        advisories: [{ reason: "NoDeclaredValues", layer: "staged" }],
+      },
+    });
+  });
+
+  it("composes Scout, tenant network, and operator sources", async () => {
+    const publish = vi.fn();
+    const result = await activateLayeredRuntimeConfig({
+      descriptors: [
+        {
+          id: "scout-global",
+          source: { gateway: { mode: "local" } },
+          access: "read-only",
+          contractVersion: 1,
+        },
+        {
+          id: "tenant-network",
+          source: {
+            gateway: {
+              bind: "tailnet",
+              controlUi: { allowedOrigins: ["https://openclaw.acme.internal"] },
+            },
+          },
+          access: "read-only",
+          contractVersion: 1,
+        },
+        {
+          id: "operator",
+          source: { gateway: { controlUi: { enabled: true } } },
+          access: "read-write",
+          contractVersion: 1,
+        },
+      ],
+      resolveSource: async (config, { layerId }) => ({
+        content: JSON.stringify(config),
+        sourceIdentity: layerId,
+      }),
+      parseSource: parseJson,
+      publish,
+    });
+
+    expect(result).toMatchObject({
+      valid: true,
+      candidate: {
+        sourceConfig: {
+          gateway: {
+            mode: "local",
+            bind: "tailnet",
+            controlUi: {
+              allowedOrigins: ["https://openclaw.acme.internal"],
+              enabled: true,
+            },
+          },
+        },
+      },
+    });
+    expect(publish).toHaveBeenCalledOnce();
   });
 });
