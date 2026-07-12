@@ -1,0 +1,166 @@
+{
+  "version": "reverse-provider-dispatch-fixtures/v1",
+  "operation": {
+    "base": {
+      "version": "reverse-provider-dispatch/v1",
+      "incarnationId": "incarnation-1",
+      "operationId": "operation-1",
+      "ownerGeneration": "owner-7",
+      "hostBundleGeneration": "lobster/host@1.0.0"
+    },
+    "open": {
+      "type": "operation-open",
+      "bindingId": "lobster/egress",
+      "deadlineMs": 30000,
+      "requestByteLimit": 1024,
+      "responseByteLimit": 2048,
+      "maxFrameBytes": 4096,
+      "maxChunkBytes": 256,
+      "request": {
+        "method": "POST",
+        "url": "https://api.dispatch.test/v1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "credentialSlotRefs": ["lobster/capi-token"],
+        "routeProfile": "lobster/managed-egress",
+        "networkGuard": {
+          "version": "network-guard/v1",
+          "target": {
+            "protocol": "https:",
+            "origin": "https://api.dispatch.test",
+            "hostname": "api.dispatch.test",
+            "port": 443
+          },
+          "route": {
+            "mode": "managed-proxy",
+            "resolution": "proxy",
+            "tls": "required"
+          },
+          "addressPolicy": {
+            "mode": "public-only",
+            "trustedHostnames": [],
+            "hostnameAllowlist": ["api.dispatch.test"],
+            "allowedPrivateCidrs": [],
+            "allowRfc2544BenchmarkRange": false,
+            "allowIpv6UniqueLocalRange": false,
+            "dnsRebinding": {
+              "policy": "reject",
+              "enforcement": "connection-owner-required"
+            }
+          }
+        },
+        "auditCorrelation": "audit-1"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "accepted-stream",
+      "frames": [
+        { "type": "credit", "stream": "request", "bytes": 4 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "dGVzdA==" },
+        { "type": "half-close", "stream": "request" },
+        { "type": "dispatch-started" },
+        { "type": "response-open", "status": 200, "statusText": "OK", "headers": { "content-type": "text/plain" } },
+        { "type": "credit", "stream": "response", "bytes": 2 },
+        { "type": "chunk", "stream": "response", "sequence": 0, "payloadBase64": "b2s=" },
+        { "type": "half-close", "stream": "response" },
+        { "type": "terminal", "outcome": "completed", "certainty": "completed" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "completed", "certainty": "completed" },
+        "cancelled": false
+      }
+    },
+    {
+      "id": "overload-before-dispatch",
+      "frames": [
+        { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },
+        "cancelled": false
+      }
+    },
+    {
+      "id": "advisory-cancellation-after-dispatch",
+      "frames": [
+        { "type": "dispatch-started" },
+        { "type": "cancel", "reason": "caller-aborted" },
+        { "type": "response-open", "status": 200, "statusText": "Late", "headers": {} },
+        { "type": "terminal", "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "cancelled" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "cancelled" },
+        "cancelled": true,
+        "ignoredFrames": 1
+      }
+    },
+    {
+      "id": "disconnect-after-dispatch",
+      "frames": [
+        { "type": "dispatch-started" }
+      ],
+      "disconnected": true,
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "connection-lost" },
+        "cancelled": false
+      }
+    },
+    {
+      "id": "request-chunk-after-half-close",
+      "frames": [
+        { "type": "half-close", "stream": "request" },
+        { "type": "credit", "stream": "request", "bytes": 1 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "YQ==" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 3,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "stale-owner-generation",
+      "openOverrides": { "ownerGeneration": "owner-6" },
+      "frames": [],
+      "expected": {
+        "ok": false,
+        "code": "stale-generation",
+        "frameIndex": 0,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "response-before-dispatch",
+      "frames": [
+        { "type": "response-open", "status": 200, "statusText": "OK", "headers": {} }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 1,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "late-terminal-frame",
+      "frames": [
+        { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },
+        { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "unavailable" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },
+        "cancelled": false,
+        "ignoredFrames": 1
+      }
+    }
+  ]
+}
