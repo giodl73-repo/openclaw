@@ -1,0 +1,31 @@
+{
+  "request": {
+    "config": {
+      "version": "capi-model-provider-adapter/v1",
+      "endpointTemplate": "https://capi.example.com/v0/resourceproxy/tenantId.{tenant_id}/anthropic/llm/{model}/messages",
+      "partnerSource": "Lobster.OpenClaw",
+      "featureId": "feature-1"
+    },
+    "context": {
+      "tenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47",
+      "userId": "user-1",
+      "correlationId": "corr-1"
+    },
+    "method": "POST",
+    "body": "{\"model\":\"claude-opus-4-6\",\"stream\":true}"
+  },
+  "expected": {
+    "url": "https://capi.example.com/v0/resourceproxy/tenantId.72f988bf-86f1-41af-91ab-2d7cd011db47/anthropic/llm/claude-opus-4-6/messages/stream?customer_id=72f988bf-86f1-41af-91ab-2d7cd011db47",
+    "credentialSlotRefs": ["lobster/capi-token"],
+    "headers": {
+      "x-ms-source": "{\"consumptionSource\":\"Api\",\"partnerSource\":\"Lobster.OpenClaw\",\"featureId\":\"feature-1\"}",
+      "x-ms-client-principal-id": "user-1",
+      "x-ms-client-tenant-id": "72f988bf-86f1-41af-91ab-2d7cd011db47",
+      "x-ms-correlation-id": "corr-1"
+    }
+  },
+  "sse": {
+    "input": "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\ndata: [DONE]\n\n",
+    "expected": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\"}}\n\n"
+  }
+}
