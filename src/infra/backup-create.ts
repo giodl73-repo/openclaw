@@ -143,6 +143,8 @@ export type BackupCreateResult = {
    * Populated on real writes only; dry runs report 0.
    */
   skippedVolatileCount: number;
+  archiveSha256?: string;
+  manifestSha256?: string;
 };
 
 const BACKUP_TAR_MAX_ATTEMPTS = 3;
@@ -482,6 +484,10 @@ export function formatBackupCreateSummary(result: BackupCreateResult): string[] 
     }
     if (result.verified) {
       lines.push("Archive verification: passed");
+      if (result.archiveSha256 && result.manifestSha256) {
+        lines.push(`Archive SHA-256: ${result.archiveSha256}`);
+        lines.push(`Manifest SHA-256: ${result.manifestSha256}`);
+      }
     }
   }
   return lines;

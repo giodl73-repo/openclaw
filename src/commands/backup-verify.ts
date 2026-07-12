@@ -1,7 +1,12 @@
 // Verifies backup archives by validating their manifest, payload entries, and hardlink targets.
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import path from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import * as tar from "tar";
+import { sha256Hex } from "../infra/crypto-digest.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { isRecord, resolveUserPath } from "../utils.js";
 
@@ -44,7 +49,7 @@ type BackupVerifyOptions = {
   json?: boolean;
 };
 
-type BackupVerifyResult = {
+export type BackupVerifyResult = {
   ok: true;
   archivePath: string;
   archiveRoot: string;
@@ -52,6 +57,8 @@ type BackupVerifyResult = {
   runtimeVersion: string;
   assetCount: number;
   entryCount: number;
+  archiveSha256: string;
+  manifestSha256: string;
 };
 
 type ArchiveEntry = {
@@ -174,10 +181,40 @@ function parseManifest(raw: string): BackupManifest {
   };
 }
 
-async function listArchiveEntries(archivePath: string): Promise<ArchiveEntry[]> {
+async function readManifestEntry(
+  entry: tar.ReadEntry,
+): Promise<{ content?: Buffer; error?: Error }> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  let exceededLimit = false;
+  for await (const chunk of entry) {
+    if (exceededLimit) {
+      continue;
+    }
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > MAX_MANIFEST_BYTES) {
+      exceededLimit = true;
+      chunks.length = 0;
+      continue;
+    }
+    chunks.push(buffer);
+  }
+  if (exceededLimit) {
+    return { error: new Error(`Backup manifest exceeds ${MAX_MANIFEST_BYTES} byte limit.`) };
+  }
+  return { content: Buffer.concat(chunks, totalBytes) };
+}
+
+async function inspectArchive(archivePath: string): Promise<{
+  entries: ArchiveEntry[];
+  manifestContents: Buffer[];
+  archiveSha256: string;
+}> {
   const entries: ArchiveEntry[] = [];
-  await tar.t({
-    file: archivePath,
+  const manifestPromises: Array<ReturnType<typeof readManifestEntry>> = [];
+  const digest = createHash("sha256");
+  const parser = tar.t({
     gzip: true,
     onentry: (entry) => {
       entries.push({
@@ -185,77 +222,33 @@ async function listArchiveEntries(archivePath: string): Promise<ArchiveEntry[]> 
         ...(entry.linkpath ? { linkpath: entry.linkpath } : {}),
         ...(entry.type ? { type: entry.type } : {}),
       });
-      entry.resume();
-    },
-  });
-  return entries;
-}
-
-async function extractManifest(params: {
-  archivePath: string;
-  manifestEntryPath: string;
-}): Promise<string> {
-  let manifestContentPromise: Promise<{ content?: string; error?: Error }> | undefined;
-  await tar.t({
-    file: params.archivePath,
-    gzip: true,
-    onentry: (entry) => {
-      if (entry.path !== params.manifestEntryPath) {
+      if (!isRootManifestEntry(entry.path)) {
         entry.resume();
         return;
       }
-
-      manifestContentPromise = new Promise<{ content?: string; error?: Error }>((resolve) => {
-        const chunks: Buffer[] = [];
-        let totalBytes = 0;
-        let exceededLimit = false;
-        let settled = false;
-        const settle = (result: { content?: string; error?: Error }) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          resolve(result);
-        };
-        entry.on("data", (chunk: Buffer | string) => {
-          if (exceededLimit) {
-            return;
-          }
-          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-          totalBytes += buffer.byteLength;
-          if (totalBytes > MAX_MANIFEST_BYTES) {
-            exceededLimit = true;
-            chunks.length = 0;
-            return;
-          }
-          chunks.push(buffer);
-        });
-        entry.on("error", (error) => {
-          settle({
-            error: error instanceof Error ? error : new Error(String(error)),
-          });
-        });
-        entry.on("end", () => {
-          if (exceededLimit) {
-            settle({
-              error: new Error(`Backup manifest exceeds ${MAX_MANIFEST_BYTES} byte limit.`),
-            });
-            return;
-          }
-          settle({ content: Buffer.concat(chunks, totalBytes).toString("utf8") });
-        });
-      });
+      manifestPromises.push(readManifestEntry(entry));
     },
   });
-
-  if (!manifestContentPromise) {
-    throw new Error(`Archive is missing manifest entry: ${params.manifestEntryPath}`);
+  await pipeline(
+    createReadStream(archivePath),
+    new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        digest.update(chunk);
+        callback(null, chunk);
+      },
+    }),
+    parser,
+  );
+  const manifestResults = await Promise.all(manifestPromises);
+  const manifestError = manifestResults.find((result) => result.error)?.error;
+  if (manifestError) {
+    throw manifestError;
   }
-  const result = await manifestContentPromise;
-  if (result.error) {
-    throw result.error;
-  }
-  return result.content ?? "";
+  return {
+    entries,
+    manifestContents: manifestResults.flatMap((result) => (result.content ? [result.content] : [])),
+    archiveSha256: digest.digest("hex"),
+  };
 }
 
 function isRootManifestEntry(entryPath: string): boolean {
@@ -329,6 +322,8 @@ function formatResult(result: BackupVerifyResult): string {
     `Runtime version: ${result.runtimeVersion}`,
     `Assets verified: ${result.assetCount}`,
     `Archive entries scanned: ${result.entryCount}`,
+    `Archive SHA-256: ${result.archiveSha256}`,
+    `Manifest SHA-256: ${result.manifestSha256}`,
   ].join("\n");
 }
 
@@ -351,7 +346,8 @@ export async function backupVerifyCommand(
   opts: BackupVerifyOptions,
 ): Promise<BackupVerifyResult> {
   const archivePath = resolveUserPath(opts.archive);
-  const rawEntries = await listArchiveEntries(archivePath);
+  const inspection = await inspectArchive(archivePath);
+  const rawEntries = inspection.entries;
   if (rawEntries.length === 0) {
     throw new Error("Backup archive is empty.");
   }
@@ -379,12 +375,11 @@ export async function backupVerifyCommand(
   if (duplicateEntryPath) {
     throw new Error(`Archive contains duplicate entry path: ${duplicateEntryPath}`);
   }
-  const manifestEntryPath = manifestMatches[0]?.raw;
-  if (!manifestEntryPath) {
-    throw new Error("Backup archive manifest entry could not be resolved.");
+  const manifestRawBytes = inspection.manifestContents[0];
+  if (!manifestRawBytes) {
+    throw new Error("Backup archive manifest contents could not be resolved.");
   }
-
-  const manifestRaw = await extractManifest({ archivePath, manifestEntryPath });
+  const manifestRaw = manifestRawBytes.toString("utf8");
   const manifest = parseManifest(manifestRaw);
   verifyManifestAgainstEntries(manifest, normalizedEntrySet);
   verifyHardlinkTargetsAgainstArchiveRoot(
@@ -401,6 +396,8 @@ export async function backupVerifyCommand(
     runtimeVersion: manifest.runtimeVersion,
     assetCount: manifest.assets.length,
     entryCount: rawEntries.length,
+    archiveSha256: inspection.archiveSha256,
+    manifestSha256: sha256Hex(manifestRawBytes),
   };
 
   if (opts.json) {

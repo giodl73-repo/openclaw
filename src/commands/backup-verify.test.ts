@@ -5,6 +5,7 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 import * as tar from "tar";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sha256Hex } from "../infra/crypto-digest.js";
 import { buildBackupArchiveRoot } from "./backup-shared.js";
 import { backupVerifyCommand } from "./backup-verify.js";
 
@@ -36,11 +37,13 @@ function createBackupManifest(assetArchivePath: string, archiveRoot = TEST_ARCHI
 
 function encodeTarEntry(params: {
   path: string;
-  contents?: string;
+  contents?: string | Buffer;
   type?: "File" | "Link";
   linkpath?: string;
 }): Buffer {
-  const body = Buffer.from(params.contents ?? "", "utf8");
+  const body = Buffer.isBuffer(params.contents)
+    ? params.contents
+    : Buffer.from(params.contents ?? "");
   const header = new tar.Header({
     path: params.path,
     type: params.type ?? "File",
@@ -205,8 +208,49 @@ describe("backupVerifyCommand", () => {
       expect(verified.ok).toBe(true);
       expect(verified.archiveRoot).toBe(archiveRoot);
       expect(verified.assetCount).toBeGreaterThan(0);
+      expect(verified.archiveSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(verified.manifestSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(verified.archiveSha256).not.toBe(verified.manifestSha256);
     } finally {
       await fs.rm(archiveDir, { recursive: true, force: true });
+    }
+  });
+
+  it("hashes the exact archived manifest bytes", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-backup-byte-hash-"));
+    const archivePath = path.join(tempDir, "backup.tar.gz");
+    const payloadArchivePath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/state.txt`;
+    const manifestText = JSON.stringify(createBackupManifest(payloadArchivePath));
+    const marker = '"runtimeVersion":"test"';
+    const markerIndex = manifestText.indexOf(marker);
+    const valueIndex = markerIndex + '"runtimeVersion":"'.length;
+    const manifestBytes = Buffer.concat([
+      Buffer.from(manifestText.slice(0, valueIndex)),
+      Buffer.from([0xff]),
+      Buffer.from(manifestText.slice(valueIndex + "test".length)),
+    ]);
+    try {
+      const archive = gzipSync(
+        Buffer.concat([
+          encodeTarEntry({
+            path: `${TEST_ARCHIVE_ROOT}/manifest.json`,
+            contents: manifestBytes,
+          }),
+          encodeTarEntry({ path: payloadArchivePath, contents: "payload\n" }),
+          Buffer.alloc(1024),
+        ]),
+      );
+      await fs.writeFile(archivePath, archive);
+
+      const verified = await backupVerifyCommand(createBackupVerifyRuntime(), {
+        archive: archivePath,
+      });
+
+      expect(verified.archiveSha256).toBe(sha256Hex(archive));
+      expect(verified.manifestSha256).toBe(sha256Hex(manifestBytes));
+      expect(verified.manifestSha256).not.toBe(sha256Hex(manifestBytes.toString("utf8")));
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
 

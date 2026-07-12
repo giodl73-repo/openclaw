@@ -29,7 +29,7 @@ export async function backupCreateCommand(
   });
   if (opts.verify && !opts.dryRun) {
     const { backupVerifyCommand } = await loadBackupVerifyRuntime();
-    await backupVerifyCommand(
+    const verification = await backupVerifyCommand(
       {
         ...runtime,
         log: () => {},
@@ -37,6 +37,8 @@ export async function backupCreateCommand(
       { archive: result.archivePath, json: false },
     );
     result.verified = true;
+    result.archiveSha256 = verification.archiveSha256;
+    result.manifestSha256 = verification.manifestSha256;
   }
   if (opts.json) {
     writeRuntimeJson(runtime, result);

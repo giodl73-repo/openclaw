@@ -59,12 +59,16 @@ describe("backupCreateCommand verify wrapper", () => {
     backupVerifyCommandMock.mockResolvedValue({
       ok: true,
       archivePath: "/tmp/openclaw-backup.tar.gz",
+      archiveSha256: "a".repeat(64),
+      manifestSha256: "b".repeat(64),
     });
 
     const runtime = createRuntime();
     const result = await backupCreateCommand(runtime, { verify: true });
 
     expect(result.verified).toBe(true);
+    expect(result.archiveSha256).toBe("a".repeat(64));
+    expect(result.manifestSha256).toBe("b".repeat(64));
     expect(backupVerifyCommandMock).toHaveBeenCalledOnce();
     const [verifyRuntime, verifyOptions] = requireBackupVerifyCall();
     expect(verifyOptions).toStrictEqual({
