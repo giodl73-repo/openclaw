@@ -3,6 +3,7 @@
 
 import type { FastMode } from "@openclaw/normalization-core/string-coerce";
 import type { ChannelId } from "../channels/plugins/types.public.js";
+import type { ContinuityStatus } from "../continuity/state-inventory.js";
 import type { SessionKind } from "../sessions/classify-session-kind.js";
 import type {
   RetainedLostTaskAuditSummary,
@@ -54,6 +55,7 @@ export type HeartbeatStatus = {
 export type StatusSummary = {
   runtimeVersion?: string | null;
   eventLoop?: import("../gateway/server/event-loop-health.js").GatewayEventLoopHealth;
+  continuity: ContinuityStatus;
   linkChannel?: {
     id: ChannelId;
     label: string;

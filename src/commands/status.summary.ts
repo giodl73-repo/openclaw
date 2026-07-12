@@ -13,6 +13,7 @@ import { resolveStorePath } from "../config/sessions/paths.js";
 import { listSessionEntries } from "../config/sessions/session-accessor.js";
 import { resolveSessionTotalTokens, type SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.js";
+import { resolveContinuityStatus } from "../continuity/state-inventory.js";
 import { resolveCronJobsStorePath } from "../cron/store.js";
 import { listGatewayAgentsBasic } from "../gateway/agent-list.js";
 import { resolveHeartbeatSummaryForAgent } from "../infra/heartbeat-summary.js";
@@ -554,6 +555,7 @@ export async function getStatusSummary(
 
   const summary: StatusSummary = {
     runtimeVersion: resolveRuntimeServiceVersion(process.env),
+    continuity: resolveContinuityStatus(cfg),
     linkChannel: linkContext
       ? {
           id: linkContext.plugin.id,

@@ -18,6 +18,7 @@ import type { ChannelsConfig } from "./types.channels.js";
 import type { CliConfig } from "./types.cli.js";
 import type { CloudWorkersConfig } from "./types.cloud-workers.js";
 import type { CommitmentsConfig } from "./types.commitments.js";
+import type { ContinuityConfig } from "./types.continuity.js";
 import type { CrestodianConfig } from "./types.crestodian.js";
 import type { CronConfig } from "./types.cron.js";
 import type { DiscoveryConfig, GatewayConfig, TalkConfig } from "./types.gateway.js";
@@ -234,6 +235,8 @@ export type OpenClawConfig = {
   transcripts?: TranscriptsConfig;
   /** Commitment/reminder extraction settings. */
   commitments?: CommitmentsConfig;
+  /** Runtime state continuity guarantee. */
+  continuity?: ContinuityConfig;
   /** Runtime hook registration and queue behavior. */
   hooks?: HooksConfig;
   /** Network discovery and service advertisement settings. */
