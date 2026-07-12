@@ -27,6 +27,7 @@ import type { SecretRef } from "../config/types.secrets.js";
 import type { OperatorScope } from "../gateway/operator-scopes.js";
 import type { GatewayRequestHandler } from "../gateway/server-methods/types.js";
 import type { InternalHookHandler } from "../hooks/internal-hook-types.js";
+import type { HostIntegrationBundleManifestV1 } from "../hosting/host-integration-bundle.js";
 import type { ImageGenerationProvider } from "../image-generation/types.js";
 import type {
   DiagnosticEventPrivateData,
@@ -2812,6 +2813,11 @@ export type OpenClawPluginApi = {
   registerNodeHostCommand: (command: OpenClawPluginNodeHostCommand) => void;
   registerNodeInvokePolicy: (policy: OpenClawPluginNodeInvokePolicy) => void;
   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;
+  /**
+   * Publish one atomic host-integration bundle while the owning plugin service
+   * is active. The returned disposer clears only that exact published snapshot.
+   */
+  registerHostIntegrationBundle: (manifest: HostIntegrationBundleManifestV1) => () => void;
   registerService: (service: OpenClawPluginService) => void;
   /** Register a local gateway discovery advertiser such as mDNS/Bonjour. */
   registerGatewayDiscoveryService: (service: OpenClawGatewayDiscoveryService) => void;
