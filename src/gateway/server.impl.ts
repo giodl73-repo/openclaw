@@ -25,6 +25,7 @@ import {
   setRuntimeConfigSnapshot,
   type ReadConfigFileSnapshotWithPluginMetadataResult,
 } from "../config/io.js";
+import { getManagedConfigReadiness } from "../config/layer-io.js";
 import { isNixMode, normalizeStateDirEnv } from "../config/paths.js";
 import { applyConfigOverrides } from "../config/runtime-overrides.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
@@ -984,6 +985,7 @@ export async function startGatewayServer(
     getStartupPending: isGatewayStartupPending,
     getStartupPendingReason: () => startupPendingReason,
     getGatewayDraining: isGatewayDraining,
+    getManagedConfigReadiness,
     getEventLoopHealth: readinessEventLoopHealth.snapshot,
     shouldSkipChannelReadiness: () =>
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||

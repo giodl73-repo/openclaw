@@ -71,6 +71,9 @@ function createReadinessHarness(params: {
   getStartupPending?: () => boolean;
   getStartupPendingReason?: Parameters<typeof createReadinessChecker>[0]["getStartupPendingReason"];
   getGatewayDraining?: Parameters<typeof createReadinessChecker>[0]["getGatewayDraining"];
+  getManagedConfigReadiness?: Parameters<
+    typeof createReadinessChecker
+  >[0]["getManagedConfigReadiness"];
   getEventLoopHealth?: Parameters<typeof createReadinessChecker>[0]["getEventLoopHealth"];
   shouldSkipChannelReadiness?: Parameters<
     typeof createReadinessChecker
@@ -87,6 +90,7 @@ function createReadinessHarness(params: {
       getStartupPending: params.getStartupPending,
       getStartupPendingReason: params.getStartupPendingReason,
       getGatewayDraining: params.getGatewayDraining,
+      getManagedConfigReadiness: params.getManagedConfigReadiness,
       getEventLoopHealth: params.getEventLoopHealth,
       shouldSkipChannelReadiness: params.shouldSkipChannelReadiness,
       cacheTtlMs: params.cacheTtlMs,
@@ -208,6 +212,28 @@ describe("createReadinessChecker", () => {
       gatewayDraining = false;
       expect(readiness()).toEqual(readySnapshot());
       expect(manager.getRuntimeSnapshot).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reports a rejected managed configuration candidate", () => {
+    withReadinessClock(() => {
+      const { manager, readiness } = createReadinessHarness({
+        getManagedConfigReadiness: () => ({
+          ready: false,
+          reason: "managed-config-candidate-rejected",
+        }),
+      });
+      expect(readiness()).toEqual(failingSnapshot(["managed-config-candidate-rejected"]));
+      expect(manager.getRuntimeSnapshot).not.toHaveBeenCalled();
+    });
+  });
+
+  it("preserves existing readiness when managed configuration is unused", () => {
+    withReadinessClock(() => {
+      const { readiness } = createReadinessHarness({
+        getManagedConfigReadiness: () => null,
+      });
+      expect(readiness()).toEqual(readySnapshot());
     });
   });
 
