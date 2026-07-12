@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ConfigIoDeps } from "./io.js";
 import type { ConfigPathProvenance } from "./layer-composition.js";
 import {
   prepareLayeredRuntimeConfig,
@@ -36,7 +37,10 @@ export type PersistConfigLayer<Source> = (params: {
   content: Uint8Array;
   expectedTargetDigest: string;
   expectedAuthorityChainIdentity: string;
-}) => void | Promise<void>;
+}) =>
+  | void
+  | { persistedContent: string | Uint8Array }
+  | Promise<void | { persistedContent: string | Uint8Array }>;
 
 export type LayerWriteResult =
   | {
@@ -73,8 +77,9 @@ export function identifyAuthorityChain(layers: readonly ResolvedConfigLayer[]): 
 
 function activationCandidate(
   layers: readonly ResolvedConfigLayer[],
+  configIO?: ConfigIoDeps,
 ): LayerActivationResult | { valid: true; candidate: LayerActivationCandidate } {
-  const prepared = prepareLayeredRuntimeConfig(layers);
+  const prepared = prepareLayeredRuntimeConfig(layers, configIO);
   if (!prepared.valid) {
     return prepared;
   }
@@ -110,6 +115,7 @@ export async function writeConfigLayer<Source>(params: {
   parseSource: ParseConfigLayerSource;
   persist: PersistConfigLayer<Source>;
   publish: (candidate: LayerActivationCandidate) => void | Promise<void>;
+  configIO?: ConfigIoDeps;
 }): Promise<LayerWriteResult> {
   const resolved = await resolveConfigLayerSources(
     params.descriptors,
@@ -185,20 +191,21 @@ export async function writeConfigLayer<Source>(params: {
 
   const proposedLayers = [...resolved.layers];
   proposedLayers[targetIndex] = { ...target, config, contentDigest: digest(content) };
-  const proposedAuthorityChainIdentity = identifyAuthorityChain(proposedLayers);
-  const prepared = activationCandidate(proposedLayers);
+  const prepared = activationCandidate(proposedLayers, params.configIO);
   if (!prepared.valid) {
     return prepared;
   }
 
+  let persistedContent: string | Uint8Array | undefined;
   try {
-    await params.persist({
+    const persistence = await params.persist({
       targetLayerId: target.id,
       source: descriptor.source,
       content,
       expectedTargetDigest: params.expectedTargetDigest,
       expectedAuthorityChainIdentity: params.expectedAuthorityChainIdentity,
     });
+    persistedContent = persistence?.persistedContent;
   } catch (error) {
     return {
       valid: false,
@@ -211,8 +218,56 @@ export async function writeConfigLayer<Source>(params: {
     };
   }
 
+  let persistedCandidate = prepared.candidate;
+  if (persistedContent !== undefined) {
+    const committedContent = bytes(persistedContent);
+    const committedDigest = digest(committedContent);
+    proposedLayers[targetIndex] = {
+      ...proposedLayers[targetIndex],
+      contentDigest: committedDigest,
+    };
+    try {
+      const committedConfig = await params.parseSource(committedContent, {
+        layerId: target.id,
+        sourceIdentity: target.sourceIdentity,
+      });
+      proposedLayers[targetIndex] = {
+        ...target,
+        config: committedConfig,
+        contentDigest: committedDigest,
+      };
+      const committed = activationCandidate(proposedLayers, params.configIO);
+      if (!committed.valid) {
+        return {
+          valid: false,
+          findings: committed.findings,
+          persisted: {
+            targetDigest: proposedLayers[targetIndex].contentDigest,
+            authorityChainIdentity: identifyAuthorityChain(proposedLayers),
+          },
+        };
+      }
+      persistedCandidate = committed.candidate;
+    } catch (error) {
+      return {
+        valid: false,
+        findings: [
+          {
+            reason: "LayerPersistedButActivationFailed",
+            message: error instanceof Error ? error.message : String(error),
+          },
+        ],
+        persisted: {
+          targetDigest: committedDigest,
+          authorityChainIdentity: identifyAuthorityChain(proposedLayers),
+        },
+      };
+    }
+  }
+  const persistedAuthorityChainIdentity = identifyAuthorityChain(proposedLayers);
+
   try {
-    await params.publish(prepared.candidate);
+    await params.publish(persistedCandidate);
   } catch (error) {
     return {
       valid: false,
@@ -224,14 +279,14 @@ export async function writeConfigLayer<Source>(params: {
       ],
       persisted: {
         targetDigest: proposedLayers[targetIndex].contentDigest,
-        authorityChainIdentity: proposedAuthorityChainIdentity,
+        authorityChainIdentity: persistedAuthorityChainIdentity,
       },
     };
   }
   return {
     valid: true,
-    candidate: prepared.candidate,
-    authorityChainIdentity: proposedAuthorityChainIdentity,
+    candidate: persistedCandidate,
+    authorityChainIdentity: persistedAuthorityChainIdentity,
   };
 }
 

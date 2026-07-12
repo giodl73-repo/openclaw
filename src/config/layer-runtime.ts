@@ -1,4 +1,6 @@
 import { isPlainObject } from "../infra/plain-object.js";
+import { cloneEnvWithPlatformSemantics } from "./env-vars.js";
+import { resolveConfigSourceText, type ConfigIoDeps } from "./io.js";
 import {
   composeConfigLayers,
   type ConfigLayer,
@@ -129,13 +131,42 @@ function prepareConfigLayers(layers: readonly ConfigLayer[]) {
 }
 
 /** Produces one ordinary runtime config after sparse layer admission succeeds. */
-export function prepareLayeredRuntimeConfig(layers: readonly ConfigLayer[]): LayerRuntimeResult {
+export function prepareLayeredRuntimeConfig(
+  layers: readonly ConfigLayer[],
+  configIO: ConfigIoDeps = {},
+): LayerRuntimeResult {
   const composition = prepareConfigLayers(layers);
   if (!composition.valid) {
     return composition;
   }
 
-  const effectiveValidation = validateConfigObjectWithPlugins(composition.config);
+  let effectiveSourceConfig: OpenClawConfig;
+  try {
+    effectiveSourceConfig = resolveConfigSourceText(
+      JSON.stringify(composition.config),
+      "<managed-config>",
+      {
+        ...configIO,
+        env: cloneEnvWithPlatformSemantics(configIO.env ?? process.env),
+      },
+    );
+  } catch (error) {
+    return {
+      valid: false,
+      findings: [
+        {
+          reason: "InvalidEffectiveConfig",
+          issues: [
+            {
+              path: "",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        },
+      ],
+    };
+  }
+  const effectiveValidation = validateConfigObjectWithPlugins(effectiveSourceConfig);
   if (!effectiveValidation.ok) {
     return {
       valid: false,
@@ -168,6 +199,7 @@ export async function activateLayeredRuntimeConfig<Source>(params: {
   resolveSource: ResolveConfigLayerSource<Source>;
   parseSource: ParseConfigLayerSource;
   publish: (candidate: LayerActivationCandidate) => void | Promise<void>;
+  configIO?: ConfigIoDeps;
 }): Promise<LayerActivationResult> {
   const resolved = await resolveConfigLayerSources(
     params.descriptors,
@@ -178,7 +210,7 @@ export async function activateLayeredRuntimeConfig<Source>(params: {
     return resolved;
   }
 
-  const prepared = prepareLayeredRuntimeConfig(resolved.layers);
+  const prepared = prepareLayeredRuntimeConfig(resolved.layers, params.configIO);
   if (!prepared.valid) {
     return prepared;
   }

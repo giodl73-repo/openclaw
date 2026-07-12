@@ -62,6 +62,7 @@ export function createManagedConfigIO<Source>(params: {
       resolveSource: params.resolveSource,
       parseSource: params.parseSource,
       publish: params.publish,
+      configIO: params.configIO,
     });
     if (result.valid) {
       journal.recordActivated(result.candidate);
@@ -73,7 +74,7 @@ export function createManagedConfigIO<Source>(params: {
 
   async function persistWithCurrentChainCheck(
     persistence: Parameters<PersistConfigLayer<Source>>[0],
-  ): Promise<void> {
+  ): Promise<void | { persistedContent: string | Uint8Array }> {
     const current = await resolveConfigLayerSources(
       params.descriptors,
       params.resolveSource,
@@ -90,7 +91,7 @@ export function createManagedConfigIO<Source>(params: {
     ) {
       throw new Error("managed configuration chain changed before persistence; reload and retry");
     }
-    await params.persist(persistence);
+    return await params.persist(persistence);
   }
 
   async function write(writeParams: {
@@ -106,6 +107,7 @@ export function createManagedConfigIO<Source>(params: {
       parseSource: params.parseSource,
       persist: persistWithCurrentChainCheck,
       publish: params.publish,
+      configIO: params.configIO,
     });
     if (result.valid) {
       journal.recordActivated(result.candidate);

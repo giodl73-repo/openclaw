@@ -384,3 +384,15 @@ describe("activateLayeredRuntimeConfig", () => {
     expect(publish).toHaveBeenCalledOnce();
   });
 });
+
+describe("effective managed source resolution", () => {
+  it("returns a structured finding when effective resolution fails", () => {
+    const result = prepareLayeredRuntimeConfig([
+      { id: "managed", config: { $include: "./missing-managed-config.json" } },
+    ]);
+    expect(result).toMatchObject({
+      valid: false,
+      findings: [{ reason: "InvalidEffectiveConfig", issues: [{ path: "" }] }],
+    });
+  });
+});

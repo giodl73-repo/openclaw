@@ -1091,6 +1091,27 @@ export function parseConfigJson5(
   }
 }
 
+/** Resolves captured config text with the ordinary include and environment read semantics. */
+export function resolveConfigSourceText(
+  raw: string,
+  configPath: string,
+  overrides: ConfigIoDeps = {},
+  options: { resolveEnvironment?: boolean } = {},
+): OpenClawConfig {
+  const deps = normalizeDeps({ ...overrides, configPath });
+  maybeLoadDotEnvForConfig(deps.env);
+  const parsed = parseConfigJson5(raw, deps.json5);
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  const included = resolveConfigIncludesForRead(parsed.parsed, configPath, deps);
+  if (options.resolveEnvironment === false) {
+    return coerceConfig(stripShippedPluginInstallConfigRecords(included));
+  }
+  const resolved = resolveConfigForRead(included, deps.env, deps.lowerPrecedenceEnv);
+  return coerceConfig(stripShippedPluginInstallConfigRecords(resolved.resolvedConfigRaw));
+}
+
 function findJsonRootSuffix(
   raw: string,
   json5: { parse: (value: string) => unknown } = JSON5,
