@@ -4,6 +4,13 @@ import {
   type ConfigLayer,
   type ConfigPathProvenance,
 } from "./layer-composition.js";
+import {
+  resolveConfigLayerSources,
+  type ConfigLayerDescriptor,
+  type ConfigLayerSourceFinding,
+  type ParseConfigLayerSource,
+  type ResolveConfigLayerSource,
+} from "./layer-sources.js";
 import { materializeRuntimeConfig } from "./materialize.js";
 import type { OpenClawConfig, RuntimeConfig } from "./types.js";
 import { validateConfigObjectWithPlugins } from "./validation.js";
@@ -39,6 +46,34 @@ export type LayerRuntimeResult =
             controllingValue?: unknown;
             conflictingValue?: unknown;
           }
+      >;
+    };
+
+export type LayerActivationCandidate = {
+  sourceConfig: Record<string, unknown>;
+  runtimeConfig: RuntimeConfig;
+  provenance: ConfigPathProvenance[];
+  layers: Array<{
+    id: string;
+    access: "read-only" | "read-write";
+    sourceIdentity: string;
+    contentDigest: string;
+  }>;
+  advisories: Array<{
+    reason: "NoDeclaredValues";
+    layer: string;
+  }>;
+};
+
+export type LayerActivationResult =
+  | { valid: true; candidate: LayerActivationCandidate }
+  | {
+      valid: false;
+      findings: Array<
+        | ConfigLayerSourceFinding
+        | ConfigLayerValidationFinding
+        | EffectiveConfigValidationFinding
+        | { reason: string; layer?: string; message?: string }
       >;
     };
 
@@ -125,4 +160,59 @@ export function prepareLayeredRuntimeConfig(layers: readonly ConfigLayer[]): Lay
     runtimeConfig: materializeRuntimeConfig(effectiveValidation.config, "load"),
     provenance: composition.provenance,
   };
+}
+
+/** Resolves and validates every layer before invoking one atomic snapshot publisher. */
+export async function activateLayeredRuntimeConfig<Source>(params: {
+  descriptors: readonly ConfigLayerDescriptor<Source>[];
+  resolveSource: ResolveConfigLayerSource<Source>;
+  parseSource: ParseConfigLayerSource;
+  publish: (candidate: LayerActivationCandidate) => void | Promise<void>;
+}): Promise<LayerActivationResult> {
+  const resolved = await resolveConfigLayerSources(
+    params.descriptors,
+    params.resolveSource,
+    params.parseSource,
+  );
+  if (!resolved.valid) {
+    return resolved;
+  }
+
+  const prepared = prepareLayeredRuntimeConfig(resolved.layers);
+  if (!prepared.valid) {
+    return prepared;
+  }
+
+  const candidate: LayerActivationCandidate = {
+    sourceConfig: prepared.sourceConfig,
+    runtimeConfig: prepared.runtimeConfig,
+    provenance: prepared.provenance,
+    layers: resolved.layers.map((layer) => ({
+      id: layer.id,
+      access: layer.access,
+      sourceIdentity: layer.sourceIdentity,
+      contentDigest: layer.contentDigest,
+    })),
+    advisories: resolved.layers
+      .filter(
+        (layer) => !prepared.provenance.some((entry) => entry.declaringLayers.includes(layer.id)),
+      )
+      .map((layer) => ({ reason: "NoDeclaredValues" as const, layer: layer.id })),
+  };
+
+  try {
+    await params.publish(candidate);
+  } catch (error) {
+    return {
+      valid: false,
+      findings: [
+        {
+          reason: "RuntimeSnapshotPublishFailed",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+
+  return { valid: true, candidate };
 }
