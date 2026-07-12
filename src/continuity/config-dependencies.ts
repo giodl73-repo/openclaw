@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import {
   readConfigIncludeFileWithGuards,
@@ -34,7 +35,10 @@ export type ContinuityConfigDependencyAssessment = {
 
 export type ContinuityConfigCapturePreparation = {
   assessment: ContinuityConfigDependencyAssessment;
-  includedFiles: string[];
+  includedFiles: Array<{
+    path: string;
+    sha256: string;
+  }>;
 };
 
 type InspectContinuityConfigDependenciesParams = {
@@ -148,22 +152,33 @@ function classifyResolvedConfig(params: {
   };
 }
 
+function sha256(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
+
 function resolveConfigAndCollectIncludes(params: {
   configPath: string;
   parsed: unknown;
   env?: NodeJS.ProcessEnv;
   allowedRoots?: readonly string[];
-}): { config: unknown; includedFiles: string[] } {
-  const includedPaths = new Set<string>();
+}): { config: unknown; includedFiles: Array<{ path: string; sha256: string }> } {
+  const includedFiles = new Map<string, string>();
   const resolver: IncludeResolver = {
     readFile: (candidate) => fs.readFileSync(candidate, "utf-8"),
-    readFileWithGuards: (readParams) =>
-      readConfigIncludeFileWithGuards({
+    readFileWithGuards: (readParams) => {
+      let includedPath: string | undefined;
+      const raw = readConfigIncludeFileWithGuards({
         ...readParams,
         onResolvedPath: (resolvedPath) => {
-          includedPaths.add(resolvedPath);
+          includedPath = resolvedPath;
         },
-      }),
+      });
+      if (!includedPath) {
+        throw new Error("Config include resolved without a canonical path");
+      }
+      includedFiles.set(includedPath, sha256(raw));
+      return raw;
+    },
     parseJson: (raw) => parseJsonWithJson5Fallback(raw),
   };
   const config = resolveConfigIncludes(params.parsed, params.configPath, resolver, {
@@ -171,7 +186,9 @@ function resolveConfigAndCollectIncludes(params: {
   });
   return {
     config,
-    includedFiles: [...includedPaths].toSorted(),
+    includedFiles: [...includedFiles]
+      .map(([path, digest]) => ({ path, sha256: digest }))
+      .toSorted((left, right) => left.path.localeCompare(right.path)),
   };
 }
 
@@ -196,7 +213,10 @@ export function prepareContinuityConfigCapture(
     };
   }
 
-  let resolved: { config: unknown; includedFiles: string[] };
+  let resolved: {
+    config: unknown;
+    includedFiles: Array<{ path: string; sha256: string }>;
+  };
   try {
     resolved = resolveConfigAndCollectIncludes({
       configPath: params.configPath,

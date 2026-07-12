@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { buildBackupArchivePath, formatBackupArchiveTimestamp } from "../commands/backup-shared.js";
@@ -21,6 +22,7 @@ export type ContinuityCaptureSource = {
   sourcePath: string;
   archivePath: string;
   excludePaths: string[];
+  expectedSha256?: string;
 };
 
 export type ContinuityArchivePlan = {
@@ -64,6 +66,10 @@ function buildContinuityArchiveRoot(nowMs = Date.now()): string {
   return `${formatBackupArchiveTimestamp(nowMs)}-openclaw-continuity`;
 }
 
+function sha256(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
+
 function canonicalizeRequiredSource(source: RequiredSource): RequiredSource | null {
   try {
     const stat = fs.statSync(source.sourcePath);
@@ -81,11 +87,13 @@ function toCaptureSource(
   archiveRoot: string,
   source: RequiredSource,
   excludePaths: string[] = [],
+  expectedSha256?: string,
 ): ContinuityCaptureSource {
   return {
     ...source,
     archivePath: buildBackupArchivePath(archiveRoot, source.sourcePath),
     excludePaths,
+    ...(expectedSha256 ? { expectedSha256 } : {}),
   };
 }
 
@@ -188,9 +196,9 @@ export function resolveContinuityArchivePlanFromPaths(
   const requiredSources: RequiredSource[] = [
     { kind: "state", sourcePath: path.resolve(params.stateDir) },
     { kind: "config", sourcePath: path.resolve(params.configPath) },
-    ...configPreparation.includedFiles.map((sourcePath) => ({
+    ...configPreparation.includedFiles.map((includedFile) => ({
       kind: "config-include" as const,
-      sourcePath,
+      sourcePath: includedFile.path,
     })),
     ...params.workspaceDirs.map((sourcePath) => ({
       kind: "workspace" as const,
@@ -206,6 +214,15 @@ export function resolveContinuityArchivePlanFromPaths(
   const configSources = presentSources.filter(
     (source) => source.kind === "config" || source.kind === "config-include",
   );
+  const configHashes = new Map<string, string>();
+  try {
+    configHashes.set(fs.realpathSync(params.configPath), sha256(params.configRaw));
+  } catch {
+    // The missing source blocker below remains authoritative.
+  }
+  for (const includedFile of configPreparation.includedFiles) {
+    configHashes.set(includedFile.path, includedFile.sha256);
+  }
   const workspaceSources = presentSources.filter((source) => source.kind === "workspace");
   const legacy = state ? scanLegacyTranscripts(state.sourcePath) : { count: 0, failed: false };
   const oauthPath = fs.existsSync(params.oauthDir)
@@ -256,7 +273,9 @@ export function resolveContinuityArchivePlanFromPaths(
         stateSource,
         exclusionsFor(stateSource.sourcePath, separateSourcePaths),
       ),
-      config: configSources.map((source) => toCaptureSource(archiveRoot, source)),
+      config: configSources.map((source) =>
+        toCaptureSource(archiveRoot, source, [], configHashes.get(path.resolve(source.sourcePath))),
+      ),
       workspaces: workspaceSources.map((source) =>
         toCaptureSource(
           archiveRoot,

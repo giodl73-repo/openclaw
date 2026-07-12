@@ -52,6 +52,7 @@ describe("continuity archive plan", () => {
     expect(plan.archiveRoot).toMatch(/-openclaw-continuity$/);
     expect(plan.sqliteTreatment).toBe("snapshot-sanitize-and-verify");
     expect(plan.sources.config.map((source) => source.sourcePath)).toEqual([fixture.configPath]);
+    expect(plan.sources.config[0]?.expectedSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(plan.sources.workspaces.map((source) => source.sourcePath)).toEqual([
       fixture.workspaceDir,
     ]);

@@ -121,7 +121,12 @@ describe("continuity config dependency classifier", () => {
       extensionMetadataComplete: true,
     });
 
-    expect(prepared.includedFiles).toEqual([includedPath]);
+    expect(prepared.includedFiles).toEqual([
+      {
+        path: includedPath,
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+    ]);
     expect(prepared.assessment.evidence.includeFileCount).toBe(1);
     expect(JSON.stringify(prepared.assessment)).not.toContain(includedPath);
   });
