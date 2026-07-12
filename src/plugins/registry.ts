@@ -15,6 +15,7 @@ import {
   registerAgentHarness as registerGlobalAgentHarness,
 } from "../agents/harness/registry.js";
 import type { AgentHarness } from "../agents/harness/types.js";
+import { registerProviderRequestTrafficPolicyForOwnerV1 } from "../agents/provider-request-traffic-policy.js";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import { createChannelIngressQueue } from "../channels/message/ingress-queue.js";
 import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
@@ -423,6 +424,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
   const coreGatewayMethods = new Set(coreGatewayMethodNames);
   const getHostCronService = () => registryParams.hostServices?.cron;
   const pluginHookRollback = new Map<string, HookRollbackEntry[]>();
+  const pluginProviderRequestTrafficPolicyDisposers = new Map<string, Set<() => void>>();
   const pluginsWithChannelRegistrationConflict = new Set<string>();
   const pluginSideEffectGuards = new Map<string, Set<PluginSideEffectGuard>>();
 
@@ -2967,6 +2969,29 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 registerReadinessCriterion(record, criterion, params.pluginConfig),
               registerHostIntegrationBundle: (manifest) =>
                 registerHostIntegrationBundle(record, manifest),
+              registerProviderRequestTrafficPolicy: (registration) => {
+                if (
+                  registryParams.activateGlobalSideEffects === false ||
+                  !shouldCommitWorkflowSideEffect()
+                ) {
+                  return () => {};
+                }
+                const disposePolicy = registerProviderRequestTrafficPolicyForOwnerV1(
+                  `plugin/${record.id}`,
+                  registration,
+                );
+                const disposers =
+                  pluginProviderRequestTrafficPolicyDisposers.get(record.id) ?? new Set();
+                disposers.add(disposePolicy);
+                pluginProviderRequestTrafficPolicyDisposers.set(record.id, disposers);
+                return () => {
+                  disposers.delete(disposePolicy);
+                  if (disposers.size === 0) {
+                    pluginProviderRequestTrafficPolicyDisposers.delete(record.id);
+                  }
+                  disposePolicy();
+                };
+              },
               registerInteractiveHandler: (registration) => {
                 const result = registerRegistryPluginInteractiveHandler(record.id, registration, {
                   pluginName: record.name,
@@ -3385,6 +3410,12 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     clearPluginInteractiveHandlersForPlugin(pluginId);
     clearCodeModeNamespacesForPlugin(pluginId);
     clearContextEnginesForOwner(`plugin:${pluginId}`);
+
+    const trafficPolicyDisposers = pluginProviderRequestTrafficPolicyDisposers.get(pluginId) ?? [];
+    for (const disposePolicy of [...trafficPolicyDisposers].toReversed()) {
+      disposePolicy();
+    }
+    pluginProviderRequestTrafficPolicyDisposers.delete(pluginId);
 
     const hookRollbackEntries = pluginHookRollback.get(pluginId) ?? [];
     for (const entry of hookRollbackEntries.toReversed()) {
