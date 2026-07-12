@@ -89,6 +89,7 @@ export function createPluginRegistryState(registryParams: PluginRegistryParams) 
         }>;
       }>
     >(),
+    pluginProviderRequestTrafficPolicyDisposers: new Map<string, Set<() => void>>(),
     pluginsWithChannelRegistrationConflict: new Set<string>(),
     pluginSideEffectGuards: new Map<string, Set<PluginSideEffectGuard>>(),
     pushDiagnostic,

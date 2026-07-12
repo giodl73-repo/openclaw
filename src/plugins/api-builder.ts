@@ -34,6 +34,7 @@ type BuildPluginApiParams = {
       | "registerNodeInvokePolicy"
       | "registerSecurityAuditCollector"
       | "registerHostIntegrationBundle"
+      | "registerProviderRequestTrafficPolicy"
       | "registerService"
       | "registerGatewayDiscoveryService"
       | "registerCliBackend"
@@ -108,6 +109,8 @@ const noopRegisterNodeInvokePolicy: OpenClawPluginApi["registerNodeInvokePolicy"
 const noopRegisterSecurityAuditCollector: OpenClawPluginApi["registerSecurityAuditCollector"] =
   () => {};
 const noopRegisterHostIntegrationBundle: OpenClawPluginApi["registerHostIntegrationBundle"] =
+  () => () => {};
+const noopRegisterProviderRequestTrafficPolicy: OpenClawPluginApi["registerProviderRequestTrafficPolicy"] =
   () => () => {};
 const noopRegisterService: OpenClawPluginApi["registerService"] = () => {};
 const noopRegisterGatewayDiscoveryService: OpenClawPluginApi["registerGatewayDiscoveryService"] =
@@ -228,6 +231,8 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
       handlers.registerSecurityAuditCollector ?? noopRegisterSecurityAuditCollector,
     registerHostIntegrationBundle:
       handlers.registerHostIntegrationBundle ?? noopRegisterHostIntegrationBundle,
+    registerProviderRequestTrafficPolicy:
+      handlers.registerProviderRequestTrafficPolicy ?? noopRegisterProviderRequestTrafficPolicy,
     registerService: handlers.registerService ?? noopRegisterService,
     registerGatewayDiscoveryService:
       handlers.registerGatewayDiscoveryService ?? noopRegisterGatewayDiscoveryService,

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { registerProviderRequestTrafficPolicyForOwnerV1 } from "../agents/provider-request-traffic-policy.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { resolveUserPath } from "../utils.js";
@@ -52,6 +53,7 @@ export function createPluginApiFactory(
 ) {
   const { registry, registryParams, getHostCronService, pluginSideEffectGuards, pushDiagnostic } =
     state;
+  const { pluginProviderRequestTrafficPolicyDisposers } = state;
   const {
     registerTool,
     registerHook,
@@ -226,6 +228,29 @@ export function createPluginApiFactory(
                 registerSecurityAuditCollector(record, collector),
               registerHostIntegrationBundle: (manifest) =>
                 registerHostIntegrationBundle(record, manifest),
+              registerProviderRequestTrafficPolicy: (registration) => {
+                if (
+                  registryParams.activateGlobalSideEffects === false ||
+                  !shouldCommitWorkflowSideEffect()
+                ) {
+                  return () => {};
+                }
+                const disposePolicy = registerProviderRequestTrafficPolicyForOwnerV1(
+                  `plugin/${record.id}`,
+                  registration,
+                );
+                const disposers =
+                  pluginProviderRequestTrafficPolicyDisposers.get(record.id) ?? new Set();
+                disposers.add(disposePolicy);
+                pluginProviderRequestTrafficPolicyDisposers.set(record.id, disposers);
+                return () => {
+                  disposers.delete(disposePolicy);
+                  if (disposers.size === 0) {
+                    pluginProviderRequestTrafficPolicyDisposers.delete(record.id);
+                  }
+                  disposePolicy();
+                };
+              },
               registerInteractiveHandler: (registration) =>
                 registerInteractiveHandler(record, registration),
               onConversationBindingResolved: (handler) =>
