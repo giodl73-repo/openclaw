@@ -9,6 +9,10 @@ import * as tar from "tar";
 import { sha256Hex } from "../infra/crypto-digest.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { isRecord, resolveUserPath } from "../utils.js";
+import {
+  type BackupManifestComponent,
+  validateBackupManifestComponents,
+} from "./backup-manifest-components.js";
 
 const WINDOWS_ABSOLUTE_ARCHIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -18,6 +22,7 @@ type BackupManifestAsset = {
   kind: string;
   sourcePath: string;
   archivePath: string;
+  component?: BackupManifestComponent;
 };
 
 type BackupManifest = {
@@ -58,6 +63,7 @@ export type BackupVerifyResult = {
   createdAt: string;
   runtimeVersion: string;
   assetCount: number;
+  componentCount: number;
   entryCount: number;
   archiveSha256: string;
   manifestSha256: string;
@@ -103,6 +109,16 @@ function normalizeArchiveRoot(rootName: string): string {
   return normalized;
 }
 
+function readStringArray(value: unknown, label: string): string[] {
+  if (
+    !Array.isArray(value) ||
+    !value.every((entry): entry is string => typeof entry === "string")
+  ) {
+    throw new Error(`${label} must be an array of strings.`);
+  }
+  return value;
+}
+
 function isArchivePathWithin(child: string, parent: string): boolean {
   const relative = path.posix.relative(parent, child);
   return relative === "" || (!relative.startsWith("../") && relative !== "..");
@@ -146,12 +162,31 @@ function parseManifest(raw: string): BackupManifest {
     if (typeof asset.archivePath !== "string" || !asset.archivePath.trim()) {
       throw new Error("Backup manifest asset is missing archivePath.");
     }
+    let component: BackupManifestComponent | undefined;
+    if (asset.component !== undefined) {
+      if (!isRecord(asset.component)) {
+        throw new Error("Backup manifest asset component must be an object.");
+      }
+      component = {
+        id: readStringValue(asset.component.id) ?? "",
+        restoreOrder:
+          typeof asset.component.restoreOrder === "number"
+            ? asset.component.restoreOrder
+            : Number.NaN,
+        dependsOn: readStringArray(
+          asset.component.dependsOn,
+          "Backup manifest component dependsOn",
+        ),
+      };
+    }
     assets.push({
       kind: asset.kind,
       sourcePath: asset.sourcePath,
       archivePath: asset.archivePath,
+      ...(component ? { component } : {}),
     });
   }
+  validateBackupManifestComponents(assets);
 
   return {
     schemaVersion: 1,
@@ -332,6 +367,7 @@ function formatResult(result: BackupVerifyResult): string {
     `Created at: ${result.createdAt}`,
     `Runtime version: ${result.runtimeVersion}`,
     `Assets verified: ${result.assetCount}`,
+    `Components verified: ${result.componentCount}`,
     `Archive entries scanned: ${result.entryCount}`,
     `Archive SHA-256: ${result.archiveSha256}`,
     `Manifest SHA-256: ${result.manifestSha256}`,
@@ -410,6 +446,7 @@ export async function backupVerifyCommand(
     createdAt: manifest.createdAt,
     runtimeVersion: manifest.runtimeVersion,
     assetCount: manifest.assets.length,
+    componentCount: manifest.assets.filter((asset) => asset.component !== undefined).length,
     entryCount: rawEntries.length,
     archiveSha256: inspection.archiveSha256,
     manifestSha256: sha256Hex(manifestRawBytes),

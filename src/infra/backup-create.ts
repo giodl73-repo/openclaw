@@ -9,6 +9,10 @@ import { pipeline } from "node:stream/promises";
 import { resolveDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import { loadSqliteVecExtension } from "../../packages/memory-host-sdk/src/engine-storage.js";
 import {
+  buildBackupManifestComponents,
+  type BackupManifestComponent,
+} from "../commands/backup-manifest-components.js";
+import {
   buildBackupArchiveBasename,
   buildBackupArchivePath,
   buildBackupArchiveRoot,
@@ -93,6 +97,7 @@ type BackupManifestAsset = {
   kind: BackupAsset["kind"];
   sourcePath: string;
   archivePath: string;
+  component: BackupManifestComponent;
 };
 
 type BackupManifest = {
@@ -424,6 +429,7 @@ function buildManifest(params: {
   oauthDir: string;
   workspaceDirs: string[];
 }): BackupManifest {
+  const components = buildBackupManifestComponents(params.assets);
   return {
     schemaVersion: 1,
     createdAt: params.createdAt,
@@ -441,10 +447,11 @@ function buildManifest(params: {
       oauthDir: params.oauthDir,
       workspaceDirs: params.workspaceDirs,
     },
-    assets: params.assets.map((asset) => ({
+    assets: params.assets.map((asset, index) => ({
       kind: asset.kind,
       sourcePath: asset.sourcePath,
       archivePath: asset.archivePath,
+      component: components[index]!,
     })),
     skipped: params.skipped.map((entry) => ({
       kind: entry.kind,

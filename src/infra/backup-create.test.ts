@@ -1179,6 +1179,7 @@ describe("createBackupArchive", () => {
         const runtime: RuntimeEnv = { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
         const verification = await backupVerifyCommand(runtime, { archive: result.archivePath });
         expect(verification.ok).toBe(true);
+        expect(verification.componentCount).toBe(result.assets.length);
       },
     );
   });

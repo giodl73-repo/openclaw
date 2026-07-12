@@ -27,6 +27,7 @@ export type BackupRetrieveResult = {
   archiveSha256: string;
   manifestSha256: string;
   assetCount: number;
+  componentCount: number;
   entryCount: number;
   restoredBytes: number;
 };
@@ -74,6 +75,7 @@ function formatResult(result: BackupRetrieveResult): string {
     `Archive SHA-256: ${result.archiveSha256}`,
     `Manifest SHA-256: ${result.manifestSha256}`,
     `Assets: ${result.assetCount}`,
+    `Components: ${result.componentCount}`,
     `Restored bytes: ${result.restoredBytes}`,
     "The destination is a verified staging bundle; it has not been activated as live state.",
   ].join("\n");
@@ -198,6 +200,7 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
       archiveSha256: verification.archiveSha256,
       manifestSha256: verification.manifestSha256,
       assetCount: verification.assetCount,
+      componentCount: verification.componentCount,
       entryCount: verification.entryCount,
       restoredBytes,
     };
