@@ -19,7 +19,9 @@ afterEach(() => {
 });
 
 function inventory(
-  entry: Partial<HostIntegrationStatusInventoryV1["entries"][number]> = {},
+  entry: Partial<
+    Extract<HostIntegrationStatusInventoryV1["entries"][number], { kind: "model-provider-adapter" }>
+  > = {},
 ): HostIntegrationStatusInventoryV1 {
   return {
     version: "host-integration-status/v1",

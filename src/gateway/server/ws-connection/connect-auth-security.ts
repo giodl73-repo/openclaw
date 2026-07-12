@@ -33,7 +33,8 @@ export function emitGatewayAuthSecurityEvent(params: {
     outcome: params.outcome,
     severity: params.severity,
     actor: {
-      kind: params.role === "node" ? "node" : "operator",
+      kind:
+        params.role === "node" ? "node" : params.role === "host-provider" ? "system" : "operator",
       ...(params.deviceId ? { deviceIdHash: hashGatewaySecurityId(params.deviceId) } : {}),
       role: params.role,
     },

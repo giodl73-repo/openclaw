@@ -39,6 +39,7 @@ type HandshakeConnectAuth = {
   bootstrapToken?: string;
   deviceToken?: string;
   password?: string;
+  hostProviderToken?: string;
   approvalRuntimeToken?: string;
   agentRuntimeIdentityToken?: string;
 };
@@ -303,6 +304,7 @@ export function shouldPreserveLocalCliSharedAuthScopes(params: {
 
 function resolveSignatureToken(connectParams: ConnectParams): string | null {
   return (
+    connectParams.auth?.hostProviderToken ??
     connectParams.auth?.token ??
     connectParams.auth?.deviceToken ??
     connectParams.auth?.bootstrapToken ??
@@ -369,15 +371,17 @@ export function resolveDeviceSignaturePayloadVersion(params: {
 function resolveAuthProvidedKind(
   connectAuth: HandshakeConnectAuth | null | undefined,
 ): AuthProvidedKind {
-  return connectAuth?.password
-    ? "password"
-    : connectAuth?.token
-      ? "token"
-      : connectAuth?.bootstrapToken
-        ? "bootstrap-token"
-        : connectAuth?.deviceToken
-          ? "device-token"
-          : "none";
+  return connectAuth?.hostProviderToken
+    ? "host-provider-token"
+    : connectAuth?.password
+      ? "password"
+      : connectAuth?.token
+        ? "token"
+        : connectAuth?.bootstrapToken
+          ? "bootstrap-token"
+          : connectAuth?.deviceToken
+            ? "device-token"
+            : "none";
 }
 
 export function resolveUnauthorizedHandshakeContext(params: {

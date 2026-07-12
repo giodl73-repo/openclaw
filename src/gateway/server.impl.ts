@@ -1199,6 +1199,13 @@ export async function startGatewayServer(
     nodePluginToolsEnabled: cfgAtStart.gateway?.nodes?.pluginTools?.enabled !== false,
     nodeSkillsEnabled: cfgAtStart.gateway?.nodes?.skills?.enabled !== false,
   });
+  const { HostProviderRegistry } = await import("./host-provider-registry.js");
+  const hostProviderRegistry = new HostProviderRegistry();
+  const { subscribeHostIntegrationAuthorityChanges } =
+    await import("../hosting/host-integration-authority-events.js");
+  const unsubscribeHostIntegrationAuthorityChanges = subscribeHostIntegrationAuthorityChanges(() =>
+    hostProviderRegistry.revalidateSessions(),
+  );
   const { createWatchNodeHttpRuntime } = await import("./watch-node-http.js");
   const watchNodeHttpRuntime = createWatchNodeHttpRuntime({
     nodeRegistry,
@@ -1442,6 +1449,8 @@ export async function startGatewayServer(
   const closeOnStartupFailure = async () => {
     try {
       await beginClosePrelude();
+      unsubscribeHostIntegrationAuthorityChanges();
+      hostProviderRegistry.shutdown();
       await stopRegisteredGatewayLifetimeSidecars();
       await stopRegisteredPostReadySidecars();
       await runClosePrelude();
@@ -1877,6 +1886,7 @@ export async function startGatewayServer(
           ...(workerPlacementDispatchAvailable
             ? { workerPlacementDispatchService: workerPlacementDispatchAvailable }
             : {}),
+          hostProviderRegistry,
           terminalSessions,
           agentRunSeq,
           chatAbortControllers,
@@ -2317,6 +2327,8 @@ export async function startGatewayServer(
     close: async (optsLocal) => {
       try {
         await beginClosePrelude();
+        unsubscribeHostIntegrationAuthorityChanges();
+        hostProviderRegistry.shutdown();
         // Kill any live operator shells before the socket layer tears down.
         terminalSessions.disposeAll();
         await stopRegisteredGatewayLifetimeSidecars();

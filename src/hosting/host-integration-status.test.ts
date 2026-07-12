@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { subscribeHostIntegrationAuthorityChanges } from "./host-integration-authority-events.js";
 import type { HostIntegrationBundleSnapshotV1 } from "./host-integration-bundle.js";
 import {
   buildHostIntegrationStatusInventoryV1,
@@ -58,6 +59,22 @@ function evidence(state: Exclude<HostIntegrationBindingStateV1, "unresolved">) {
 }
 
 describe("host integration status inventory", () => {
+  it("notifies authority listeners after owner evidence publication and clear", () => {
+    const observed: Array<string | undefined> = [];
+    const unsubscribe = subscribeHostIntegrationAuthorityChanges(() => {
+      observed.push(getCurrentHostIntegrationOwnerEvidenceV1()[0]?.ownerGeneration);
+    });
+
+    try {
+      publishHostIntegrationOwnerEvidenceV1([evidence("ready")]);
+      clearCurrentHostIntegrationOwnerEvidenceV1();
+    } finally {
+      unsubscribe();
+    }
+
+    expect(observed).toEqual(["owner-7", undefined]);
+  });
+
   it("publishes immutable owner evidence atomically", () => {
     const published = publishHostIntegrationOwnerEvidenceV1([evidence("ready")]);
     expect(Object.isFrozen(published)).toBe(true);

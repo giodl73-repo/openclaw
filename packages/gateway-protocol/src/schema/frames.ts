@@ -10,6 +10,17 @@ export const GATEWAY_SERVER_CAPS = {
   CRESTODIAN_SETUP_MODEL_REF: "crestodian-setup-model-ref",
 } as const;
 
+export const HostProviderDeclarationSchema = Type.Object(
+  {
+    bindingId: NonEmptyString,
+    interfaceVersion: Type.Literal("provider-request-dispatcher/v1"),
+    carrierVersion: Type.Literal("reverse-provider-dispatch/v1"),
+    ownerGeneration: NonEmptyString,
+    hostBundleGeneration: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+
 /**
  * Top-level gateway frame schemas.
  *
@@ -44,6 +55,7 @@ export const ConnectParamsSchema = closedObject({
   caps: Type.Optional(Type.Array(NonEmptyString, { default: [] })),
   commands: Type.Optional(Type.Array(NonEmptyString)),
   permissions: Type.Optional(Type.Record(NonEmptyString, Type.Boolean())),
+  hostProvider: Type.Optional(HostProviderDeclarationSchema),
   pathEnv: Type.Optional(Type.String()),
   role: Type.Optional(NonEmptyString),
   scopes: Type.Optional(Type.Array(NonEmptyString)),
@@ -64,6 +76,7 @@ export const ConnectParamsSchema = closedObject({
       password: Type.Optional(Type.String()),
       approvalRuntimeToken: Type.Optional(Type.String()),
       agentRuntimeIdentityToken: Type.Optional(Type.String()),
+      hostProviderToken: Type.Optional(Type.String()),
     }),
   ),
   locale: Type.Optional(Type.String()),

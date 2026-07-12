@@ -75,9 +75,10 @@ export async function authorizeGatewayConnectDevice(
     pairingLocality,
     skipLocalBackendSelfPairing,
     skipControlUiPairingForDevice,
+    trustedHostProviderAdmission,
   } = state;
   let hasServerApprovedDeviceTokenBaseline = false;
-  if (device && devicePublicKey) {
+  if (device && devicePublicKey && !trustedHostProviderAdmission) {
     const formatAuditList = (items: string[] | undefined): string => {
       const normalized = normalizeSortedUniqueTrimmedStringList(items);
       return normalized.length > 0 ? normalized.join(",") : "<none>";

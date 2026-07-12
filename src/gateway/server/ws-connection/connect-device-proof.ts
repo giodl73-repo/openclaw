@@ -6,6 +6,7 @@ import {
   normalizeDevicePublicKeyBase64Url,
 } from "../../../infra/device-identity.js";
 import type { GatewayAuthResult, ResolvedGatewayAuth } from "../../auth.js";
+import { verifyHostProviderAdmission, type HostProviderAdmission } from "../../host-provider-admission.js";
 import type { GatewayRole } from "../../role-policy.js";
 import { emitGatewayAuthSecurityEvent } from "./connect-auth-security.js";
 import { resolveDeviceSignaturePayloadVersion } from "./handshake-auth-helpers.js";
@@ -23,7 +24,12 @@ export function verifyGatewayConnectDeviceProof(
     scopes: string[];
   },
 ):
-  | { ok: true; devicePublicKey: string | null; deviceAuthPayloadVersion: "v2" | "v3" | null }
+  | {
+      ok: true;
+      devicePublicKey: string | null;
+      deviceAuthPayloadVersion: "v2" | "v3" | null;
+      trustedHostProviderAdmission?: HostProviderAdmission;
+    }
   | { ok: false } {
   const { device, resolvedAuth, authMethod, role, scopes } = params;
   if (!device) {
@@ -96,6 +102,22 @@ export function verifyGatewayConnectDeviceProof(
   if (!devicePublicKey) {
     rejectDeviceAuthInvalid("device-public-key", "device public key invalid");
     return { ok: false };
+  }
+  if (role === "host-provider") {
+    const admission = verifyHostProviderAdmission({
+      connect: connectParams,
+      publicKey: devicePublicKey,
+    });
+    if (!admission.ok) {
+      rejectDeviceAuthInvalid("host-provider-admission", admission.reason);
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      devicePublicKey,
+      deviceAuthPayloadVersion: payloadVersion,
+      trustedHostProviderAdmission: admission.admission,
+    };
   }
   return { ok: true, devicePublicKey, deviceAuthPayloadVersion: payloadVersion };
 }

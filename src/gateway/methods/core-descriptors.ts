@@ -2,6 +2,7 @@
 import type { OperatorScope } from "../operator-scopes.js";
 import {
   DYNAMIC_GATEWAY_METHOD_SCOPE,
+  HOST_PROVIDER_GATEWAY_METHOD_SCOPE,
   NODE_GATEWAY_METHOD_SCOPE,
   type GatewayMethodDescriptorInput,
   type GatewayMethodHandler,
@@ -237,6 +238,7 @@ const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "node.invoke.progress", scope: "node" },
   { name: "node.invoke.result", scope: "node" },
   { name: "node.event", scope: "node" },
+  { name: "host.provider.frame", scope: "host-provider", advertise: false },
   { name: "cron.get", scope: "operator.read" },
   { name: "cron.list", scope: "operator.read" },
   { name: "cron.status", scope: "operator.read" },
@@ -388,7 +390,9 @@ function resolveCoreGatewayMethodScope(method: string): GatewayMethodScope | und
 /** Looks up an operator-only core method scope, excluding node and dynamic methods. */
 export function resolveCoreOperatorGatewayMethodScope(method: string): OperatorScope | undefined {
   const scope = resolveCoreGatewayMethodScope(method);
-  return scope === NODE_GATEWAY_METHOD_SCOPE || scope === DYNAMIC_GATEWAY_METHOD_SCOPE
+  return scope === NODE_GATEWAY_METHOD_SCOPE ||
+    scope === HOST_PROVIDER_GATEWAY_METHOD_SCOPE ||
+    scope === DYNAMIC_GATEWAY_METHOD_SCOPE
     ? undefined
     : scope;
 }
@@ -396,6 +400,11 @@ export function resolveCoreOperatorGatewayMethodScope(method: string): OperatorS
 /** Returns true for core methods reserved for authenticated node clients. */
 export function isCoreNodeGatewayMethod(method: string): boolean {
   return resolveCoreGatewayMethodScope(method) === NODE_GATEWAY_METHOD_SCOPE;
+}
+
+/** Returns true for core methods reserved for authenticated host-provider clients. */
+export function isCoreHostProviderGatewayMethod(method: string): boolean {
+  return resolveCoreGatewayMethodScope(method) === HOST_PROVIDER_GATEWAY_METHOD_SCOPE;
 }
 
 /** Returns true for core methods whose required operator scope is resolved by the handler. */

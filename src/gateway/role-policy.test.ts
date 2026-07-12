@@ -12,6 +12,7 @@ describe("gateway role policy", () => {
   test("parses supported roles", () => {
     expect(parseGatewayRole("operator")).toBe("operator");
     expect(parseGatewayRole("node")).toBe("node");
+    expect(parseGatewayRole("host-provider")).toBe("host-provider");
     expect(parseGatewayRole("admin")).toBeNull();
     expect(parseGatewayRole(undefined)).toBeNull();
   });
@@ -20,6 +21,7 @@ describe("gateway role policy", () => {
     expect(roleCanSkipDeviceIdentity("operator", true)).toBe(true);
     expect(roleCanSkipDeviceIdentity("operator", false)).toBe(false);
     expect(roleCanSkipDeviceIdentity("node", true)).toBe(false);
+    expect(roleCanSkipDeviceIdentity("host-provider", true)).toBe(false);
   });
 
   test("authorizes roles against node vs operator methods", () => {
@@ -35,5 +37,10 @@ describe("gateway role policy", () => {
     expect(isRoleAuthorizedForMethod("operator", "node.skills.update")).toBe(false);
     expect(isRoleAuthorizedForMethod("operator", "node.pending.drain")).toBe(false);
     expect(isRoleAuthorizedForMethod("operator", "node.event")).toBe(false);
+    expect(isRoleAuthorizedForMethod("host-provider", "host.provider.frame")).toBe(true);
+    expect(isRoleAuthorizedForMethod("host-provider", "status")).toBe(false);
+    expect(isRoleAuthorizedForMethod("host-provider", "node.event")).toBe(false);
+    expect(isRoleAuthorizedForMethod("operator", "host.provider.frame")).toBe(false);
+    expect(isRoleAuthorizedForMethod("node", "host.provider.frame")).toBe(false);
   });
 });

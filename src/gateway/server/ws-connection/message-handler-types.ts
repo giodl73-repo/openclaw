@@ -11,6 +11,7 @@ import type { createSubsystemLogger } from "../../../logging/subsystem.js";
 import type { DeviceBootstrapProfile } from "../../../shared/device-bootstrap-profile.js";
 import type { AuthRateLimiter } from "../../auth-rate-limit.js";
 import type { GatewayAuthResult, ResolvedGatewayAuth } from "../../auth.js";
+import type { HostProviderAdmission } from "../../host-provider-admission.js";
 import type { GatewayMethodRegistry } from "../../methods/registry.js";
 import type { NodePairingAutoApproveClientIpSource } from "../../node-pairing-auto-approve.types.js";
 import type { NodeReapprovalCoordinator } from "../../node-reapproval-coordinator.js";
@@ -144,6 +145,7 @@ export type AuthenticatedGatewayConnect = {
   skipControlUiPairingForDevice: boolean;
   skipLocalBackendSelfPairing: boolean;
   rejectUnauthorized: (failedAuth: GatewayAuthResult) => void;
+  trustedHostProviderAdmission?: HostProviderAdmission;
 };
 
 export type DeviceAuthorizedGatewayConnect = AuthenticatedGatewayConnect & {

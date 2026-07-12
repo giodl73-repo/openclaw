@@ -118,6 +118,7 @@ export async function attachAuthenticatedGatewayConnect(
     pairingLocality,
     sessionUsesSharedGatewayAuth,
     sessionSharedGatewaySessionGeneration,
+    trustedHostProviderAdmission,
   } = state;
   if (!(await prepareGatewayNodeConnect(context, state))) {
     return;
@@ -125,7 +126,10 @@ export async function attachAuthenticatedGatewayConnect(
 
   // Presence lists user-visible clients/nodes. Ephemeral control-plane connections
   // (CLI, backend RPC probes, tests) churn for the full TTL and stay excluded.
-  const shouldTrackPresence = !isEphemeralGatewayClient(connectParams.client);
+  // Host-provider reverse-dispatch sessions are a system carrier, not a
+  // user-visible presence entry.
+  const shouldTrackPresence =
+    role !== "host-provider" && !isEphemeralGatewayClient(connectParams.client);
   const clientId = connectParams.client.id;
   const instanceId = connectParams.client.instanceId;
   const presenceKey = shouldTrackPresence ? (device?.id ?? instanceId ?? connId) : undefined;
@@ -134,7 +138,7 @@ export async function attachAuthenticatedGatewayConnect(
     await releasePendingNodePairingCleanup();
     setCloseCause("connect-aborted-before-register", {
       ...clientMeta,
-      auth: authMethod,
+      auth: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
     });
     return;
   }
@@ -205,12 +209,13 @@ export async function attachAuthenticatedGatewayConnect(
     }
   }
   const internal =
-    isTrustedApprovalRuntime || trustedAgentRuntimeIdentity
+    isTrustedApprovalRuntime || trustedAgentRuntimeIdentity || trustedHostProviderAdmission
       ? {
           ...(isTrustedApprovalRuntime ? { approvalRuntime: true } : {}),
           ...(trustedAgentRuntimeIdentity
             ? { agentRuntimeIdentity: trustedAgentRuntimeIdentity }
             : {}),
+          ...(trustedHostProviderAdmission ? { hostProvider: trustedHostProviderAdmission } : {}),
         }
       : undefined;
   if (usesLegacyNodeProtocol) {
@@ -284,12 +289,29 @@ export async function attachAuthenticatedGatewayConnect(
     await releasePendingNodePairingCleanup();
     setCloseCause("connect-aborted-before-register", {
       ...clientMeta,
-      auth: authMethod,
+      auth: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
     });
     return;
   }
   setHandshakeState("connected");
   advanceHandshakePhase("session_attached");
+  if (role === "host-provider") {
+    const hostProviderRegistry = buildRequestContext().hostProviderRegistry;
+    if (!hostProviderRegistry) {
+      close(1011, "host provider registry unavailable");
+      return;
+    }
+    try {
+      hostProviderRegistry.register(nextClient);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "host provider registration failed";
+      markHandshakeFailure("host-provider-registration", { reason: message });
+      sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, message);
+      close(1008, truncateCloseReason(message));
+      return;
+    }
+  }
   logWs("in", "connect", {
     connId,
     client: connectParams.client.id,
@@ -298,7 +320,7 @@ export async function attachAuthenticatedGatewayConnect(
     mode: connectParams.client.mode,
     clientId,
     platform: connectParams.client.platform,
-    auth: authMethod,
+    auth: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
   });
 
   if (isWebchatConnect(connectParams)) {
