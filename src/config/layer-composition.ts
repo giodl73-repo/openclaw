@@ -1,6 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 import { isPlainObject } from "../infra/plain-object.js";
 import { isBlockedObjectKey } from "../infra/prototype-keys.js";
+import {
+  compareConfigLayerBound,
+  prepareConfigLayerAuthorityValue,
+  type ConfigLayerControl,
+} from "./layer-authority.js";
 
 export type ConfigLayer = {
   id: string;
@@ -9,7 +14,7 @@ export type ConfigLayer = {
 
 export type ConfigPathProvenance = {
   path: string;
-  control: "exact";
+  control: ConfigLayerControl;
   controllingLayer: string;
   declaringLayers: string[];
 };
@@ -20,7 +25,8 @@ export type ConfigLayerFinding = {
     | "DuplicateLayerId"
     | "InvalidLayerDocument"
     | "BlockedConfigPath"
-    | "ControlledByEarlierLayer";
+    | "ControlledByEarlierLayer"
+    | "WouldWeakenEarlierLayer";
   layer: string;
   path?: string;
   controllingLayer?: string;
@@ -40,6 +46,7 @@ export type ConfigCompositionResult =
     };
 
 type ExactClaim = {
+  control: ConfigLayerControl;
   value: unknown;
   controllingLayer: string;
   declaringLayers: string[];
@@ -119,9 +126,10 @@ export function composeConfigLayers(layers: readonly ConfigLayer[]): ConfigCompo
     path: string[];
     candidate: unknown;
     existing: StoredClaim;
+    reason?: "ControlledByEarlierLayer" | "WouldWeakenEarlierLayer";
   }) => {
     findings.push({
-      reason: "ControlledByEarlierLayer",
+      reason: params.reason ?? "ControlledByEarlierLayer",
       layer: params.layer.id,
       path: formatPath(params.path),
       controllingLayer: params.existing.claim.controllingLayer,
@@ -158,15 +166,42 @@ export function composeConfigLayers(layers: readonly ConfigLayer[]): ConfigCompo
           recordConflict({ layer, path, candidate, existing: overlapping });
           continue;
         }
+        const prepared = prepareConfigLayerAuthorityValue(formatPath(path), candidate);
         claims.set(keyForPath, {
           path,
           claim: {
-            value: structuredClone(candidate),
+            control: prepared.control,
+            value: prepared.value,
             controllingLayer: layer.id,
             declaringLayers: [layer.id],
           },
         });
-        setPath(config, path, candidate);
+        setPath(config, path, prepared.value);
+        continue;
+      }
+
+      if (existing.claim.control !== "exact") {
+        const comparison = compareConfigLayerBound({
+          control: existing.claim.control,
+          inherited: existing.claim.value,
+          candidate,
+        });
+        if (!comparison.accepted) {
+          recordConflict({
+            layer,
+            path,
+            candidate,
+            existing,
+            reason: "WouldWeakenEarlierLayer",
+          });
+          continue;
+        }
+        existing.claim.declaringLayers.push(layer.id);
+        if (comparison.tightened) {
+          existing.claim.value = comparison.value;
+          existing.claim.controllingLayer = layer.id;
+          setPath(config, path, comparison.value);
+        }
         continue;
       }
 
@@ -210,7 +245,7 @@ export function composeConfigLayers(layers: readonly ConfigLayer[]): ConfigCompo
   const provenance = [...claims.values()]
     .map(({ path, claim }) => ({
       path: formatPath(path),
-      control: "exact" as const,
+      control: claim.control,
       controllingLayer: claim.controllingLayer,
       declaringLayers: [...claim.declaringLayers],
     }))
