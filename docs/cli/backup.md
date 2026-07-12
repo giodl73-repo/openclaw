@@ -1,8 +1,9 @@
 ---
-summary: "CLI reference for `openclaw backup` (create local backup archives)"
+summary: "CLI reference for creating, verifying, and retrieving local OpenClaw backups"
 read_when:
   - You want a first-class backup archive for local OpenClaw state
   - You want to preview which paths would be included before reset or uninstall
+  - You want to inspect a verified backup in a non-active staging directory
 title: "Backup"
 ---
 
@@ -18,6 +19,7 @@ openclaw backup create --verify
 openclaw backup create --no-include-workspace
 openclaw backup create --only-config
 openclaw backup verify ./2026-03-09T08-00-00.000+08-00-openclaw-backup.tar.gz
+openclaw backup retrieve ./backup.tar.gz --destination ./restored
 ```
 
 ## Notes
@@ -27,6 +29,9 @@ openclaw backup verify ./2026-03-09T08-00-00.000+08-00-openclaw-backup.tar.gz
 - Existing archive files are never overwritten. Output paths inside the source state/workspace trees are rejected to avoid self-inclusion.
 - `openclaw backup verify <archive>` checks that the archive contains exactly one root manifest, rejects traversal-style archive paths, and confirms every manifest-declared payload exists in the tarball. `openclaw backup create --verify` runs that validation immediately after writing the archive.
 - `openclaw backup create --only-config` backs up just the active JSON config file.
+- `openclaw backup retrieve <archive> --destination <path>` copies and verifies the archive, then extracts its manifest and payload into a new private staging directory. The destination must not already exist.
+- Retrieval rejects links, special entries, unsafe paths, and archives that exceed its entry or expanded-size safety limits. If extraction fails, OpenClaw removes the incomplete destination.
+- Retrieval does **not** activate the staged files as live OpenClaw state. Inspect the staging directory manually; native restore and activation are not implemented by this command.
 
 ## What gets backed up
 

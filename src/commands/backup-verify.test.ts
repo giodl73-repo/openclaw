@@ -581,4 +581,29 @@ describe("backupVerifyCommand", () => {
       );
     }
   });
+
+  it("stops archive inspection at the configured entry limit", async () => {
+    const payloadArchivePath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/state.txt`;
+    await withBrokenArchiveFixture(
+      {
+        tempPrefix: "openclaw-backup-entry-limit-",
+        manifestAssetArchivePath: payloadArchivePath,
+        payloads: [
+          {
+            fileName: "state.txt",
+            contents: "state\n",
+            archivePath: payloadArchivePath,
+          },
+        ],
+      },
+      async (archivePath) => {
+        await expect(
+          backupVerifyCommand(createBackupVerifyRuntime(), {
+            archive: archivePath,
+            maxEntries: 1,
+          }),
+        ).rejects.toThrow(/exceeds the 1-entry limit/i);
+      },
+    );
+  });
 });

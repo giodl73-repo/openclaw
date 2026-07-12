@@ -5,6 +5,7 @@ import { registerBackupCommand } from "./register.backup.js";
 
 const mocks = vi.hoisted(() => ({
   backupCreateCommand: vi.fn(),
+  backupRetrieveCommand: vi.fn(),
   backupVerifyCommand: vi.fn(),
   runtime: {
     log: vi.fn(),
@@ -19,6 +20,10 @@ const runtime = mocks.runtime;
 
 vi.mock("../../commands/backup.js", () => ({
   backupCreateCommand: mocks.backupCreateCommand,
+}));
+
+vi.mock("../../commands/backup-retrieve.js", () => ({
+  backupRetrieveCommand: mocks.backupRetrieveCommand,
 }));
 
 vi.mock("../../commands/backup-verify.js", () => ({
@@ -39,6 +44,7 @@ describe("registerBackupCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     backupCreateCommand.mockResolvedValue(undefined);
+    mocks.backupRetrieveCommand.mockResolvedValue(undefined);
     backupVerifyCommand.mockResolvedValue(undefined);
   });
 
@@ -92,5 +98,23 @@ describe("registerBackupCommand", () => {
     const options = expectForwardedOptions(backupVerifyCommand);
     expect(options.archive).toBe("/tmp/openclaw-backup.tar.gz");
     expect(options.json).toBe(true);
+  });
+
+  it("runs backup retrieve with a required clean destination", async () => {
+    await runCli([
+      "backup",
+      "retrieve",
+      "/tmp/openclaw-backup.tar.gz",
+      "--destination",
+      "/tmp/restored",
+      "--json",
+    ]);
+
+    const options = expectForwardedOptions(mocks.backupRetrieveCommand);
+    expect(options).toStrictEqual({
+      archive: "/tmp/openclaw-backup.tar.gz",
+      destination: "/tmp/restored",
+      json: true,
+    });
   });
 });

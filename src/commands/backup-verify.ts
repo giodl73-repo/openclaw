@@ -12,6 +12,7 @@ import { isRecord, resolveUserPath } from "../utils.js";
 
 const WINDOWS_ABSOLUTE_ARCHIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
+export const DEFAULT_BACKUP_VERIFY_MAX_ENTRIES = 1_000_000;
 
 type BackupManifestAsset = {
   kind: string;
@@ -47,6 +48,7 @@ type BackupManifest = {
 type BackupVerifyOptions = {
   archive: string;
   json?: boolean;
+  maxEntries?: number;
 };
 
 export type BackupVerifyResult = {
@@ -206,7 +208,10 @@ async function readManifestEntry(
   return { content: Buffer.concat(chunks, totalBytes) };
 }
 
-async function inspectArchive(archivePath: string): Promise<{
+async function inspectArchive(
+  archivePath: string,
+  maxEntries: number,
+): Promise<{
   entries: ArchiveEntry[];
   manifestContents: Buffer[];
   archiveSha256: string;
@@ -214,9 +219,15 @@ async function inspectArchive(archivePath: string): Promise<{
   const entries: ArchiveEntry[] = [];
   const manifestPromises: Array<ReturnType<typeof readManifestEntry>> = [];
   const digest = createHash("sha256");
-  const parser = tar.t({
+  let parser: ReturnType<typeof tar.t>;
+  parser = tar.t({
     gzip: true,
     onentry: (entry) => {
+      if (entries.length >= maxEntries) {
+        entry.resume();
+        parser.abort(new Error(`Backup archive exceeds the ${maxEntries}-entry limit.`));
+        return;
+      }
       entries.push({
         path: entry.path,
         ...(entry.linkpath ? { linkpath: entry.linkpath } : {}),
@@ -346,7 +357,11 @@ export async function backupVerifyCommand(
   opts: BackupVerifyOptions,
 ): Promise<BackupVerifyResult> {
   const archivePath = resolveUserPath(opts.archive);
-  const inspection = await inspectArchive(archivePath);
+  const maxEntries = opts.maxEntries ?? DEFAULT_BACKUP_VERIFY_MAX_ENTRIES;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+    throw new Error("Backup verify maxEntries must be a positive safe integer.");
+  }
+  const inspection = await inspectArchive(archivePath, maxEntries);
   const rawEntries = inspection.entries;
   if (rawEntries.length === 0) {
     throw new Error("Backup archive is empty.");
