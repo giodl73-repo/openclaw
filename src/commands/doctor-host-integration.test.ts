@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
-import type { HostIntegrationStatusInventoryV1 } from "../hosting/host-integration-status.js";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  clearCurrentHostIntegrationBundleSnapshotV1,
+  registerHostIntegrationBundleV1,
+} from "../hosting/host-integration-bundle.js";
+import {
+  clearCurrentHostIntegrationOwnerEvidenceV1,
+  type HostIntegrationStatusInventoryV1,
+} from "../hosting/host-integration-status.js";
+import {
+  collectHostIntegrationHealthFindings,
   HOST_INTEGRATION_BINDINGS_CHECK_ID,
   hostIntegrationStatusToHealthFindings,
 } from "./doctor-host-integration.js";
+
+afterEach(() => {
+  clearCurrentHostIntegrationBundleSnapshotV1();
+  clearCurrentHostIntegrationOwnerEvidenceV1();
+});
 
 function inventory(
   entry: Partial<HostIntegrationStatusInventoryV1["entries"][number]> = {},
@@ -37,6 +50,52 @@ function inventory(
 }
 
 describe("host integration Doctor findings", () => {
+  it("stays absent when no host integration bundle is registered", () => {
+    expect(collectHostIntegrationHealthFindings()).toEqual([]);
+  });
+
+  it("reads the published bundle snapshot without probing owners", () => {
+    registerHostIntegrationBundleV1({
+      manifest: {
+        version: "host-integration-bundle/v1",
+        id: "lobster/capi",
+        bundleVersion: "1.0.0",
+        contributions: [
+          {
+            owner: "model-provider",
+            kind: "model-provider-adapter",
+            id: "lobster/capi",
+            version: "capi-model-adapter/v1",
+            required: true,
+            readinessCriteria: ["CapiReady"],
+          },
+        ],
+      },
+      availableContributions: [
+        {
+          owner: "model-provider",
+          kind: "model-provider-adapter",
+          id: "lobster/capi",
+          version: "capi-model-adapter/v1",
+          provenance: {
+            pluginId: "lobster",
+            source: "/plugins/lobster",
+            origin: "workspace",
+          },
+        },
+      ],
+    });
+
+    expect(collectHostIntegrationHealthFindings()).toMatchObject([
+      {
+        checkId: HOST_INTEGRATION_BINDINGS_CHECK_ID,
+        severity: "warning",
+        target: "lobster/capi",
+        requirement: "OwnerEvidenceUnavailable",
+      },
+    ]);
+  });
+
   it("emits no success finding for a ready binding", () => {
     expect(
       hostIntegrationStatusToHealthFindings(
