@@ -12,27 +12,17 @@ import {
   isLegacySessionTranscriptBackupPath,
   isVolatileBackupPath,
 } from "../infra/backup-volatile-filter.js";
+import type { ContinuityArchiveCaptureEvidence } from "./archive-manifest.js";
 import type { ContinuityArchivePlan, ContinuityCaptureSource } from "./archive-plan.js";
 import { sanitizeContinuitySqliteSnapshot } from "./sqlite-sanitize.js";
 
-export type ContinuityArchiveStagingEvidence = {
-  config: ContinuityArchivePlan["evidence"]["config"];
-  configFileCount: number;
-  workspaceCount: number;
-  oauthExcluded: true;
-  legacyTranscriptCount: 0;
-  sqliteSnapshotCount: number;
-  removedAuthProfileStoreRows: number;
-  removedAuthProfileStateRows: number;
-  credentialStoreRows: 0;
-  authProfileStateRows: 0;
-  copiedFileCount: number;
-  skippedVolatileCount: number;
-};
+export type ContinuityArchiveStagingEvidence = ContinuityArchiveCaptureEvidence;
 
 export type ContinuityArchiveStagingResult = {
   stagingDir: string;
   artifactRoot: string;
+  stateFileArchivePaths: string[];
+  sanitizedSqliteArchivePaths: string[];
   evidence: ContinuityArchiveStagingEvidence;
 };
 
@@ -265,6 +255,30 @@ async function assertSourceStillCanonical(source: ContinuityCaptureSource): Prom
   }
 }
 
+async function listStagedFileArchivePaths(params: {
+  directoryPath: string;
+  archivePath: string;
+}): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await fs.readdir(params.directoryPath, { withFileTypes: true })) {
+    const entryPath = path.join(params.directoryPath, entry.name);
+    const archivePath = path.posix.join(params.archivePath, entry.name);
+    if (entry.isDirectory()) {
+      files.push(
+        ...(await listStagedFileArchivePaths({
+          directoryPath: entryPath,
+          archivePath,
+        })),
+      );
+    } else if (entry.isFile()) {
+      files.push(archivePath);
+    } else {
+      throw new Error(`Continuity staging contains an unsupported entry: ${entryPath}`);
+    }
+  }
+  return files.toSorted();
+}
+
 /**
  * Materialize an eligible continuity plan into a new owner-private directory.
  * The returned directory is not an archive and is never activated as live state.
@@ -334,6 +348,7 @@ export async function stageContinuityArchivePlan(params: {
       destinationPath: stateDestination,
       context,
     });
+    const sanitizedSqliteArchivePaths: string[] = [];
     for (const snapshot of sqlitePlan.snapshots) {
       const relativePath = path.relative(
         params.plan.sources.state.sourcePath,
@@ -347,8 +362,18 @@ export async function stageContinuityArchivePlan(params: {
       const destinationPath = path.join(stateDestination, relativePath);
       await ensurePrivateDirectory(path.dirname(destinationPath));
       await fs.rename(snapshot.sourcePath, destinationPath);
+      sanitizedSqliteArchivePaths.push(
+        path.posix.join(
+          params.plan.sources.state.archivePath,
+          relativePath.replaceAll(path.sep, "/"),
+        ),
+      );
       stats.copiedFileCount += 1;
     }
+    const stateFileArchivePaths = await listStagedFileArchivePaths({
+      directoryPath: stateDestination,
+      archivePath: params.plan.sources.state.archivePath,
+    });
     await fs.rm(snapshotDir, { recursive: true, force: true });
 
     for (const configSource of params.plan.sources.config) {
@@ -380,7 +405,12 @@ export async function stageContinuityArchivePlan(params: {
     return {
       stagingDir,
       artifactRoot: resolveStagedPath(stagingDir, params.plan.archiveRoot),
+      stateFileArchivePaths,
+      sanitizedSqliteArchivePaths: sanitizedSqliteArchivePaths.toSorted(),
       evidence: {
+        configClassificationComplete: true,
+        includeClosureComplete: true,
+        sqliteSanitationComplete: true,
         config: params.plan.evidence.config,
         configFileCount: params.plan.evidence.configFileCount,
         workspaceCount: params.plan.evidence.workspaceCount,

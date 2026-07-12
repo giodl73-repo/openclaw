@@ -123,7 +123,7 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
     await fs.chmod(snapshotPath, 0o600);
     const verification: BackupVerifyResult = await backupVerifyCommand(
       { log: () => {}, error: () => {}, exit: () => {} },
-      { archive: snapshotPath, maxEntries },
+      { archive: snapshotPath, maxEntries, maxContentBytes: maxBytes },
     );
     if (verification.entryCount > maxEntries) {
       throw new Error(`Backup payload exceeds the ${maxEntries}-entry retrieve limit.`);

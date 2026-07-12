@@ -198,7 +198,7 @@ async function removeBackupTempArchiveBestEffort(tempArchivePath: string): Promi
   await fs.rm(tempArchivePath, { force: true }).catch(() => undefined);
 }
 
-async function writeArchiveStreamToFile(params: {
+export async function writeArchiveStreamToFile(params: {
   archivePath: string;
   archiveStream: AsyncIterable<Uint8Array> | NodeJS.ReadableStream;
 }): Promise<void> {
@@ -368,7 +368,7 @@ function isLinkUnsupportedError(code: string | undefined): boolean {
   return code === "ENOTSUP" || code === "EOPNOTSUPP" || code === "EPERM";
 }
 
-async function publishTempArchive(params: {
+export async function publishTempArchive(params: {
   tempArchivePath: string;
   outputPath: string;
 }): Promise<void> {

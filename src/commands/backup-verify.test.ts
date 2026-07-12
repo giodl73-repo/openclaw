@@ -216,6 +216,25 @@ describe("backupVerifyCommand", () => {
     }
   });
 
+  it("accepts an explicit backup artifact type", async () => {
+    const manifest = {
+      ...createBackupManifest(`${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/payload.txt`),
+      artifactType: "backup",
+    };
+    await createArchiveWithManifestContent(
+      {
+        tempPrefix: "openclaw-backup-explicit-type-",
+        manifestContent: `${JSON.stringify(manifest, null, 2)}\n`,
+      },
+      async (archivePath) => {
+        const verified = await backupVerifyCommand(createBackupVerifyRuntime(), {
+          archive: archivePath,
+        });
+        expect(verified.artifactType).toBe("backup");
+      },
+    );
+  });
+
   it("hashes the exact archived manifest bytes", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-backup-byte-hash-"));
     const archivePath = path.join(tempDir, "backup.tar.gz");

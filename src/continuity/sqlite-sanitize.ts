@@ -96,6 +96,17 @@ function assertCredentialRowsRemoved(db: DatabaseSync): void {
   }
 }
 
+/** Verify that a copied SQLite artifact contains no external or reconstructed auth rows. */
+export function verifyContinuitySqliteSnapshot(snapshotPath: string): void {
+  const sqlite = requireNodeSqlite();
+  const snapshot = new sqlite.DatabaseSync(snapshotPath, { readOnly: true });
+  try {
+    assertCredentialRowsRemoved(snapshot);
+  } finally {
+    snapshot.close();
+  }
+}
+
 async function assertDistinctSnapshot(params: {
   sourcePath: string;
   snapshotPath: string;
@@ -187,12 +198,7 @@ export async function sanitizeContinuitySqliteSnapshot(params: {
       snapshot.close();
     }
 
-    const verified = new sqlite.DatabaseSync(params.snapshotPath, { readOnly: true });
-    try {
-      assertCredentialRowsRemoved(verified);
-    } finally {
-      verified.close();
-    }
+    verifyContinuitySqliteSnapshot(params.snapshotPath);
     return {
       removedAuthProfileStoreRows,
       removedAuthProfileStateRows,
