@@ -4,6 +4,10 @@ import { Stream } from "openai/streaming";
 import type { Model } from "openclaw/plugin-sdk/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mintSecretSentinel } from "../secrets/sentinel.js";
+import {
+  clearCurrentProviderRequestTrafficPolicyV1,
+  registerProviderRequestTrafficPolicyV1,
+} from "./provider-request-traffic-policy.js";
 import { buildGuardedModelFetch } from "./provider-transport-fetch.js";
 
 type ProviderRequestPolicyConfigMockResult = {
@@ -67,6 +71,7 @@ const {
     resolveProviderRequestPolicyConfigMock: vi.fn<() => ProviderRequestPolicyConfigMockResult>(
       () => ({
         allowPrivateNetwork: false,
+        policy: { endpointClass: "default" },
       }),
     ),
     shouldUseEnvHttpProxyForUrlMock: vi.fn(() => false),
@@ -164,9 +169,10 @@ describe("buildGuardedModelFetch", () => {
     ensureModelProviderLocalServiceMock.mockReset().mockResolvedValue(undefined);
     buildProviderRequestDispatcherPolicyMock.mockClear().mockReturnValue(undefined);
     mergeModelProviderRequestOverridesMock.mockClear();
-    resolveProviderRequestPolicyConfigMock
-      .mockClear()
-      .mockReturnValue({ allowPrivateNetwork: false });
+    resolveProviderRequestPolicyConfigMock.mockClear().mockReturnValue({
+      allowPrivateNetwork: false,
+      policy: { endpointClass: "default" },
+    });
     shouldUseEnvHttpProxyForUrlMock.mockClear().mockReturnValue(false);
     withTrustedEnvProxyGuardedFetchModeMock.mockClear();
     delete process.env.OPENCLAW_DEBUG_PROXY_ENABLED;
@@ -175,6 +181,7 @@ describe("buildGuardedModelFetch", () => {
   });
 
   afterEach(() => {
+    clearCurrentProviderRequestTrafficPolicyV1();
     delete process.env.OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS;
   });
 
@@ -186,6 +193,63 @@ describe("buildGuardedModelFetch", () => {
       baseUrl: "https://api.openai.com/v1",
     } as unknown as Model<"openai-responses">;
   }
+
+  it("applies compiled traffic policy before SSRF and suppresses weaker proxy fallback", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: true,
+      policy: { endpointClass: "custom" },
+    });
+    shouldUseEnvHttpProxyForUrlMock.mockReturnValue(true);
+    registerProviderRequestTrafficPolicyV1({
+      version: "provider-request-traffic-policy/v1",
+      id: "lobster/enterprise-egress",
+      generation: "policy-1",
+      required: true,
+      provenance: { source: "test", revision: "1" },
+      routeProfiles: [
+        {
+          id: "lobster/direct",
+          dispatcherPolicy: { mode: "direct" },
+        },
+      ],
+      rules: [
+        {
+          id: "openai",
+          match: { providers: ["openai"], endpointClasses: ["custom"] },
+          outcome: {
+            action: "allow",
+            routeProfileId: "lobster/direct",
+            allowedOrigins: ["https://api.openai.com"],
+            allowPrivateNetwork: false,
+            maximumTimeoutMs: 10_000,
+          },
+        },
+      ],
+    });
+
+    const response = await buildGuardedModelFetch(
+      sentinelModel(),
+      30_000,
+    )("https://api.openai.com/v1/responses");
+    await response.text();
+
+    expect(latestGuardedFetchParams()).toMatchObject({
+      dispatcherPolicy: { mode: "direct" },
+      timeoutMs: 10_000,
+    });
+    expect(latestGuardedFetchParams().policy).not.toMatchObject({
+      allowPrivateNetwork: true,
+    });
+    const validateUrl = latestGuardedFetchParams().validateUrl;
+    expect(validateUrl).toBeTypeOf("function");
+    expect(() =>
+      (validateUrl as (url: URL) => void)(new URL("https://api.openai.com/v1/redirected")),
+    ).not.toThrow();
+    expect(() =>
+      (validateUrl as (url: URL) => void)(new URL("https://other.example/v1/responses")),
+    ).toThrow("redirect denied by traffic policy");
+    expect(withTrustedEnvProxyGuardedFetchModeMock).not.toHaveBeenCalled();
+  });
 
   it("swaps sentinels in Request-form headers", async () => {
     const sentinel = mintSecretSentinel("request-form-secret", { label: "request-form" });
@@ -812,6 +876,49 @@ describe("buildGuardedModelFetch", () => {
     });
     expect(policy?.allowPrivateNetwork).toBeUndefined();
     expect(policy?.dangerouslyAllowPrivateNetwork).toBeUndefined();
+  });
+
+  it("lets traffic policy remove exact configured private-origin trust", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValueOnce({
+      allowPrivateNetwork: false,
+      policy: { endpointClass: "custom" },
+    });
+    registerProviderRequestTrafficPolicyV1({
+      version: "provider-request-traffic-policy/v1",
+      id: "lobster/enterprise-egress",
+      generation: "policy-1",
+      required: true,
+      provenance: { source: "test", revision: "1" },
+      routeProfiles: [
+        {
+          id: "lobster/direct",
+          dispatcherPolicy: { mode: "direct" },
+        },
+      ],
+      rules: [
+        {
+          id: "lmstudio",
+          match: { providers: ["lmstudio"], endpointClasses: ["custom"] },
+          outcome: {
+            action: "allow",
+            routeProfileId: "lobster/direct",
+            allowedOrigins: ["http://10.0.0.5:1234"],
+            allowPrivateNetwork: false,
+          },
+        },
+      ],
+    });
+    const model = {
+      id: "qwen3:32b",
+      provider: "lmstudio",
+      api: "openai-completions",
+      baseUrl: "http://10.0.0.5:1234/v1",
+    } as unknown as Model<"openai-completions">;
+
+    const fetcher = buildGuardedModelFetch(model);
+    await fetcher("http://10.0.0.5:1234/v1/chat/completions", { method: "POST" });
+
+    expect(latestGuardedFetchParams().policy).toBeUndefined();
   });
 
   it("trusts exact configured HTTPS custom provider origins", async () => {

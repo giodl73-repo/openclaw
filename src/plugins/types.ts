@@ -15,6 +15,7 @@ import type {
 import type { FailoverReason } from "../agents/embedded-agent-helpers/types.js";
 import type { AgentHarness } from "../agents/harness/types.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.types.js";
+import type { ProviderRequestTrafficPolicyRegistrationV1 } from "../agents/provider-request-traffic-policy.js";
 import type { AgentMessage } from "../agents/runtime/index.js";
 import type { StreamFn } from "../agents/runtime/index.js";
 import type { ProviderSystemPromptContribution } from "../agents/system-prompt-contribution.js";
@@ -2737,6 +2738,13 @@ export type OpenClawPluginApi = {
   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;
   /** Register an advisory readiness criterion that an operator profile may require. */
   registerReadinessCriterion: (criterion: OpenClawPluginReadinessCriterion) => void;
+  /**
+   * Publish one compiled provider-traffic policy while the owning plugin is
+   * active. The returned disposer clears only that exact generation.
+   */
+  registerProviderRequestTrafficPolicy: (
+    registration: ProviderRequestTrafficPolicyRegistrationV1,
+  ) => () => void;
   registerService: (service: OpenClawPluginService) => void;
   /** Register a local gateway discovery advertiser such as mDNS/Bonjour. */
   registerGatewayDiscoveryService: (service: OpenClawGatewayDiscoveryService) => void;

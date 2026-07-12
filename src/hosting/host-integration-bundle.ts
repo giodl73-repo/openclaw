@@ -8,6 +8,10 @@ export type HostIntegrationContributionTypeV1 =
   | {
       owner: "provider-request";
       kind: "credential-slot-resolver";
+    }
+  | {
+      owner: "provider-request";
+      kind: "provider-request-traffic-policy";
     };
 
 export type HostIntegrationBundleContributionV1 = HostIntegrationContributionTypeV1 & {
@@ -136,6 +140,15 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
     return {
       owner: "provider-request",
       kind: "credential-slot-resolver",
+    };
+  }
+  if (
+    contribution.owner === "provider-request" &&
+    contribution.kind === "provider-request-traffic-policy"
+  ) {
+    return {
+      owner: "provider-request",
+      kind: "provider-request-traffic-policy",
     };
   }
   throw new HostIntegrationBundleError(
