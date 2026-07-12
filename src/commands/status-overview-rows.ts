@@ -70,6 +70,18 @@ function buildModelPricingOverviewValue(params: {
   return params.warn(`warning · optional pricing refresh degraded${detail}`);
 }
 
+/** Formats configured continuity intent separately from the proven effective guarantee. */
+export function buildContinuityOverviewValue(params: {
+  continuity: StatusSummary["continuity"];
+  warn: (value: string) => string;
+}): string {
+  const { desiredLevel, effectiveLevel } = params.continuity;
+  if (desiredLevel === effectiveLevel) {
+    return effectiveLevel;
+  }
+  return params.warn(`${desiredLevel} requested · ${effectiveLevel} effective`);
+}
+
 /** Builds the default `openclaw status` overview rows from scan, health, memory, and session inputs. */
 export function buildStatusCommandOverviewRows(
   params: {
@@ -161,6 +173,13 @@ export function buildStatusCommandOverviewRows(
     updateValue: params.updateValue,
     agentsValue,
     suffixRows: [
+      {
+        Item: "Continuity",
+        Value: buildContinuityOverviewValue({
+          continuity: params.summary.continuity,
+          warn: params.warn,
+        }),
+      },
       ...(modelPricingValue ? [{ Item: "Model pricing", Value: modelPricingValue }] : []),
       ...(params.updateRestartValue
         ? [{ Item: "Update restart", Value: params.updateRestartValue }]
