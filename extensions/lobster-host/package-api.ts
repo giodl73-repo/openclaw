@@ -1,0 +1,49 @@
+import type { HostIntegrationBundleManifestV1 } from "openclaw/plugin-sdk/types";
+
+export const LOBSTER_HOST_BUNDLE_MANIFEST_V1 = {
+  version: "host-integration-bundle/v1",
+  id: "lobster/host",
+  bundleVersion: "1.0.0",
+  contributions: [
+    {
+      owner: "model-provider",
+      kind: "model-provider-adapter",
+      id: "lobster/capi",
+      version: "capi-model-provider-adapter/v1",
+      required: true,
+      readinessCriteria: ["model.provider.capi"],
+    },
+    {
+      owner: "provider-request",
+      kind: "credential-slot-resolver",
+      id: "lobster/capi-token",
+      version: "credential-slot-resolver/v1",
+      required: true,
+      readinessCriteria: ["provider.request.credentials.capi"],
+    },
+    {
+      owner: "provider-request",
+      kind: "provider-request-traffic-policy",
+      id: "lobster/enterprise-egress",
+      version: "provider-request-traffic-policy/v1",
+      required: true,
+      readinessCriteria: ["provider.request.policy.lobster"],
+    },
+    {
+      owner: "provider-request",
+      kind: "provider-request-dispatcher",
+      id: "lobster/egress",
+      version: "provider-request-dispatcher/v1",
+      required: true,
+      readinessCriteria: ["provider.request.dispatch.lobster"],
+    },
+    {
+      owner: "provider-request",
+      kind: "provider-request-carrier",
+      id: "lobster/reverse-provider",
+      version: "reverse-provider-dispatch/v1",
+      required: true,
+      readinessCriteria: ["provider.request.carrier.lobster"],
+    },
+  ],
+} satisfies HostIntegrationBundleManifestV1;

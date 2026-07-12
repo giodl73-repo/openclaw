@@ -1,0 +1,14 @@
+{
+  "id": "lobster-host",
+  "enabledByDefault": false,
+  "activation": {
+    "onStartup": true
+  },
+  "name": "Lobster Host",
+  "description": "Registers the inactive Lobster hosted-integration bundle.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

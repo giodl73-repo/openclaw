@@ -12,6 +12,14 @@ export type HostIntegrationContributionTypeV1 =
   | {
       owner: "provider-request";
       kind: "provider-request-dispatcher";
+    }
+  | {
+      owner: "provider-request";
+      kind: "provider-request-traffic-policy";
+    }
+  | {
+      owner: "provider-request";
+      kind: "provider-request-carrier";
     };
 
 export type HostIntegrationBundleContributionV1 = HostIntegrationContributionTypeV1 & {
@@ -149,6 +157,24 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
     return {
       owner: "provider-request",
       kind: "provider-request-dispatcher",
+    };
+  }
+  if (
+    contribution.owner === "provider-request" &&
+    contribution.kind === "provider-request-traffic-policy"
+  ) {
+    return {
+      owner: "provider-request",
+      kind: "provider-request-traffic-policy",
+    };
+  }
+  if (
+    contribution.owner === "provider-request" &&
+    contribution.kind === "provider-request-carrier"
+  ) {
+    return {
+      owner: "provider-request",
+      kind: "provider-request-carrier",
     };
   }
   throw new HostIntegrationBundleError(

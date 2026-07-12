@@ -997,6 +997,15 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  extensions/lobster-host:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/longcat:
     devDependencies:
       '@openclaw/plugin-sdk':

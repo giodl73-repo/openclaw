@@ -32,6 +32,12 @@ import { isOperatorScope, type OperatorScope } from "../gateway/operator-scopes.
 import type { GatewayRequestHandler, RespondFn } from "../gateway/server-methods/types.js";
 import { registerInternalHook, unregisterInternalHook } from "../hooks/internal-hooks.js";
 import type { HookEntry } from "../hooks/types.js";
+import {
+  clearCurrentHostIntegrationBundleSnapshotV1,
+  getCurrentHostIntegrationBundleSnapshotV1,
+  registerHostIntegrationBundleV1,
+  type HostIntegrationBundleManifestV1,
+} from "../hosting/host-integration-bundle.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
   NODE_EXEC_APPROVALS_COMMANDS,
@@ -1745,6 +1751,31 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     });
   };
 
+  const registerHostIntegrationBundle = (
+    record: PluginRecord,
+    manifest: HostIntegrationBundleManifestV1,
+  ): (() => void) => {
+    const snapshot = registerHostIntegrationBundleV1({
+      manifest,
+      availableContributions: manifest.contributions.map((contribution) => ({
+        owner: contribution.owner,
+        kind: contribution.kind,
+        id: contribution.id,
+        version: contribution.version,
+        provenance: {
+          pluginId: record.id,
+          source: record.source,
+          origin: record.origin,
+        },
+      })),
+    });
+    return () => {
+      if (getCurrentHostIntegrationBundleSnapshotV1() === snapshot) {
+        clearCurrentHostIntegrationBundleSnapshotV1();
+      }
+    };
+  };
+
   const registerService = (record: PluginRecord, service: OpenClawPluginService) => {
     const id = service.id.trim();
     if (!id) {
@@ -2934,6 +2965,8 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 registerSecurityAuditCollector(record, collector),
               registerReadinessCriterion: (criterion) =>
                 registerReadinessCriterion(record, criterion, params.pluginConfig),
+              registerHostIntegrationBundle: (manifest) =>
+                registerHostIntegrationBundle(record, manifest),
               registerInteractiveHandler: (registration) => {
                 const result = registerRegistryPluginInteractiveHandler(record.id, registration, {
                   pluginName: record.name,
