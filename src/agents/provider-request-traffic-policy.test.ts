@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
+import canonicalPolicyFixture from "./fixtures/provider-request-traffic-policy-v1.json" with { type: "json" };
 import {
   clearCurrentProviderRequestTrafficPolicyV1,
   evaluateCurrentProviderRequestTrafficPolicyV1,
   getCurrentProviderRequestTrafficPolicyV1,
   registerProviderRequestTrafficPolicyV1,
+  type ProviderRequestTrafficPolicyDecisionV1,
+  type ProviderRequestTrafficPolicyFactsV1,
   type ProviderRequestTrafficPolicyRegistrationV1,
 } from "./provider-request-traffic-policy.js";
 
@@ -68,6 +71,25 @@ afterEach(() => {
 });
 
 describe("provider request traffic policy", () => {
+  it("evaluates the canonical language-neutral fixtures", () => {
+    const fixture = canonicalPolicyFixture as {
+      version: string;
+      registration: ProviderRequestTrafficPolicyRegistrationV1;
+      cases: Array<{
+        id: string;
+        facts: ProviderRequestTrafficPolicyFactsV1;
+        expected: ProviderRequestTrafficPolicyDecisionV1;
+      }>;
+    };
+    expect(fixture.version).toBe("provider-request-traffic-policy-fixtures/v1");
+    registerProviderRequestTrafficPolicyV1(fixture.registration);
+    for (const entry of fixture.cases) {
+      expect(evaluateCurrentProviderRequestTrafficPolicyV1(entry.facts), entry.id).toEqual(
+        entry.expected,
+      );
+    }
+  });
+
   it("publishes one immutable ready generation and disposes only its own snapshot", () => {
     const disposeOld = registerProviderRequestTrafficPolicyV1(registration());
     const first = getCurrentProviderRequestTrafficPolicyV1();
