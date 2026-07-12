@@ -2,9 +2,24 @@
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { verifyContinuitySqliteSnapshot } from "../continuity/sqlite-sanitize.js";
+import {
+  listContinuityStateSurfaces,
+  type ContinuityStateOwner,
+  type ContinuityStateTreatment,
+} from "../continuity/state-inventory.js";
 import { sha256Hex } from "../infra/crypto-digest.js";
+import { requireNodeSqlite } from "../infra/node-sqlite.js";
+import { compareComparableSemver, parseComparableSemver } from "../infra/semver-compare.js";
+import {
+  createNewerSqliteSchemaVersionError,
+  readSqliteUserVersion,
+} from "../infra/sqlite-user-version.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
+import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../state/openclaw-agent-db.js";
+import { OPENCLAW_STATE_SCHEMA_VERSION } from "../state/openclaw-state-db.js";
 import { resolveUserPath } from "../utils.js";
+import { resolveRuntimeServiceVersion } from "../version.js";
 import {
   assertSafeRetrievedTree,
   backupRetrieveCommand,
@@ -34,6 +49,38 @@ export type MaterializedContinuityComponent = {
   fileCount: number;
 };
 
+export type MaterializedSqliteSchemaEvidence = {
+  archivePath: string;
+  kind: "shared-state" | "agent-state" | "other";
+  schemaVersion: number;
+  supportedVersion: number | null;
+};
+
+export type ContinuityCompatibilityEvidence = {
+  artifactRuntimeVersion: string;
+  currentRuntimeVersion: string;
+  runtimeDecision: "same-or-older";
+  artifactPlatform: string;
+  currentPlatform: NodeJS.Platform;
+  platformDecision: "same-platform";
+  sqliteSchemas: MaterializedSqliteSchemaEvidence[];
+};
+
+export type ContinuitySurfaceObligation = {
+  id: string;
+  owner: ContinuityStateOwner;
+  treatment: Exclude<ContinuityStateTreatment, "captured">;
+  sensitive: boolean;
+  disposition: "rebuild-before-activation" | "resolve-before-activation" | "reset-on-activation";
+};
+
+export type ContinuitySurfaceEvidence = {
+  obligations: ContinuitySurfaceObligation[];
+  reconstructionPerformed: false;
+  externalDependenciesResolved: false;
+  transientsCreated: false;
+};
+
 export type BackupMaterializeResult = {
   ok: true;
   archivePath: string;
@@ -44,7 +91,10 @@ export type BackupMaterializeResult = {
   manifestSha256: string;
   materializedFileCount: number;
   components: MaterializedContinuityComponent[];
+  compatibility: ContinuityCompatibilityEvidence;
+  surfaces: ContinuitySurfaceEvidence;
   activated: false;
+  activationReady: false;
   effectiveArchived: false;
 };
 
@@ -276,6 +326,151 @@ async function copyOwnedFile(params: {
   }
 }
 
+function validateRuntimeCompatibility(
+  manifest: BackupManifest,
+): Pick<
+  ContinuityCompatibilityEvidence,
+  | "artifactRuntimeVersion"
+  | "currentRuntimeVersion"
+  | "runtimeDecision"
+  | "artifactPlatform"
+  | "currentPlatform"
+  | "platformDecision"
+> {
+  const currentRuntimeVersion = resolveRuntimeServiceVersion();
+  const artifactVersion = parseComparableSemver(manifest.runtimeVersion, {
+    normalizeLegacyDotBeta: true,
+  });
+  const currentVersion = parseComparableSemver(currentRuntimeVersion, {
+    normalizeLegacyDotBeta: true,
+  });
+  const runtimeComparison = compareComparableSemver(artifactVersion, currentVersion);
+  if (runtimeComparison === null) {
+    throw new Error(
+      `Continuity runtime compatibility requires exact semantic versions; artifact=${JSON.stringify(manifest.runtimeVersion)}, current=${JSON.stringify(currentRuntimeVersion)}.`,
+    );
+  }
+  if (runtimeComparison > 0) {
+    throw new Error(
+      `Continuity artifact runtime ${manifest.runtimeVersion} is newer than this OpenClaw runtime ${currentRuntimeVersion}. Upgrade OpenClaw before materializing it.`,
+    );
+  }
+  if (manifest.platform !== process.platform) {
+    throw new Error(
+      `Continuity artifact platform ${JSON.stringify(manifest.platform)} does not match this local runtime platform ${JSON.stringify(process.platform)}.`,
+    );
+  }
+  return {
+    artifactRuntimeVersion: manifest.runtimeVersion,
+    currentRuntimeVersion,
+    runtimeDecision: "same-or-older",
+    artifactPlatform: manifest.platform,
+    currentPlatform: process.platform,
+    platformDecision: "same-platform",
+  };
+}
+
+function classifySqliteSchema(
+  archivePath: string,
+  stateArchivePath: string,
+): {
+  kind: MaterializedSqliteSchemaEvidence["kind"];
+  supportedVersion: number | null;
+  label: string;
+} {
+  const stateRelativePath = path.posix.relative(stateArchivePath, archivePath);
+  if (stateRelativePath === "state/openclaw.sqlite") {
+    return {
+      kind: "shared-state",
+      supportedVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+      label: "OpenClaw shared state database",
+    };
+  }
+  if (/^agents\/[^/]+\/agent\/openclaw-agent\.sqlite$/i.test(stateRelativePath)) {
+    return {
+      kind: "agent-state",
+      supportedVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+      label: "OpenClaw agent state database",
+    };
+  }
+  return { kind: "other", supportedVersion: null, label: "Continuity SQLite database" };
+}
+
+function validateSqliteSchemas(
+  retrievedDirectory: string,
+  manifest: BackupManifest,
+): MaterializedSqliteSchemaEvidence[] {
+  const stateArchivePath = manifest.assets.find((asset) => asset.kind === "state")?.archivePath;
+  if (!stateArchivePath) {
+    throw new Error("Continuity SQLite compatibility requires one state component.");
+  }
+  const sqlite = requireNodeSqlite();
+  return (manifest.sanitizedSqlitePaths ?? []).map((archivePath) => {
+    const databasePath = resolveRetrievedPath(retrievedDirectory, manifest, archivePath);
+    verifyContinuitySqliteSnapshot(databasePath);
+    const database = new sqlite.DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const integrityRows = database.prepare("PRAGMA integrity_check").all() as Array<{
+        integrity_check?: unknown;
+      }>;
+      if (integrityRows.length !== 1 || integrityRows[0]?.integrity_check !== "ok") {
+        throw new Error(`Continuity SQLite integrity validation failed: ${archivePath}`);
+      }
+      const schemaVersion = readSqliteUserVersion(database);
+      if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 0) {
+        throw new Error(`Continuity SQLite has an invalid schema version: ${archivePath}`);
+      }
+      const classification = classifySqliteSchema(archivePath, stateArchivePath);
+      if (
+        classification.supportedVersion !== null &&
+        schemaVersion > classification.supportedVersion
+      ) {
+        throw createNewerSqliteSchemaVersionError(
+          classification.label,
+          archivePath,
+          schemaVersion,
+          classification.supportedVersion,
+        );
+      }
+      return {
+        archivePath,
+        kind: classification.kind,
+        schemaVersion,
+        supportedVersion: classification.supportedVersion,
+      };
+    } finally {
+      database.close();
+    }
+  });
+}
+
+function resolveSurfaceEvidence(): ContinuitySurfaceEvidence {
+  const dispositionByTreatment = {
+    reconstructed: "rebuild-before-activation",
+    external: "resolve-before-activation",
+    ephemeral: "reset-on-activation",
+  } as const;
+  const obligations = listContinuityStateSurfaces().flatMap((surface) =>
+    surface.treatment === "captured"
+      ? []
+      : [
+          {
+            id: surface.id,
+            owner: surface.owner,
+            treatment: surface.treatment,
+            sensitive: surface.sensitive,
+            disposition: dispositionByTreatment[surface.treatment],
+          },
+        ],
+  );
+  return {
+    obligations,
+    reconstructionPerformed: false,
+    externalDependenciesResolved: false,
+    transientsCreated: false,
+  };
+}
+
 function formatResult(result: BackupMaterializeResult): string {
   return [
     `Continuity materialized: ${result.destination}`,
@@ -284,6 +479,8 @@ function formatResult(result: BackupMaterializeResult): string {
     `Manifest SHA-256: ${result.manifestSha256}`,
     `Components materialized: ${result.components.length}`,
     `Files materialized: ${result.materializedFileCount}`,
+    `Compatibility validated: ${result.compatibility.runtimeDecision}, ${result.compatibility.platformDecision}, ${result.compatibility.sqliteSchemas.length} SQLite database(s)`,
+    `Activation obligations remaining: ${result.surfaces.obligations.length}`,
     "This is an offline filesystem root; it has not been activated and does not establish effective Archived.",
   ].join("\n");
 }
@@ -342,6 +539,11 @@ async function materializeContinuityArchive(
       path.posix.join(payloadRoot, relativePath),
     );
     const filesByComponent = assignPayloadFiles({ manifest, assets, payloadFiles });
+    const compatibility: ContinuityCompatibilityEvidence = {
+      ...validateRuntimeCompatibility(manifest),
+      sqliteSchemas: validateSqliteSchemas(retrievedDirectory, manifest),
+    };
+    const surfaces = resolveSurfaceEvidence();
 
     await fs.mkdir(destination, { mode: 0o700 });
     destinationCreated = true;
@@ -392,7 +594,10 @@ async function materializeContinuityArchive(
       manifestSha256: retrieval.manifestSha256,
       components,
       materializedFileCount,
+      compatibility,
+      surfaces,
       activated: false,
+      activationReady: false,
       effectiveArchived: false,
     } as const;
     await fs.writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, {
@@ -416,7 +621,10 @@ async function materializeContinuityArchive(
       manifestSha256: retrieval.manifestSha256,
       materializedFileCount,
       components,
+      compatibility,
+      surfaces,
       activated: false,
+      activationReady: false,
       effectiveArchived: false,
     };
   } catch (error) {

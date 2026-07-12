@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildConfigSchema } from "../config/schema.js";
 import { createContinuityArchive } from "../continuity/archive-create.js";
 import { resolveContinuityArchivePlanFromPaths } from "../continuity/archive-plan.js";
+import type { ContinuityArchivePlan } from "../continuity/archive-plan.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
+import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../state/openclaw-agent-db.js";
+import { OPENCLAW_STATE_SCHEMA_VERSION } from "../state/openclaw-state-db.js";
 import { backupMaterializeCommand } from "./backup-materialize.js";
 
 const tempDirs: string[] = [];
@@ -27,6 +30,15 @@ async function makeFixture() {
   await fs.writeFile(path.join(workspaceDir, "AGENTS.md"), "workspace");
   await fs.writeFile(path.join(workspaceDir, "tool.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   await fs.writeFile(path.join(oauthDir, "oauth.json"), "credential");
+  const workspaceDatabasePath = path.join(workspaceDir, "openclaw.sqlite");
+  const pluginDatabasePath = path.join(
+    stateDir,
+    "state",
+    "extensions",
+    "example",
+    "openclaw.sqlite",
+  );
+  const agentDatabasePath = path.join(stateDir, "agents", "main", "agent", "openclaw-agent.sqlite");
   const databasePath = path.join(stateDir, "state", "openclaw.sqlite");
   const sqlite = requireNodeSqlite();
   const database = new sqlite.DatabaseSync(databasePath);
@@ -39,8 +51,23 @@ async function makeFixture() {
     CREATE TABLE sessions (id TEXT PRIMARY KEY);
     INSERT INTO auth_profile_stores VALUES ('main', '{"secret":"LIVE_SECRET"}', 1);
     INSERT INTO sessions VALUES ('session-1');
+    PRAGMA user_version = ${OPENCLAW_STATE_SCHEMA_VERSION};
   `);
   database.close();
+  await fs.mkdir(path.dirname(agentDatabasePath), { recursive: true });
+  const agentDatabase = new sqlite.DatabaseSync(agentDatabasePath);
+  agentDatabase.exec(`
+    CREATE TABLE sessions (id TEXT PRIMARY KEY);
+    PRAGMA user_version = ${OPENCLAW_AGENT_SCHEMA_VERSION};
+  `);
+  agentDatabase.close();
+  const workspaceDatabase = new sqlite.DatabaseSync(workspaceDatabasePath);
+  workspaceDatabase.exec("PRAGMA user_version = 999;");
+  workspaceDatabase.close();
+  await fs.mkdir(path.dirname(pluginDatabasePath), { recursive: true });
+  const pluginDatabase = new sqlite.DatabaseSync(pluginDatabasePath);
+  pluginDatabase.exec("PRAGMA user_version = 999;");
+  pluginDatabase.close();
   const configRaw = await fs.readFile(configPath, "utf8");
   const plan = resolveContinuityArchivePlanFromPaths({
     stateDir,
@@ -58,7 +85,42 @@ async function makeFixture() {
     stagingParent: path.join(root, "staging"),
     nowMs: 0,
   });
-  return { root, stateDir, configPath, databasePath, outputPath, destination, plan };
+  return {
+    root,
+    stateDir,
+    configPath,
+    databasePath,
+    agentDatabasePath,
+    pluginDatabasePath,
+    workspaceDatabasePath,
+    outputPath,
+    destination,
+    plan,
+  };
+}
+
+async function rewriteArchive(params: {
+  root: string;
+  archivePath: string;
+  plan: ContinuityArchivePlan;
+  name: string;
+  mutate: (extractedDirectory: string) => Promise<void>;
+}): Promise<string> {
+  const extractedDirectory = path.join(params.root, `${params.name}-extracted`);
+  const rewrittenArchivePath = path.join(params.root, `${params.name}.tar.gz`);
+  await fs.mkdir(extractedDirectory);
+  await tar.x({ file: params.archivePath, cwd: extractedDirectory, gzip: true });
+  await params.mutate(extractedDirectory);
+  await tar.c(
+    {
+      file: rewrittenArchivePath,
+      cwd: extractedDirectory,
+      gzip: true,
+      portable: true,
+    },
+    [params.plan.archiveRoot],
+  );
+  return rewrittenArchivePath;
 }
 
 function materializedPath(params: {
@@ -90,15 +152,50 @@ describe("backupMaterializeCommand", () => {
       destination: fixture.destination,
       archiveRoot: fixture.plan.archiveRoot,
       activated: false,
+      activationReady: false,
       effectiveArchived: false,
+      compatibility: {
+        runtimeDecision: "same-or-older",
+        platformDecision: "same-platform",
+      },
+      surfaces: {
+        reconstructionPerformed: false,
+        externalDependenciesResolved: false,
+        transientsCreated: false,
+      },
     });
+    expect(result.compatibility.sqliteSchemas).toEqual([
+      expect.objectContaining({
+        kind: "agent-state",
+        schemaVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+        supportedVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+      }),
+      expect.objectContaining({
+        kind: "other",
+        schemaVersion: 999,
+        supportedVersion: null,
+      }),
+      expect.objectContaining({
+        kind: "shared-state",
+        schemaVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+        supportedVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+      }),
+    ]);
+    expect(result.surfaces.obligations).toEqual([
+      expect.objectContaining({
+        id: "host-dependencies",
+        disposition: "resolve-before-activation",
+      }),
+      expect.objectContaining({ id: "derived-state", disposition: "rebuild-before-activation" }),
+      expect.objectContaining({ id: "runtime-transients", disposition: "reset-on-activation" }),
+    ]);
     expect(result.components.map((component) => component.kind)).toEqual([
       "config",
       "state",
       "workspace",
     ]);
     expect(result.components.map((component) => component.restoreOrder)).toEqual([0, 1, 2]);
-    expect(result.materializedFileCount).toBe(4);
+    expect(result.materializedFileCount).toBe(7);
     expect(runtime.log).toHaveBeenCalledWith(
       expect.stringContaining("does not establish effective Archived"),
     );
@@ -157,14 +254,20 @@ describe("backupMaterializeCommand", () => {
     const receipt = JSON.parse(await fs.readFile(result.receiptPath, "utf8")) as {
       activated: boolean;
       effectiveArchived: boolean;
+      activationReady: boolean;
       archiveSha256: string;
       components: Array<{ id: string }>;
+      compatibility: { sqliteSchemas: Array<{ kind: string }> };
+      surfaces: { obligations: Array<{ id: string }> };
     };
     expect(receipt).toMatchObject({
       activated: false,
+      activationReady: false,
       effectiveArchived: false,
       archiveSha256: result.archiveSha256,
     });
+    expect(receipt.compatibility.sqliteSchemas).toEqual(result.compatibility.sqliteSchemas);
+    expect(receipt.surfaces.obligations).toEqual(result.surfaces.obligations);
     expect(receipt.components.map((component) => component.id)).toEqual(
       result.components.map((component) => component.id),
     );
@@ -202,6 +305,103 @@ describe("backupMaterializeCommand", () => {
     ).rejects.toThrow(/outside every captured source/i);
 
     await expect(fs.access(nestedDestination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each([
+    ["newer", "9999.0.0", /runtime .* is newer/i],
+    ["malformed", "not-a-version", /requires exact semantic versions/i],
+  ])(
+    "rejects a %s artifact runtime before creating the destination",
+    async (_name, runtimeVersion, expectedError) => {
+      const fixture = await makeFixture();
+      const archivePath = await rewriteArchive({
+        root: fixture.root,
+        archivePath: fixture.outputPath,
+        plan: fixture.plan,
+        name: `runtime-${runtimeVersion}`,
+        mutate: async (extractedDirectory) => {
+          const manifestPath = path.join(
+            extractedDirectory,
+            fixture.plan.archiveRoot,
+            "manifest.json",
+          );
+          const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
+            runtimeVersion: string;
+          };
+          manifest.runtimeVersion = runtimeVersion;
+          await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+        },
+      });
+
+      await expect(
+        backupMaterializeCommand(
+          { log: () => {}, error: () => {}, exit: () => {} },
+          { archive: archivePath, destination: fixture.destination },
+        ),
+      ).rejects.toThrow(expectedError);
+      await expect(fs.access(fixture.destination)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+
+  it("rejects a different artifact platform before creating the destination", async () => {
+    const fixture = await makeFixture();
+    const archivePath = await rewriteArchive({
+      root: fixture.root,
+      archivePath: fixture.outputPath,
+      plan: fixture.plan,
+      name: "platform-mismatch",
+      mutate: async (extractedDirectory) => {
+        const manifestPath = path.join(
+          extractedDirectory,
+          fixture.plan.archiveRoot,
+          "manifest.json",
+        );
+        const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
+          platform: string;
+        };
+        manifest.platform = process.platform === "linux" ? "darwin" : "linux";
+        await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      },
+    });
+
+    await expect(
+      backupMaterializeCommand(
+        { log: () => {}, error: () => {}, exit: () => {} },
+        { archive: archivePath, destination: fixture.destination },
+      ),
+    ).rejects.toThrow(/does not match this local runtime platform/i);
+    await expect(fs.access(fixture.destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each([
+    ["shared", "state/openclaw.sqlite", OPENCLAW_STATE_SCHEMA_VERSION + 1],
+    ["agent", "agents/main/agent/openclaw-agent.sqlite", OPENCLAW_AGENT_SCHEMA_VERSION + 1],
+  ])("rejects a newer %s core SQLite schema", async (name, relativePath, schemaVersion) => {
+    const fixture = await makeFixture();
+    const archivePath = await rewriteArchive({
+      root: fixture.root,
+      archivePath: fixture.outputPath,
+      plan: fixture.plan,
+      name: `newer-${name}-schema`,
+      mutate: async (extractedDirectory) => {
+        const databasePath = path.join(
+          extractedDirectory,
+          ...path.posix.join(fixture.plan.sources.state.archivePath, relativePath).split("/"),
+        );
+        const sqlite = requireNodeSqlite();
+        const database = new sqlite.DatabaseSync(databasePath);
+        database.exec(`PRAGMA user_version = ${schemaVersion};`);
+        database.close();
+      },
+    });
+
+    await expect(
+      backupMaterializeCommand(
+        { log: () => {}, error: () => {}, exit: () => {} },
+        { archive: archivePath, destination: fixture.destination },
+      ),
+    ).rejects.toThrow(/uses newer schema version/i);
+    await expect(fs.access(fixture.destination)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("canonicalizes manifest source aliases before destination overlap checks", async () => {
