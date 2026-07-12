@@ -1,7 +1,8 @@
-// Backup command registration for local archive creation, verification, and retrieval.
+// Backup command registration for local archive creation, verification, retrieval, and materialization.
 import type { Command } from "commander";
 import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
+import { backupMaterializeCommand } from "../../commands/backup-materialize.js";
 import { backupRetrieveCommand } from "../../commands/backup-retrieve.js";
 import { backupVerifyCommand } from "../../commands/backup-verify.js";
 import { backupCreateCommand } from "../../commands/backup.js";
@@ -9,11 +10,11 @@ import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
 
-/** Register backup create, verify, and retrieve subcommands. */
+/** Register backup create, verify, retrieve, and materialize subcommands. */
 export function registerBackupCommand(program: Command) {
   const backup = program
     .command("backup")
-    .description("Create, verify, and retrieve local backup archives for OpenClaw state")
+    .description("Create, verify, retrieve, and materialize local OpenClaw archives")
     .addHelpText(
       "after",
       () =>
@@ -111,6 +112,31 @@ export function registerBackupCommand(program: Command) {
     .action(async (archive, opts) => {
       await runCommandWithRuntime(defaultRuntime, async () => {
         await backupRetrieveCommand(defaultRuntime, {
+          archive: archive as string,
+          destination: opts.destination as string,
+          json: Boolean(opts.json),
+        });
+      });
+    });
+
+  backup
+    .command("materialize <archive>")
+    .description("Materialize a continuity archive into a new offline filesystem root")
+    .requiredOption("--destination <path>", "New offline filesystem root (must not exist)")
+    .option("--json", "Output JSON", false)
+    .addHelpText(
+      "after",
+      () =>
+        `\n${theme.heading("Examples:")}\n${formatHelpExamples([
+          [
+            "openclaw backup materialize ./continuity.tar.gz --destination ./offline-root",
+            "Verify and materialize continuity components without activating live state.",
+          ],
+        ])}`,
+    )
+    .action(async (archive, opts) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        await backupMaterializeCommand(defaultRuntime, {
           archive: archive as string,
           destination: opts.destination as string,
           json: Boolean(opts.json),
