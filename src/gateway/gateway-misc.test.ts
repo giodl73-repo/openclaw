@@ -328,6 +328,7 @@ function makeReadPairClients(
 function makeScopedBroadcastClients() {
   const pairingSocket = makeRecordingSocket();
   const nodeSocket = makeRecordingSocket();
+  const hostProviderSocket = makeRecordingSocket();
   const readSocket = makeRecordingSocket();
   const writeSocket = makeRecordingSocket();
   const adminSocket = makeRecordingSocket();
@@ -337,12 +338,24 @@ function makeScopedBroadcastClients() {
       role: "node",
       scopes: ["operator.read"],
     } as GatewayWsClient["connect"]),
+    makeGatewayWsClient("c-host-provider", hostProviderSocket, {
+      role: "host-provider",
+      scopes: [],
+    } as unknown as GatewayWsClient["connect"]),
     makeOperatorWsClient("c-read", readSocket, ["operator.read"]),
     makeOperatorWsClient("c-write", writeSocket, ["operator.write"]),
     makeOperatorWsClient("c-admin", adminSocket, ["operator.admin"]),
   ]);
 
-  return { pairingSocket, nodeSocket, readSocket, writeSocket, adminSocket, clients };
+  return {
+    pairingSocket,
+    nodeSocket,
+    hostProviderSocket,
+    readSocket,
+    writeSocket,
+    adminSocket,
+    clients,
+  };
 }
 
 function makeScopedBroadcastContext() {
@@ -470,8 +483,15 @@ describe("gateway broadcaster", () => {
   });
 
   it("defaults unknown events to deny and classifies remaining gateway broadcast events", () => {
-    const { pairingSocket, nodeSocket, readSocket, writeSocket, adminSocket, broadcast } =
-      makeScopedBroadcastContext();
+    const {
+      pairingSocket,
+      nodeSocket,
+      hostProviderSocket,
+      readSocket,
+      writeSocket,
+      adminSocket,
+      broadcast,
+    } = makeScopedBroadcastContext();
 
     broadcast("cron", { jobId: "job-1" });
     broadcast("talk.mode", { enabled: true });
@@ -503,6 +523,7 @@ describe("gateway broadcaster", () => {
       "shutdown",
       "update.available",
     ]);
+    expectSentEvents(hostProviderSocket, []);
     expectSentEvents(readSocket, [
       "cron",
       "voicewake.changed",

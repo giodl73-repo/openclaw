@@ -8,6 +8,10 @@ export type HostIntegrationContributionTypeV1 =
   | {
       owner: "provider-request";
       kind: "credential-slot-resolver";
+    }
+  | {
+      owner: "provider-request";
+      kind: "provider-request-dispatcher";
     };
 
 export type HostIntegrationBundleContributionV1 = HostIntegrationContributionTypeV1 & {
@@ -136,6 +140,15 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
     return {
       owner: "provider-request",
       kind: "credential-slot-resolver",
+    };
+  }
+  if (
+    contribution.owner === "provider-request" &&
+    contribution.kind === "provider-request-dispatcher"
+  ) {
+    return {
+      owner: "provider-request",
+      kind: "provider-request-dispatcher",
     };
   }
   throw new HostIntegrationBundleError(
@@ -361,6 +374,7 @@ export function registerHostIntegrationBundleV1(params: {
 }): HostIntegrationBundleSnapshotV1 {
   const nextSnapshot = prepareHostIntegrationBundleSnapshotV1(params);
   currentSnapshot = nextSnapshot;
+  notifyHostIntegrationAuthorityChanged();
   return nextSnapshot;
 }
 
@@ -372,6 +386,7 @@ export function getCurrentHostIntegrationBundleSnapshotV1():
 
 export function clearCurrentHostIntegrationBundleSnapshotV1(): void {
   currentSnapshot = undefined;
+  notifyHostIntegrationAuthorityChanged();
 }
 
 export function resolveHostIntegrationContributionV1(
@@ -409,3 +424,4 @@ export function resolveHostIntegrationContributionV1(
   }
   return entry;
 }
+import { notifyHostIntegrationAuthorityChanged } from "./host-integration-authority-events.js";

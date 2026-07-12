@@ -6,6 +6,7 @@ import {
   CAPI_MODEL_ADAPTER_VERSION,
 } from "../agents/model-provider-adapters/capi.js";
 import { CREDENTIAL_SLOT_RESOLVER_VERSION } from "../infra/net/credential-slot.js";
+import { subscribeHostIntegrationAuthorityChanges } from "./host-integration-authority-events.js";
 import {
   HOST_INTEGRATION_BUNDLE_VERSION,
   HostIntegrationBundleError,
@@ -43,6 +44,25 @@ afterEach(() => {
 });
 
 describe("host integration bundle registration", () => {
+  it("notifies authority listeners after publication and clear", () => {
+    const observed: Array<string | undefined> = [];
+    const unsubscribe = subscribeHostIntegrationAuthorityChanges(() => {
+      observed.push(getCurrentHostIntegrationBundleSnapshotV1()?.bundleVersion);
+    });
+
+    try {
+      registerHostIntegrationBundleV1({
+        manifest: cloneManifest(),
+        availableContributions: cloneAvailable(),
+      });
+      clearCurrentHostIntegrationBundleSnapshotV1();
+    } finally {
+      unsubscribe();
+    }
+
+    expect(observed).toEqual(["1.0.0", undefined]);
+  });
+
   it("publishes one immutable effective inventory with owner provenance", () => {
     const snapshot = registerHostIntegrationBundleV1({
       manifest: cloneManifest(),
@@ -78,6 +98,21 @@ describe("host integration bundle registration", () => {
           readinessCriteria: ["provider.request.credentials.capi"],
           status: "resolved",
           resolvedVersion: CREDENTIAL_SLOT_RESOLVER_VERSION,
+          provenance: {
+            pluginId: "lobster-host",
+            source: "/plugins/lobster-host/openclaw.plugin.json",
+            origin: "config",
+          },
+        },
+        {
+          owner: "provider-request",
+          kind: "provider-request-dispatcher",
+          id: "lobster/egress",
+          version: "provider-request-dispatcher/v1",
+          required: true,
+          readinessCriteria: ["provider.request.dispatch.lobster"],
+          status: "resolved",
+          resolvedVersion: "provider-request-dispatcher/v1",
           provenance: {
             pluginId: "lobster-host",
             source: "/plugins/lobster-host/openclaw.plugin.json",

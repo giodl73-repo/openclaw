@@ -1,3 +1,4 @@
+import { notifyHostIntegrationAuthorityChanged } from "./host-integration-authority-events.js";
 import type {
   HostIntegrationBundleInventoryEntryV1,
   HostIntegrationBundleSnapshotV1,
@@ -92,6 +93,7 @@ export function publishHostIntegrationOwnerEvidenceV1(
     });
   });
   currentOwnerEvidence = Object.freeze(snapshot);
+  notifyHostIntegrationAuthorityChanged();
   return currentOwnerEvidence;
 }
 
@@ -101,6 +103,7 @@ export function getCurrentHostIntegrationOwnerEvidenceV1(): readonly HostIntegra
 
 export function clearCurrentHostIntegrationOwnerEvidenceV1(): void {
   currentOwnerEvidence = EMPTY_OWNER_EVIDENCE;
+  notifyHostIntegrationAuthorityChanged();
 }
 
 function resolveBundleState(entry: HostIntegrationBundleInventoryEntryV1): {

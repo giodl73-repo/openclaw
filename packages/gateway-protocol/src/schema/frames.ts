@@ -7,6 +7,17 @@ export const GATEWAY_SERVER_CAPS = {
   CHAT_SEND_ROUTING_CONTRACT: "chat-send-routing-contract",
 } as const;
 
+export const HostProviderDeclarationSchema = Type.Object(
+  {
+    bindingId: NonEmptyString,
+    interfaceVersion: Type.Literal("provider-request-dispatcher/v1"),
+    carrierVersion: Type.Literal("reverse-provider-dispatch/v1"),
+    ownerGeneration: NonEmptyString,
+    hostBundleGeneration: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+
 /**
  * Top-level gateway frame schemas.
  *
@@ -51,6 +62,7 @@ export const ConnectParamsSchema = Type.Object(
     caps: Type.Optional(Type.Array(NonEmptyString, { default: [] })),
     commands: Type.Optional(Type.Array(NonEmptyString)),
     permissions: Type.Optional(Type.Record(NonEmptyString, Type.Boolean())),
+    hostProvider: Type.Optional(HostProviderDeclarationSchema),
     pathEnv: Type.Optional(Type.String()),
     role: Type.Optional(NonEmptyString),
     scopes: Type.Optional(Type.Array(NonEmptyString)),
@@ -75,6 +87,7 @@ export const ConnectParamsSchema = Type.Object(
           password: Type.Optional(Type.String()),
           approvalRuntimeToken: Type.Optional(Type.String()),
           agentRuntimeIdentityToken: Type.Optional(Type.String()),
+          hostProviderToken: Type.Optional(Type.String()),
         },
         { additionalProperties: false },
       ),

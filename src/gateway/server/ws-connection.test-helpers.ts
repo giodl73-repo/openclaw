@@ -42,11 +42,21 @@ export function createResolvedGatewayTokenAuth(token: string): ResolvedGatewayAu
 export function createGatewayWsTestRequestContext(
   overrides: {
     nodeRegistry?: { unregister: ReturnType<typeof vi.fn> };
+    hostProviderRegistry?: {
+      register: ReturnType<typeof vi.fn>;
+      unregister: ReturnType<typeof vi.fn>;
+      receiveFrame?: ReturnType<typeof vi.fn>;
+    };
   } = {},
 ) {
   return {
     unsubscribeAllSessionEvents: vi.fn(),
     nodeRegistry: overrides.nodeRegistry ?? { unregister: vi.fn() },
+    hostProviderRegistry: overrides.hostProviderRegistry ?? {
+      register: vi.fn(),
+      unregister: vi.fn(),
+      receiveFrame: vi.fn(),
+    },
     nodeUnsubscribeAll: vi.fn(),
   };
 }

@@ -1045,6 +1045,13 @@ export async function startGatewayServer(
     broadcastVoiceWakeChanged,
     hasTalkNodeConnected,
   } = createGatewayNodeSessionRuntime({ broadcast });
+  const { HostProviderRegistry } = await import("./host-provider-registry.js");
+  const hostProviderRegistry = new HostProviderRegistry();
+  const { subscribeHostIntegrationAuthorityChanges } =
+    await import("../hosting/host-integration-authority-events.js");
+  const unsubscribeHostIntegrationAuthorityChanges = subscribeHostIntegrationAuthorityChanges(() =>
+    hostProviderRegistry.revalidateSessions(),
+  );
   listConnectedNodesForReadiness = () => nodeRegistry.listConnected();
   const { createWatchNodeHttpRuntime } = await import("./watch-node-http.js");
   const watchNodeHttpRuntime = createWatchNodeHttpRuntime({
@@ -1255,6 +1262,8 @@ export async function startGatewayServer(
   let clearFallbackGatewayContextForServer = () => {};
   const closeOnStartupFailure = async () => {
     try {
+      unsubscribeHostIntegrationAuthorityChanges();
+      hostProviderRegistry.shutdown();
       await stopRegisteredGatewayLifetimeSidecars();
       await stopRegisteredPostReadySidecars();
       await runClosePrelude();
@@ -1620,6 +1629,7 @@ export async function startGatewayServer(
             });
           },
           nodeRegistry,
+          hostProviderRegistry,
           terminalSessions,
           agentRunSeq,
           chatAbortControllers,
@@ -1995,6 +2005,8 @@ export async function startGatewayServer(
     close: async (optsLocal) => {
       try {
         markClosePreludeStarted();
+        unsubscribeHostIntegrationAuthorityChanges();
+        hostProviderRegistry.shutdown();
         // Kill any live operator shells before the socket layer tears down.
         terminalSessions.disposeAll();
         await stopRegisteredGatewayLifetimeSidecars();

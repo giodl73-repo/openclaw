@@ -3,6 +3,8 @@ import type { OperatorScope } from "../operator-scopes.js";
 
 /** Scope marker for methods that only authenticated node clients may call. */
 export const NODE_GATEWAY_METHOD_SCOPE = "node" as const;
+/** Scope marker for methods that only authenticated host-provider clients may call. */
+export const HOST_PROVIDER_GATEWAY_METHOD_SCOPE = "host-provider" as const;
 /** Scope marker for methods whose handler derives the required operator scope at runtime. */
 export const DYNAMIC_GATEWAY_METHOD_SCOPE = "dynamic" as const;
 
@@ -10,6 +12,7 @@ export const DYNAMIC_GATEWAY_METHOD_SCOPE = "dynamic" as const;
 export type GatewayMethodScope =
   | OperatorScope
   | typeof NODE_GATEWAY_METHOD_SCOPE
+  | typeof HOST_PROVIDER_GATEWAY_METHOD_SCOPE
   | typeof DYNAMIC_GATEWAY_METHOD_SCOPE;
 
 /** Owner metadata used to keep core, plugin, channel, and auxiliary methods distinguishable. */

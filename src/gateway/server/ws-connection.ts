@@ -503,6 +503,9 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       if (client?.connect?.role === "node") {
         currentDisconnectedNodeId = context.nodeRegistry.unregister(connId);
       }
+      if (client?.connect?.role === "host-provider") {
+        context.hostProviderRegistry?.unregister(connId);
+      }
       if (
         client?.presenceKey &&
         (client.connect.role !== "node" || currentDisconnectedNodeId !== null)

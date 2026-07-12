@@ -146,6 +146,10 @@ const loadHealthHandlers = lazyHandlerModule(
   () => import("./server-methods/health.js"),
   (module) => module.healthHandlers,
 );
+const loadHostProviderHandlers = lazyHandlerModule(
+  () => import("./server-methods/host-provider.js"),
+  (module) => module.hostProviderHandlers,
+);
 const loadLogsHandlers = lazyHandlerModule(
   () => import("./server-methods/logs.js"),
   (module) => module.logsHandlers,
@@ -274,7 +278,7 @@ function authorizeGatewayMethod(
   if (!client?.connect) {
     return null;
   }
-  if (method === "health") {
+  if (method === "health" && client.connect.role !== "host-provider") {
     return null;
   }
   const roleRaw = client.connect.role ?? "operator";
@@ -286,7 +290,7 @@ function authorizeGatewayMethod(
   if (!isRoleAuthorizedForMethod(role, method)) {
     return errorShape(ErrorCodes.INVALID_REQUEST, `unauthorized role: ${role}`);
   }
-  if (role === "node") {
+  if (role === "node" || role === "host-provider") {
     return null;
   }
   if (scopes.includes(ADMIN_SCOPE)) {
@@ -303,6 +307,10 @@ function authorizeGatewayMethod(
 }
 
 export const coreGatewayHandlers: GatewayRequestHandlers = {
+  ...createLazyCoreHandlers({
+    methods: ["host.provider.frame"],
+    loadHandlers: loadHostProviderHandlers,
+  }),
   ...createLazyCoreHandlers({
     methods: ["connect"],
     loadHandlers: loadConnectHandlers,

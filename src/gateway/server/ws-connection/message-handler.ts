@@ -115,6 +115,10 @@ import { hasForwardedRequestHeaders, isLocalDirectRequest } from "../../auth.js"
 import { listControlUiPluginTabs } from "../../control-ui-plugin-tabs.js";
 import { normalizeDeviceMetadataForAuth } from "../../device-auth.js";
 import { pruneSupersededSilentPairingsAfterApproval } from "../../device-pairing-prune.js";
+import {
+  verifyHostProviderAdmission,
+  type HostProviderAdmission,
+} from "../../host-provider-admission.js";
 import { ADMIN_SCOPE, APPROVALS_SCOPE } from "../../method-scopes.js";
 import type { GatewayMethodRegistry } from "../../methods/registry.js";
 import {
@@ -230,7 +234,8 @@ function emitGatewayAuthSecurityEvent(params: {
     outcome: params.outcome,
     severity: params.severity,
     actor: {
-      kind: params.role === "node" ? "node" : "operator",
+      kind:
+        params.role === "node" ? "node" : params.role === "host-provider" ? "system" : "operator",
       ...(params.deviceId ? { deviceIdHash: hashGatewaySecurityId(params.deviceId) } : {}),
       role: params.role,
     },
@@ -890,6 +895,18 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           close(1008, "invalid role");
           return;
         }
+        const hasHostProviderCredentials = Boolean(
+          connectParams.hostProvider || connectParams.auth?.hostProviderToken,
+        );
+        if (role !== "host-provider" && hasHostProviderCredentials) {
+          markHandshakeFailure("host-provider-credentials-on-wrong-role");
+          sendHandshakeErrorResponse(
+            ErrorCodes.INVALID_REQUEST,
+            "host provider credentials require the host-provider role",
+          );
+          close(1008, "invalid host provider credentials");
+          return;
+        }
         // Default-deny: scopes must be explicit. Empty/missing scopes means no permissions.
         // Note: If the client does not present a device identity, we can't bind scopes to a paired
         // device/token, so we will clear scopes after auth to avoid self-declared permissions.
@@ -961,6 +978,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           hasSharedAuth ||
           Boolean(connectParams.auth?.bootstrapToken) ||
           Boolean(connectParams.auth?.deviceToken) ||
+          Boolean(connectParams.auth?.hostProviderToken) ||
           Boolean(device);
         if (hasRawHandshakeCredentials) {
           advanceHandshakePhase("auth_credentials_received");
@@ -1161,6 +1179,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
         if (!handleMissingDeviceIdentity()) {
           return;
         }
+        let trustedHostProviderAdmission: HostProviderAdmission | undefined;
         if (device) {
           const rejectDeviceAuthInvalid = (reason: string, message: string) => {
             emitGatewayAuthSecurityEvent({
@@ -1237,49 +1256,66 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
             rejectDeviceAuthInvalid("device-public-key", "device public key invalid");
             return;
           }
+          if (role === "host-provider") {
+            const admission = verifyHostProviderAdmission({
+              connect: connectParams,
+              publicKey: devicePublicKey,
+            });
+            if (!admission.ok) {
+              rejectDeviceAuthInvalid("host-provider-admission", admission.reason);
+              return;
+            }
+            trustedHostProviderAdmission = admission.admission;
+          }
         }
 
-        const authDecision = await resolveConnectAuthDecision({
-          state: {
-            authResult,
-            authOk,
-            authMethod,
-            sharedAuthOk,
-            sharedAuthProvided: hasSharedAuth,
-            bootstrapTokenCandidate,
-            deviceTokenCandidate,
-            deviceTokenCandidateSource,
-          },
-          hasDeviceIdentity: Boolean(device),
-          deviceId: device?.id,
-          publicKey: device?.publicKey,
-          role,
-          scopes,
-          rateLimiter: authRateLimiter,
-          clientIp: browserRateLimitClientIp,
-          verifyBootstrapToken: async ({
-            deviceId,
-            publicKey,
-            token,
-            role: roleLocal,
-            scopes: scopesLocal,
-          }) =>
-            await verifyDeviceBootstrapToken({
+        let deviceTokenSharedGatewaySessionGeneration: string | undefined;
+        if (trustedHostProviderAdmission) {
+          authOk = true;
+        } else {
+          const authDecision = await resolveConnectAuthDecision({
+            state: {
+              authResult,
+              authOk,
+              authMethod,
+              sharedAuthOk,
+              sharedAuthProvided: hasSharedAuth,
+              bootstrapTokenCandidate,
+              deviceTokenCandidate,
+              deviceTokenCandidateSource,
+            },
+            hasDeviceIdentity: Boolean(device),
+            deviceId: device?.id,
+            publicKey: device?.publicKey,
+            role,
+            scopes,
+            rateLimiter: authRateLimiter,
+            clientIp: browserRateLimitClientIp,
+            verifyBootstrapToken: async ({
               deviceId,
               publicKey,
               token,
               role: roleLocal,
               scopes: scopesLocal,
-            }),
-          verifyDeviceToken: async (paramsLocal) =>
-            await verifyDeviceToken({
-              ...paramsLocal,
-              requiredSharedGatewaySessionGeneration: getRequiredSharedGatewaySessionGeneration?.(),
-            }),
-        });
-        ({ authResult, authOk, authMethod } = authDecision);
-        const deviceTokenSharedGatewaySessionGeneration =
-          authDecision.deviceTokenSharedGatewaySessionGeneration;
+            }) =>
+              await verifyDeviceBootstrapToken({
+                deviceId,
+                publicKey,
+                token,
+                role: roleLocal,
+                scopes: scopesLocal,
+              }),
+            verifyDeviceToken: async (paramsLocal) =>
+              await verifyDeviceToken({
+                ...paramsLocal,
+                requiredSharedGatewaySessionGeneration:
+                  getRequiredSharedGatewaySessionGeneration?.(),
+              }),
+          });
+          ({ authResult, authOk, authMethod } = authDecision);
+          deviceTokenSharedGatewaySessionGeneration =
+            authDecision.deviceTokenSharedGatewaySessionGeneration;
+        }
         pairingLocality = resolvePairingLocality({
           connectParams,
           isLocalClient,
@@ -1360,7 +1396,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           authMethod,
         );
         let hasServerApprovedDeviceTokenBaseline = false;
-        if (device && devicePublicKey) {
+        if (device && devicePublicKey && !trustedHostProviderAdmission) {
           const formatAuditList = (items: string[] | undefined): string => {
             const normalized = normalizeSortedUniqueTrimmedStringList(items);
             return normalized.length > 0 ? normalized.join(",") : "<none>";
@@ -1826,7 +1862,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           }
         }
 
-        const shouldIssueDeviceToken = !trustedProxyAuthOk;
+        const shouldIssueDeviceToken = !trustedProxyAuthOk && !trustedHostProviderAdmission;
         const sharedGatewayAuthIssuer =
           sessionSharedGatewaySessionGeneration &&
           (deviceTokenSharedGatewaySessionGeneration !== undefined ||
@@ -1968,7 +2004,8 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           connectParams.permissions = reconciliation.effectivePermissions;
         }
 
-        const shouldTrackPresence = !isGatewayCliClient(connectParams.client);
+        const shouldTrackPresence =
+          role !== "host-provider" && !isGatewayCliClient(connectParams.client);
         const clientId = connectParams.client.id;
         const instanceId = connectParams.client.instanceId;
         const presenceKey = shouldTrackPresence ? (device?.id ?? instanceId ?? connId) : undefined;
@@ -1977,7 +2014,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           await releasePendingNodePairingCleanup();
           setCloseCause("connect-aborted-before-register", {
             ...clientMeta,
-            auth: authMethod,
+            auth: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
           });
           return;
         }
@@ -2049,11 +2086,14 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           }
         }
         const internal =
-          isTrustedApprovalRuntime || trustedAgentRuntimeIdentity
+          isTrustedApprovalRuntime || trustedAgentRuntimeIdentity || trustedHostProviderAdmission
             ? {
                 ...(isTrustedApprovalRuntime ? { approvalRuntime: true } : {}),
                 ...(trustedAgentRuntimeIdentity
                   ? { agentRuntimeIdentity: trustedAgentRuntimeIdentity }
+                  : {}),
+                ...(trustedHostProviderAdmission
+                  ? { hostProvider: trustedHostProviderAdmission }
                   : {}),
               }
             : undefined;
@@ -2127,12 +2167,29 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           await releasePendingNodePairingCleanup();
           setCloseCause("connect-aborted-before-register", {
             ...clientMeta,
-            auth: authMethod,
+            auth: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
           });
           return;
         }
         setHandshakeState("connected");
         advanceHandshakePhase("session_attached");
+        if (role === "host-provider") {
+          const hostProviderRegistry = buildRequestContext().hostProviderRegistry;
+          if (!hostProviderRegistry) {
+            close(1011, "host provider registry unavailable");
+            return;
+          }
+          try {
+            hostProviderRegistry.register(nextClient);
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "host provider registration failed";
+            markHandshakeFailure("host-provider-registration", { reason: message });
+            sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, message);
+            close(1008, truncateCloseReason(message));
+            return;
+          }
+        }
         logWs("in", "connect", {
           connId,
           client: connectParams.client.id,
@@ -2141,7 +2198,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           mode: connectParams.client.mode,
           clientId,
           platform: connectParams.client.platform,
-          auth: authMethod,
+          auth: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
         });
 
         if (isWebchatConnect(connectParams)) {
@@ -2232,16 +2289,27 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
             );
         }
 
-        const snapshot = buildGatewaySnapshot({
-          includeSensitive: scopes.includes(ADMIN_SCOPE),
-        });
-        const cachedHealth = getHealthCache();
-        if (cachedHealth) {
-          snapshot.health = cachedHealth;
-          snapshot.stateVersion.health = getHealthVersion();
+        const snapshot =
+          role === "host-provider"
+            ? {
+                presence: [],
+                health: {},
+                stateVersion: { presence: 0, health: 0 },
+                uptimeMs: Math.round(process.uptime() * 1000),
+              }
+            : buildGatewaySnapshot({
+                includeSensitive: scopes.includes(ADMIN_SCOPE),
+              });
+        if (role !== "host-provider") {
+          const cachedHealth = getHealthCache();
+          if (cachedHealth) {
+            snapshot.health = cachedHealth;
+            snapshot.stateVersion.health = getHealthVersion();
+          }
         }
         const helloOkAuthScopes = deviceToken ? deviceToken.scopes : scopes;
-        const controlUiTabs = listControlUiPluginTabs(helloOkAuthScopes);
+        const controlUiTabs =
+          role === "host-provider" ? [] : listControlUiPluginTabs(helloOkAuthScopes);
         const helloOk = {
           type: "hello-ok",
           protocol: PROTOCOL_VERSION,
@@ -2250,13 +2318,16 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
             connId,
           },
           features: {
-            methods: gatewayMethods,
-            events,
-            capabilities: [GATEWAY_SERVER_CAPS.CHAT_SEND_ROUTING_CONTRACT],
+            methods: role === "host-provider" ? ["host.provider.frame"] : gatewayMethods,
+            events: role === "host-provider" ? [] : events,
+            capabilities:
+              role === "host-provider" ? [] : [GATEWAY_SERVER_CAPS.CHAT_SEND_ROUTING_CONTRACT],
           },
           snapshot,
           ...(controlUiTabs.length > 0 ? { controlUiTabs } : {}),
-          ...(Object.keys(pluginSurfaceUrls).length > 0 ? { pluginSurfaceUrls } : {}),
+          ...(role !== "host-provider" && Object.keys(pluginSurfaceUrls).length > 0
+            ? { pluginSurfaceUrls }
+            : {}),
           auth: {
             role,
             scopes: helloOkAuthScopes,
@@ -2329,10 +2400,11 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           action: "gateway.auth.succeeded",
           outcome: "success",
           severity: "low",
-          authMode: resolvedAuth.mode,
-          authMethod,
-          authProvided:
-            authMethod === "device-token" || authMethod === "bootstrap-token"
+          authMode: trustedHostProviderAdmission ? "host-provider-token" : resolvedAuth.mode,
+          authMethod: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
+          authProvided: trustedHostProviderAdmission
+            ? "host-provider-token"
+            : authMethod === "device-token" || authMethod === "bootstrap-token"
               ? authMethod
               : hasPasswordAuth
                 ? "password"
