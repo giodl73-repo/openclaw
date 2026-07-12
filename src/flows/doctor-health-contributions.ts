@@ -2078,6 +2078,19 @@ export function resolveDoctorHealthContributions(): DoctorHealthContribution[] {
       run: runSystemdLingerHealth,
     }),
     createDoctorHealthContribution({
+      id: "doctor:host-integration-bindings",
+      label: "Host integration bindings",
+      healthChecks: {
+        id: "core/doctor/host-integration-bindings",
+        description: "Registered host integration binding failures are reported as findings.",
+        async detect() {
+          const { collectHostIntegrationHealthFindings } =
+            await import("../commands/doctor-host-integration.js");
+          return collectHostIntegrationHealthFindings();
+        },
+      },
+    }),
+    createDoctorHealthContribution({
       id: "doctor:workspace-status",
       label: "Workspace status",
       healthChecks: {

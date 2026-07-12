@@ -1,0 +1,161 @@
+import { describe, expect, it } from "vitest";
+import type { HostIntegrationStatusInventoryV1 } from "../hosting/host-integration-status.js";
+import {
+  HOST_INTEGRATION_BINDINGS_CHECK_ID,
+  hostIntegrationStatusToHealthFindings,
+} from "./doctor-host-integration.js";
+
+function inventory(
+  entry: Partial<HostIntegrationStatusInventoryV1["entries"][number]> = {},
+): HostIntegrationStatusInventoryV1 {
+  return {
+    version: "host-integration-status/v1",
+    bundle: {
+      id: "lobster/capi",
+      version: "1.0.0",
+      generation: "lobster/capi@1.0.0",
+    },
+    state: entry.state ?? "unresolved",
+    entries: [
+      {
+        owner: "model-provider",
+        kind: "model-provider-adapter",
+        id: "lobster/capi",
+        version: "capi-model-adapter/v1",
+        required: true,
+        readinessCriteria: ["CapiReady"],
+        status: "resolved",
+        resolvedVersion: "capi-model-adapter/v1",
+        state: "unresolved",
+        reason: "OwnerEvidenceUnavailable",
+        message: "sensitive owner detail must not be copied",
+        generations: { bundle: "lobster/capi@1.0.0" },
+        ...entry,
+      },
+    ],
+  };
+}
+
+describe("host integration Doctor findings", () => {
+  it("emits no success finding for a ready binding", () => {
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({ state: "ready", reason: "CapiReady", message: "ready" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reports unresolved owner evidence without copying owner messages", () => {
+    expect(hostIntegrationStatusToHealthFindings(inventory())).toEqual([
+      {
+        checkId: HOST_INTEGRATION_BINDINGS_CHECK_ID,
+        severity: "warning",
+        message:
+          "Host integration lobster/capi is unresolved for model-provider/model-provider-adapter in bundle lobster/capi@1.0.0 (OwnerEvidenceUnavailable).",
+        target: "lobster/capi",
+        requirement: "OwnerEvidenceUnavailable",
+        fixHint:
+          "Reload owner model-provider and verify it publishes status for bundle lobster/capi@1.0.0.",
+      },
+    ]);
+  });
+
+  it("reports required missing contributions as errors", () => {
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({
+          status: "missing",
+          state: "unavailable",
+          reason: "ContributionMissing",
+          message: "required contribution is missing",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        severity: "error",
+        requirement: "ContributionMissing",
+        fixHint:
+          "Enable a host package that registers lobster/capi with contract capi-model-adapter/v1, then restart OpenClaw.",
+      },
+    ]);
+  });
+
+  it("keeps optional incompatibility and stale carrier evidence actionable warnings", () => {
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({
+          required: false,
+          status: "incompatible",
+          state: "degraded",
+          reason: "ContributionIncompatible",
+          message: "optional contribution is incompatible",
+        }),
+      ),
+    ).toMatchObject([{ severity: "warning", requirement: "ContributionIncompatible" }]);
+
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({
+          state: "stale",
+          reason: "OwnerEvidenceBundleGenerationMismatch",
+          message: "old generation carried a bearer token",
+          config: { source: "openclaw.json", path: "models.providers.capi" },
+          generations: {
+            bundle: "lobster/capi@1.0.0",
+            owner: "owner-2",
+            carrier: "carrier-1",
+            carrierIncarnation: "process-9",
+          },
+        }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        severity: "warning",
+        source: "openclaw.json",
+        path: "models.providers.capi",
+        requirement: "OwnerEvidenceBundleGenerationMismatch",
+        fixHint:
+          "Reload owner model-provider and its carrier so they publish status for bundle lobster/capi@1.0.0.",
+      }),
+    ]);
+  });
+
+  it("uses owner reload disposition for owner-specific failures", () => {
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({
+          state: "unavailable",
+          reason: "CredentialSlotUnavailable",
+          message: "secret value should remain hidden",
+          config: { source: "openclaw.json", path: "models.providers.capi" },
+          reloadDisposition: "restart-required",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        severity: "error",
+        requirement: "CredentialSlotUnavailable",
+        path: "models.providers.capi",
+        fixHint: "Correct models.providers.capi, then restart OpenClaw.",
+      },
+    ]);
+  });
+
+  it("does not expose unrecognized owner reason text", () => {
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({
+          state: "degraded",
+          reason: "Bearer abc123 should never appear",
+          message: "another sensitive field",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        message:
+          "Host integration lobster/capi is degraded for model-provider/model-provider-adapter in bundle lobster/capi@1.0.0 (OwnerReportedDegraded).",
+        requirement: "OwnerReportedDegraded",
+      },
+    ]);
+  });
+});
