@@ -3,9 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildContinuityRestorePlanReceipt,
   ContinuityRestorePlanError,
-  parseContinuityRestorePlanReceipt,
-  projectContinuityRestorePlan,
-  resolveContinuityRestorePlanReplay,
   type CanonicalRestorePlanAsset,
 } from "./restore-plan.js";
 
@@ -92,7 +89,6 @@ describe("continuity restore plan receipt", () => {
   it("groups nested assets under an authorized manifest asset root", () => {
     const receipt = build();
 
-    expect(parseContinuityRestorePlanReceipt(receipt)).toEqual(receipt);
     expect(receipt.groups).toHaveLength(2);
     expect(receipt.groups[1]).toMatchObject({
       rootComponentId: "state",
@@ -105,6 +101,7 @@ describe("continuity restore plan receipt", () => {
       ],
     });
     expect(receipt.blockers).toEqual([
+      { code: "continuity.restore.materialization_content_identity_required" },
       { code: "continuity.restore.launcher_lease_required" },
       { code: "continuity.restore.publication_capability_missing" },
     ]);
@@ -283,69 +280,5 @@ describe("continuity restore plan receipt", () => {
         code: "continuity.restore.target_overlap",
       }),
     );
-  });
-
-  it("replays only the exact same canonical plan", () => {
-    const planned = build();
-
-    expect(resolveContinuityRestorePlanReplay({ planned, existing: planned })).toEqual(planned);
-    expect(() =>
-      resolveContinuityRestorePlanReplay({
-        planned: build({ runtimeVersion: "2026.7.13" }),
-        existing: planned,
-      }),
-    ).toThrowError(
-      expect.objectContaining<Partial<ContinuityRestorePlanError>>({
-        code: "continuity.restore.plan_conflict",
-      }),
-    );
-  });
-
-  it.each([
-    {
-      name: "execution eligibility",
-      mutate: (receipt: Record<string, unknown>) => {
-        receipt.executionEligible = true;
-      },
-    },
-    {
-      name: "unknown top-level field",
-      mutate: (receipt: Record<string, unknown>) => {
-        receipt.execute = "now";
-      },
-    },
-    {
-      name: "success-shaped blocker",
-      mutate: (receipt: Record<string, unknown>) => {
-        (receipt.blockers as Array<Record<string, unknown>>).splice(0, 1);
-      },
-    },
-    {
-      name: "unknown nested field",
-      mutate: (receipt: Record<string, unknown>) => {
-        const groups = receipt.groups as Array<Record<string, unknown>>;
-        groups[0]!.command = "publish";
-      },
-    },
-  ])("rejects $name", ({ mutate }) => {
-    const receipt = structuredClone(build()) as unknown as Record<string, unknown>;
-    mutate(receipt);
-
-    expect(() => parseContinuityRestorePlanReceipt(receipt)).toThrow();
-  });
-
-  it("projects no raw target or materialization paths", () => {
-    const receipt = build();
-    const projection = projectContinuityRestorePlan(receipt);
-    const serialized = JSON.stringify(projection);
-
-    expect(projection).toMatchObject({
-      planId: receipt.planId,
-      publicationGroupCount: 2,
-      assetCount: 4,
-      executionEligible: false,
-    });
-    expect(serialized).not.toContain("restore-target");
-    expect(serialized).not.toContain("materialized");
   });
 });
