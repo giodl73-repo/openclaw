@@ -43,6 +43,13 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     clearPluginInteractiveHandlersForPlugin(pluginId);
     clearCodeModeNamespacesForPlugin(pluginId);
     clearContextEnginesForOwner(`plugin:${pluginId}`);
+    const trafficPolicyDisposers = state.pluginProviderRequestTrafficPolicyDisposers.get(pluginId);
+    if (trafficPolicyDisposers) {
+      for (const disposePolicy of [...trafficPolicyDisposers].toReversed()) {
+        disposePolicy();
+      }
+      state.pluginProviderRequestTrafficPolicyDisposers.delete(pluginId);
+    }
     registrars.rollbackHooks(pluginId);
   };
 

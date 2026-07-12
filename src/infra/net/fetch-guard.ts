@@ -87,6 +87,8 @@ export type GuardedFetchOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   requireHttps?: boolean;
+  /** Validate every request URL, including each redirect target, before dispatch. */
+  validateUrl?: (url: URL) => void;
   policy?: SsrFPolicy;
   lookupFn?: LookupFn;
   dispatcherPolicy?: PinnedDispatcherPolicy;
@@ -538,7 +540,6 @@ async function fetchWithSsrFGuardInternal(
       await release();
       throw new Error("URL must use https");
     }
-
     let dispatcher: Dispatcher | null = null;
     // Resolve inside the redirect loop so exact-origin trust never carries across origins.
     const policyForUrl = resolveSsrFPolicyForUrl(parsedUrl, params.policy);
@@ -553,6 +554,7 @@ async function fetchWithSsrFGuardInternal(
         signal,
       );
     try {
+      params.validateUrl?.(parsedUrl);
       const usesTrustedExplicitProxyMode =
         mode === GUARDED_FETCH_MODE.TRUSTED_EXPLICIT_PROXY &&
         dispatcherPolicy?.mode === "explicit-proxy";
