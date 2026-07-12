@@ -2,6 +2,7 @@
 import type { WebSocket } from "ws";
 import type { ConnectParams } from "../../../packages/gateway-protocol/src/schema/frames.js";
 import type { AgentRuntimeIdentity } from "../agent-runtime-identity-token.js";
+import type { HostProviderAdmission } from "../host-provider-admission.js";
 import type { PluginNodeCapabilityClient } from "../plugin-node-capability.js";
 import type { WorkerConnectionIdentity } from "../worker-environments/connection-identity.js";
 
@@ -34,6 +35,7 @@ export type GatewayWsClient = PluginNodeCapabilityClient & {
   internal?: {
     approvalRuntime?: boolean;
     agentRuntimeIdentity?: AgentRuntimeIdentity;
+    hostProvider?: HostProviderAdmission;
   };
   canvasHostUrl?: string;
   canvasCapability?: string;

@@ -175,6 +175,43 @@ describe("lazy protocol validators", () => {
     ).toBe(false);
   });
 
+  it("validates the fixed host provider declaration and admission token", () => {
+    const connect = {
+      minProtocol: 5,
+      maxProtocol: 5,
+      client: {
+        id: "host-provider",
+        version: "1.0.0",
+        platform: "linux",
+        mode: "service",
+      },
+      role: "host-provider",
+      scopes: [],
+      hostProvider: {
+        bindingId: "lobster/egress",
+        interfaceVersion: "provider-request-dispatcher/v1",
+        carrierVersion: "reverse-provider-dispatch/v1",
+        ownerGeneration: "owner-4",
+        hostBundleGeneration: "lobster/host@1.0.0",
+      },
+      auth: { hostProviderToken: "credential" },
+    };
+
+    expect(validateConnectParams(connect)).toBe(true);
+    expect(
+      validateConnectParams({
+        ...connect,
+        hostProvider: { ...connect.hostProvider, carrierVersion: "generic-bus/v1" },
+      }),
+    ).toBe(false);
+    expect(
+      validateConnectParams({
+        ...connect,
+        hostProvider: { ...connect.hostProvider, unexpected: true },
+      }),
+    ).toBe(false);
+  });
+
   it("accepts selected-agent scope on chat send, history, and abort params", () => {
     expect(
       validateChatHistoryParams({

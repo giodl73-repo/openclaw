@@ -19,6 +19,14 @@
         "version": "credential-slot-resolver/v1",
         "required": true,
         "readinessCriteria": ["example.provider.credentials"]
+      },
+      {
+        "owner": "provider-request",
+        "kind": "provider-request-dispatcher",
+        "id": "example/reverse-provider",
+        "version": "provider-request-dispatcher/v1",
+        "required": true,
+        "readinessCriteria": ["provider.request.dispatch.example"]
       }
     ]
   },
@@ -39,6 +47,17 @@
       "kind": "credential-slot-resolver",
       "id": "example/provider-token",
       "version": "credential-slot-resolver/v1",
+      "provenance": {
+        "pluginId": "example-host",
+        "source": "/plugins/example-host/openclaw.plugin.json",
+        "origin": "config"
+      }
+    },
+    {
+      "owner": "provider-request",
+      "kind": "provider-request-dispatcher",
+      "id": "example/reverse-provider",
+      "version": "provider-request-dispatcher/v1",
       "provenance": {
         "pluginId": "example-host",
         "source": "/plugins/example-host/openclaw.plugin.json",

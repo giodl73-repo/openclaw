@@ -8,6 +8,7 @@ import {
 } from "./core-descriptors.js";
 import {
   DYNAMIC_GATEWAY_METHOD_SCOPE,
+  HOST_PROVIDER_GATEWAY_METHOD_SCOPE,
   type GatewayMethodDescriptor,
   type GatewayMethodHandler,
   type GatewayMethodDescriptorInput,
@@ -28,10 +29,15 @@ function normalizeDescriptor(input: GatewayMethodDescriptorInput): GatewayMethod
   if (!name) {
     throw new Error("gateway method descriptor name must not be empty");
   }
+  if (input.scope === HOST_PROVIDER_GATEWAY_METHOD_SCOPE && input.owner.kind !== "core") {
+    throw new Error(`host-provider gateway methods must be core-owned: ${name}`);
+  }
   // Plugin-owned methods pass through the plugin namespace policy so plugins cannot weaken
   // protected core-looking method names by declaring a permissive scope.
   const normalizedScope =
-    input.scope === NODE_GATEWAY_METHOD_SCOPE || input.scope === DYNAMIC_GATEWAY_METHOD_SCOPE
+    input.scope === NODE_GATEWAY_METHOD_SCOPE ||
+    input.scope === HOST_PROVIDER_GATEWAY_METHOD_SCOPE ||
+    input.scope === DYNAMIC_GATEWAY_METHOD_SCOPE
       ? input.scope
       : input.owner.kind === "plugin"
         ? normalizePluginGatewayMethodScope(name, input.scope).scope

@@ -108,8 +108,13 @@ export async function authenticateGatewayConnect(
   const device = controlUiAuthPolicy.device;
   const hasBootstrapProof = Boolean(connectParams.auth?.bootstrapToken);
   const hasDeviceTokenProof = Boolean(connectParams.auth?.deviceToken);
+  const hasHostProviderTokenProof = Boolean(connectParams.auth?.hostProviderToken);
   const hasRawHandshakeCredentials =
-    hasSharedAuth || hasBootstrapProof || hasDeviceTokenProof || Boolean(device);
+    hasSharedAuth ||
+    hasBootstrapProof ||
+    hasDeviceTokenProof ||
+    hasHostProviderTokenProof ||
+    Boolean(device);
   if (hasRawHandshakeCredentials) {
     advanceHandshakePhase("auth_credentials_received");
   }
@@ -319,50 +324,56 @@ export async function authenticateGatewayConnect(
   if (!deviceProof.ok) {
     return undefined;
   }
+  const trustedHostProviderAdmission = deviceProof.trustedHostProviderAdmission;
 
-  const authDecision = await resolveConnectAuthDecision({
-    state: {
-      authResult,
-      authOk,
-      authMethod,
-      sharedAuthOk,
-      sharedAuthProvided: hasSharedAuth,
-      bootstrapTokenCandidate,
-      deviceTokenCandidate,
-      deviceTokenCandidateSource,
-    },
-    hasDeviceIdentity: Boolean(device),
-    deviceId: device?.id,
-    publicKey: device?.publicKey,
-    role,
-    scopes,
-    rateLimiter: authRateLimiter,
-    clientIp: browserRateLimitClientIp,
-    async verifyBootstrapToken({
-      deviceId,
-      publicKey,
-      token,
-      role: roleLocal,
-      scopes: scopesLocal,
-    }) {
-      return await verifyDeviceBootstrapToken({
+  let deviceTokenSharedGatewaySessionGeneration: string | undefined;
+  if (trustedHostProviderAdmission) {
+    authOk = true;
+  } else {
+    const authDecision = await resolveConnectAuthDecision({
+      state: {
+        authResult,
+        authOk,
+        authMethod,
+        sharedAuthOk,
+        sharedAuthProvided: hasSharedAuth,
+        bootstrapTokenCandidate,
+        deviceTokenCandidate,
+        deviceTokenCandidateSource,
+      },
+      hasDeviceIdentity: Boolean(device),
+      deviceId: device?.id,
+      publicKey: device?.publicKey,
+      role,
+      scopes,
+      rateLimiter: authRateLimiter,
+      clientIp: browserRateLimitClientIp,
+      async verifyBootstrapToken({
         deviceId,
         publicKey,
         token,
         role: roleLocal,
         scopes: scopesLocal,
-      });
-    },
-    async verifyDeviceToken(paramsLocal) {
-      return await verifyDeviceToken({
-        ...paramsLocal,
-        requiredSharedGatewaySessionGeneration: getRequiredSharedGatewaySessionGeneration?.(),
-      });
-    },
-  });
-  ({ authResult, authOk, authMethod } = authDecision);
-  const deviceTokenSharedGatewaySessionGeneration =
-    authDecision.deviceTokenSharedGatewaySessionGeneration;
+      }) {
+        return await verifyDeviceBootstrapToken({
+          deviceId,
+          publicKey,
+          token,
+          role: roleLocal,
+          scopes: scopesLocal,
+        });
+      },
+      async verifyDeviceToken(paramsLocal) {
+        return await verifyDeviceToken({
+          ...paramsLocal,
+          requiredSharedGatewaySessionGeneration: getRequiredSharedGatewaySessionGeneration?.(),
+        });
+      },
+    });
+    ({ authResult, authOk, authMethod } = authDecision);
+    deviceTokenSharedGatewaySessionGeneration =
+      authDecision.deviceTokenSharedGatewaySessionGeneration;
+  }
   pairingLocality = resolvePairingLocality({
     connectParams,
     isLocalClient,
@@ -474,5 +485,6 @@ export async function authenticateGatewayConnect(
     skipControlUiPairingForDevice,
     skipLocalBackendSelfPairing,
     rejectUnauthorized,
+    ...(trustedHostProviderAdmission ? { trustedHostProviderAdmission } : {}),
   };
 }

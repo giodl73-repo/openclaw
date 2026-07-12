@@ -136,6 +136,18 @@ export async function admitGatewayConnect(context: GatewayConnectPhaseContext) {
     close(1008, "invalid role");
     return undefined;
   }
+  const hasHostProviderCredentials = Boolean(
+    connectParams.hostProvider || connectParams.auth?.hostProviderToken,
+  );
+  if (role !== "host-provider" && hasHostProviderCredentials) {
+    markHandshakeFailure("host-provider-credentials-on-wrong-role");
+    sendHandshakeErrorResponse(
+      ErrorCodes.INVALID_REQUEST,
+      "host provider credentials require the host-provider role",
+    );
+    close(1008, "invalid host provider credentials");
+    return undefined;
+  }
   // Default-deny: scopes must be explicit. Empty/missing scopes means no permissions.
   // Note: If the client does not present a device identity, we can't bind scopes to a paired
   // device/token, so we will clear scopes after auth to avoid self-declared permissions.

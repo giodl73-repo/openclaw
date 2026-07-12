@@ -5,6 +5,7 @@ import { getPluginRegistryState } from "../plugins/runtime-state.js";
 import { resolveReservedGatewayMethodScope } from "../shared/gateway-method-policy.js";
 import {
   isCoreGatewayMethodClassified,
+  isCoreHostProviderGatewayMethod,
   isCoreNodeGatewayMethod,
   isDynamicOperatorGatewayMethod,
   resolveCoreOperatorGatewayMethodScope,
@@ -47,7 +48,9 @@ function resolveScopedMethod(method: string): OperatorScope | undefined {
     (descriptor) => descriptor.name === method,
   );
   const pluginScope = pluginDescriptor?.scope;
-  return pluginScope === "node" || pluginScope === "dynamic" ? undefined : pluginScope;
+  return pluginScope === "node" || pluginScope === "host-provider" || pluginScope === "dynamic"
+    ? undefined
+    : pluginScope;
 }
 
 /** Returns true when a method requires the approvals operator scope. */
@@ -58,6 +61,11 @@ export function isApprovalMethod(method: string): boolean {
 /** Returns true when a method is reserved for node-role clients instead of operators. */
 export function isNodeRoleMethod(method: string): boolean {
   return isCoreNodeGatewayMethod(method);
+}
+
+/** Returns true when a method is reserved for host-provider peers. */
+export function isHostProviderRoleMethod(method: string): boolean {
+  return isCoreHostProviderGatewayMethod(method);
 }
 
 /** Resolves the required static operator scope for a gateway method, if one exists. */
@@ -288,7 +296,7 @@ export function authorizeOperatorScopesForRequiredScope(
 
 /** Returns true when a method has any core, node, dynamic, reserved, or plugin scope policy. */
 export function isGatewayMethodClassified(method: string): boolean {
-  if (isNodeRoleMethod(method)) {
+  if (isNodeRoleMethod(method) || isHostProviderRoleMethod(method)) {
     return true;
   }
   if (isDynamicOperatorGatewayMethod(method)) {

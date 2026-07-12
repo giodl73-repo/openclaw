@@ -59,6 +59,19 @@ describe("gateway method registry", () => {
     ).toThrow("gateway method already registered: example.duplicate");
   });
 
+  it("rejects non-core host-provider methods", () => {
+    expect(() =>
+      createGatewayMethodRegistry([
+        {
+          name: "plugin.host-provider",
+          handler,
+          scope: "host-provider",
+          owner: { kind: "plugin", pluginId: "demo" },
+        },
+      ]),
+    ).toThrow("host-provider gateway methods must be core-owned: plugin.host-provider");
+  });
+
   it("coerces reserved plugin namespaces to admin scope", () => {
     const descriptor = createPluginGatewayMethodDescriptor({
       pluginId: "demo",

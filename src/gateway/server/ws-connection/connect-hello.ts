@@ -61,17 +61,29 @@ export async function sendGatewayHello(
     handoffBootstrapProfile,
     deviceToken,
     bootstrapDeviceTokens,
+    trustedHostProviderAdmission,
   } = state;
-  const snapshot = buildGatewaySnapshot({
-    includeSensitive: scopes.includes(ADMIN_SCOPE),
-  });
-  const cachedHealth = getHealthCache();
-  if (cachedHealth) {
-    snapshot.health = cachedHealth;
-    snapshot.stateVersion.health = getHealthVersion();
+  const snapshot =
+    role === "host-provider"
+      ? {
+          presence: [],
+          health: {},
+          stateVersion: { presence: 0, health: 0 },
+          uptimeMs: Math.round(process.uptime() * 1000),
+        }
+      : buildGatewaySnapshot({
+          includeSensitive: scopes.includes(ADMIN_SCOPE),
+        });
+  if (role !== "host-provider") {
+    const cachedHealth = getHealthCache();
+    if (cachedHealth) {
+      snapshot.health = cachedHealth;
+      snapshot.stateVersion.health = getHealthVersion();
+    }
   }
   const helloOkAuthScopes = deviceToken ? deviceToken.scopes : scopes;
-  const controlUiTabs = listControlUiPluginTabs(helloOkAuthScopes);
+  const controlUiTabs =
+    role === "host-provider" ? [] : listControlUiPluginTabs(helloOkAuthScopes);
   const helloOk = {
     type: "hello-ok",
     protocol: PROTOCOL_VERSION,
@@ -80,16 +92,21 @@ export async function sendGatewayHello(
       connId,
     },
     features: {
-      methods: gatewayMethods,
-      events,
-      capabilities: [
-        GATEWAY_SERVER_CAPS.CHAT_SEND_ROUTING_CONTRACT,
-        GATEWAY_SERVER_CAPS.CRESTODIAN_SETUP_MODEL_REF,
-      ],
+      methods: role === "host-provider" ? ["host.provider.frame"] : gatewayMethods,
+      events: role === "host-provider" ? [] : events,
+      capabilities:
+        role === "host-provider"
+          ? []
+          : [
+              GATEWAY_SERVER_CAPS.CHAT_SEND_ROUTING_CONTRACT,
+              GATEWAY_SERVER_CAPS.CRESTODIAN_SETUP_MODEL_REF,
+            ],
     },
     snapshot,
     ...(controlUiTabs.length > 0 ? { controlUiTabs } : {}),
-    ...(Object.keys(pluginSurfaceUrls).length > 0 ? { pluginSurfaceUrls } : {}),
+    ...(role !== "host-provider" && Object.keys(pluginSurfaceUrls).length > 0
+      ? { pluginSurfaceUrls }
+      : {}),
     auth: {
       role,
       scopes: helloOkAuthScopes,
@@ -170,9 +187,9 @@ export async function sendGatewayHello(
     action: "gateway.auth.succeeded",
     outcome: "success",
     severity: "low",
-    authMode: resolvedAuth.mode,
-    authMethod,
-    authProvided,
+    authMode: trustedHostProviderAdmission ? "host-provider-token" : resolvedAuth.mode,
+    authMethod: trustedHostProviderAdmission ? "host-provider-token" : authMethod,
+    authProvided: trustedHostProviderAdmission ? "host-provider-token" : authProvided,
     role,
     scopes: helloOkAuthScopes,
     clientMode: connectParams.client.mode,

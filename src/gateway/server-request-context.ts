@@ -50,6 +50,7 @@ type GatewayRequestContextParams = {
   workerEnvironmentService?: GatewayRequestContext["workerEnvironmentService"];
   workerSessionPlacementService?: GatewayRequestContext["workerSessionPlacementService"];
   workerPlacementDispatchService?: GatewayRequestContext["workerPlacementDispatchService"];
+  hostProviderRegistry?: GatewayRequestContext["hostProviderRegistry"];
   terminalSessions?: GatewayRequestContext["terminalSessions"];
   agentRunSeq: GatewayRequestContext["agentRunSeq"];
   chatAbortControllers: GatewayRequestContext["chatAbortControllers"];
@@ -222,6 +223,7 @@ export function createGatewayRequestContext(
     ...(params.workerPlacementDispatchService
       ? { workerPlacementDispatchService: params.workerPlacementDispatchService }
       : {}),
+    ...(params.hostProviderRegistry ? { hostProviderRegistry: params.hostProviderRegistry } : {}),
     terminalSessions: params.terminalSessions,
     agentRunSeq: params.agentRunSeq,
     chatAbortControllers: params.chatAbortControllers,
