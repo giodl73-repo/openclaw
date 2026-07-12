@@ -31,6 +31,7 @@ export type LayerWriteFinding =
   | { reason: string; layer?: string; message?: string };
 
 export type PersistConfigLayer<Source> = (params: {
+  targetLayerId: string;
   source: Source;
   content: Uint8Array;
   expectedTargetDigest: string;
@@ -192,6 +193,7 @@ export async function writeConfigLayer<Source>(params: {
 
   try {
     await params.persist({
+      targetLayerId: target.id,
       source: descriptor.source,
       content,
       expectedTargetDigest: params.expectedTargetDigest,
@@ -266,13 +268,17 @@ export function createLayerGenerationJournal(now: () => Date = () => new Date())
       };
       return inspection;
     },
-    recordRejected(findings: LayerWriteFinding[]): LayerGenerationInspection {
+    recordRejected(
+      findings: LayerWriteFinding[],
+      options: { affectsReadiness?: boolean } = {},
+    ): LayerGenerationInspection {
       attemptGeneration += 1;
+      const ready = options.affectsReadiness === false && activeGeneration !== null;
       inspection = {
         attemptGeneration,
         activeGeneration,
         attemptedAt: now().toISOString(),
-        ready: false,
+        ready,
         findings: findings.map((finding) => ({
           reason: finding.reason,
           ...(finding.layer !== undefined ? { layer: finding.layer } : {}),

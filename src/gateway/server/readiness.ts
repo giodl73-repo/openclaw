@@ -48,6 +48,7 @@ export function createReadinessChecker(deps: {
   getStartupPending?: () => boolean;
   getStartupPendingReason?: () => string | undefined;
   getGatewayDraining?: () => boolean;
+  getManagedConfigReadiness?: () => { ready: boolean; reason?: string } | null;
   getEventLoopHealth?: () => GatewayEventLoopHealth | undefined;
   shouldSkipChannelReadiness?: () => boolean;
   cacheTtlMs?: number;
@@ -70,6 +71,17 @@ export function createReadinessChecker(deps: {
     if (deps.getGatewayDraining?.()) {
       return withEventLoopHealth(
         { ready: false, failing: ["gateway-draining"], uptimeMs },
+        deps.getEventLoopHealth,
+      );
+    }
+    const managedConfigReadiness = deps.getManagedConfigReadiness?.();
+    if (managedConfigReadiness && !managedConfigReadiness.ready) {
+      return withEventLoopHealth(
+        {
+          ready: false,
+          failing: [managedConfigReadiness.reason ?? "managed-config-candidate-rejected"],
+          uptimeMs,
+        },
         deps.getEventLoopHealth,
       );
     }

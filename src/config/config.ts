@@ -31,6 +31,8 @@ export {
   setRuntimeConfigSnapshot,
   writeConfigFile,
 } from "./io.js";
+export { createManagedConfigIO, getManagedConfigReadiness } from "./layer-io.js";
+export type { ManagedConfigReadiness } from "./layer-io.js";
 export {
   hashRuntimeConfigValue,
   resolveConfigWriteAfterWrite,
