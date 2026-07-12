@@ -6,6 +6,12 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import * as tar from "tar";
+import {
+  BACKUP_CONTINUITY_BLOCKER_CODES,
+  BACKUP_CONTINUITY_TARGET_LEVEL,
+  type BackupContinuityAssessment,
+  type BackupContinuityBlockerCode,
+} from "../continuity/backup-assessment.js";
 import { sha256Hex } from "../infra/crypto-digest.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { isRecord, resolveUserPath } from "../utils.js";
@@ -48,6 +54,7 @@ type BackupManifest = {
     reason?: string;
     coveredBy?: string;
   }>;
+  continuityAssessment?: BackupContinuityAssessment;
 };
 
 type BackupVerifyOptions = {
@@ -67,6 +74,7 @@ export type BackupVerifyResult = {
   entryCount: number;
   archiveSha256: string;
   manifestSha256: string;
+  continuityAssessment?: BackupContinuityAssessment;
 };
 
 type ArchiveEntry = {
@@ -117,6 +125,66 @@ function readStringArray(value: unknown, label: string): string[] {
     throw new Error(`${label} must be an array of strings.`);
   }
   return value;
+}
+
+const BACKUP_CONTINUITY_BLOCKER_CODE_SET = new Set<string>(BACKUP_CONTINUITY_BLOCKER_CODES);
+
+function isBackupContinuityBlockerCode(value: unknown): value is BackupContinuityBlockerCode {
+  return typeof value === "string" && BACKUP_CONTINUITY_BLOCKER_CODE_SET.has(value);
+}
+
+function parseContinuityAssessment(value: unknown): BackupContinuityAssessment | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error("Backup manifest continuityAssessment must be an object.");
+  }
+  if (value.targetLevel !== BACKUP_CONTINUITY_TARGET_LEVEL || value.eligible !== false) {
+    throw new Error("Backup manifest continuityAssessment has unsupported eligibility metadata.");
+  }
+  if (!Array.isArray(value.blockers) || value.blockers.length === 0) {
+    throw new Error("Backup manifest continuityAssessment must contain blockers.");
+  }
+  const blockers = value.blockers.map((blocker) => {
+    if (!isRecord(blocker)) {
+      throw new Error("Backup manifest continuityAssessment contains a non-object blocker.");
+    }
+    if (!isBackupContinuityBlockerCode(blocker.code)) {
+      throw new Error(
+        `Backup manifest continuityAssessment blocker code is invalid: ${String(blocker.code)}`,
+      );
+    }
+    if (
+      typeof blocker.count !== "number" ||
+      !Number.isSafeInteger(blocker.count) ||
+      blocker.count <= 0
+    ) {
+      throw new Error(
+        `Backup manifest continuityAssessment blocker count is invalid: ${blocker.code}`,
+      );
+    }
+    return {
+      code: blocker.code,
+      count: blocker.count,
+    };
+  });
+  if (new Set(blockers.map((blocker) => blocker.code)).size !== blockers.length) {
+    throw new Error("Backup manifest continuityAssessment contains duplicate blocker codes.");
+  }
+  if (
+    !blockers.some(
+      (blocker) =>
+        blocker.code === "continuity.config.secret_classification_unproven" && blocker.count === 1,
+    )
+  ) {
+    throw new Error("Backup manifest continuityAssessment is missing its fail-closed blocker.");
+  }
+  return {
+    targetLevel: BACKUP_CONTINUITY_TARGET_LEVEL,
+    eligible: false,
+    blockers,
+  };
 }
 
 function isArchivePathWithin(child: string, parent: string): boolean {
@@ -215,6 +283,7 @@ function parseManifest(raw: string): BackupManifest {
       : undefined,
     assets,
     skipped: Array.isArray(parsed.skipped) ? parsed.skipped : undefined,
+    continuityAssessment: parseContinuityAssessment(parsed.continuityAssessment),
   };
 }
 
@@ -254,8 +323,7 @@ async function inspectArchive(
   const entries: ArchiveEntry[] = [];
   const manifestPromises: Array<ReturnType<typeof readManifestEntry>> = [];
   const digest = createHash("sha256");
-  let parser: ReturnType<typeof tar.t>;
-  parser = tar.t({
+  const parser: tar.Parser = tar.t({
     gzip: true,
     onentry: (entry) => {
       if (entries.length >= maxEntries) {
@@ -371,6 +439,12 @@ function formatResult(result: BackupVerifyResult): string {
     `Archive entries scanned: ${result.entryCount}`,
     `Archive SHA-256: ${result.archiveSha256}`,
     `Manifest SHA-256: ${result.manifestSha256}`,
+    ...(result.continuityAssessment
+      ? [
+          `Archived continuity eligible: ${result.continuityAssessment.eligible ? "yes" : "no"}`,
+          `Continuity blockers: ${result.continuityAssessment.blockers.map((blocker) => blocker.code).join(", ")}`,
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -450,6 +524,9 @@ export async function backupVerifyCommand(
     entryCount: rawEntries.length,
     archiveSha256: inspection.archiveSha256,
     manifestSha256: sha256Hex(manifestRawBytes),
+    ...(manifest.continuityAssessment
+      ? { continuityAssessment: manifest.continuityAssessment }
+      : {}),
   };
 
   if (opts.json) {

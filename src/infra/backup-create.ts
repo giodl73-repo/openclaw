@@ -20,6 +20,10 @@ import {
   resolveBackupPlanFromDisk,
 } from "../commands/backup-shared.js";
 import { isPathWithin } from "../commands/cleanup-utils.js";
+import {
+  assessBackupForArchivedContinuity,
+  type BackupContinuityAssessment,
+} from "../continuity/backup-assessment.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { resolveHomeDir, resolveUserPath } from "../utils.js";
@@ -124,6 +128,7 @@ type BackupManifest = {
     reason: string;
     coveredBy?: string;
   }>;
+  continuityAssessment: BackupContinuityAssessment;
 };
 
 export type BackupCreateResult = {
@@ -148,6 +153,7 @@ export type BackupCreateResult = {
    * Populated on real writes only; dry runs report 0.
    */
   skippedVolatileCount: number;
+  continuityAssessment?: BackupContinuityAssessment;
   archiveSha256?: string;
   manifestSha256?: string;
 };
@@ -265,6 +271,7 @@ export const testApi = {
   writeTarArchiveWithRetry,
   isTarEofRaceError,
   createBackupVolatileStatCache,
+  isPathInBackupCaptureScope,
 };
 export { testApi as __test };
 
@@ -417,6 +424,14 @@ async function canonicalizePathForContainment(targetPath: string): Promise<strin
   }
 }
 
+async function isPathInBackupCaptureScope(
+  targetPath: string,
+  assets: readonly Pick<BackupAsset, "sourcePath">[],
+): Promise<boolean> {
+  const canonicalTargetPath = await canonicalizePathForContainment(targetPath);
+  return assets.some((asset) => isPathWithin(canonicalTargetPath, asset.sourcePath));
+}
+
 function buildManifest(params: {
   createdAt: string;
   archiveRoot: string;
@@ -428,6 +443,7 @@ function buildManifest(params: {
   configPath: string;
   oauthDir: string;
   workspaceDirs: string[];
+  continuityAssessment: BackupContinuityAssessment;
 }): BackupManifest {
   const components = buildBackupManifestComponents(params.assets);
   return {
@@ -459,6 +475,7 @@ function buildManifest(params: {
       reason: entry.reason,
       coveredBy: entry.coveredBy,
     })),
+    continuityAssessment: params.continuityAssessment,
   };
 }
 
@@ -544,6 +561,8 @@ type SqliteBackupAsset = {
 type StateSqliteBackupPlan = {
   snapshots: SqliteBackupAsset[];
   discoveredSourcePaths: Set<string>;
+  authProfileStoreRowCount: number;
+  authProfileStateRowCount: number;
 };
 
 const SQLITE_BACKUP_SOURCE_SUFFIXES = ["", "-wal", "-shm", "-journal"] as const;
@@ -615,6 +634,16 @@ function tableExistsSql(db: DatabaseSync, tableName: string): boolean {
   return row?.ok === 1;
 }
 
+function countTableRows(db: DatabaseSync, tableName: string): number {
+  if (!tableExistsSql(db, tableName)) {
+    return 0;
+  }
+  const row = db.prepare(`SELECT COUNT(*) AS count FROM "${tableName}"`).get() as
+    | { count?: unknown }
+    | undefined;
+  return typeof row?.count === "number" ? row.count : 0;
+}
+
 function sanitizeGlobalStateSqliteSnapshot(db: DatabaseSync): void {
   if (tableExistsSql(db, "delivery_queue_entries")) {
     db.prepare("DELETE FROM delivery_queue_entries").run();
@@ -625,7 +654,10 @@ function sanitizeGlobalStateSqliteSnapshot(db: DatabaseSync): void {
 async function listStateSqlitePaths(params: {
   stateDir: string;
   globalStateSqlitePath: string;
-}): Promise<{ snapshotPaths: string[]; discoveredSourcePaths: Set<string> }> {
+}): Promise<{
+  snapshotPaths: string[];
+  discoveredSourcePaths: Set<string>;
+}> {
   const snapshotPaths = new Set<string>();
   const discoveredSourcePaths = new Set<string>();
   const extensionsFilter = buildExtensionsNodeModulesFilter(params.stateDir);
@@ -723,6 +755,8 @@ async function createStateSqliteBackupPlan(params: {
   });
   const sqlite = requireNodeSqlite();
   const snapshots: SqliteBackupAsset[] = [];
+  let authProfileStoreRowCount = 0;
+  let authProfileStateRowCount = 0;
   for (const archiveSourcePath of discovery.snapshotPaths) {
     // A discovered *.sqlite file that SQLite cannot snapshot aborts backup.
     // Raw-copying malformed or unreadable databases would restore unsafe state.
@@ -756,6 +790,15 @@ async function createStateSqliteBackupPlan(params: {
         snapshot.close();
       }
     }
+    const snapshot = new sqlite.DatabaseSync(sourcePath, { readOnly: true });
+    try {
+      authProfileStoreRowCount +=
+        countTableRows(snapshot, "auth_profile_store") +
+        countTableRows(snapshot, "auth_profile_stores");
+      authProfileStateRowCount += countTableRows(snapshot, "auth_profile_state");
+    } finally {
+      snapshot.close();
+    }
     snapshots.push({
       sourcePath,
       archiveSourcePath,
@@ -766,7 +809,12 @@ async function createStateSqliteBackupPlan(params: {
       ),
     });
   }
-  return { snapshots, discoveredSourcePaths: discovery.discoveredSourcePaths };
+  return {
+    snapshots,
+    discoveredSourcePaths: discovery.discoveredSourcePaths,
+    authProfileStoreRowCount,
+    authProfileStateRowCount,
+  };
 }
 
 export async function createBackupArchive(
@@ -838,7 +886,23 @@ export async function createBackupArchive(
           stateDir: stateAsset.sourcePath,
           tempDir,
         })
-      : { snapshots: [], discoveredSourcePaths: new Set<string>() };
+      : {
+          snapshots: [],
+          discoveredSourcePaths: new Set<string>(),
+          authProfileStoreRowCount: 0,
+          authProfileStateRowCount: 0,
+        };
+    const oauthCredentialsInCaptureScope =
+      !onlyConfig && (await isPathInBackupCaptureScope(plan.oauthDir, result.assets));
+    const continuityAssessment = assessBackupForArchivedContinuity({
+      onlyConfig,
+      includeWorkspace,
+      excludesLegacySessionTranscripts: stateAsset !== undefined,
+      oauthCredentialsInCaptureScope,
+      authProfileStoreRowCount: stateSqliteBackup.authProfileStoreRowCount,
+      authProfileStateRowCount: stateSqliteBackup.authProfileStateRowCount,
+    });
+    result.continuityAssessment = continuityAssessment;
     const sourcePathRemaps = new Map<string, string>();
     const skippedSqliteSourcePaths = new Set<string>();
     for (const snapshot of stateSqliteBackup.snapshots) {
@@ -858,6 +922,7 @@ export async function createBackupArchive(
       configPath: plan.configPath,
       oauthDir: plan.oauthDir,
       workspaceDirs: plan.workspaceDirs,
+      continuityAssessment,
     });
     await writeJson(manifestPath, manifest, { trailingNewline: true });
 

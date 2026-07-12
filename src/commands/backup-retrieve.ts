@@ -1,8 +1,9 @@
 // Retrieves a verified backup archive into a new, non-active staging directory.
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Stats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import * as tar from "tar";
+import type { BackupContinuityAssessment } from "../continuity/backup-assessment.js";
 import { root as fsSafeRoot } from "../infra/fs-safe.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { resolveUserPath } from "../utils.js";
@@ -30,9 +31,13 @@ export type BackupRetrieveResult = {
   componentCount: number;
   entryCount: number;
   restoredBytes: number;
+  continuityAssessment?: BackupContinuityAssessment;
 };
 
-function restoreEntryKind(entry: tar.ReadEntry): "file" | "directory" | "other" {
+function restoreEntryKind(entry: tar.ReadEntry | Stats): "file" | "directory" | "other" {
+  if ("isFile" in entry) {
+    return entry.isFile() ? "file" : entry.isDirectory() ? "directory" : "other";
+  }
   return entry.type === "File" ? "file" : entry.type === "Directory" ? "directory" : "other";
 }
 
@@ -112,6 +117,7 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
   let destinationCreated = false;
   let operationFailed = false;
   let operationFailure: unknown;
+  let result: BackupRetrieveResult | undefined;
   try {
     await fs.copyFile(archivePath, snapshotPath, fsConstants.COPYFILE_EXCL);
     await fs.chmod(snapshotPath, 0o600);
@@ -192,7 +198,7 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
     });
     await fs.rm(incompleteMarker);
 
-    return {
+    result = {
       ok: true,
       archivePath,
       destination,
@@ -202,6 +208,9 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
       assetCount: verification.assetCount,
       componentCount: verification.componentCount,
       entryCount: verification.entryCount,
+      ...(verification.continuityAssessment
+        ? { continuityAssessment: verification.continuityAssessment }
+        : {}),
       restoredBytes,
     };
   } catch (error) {
@@ -218,25 +227,35 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
       }
     }
     operationFailure = reportedError;
-    throw reportedError;
-  } finally {
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch (cleanupError) {
-      if (operationFailed) {
-        throw new AggregateError(
-          [operationFailure, cleanupError],
-          `Backup retrieve failed and its temporary archive could not be removed: ${tempDir}`,
-        );
-      }
-      throw new Error(
-        `Backup was retrieved but its temporary archive could not be removed: ${tempDir}`,
-        {
-          cause: cleanupError,
-        },
+  }
+
+  let tempCleanupFailure: unknown;
+  try {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  } catch (error) {
+    tempCleanupFailure = error;
+  }
+
+  if (operationFailed) {
+    if (tempCleanupFailure !== undefined) {
+      throw new AggregateError(
+        [operationFailure, tempCleanupFailure],
+        `Backup retrieve failed and its temporary archive could not be removed: ${tempDir}`,
+        { cause: operationFailure },
       );
     }
+    throw operationFailure;
   }
+  if (tempCleanupFailure !== undefined) {
+    throw new Error(
+      `Backup was retrieved but its temporary archive could not be removed: ${tempDir}`,
+      { cause: tempCleanupFailure },
+    );
+  }
+  if (!result) {
+    throw new Error("Backup retrieve completed without producing a result.");
+  }
+  return result;
 }
 
 /** Retrieve a verified backup into a new staging directory without activating it. */
