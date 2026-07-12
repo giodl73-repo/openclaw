@@ -32,6 +32,11 @@ export type ContinuityConfigDependencyAssessment = {
   evidence: ContinuityConfigDependencyEvidence;
 };
 
+export type ContinuityConfigCapturePreparation = {
+  assessment: ContinuityConfigDependencyAssessment;
+  includedFiles: string[];
+};
+
 type InspectContinuityConfigDependenciesParams = {
   configPath: string;
   raw: string;
@@ -148,7 +153,7 @@ function resolveConfigAndCollectIncludes(params: {
   parsed: unknown;
   env?: NodeJS.ProcessEnv;
   allowedRoots?: readonly string[];
-}): { config: unknown; includeFileCount: number } {
+}): { config: unknown; includedFiles: string[] } {
   const includedPaths = new Set<string>();
   const resolver: IncludeResolver = {
     readFile: (candidate) => fs.readFileSync(candidate, "utf-8"),
@@ -166,7 +171,7 @@ function resolveConfigAndCollectIncludes(params: {
   });
   return {
     config,
-    includeFileCount: includedPaths.size,
+    includedFiles: [...includedPaths].toSorted(),
   };
 }
 
@@ -174,21 +179,24 @@ function resolveConfigAndCollectIncludes(params: {
  * Classify a config recovery artifact without resolving SecretRefs or
  * environment placeholders to their secret bytes.
  */
-export function inspectContinuityConfigDependencies(
+export function prepareContinuityConfigCapture(
   params: InspectContinuityConfigDependenciesParams,
-): ContinuityConfigDependencyAssessment {
+): ContinuityConfigCapturePreparation {
   let parsed: unknown;
   try {
     parsed = parseJsonWithJson5Fallback(params.raw);
   } catch {
     return {
-      eligible: false,
-      blockers: [{ code: "continuity.config.malformed", count: 1 }],
-      evidence: emptyEvidence(),
+      assessment: {
+        eligible: false,
+        blockers: [{ code: "continuity.config.malformed", count: 1 }],
+        evidence: emptyEvidence(),
+      },
+      includedFiles: [],
     };
   }
 
-  let resolved: { config: unknown; includeFileCount: number };
+  let resolved: { config: unknown; includedFiles: string[] };
   try {
     resolved = resolveConfigAndCollectIncludes({
       configPath: params.configPath,
@@ -198,16 +206,28 @@ export function inspectContinuityConfigDependencies(
     });
   } catch {
     return {
-      eligible: false,
-      blockers: [{ code: "continuity.config.include_unresolved", count: 1 }],
-      evidence: emptyEvidence(),
+      assessment: {
+        eligible: false,
+        blockers: [{ code: "continuity.config.include_unresolved", count: 1 }],
+        evidence: emptyEvidence(),
+      },
+      includedFiles: [],
     };
   }
 
-  return classifyResolvedConfig({
-    config: resolved.config,
-    uiHints: params.uiHints,
-    extensionMetadataComplete: params.extensionMetadataComplete,
-    includeFileCount: resolved.includeFileCount,
-  });
+  return {
+    assessment: classifyResolvedConfig({
+      config: resolved.config,
+      uiHints: params.uiHints,
+      extensionMetadataComplete: params.extensionMetadataComplete,
+      includeFileCount: resolved.includedFiles.length,
+    }),
+    includedFiles: resolved.includedFiles,
+  };
+}
+
+export function inspectContinuityConfigDependencies(
+  params: InspectContinuityConfigDependenciesParams,
+): ContinuityConfigDependencyAssessment {
+  return prepareContinuityConfigCapture(params).assessment;
 }

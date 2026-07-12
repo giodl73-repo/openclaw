@@ -3,7 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildConfigSchema } from "../config/schema.js";
-import { inspectContinuityConfigDependencies } from "./config-dependencies.js";
+import {
+  inspectContinuityConfigDependencies,
+  prepareContinuityConfigCapture,
+} from "./config-dependencies.js";
 
 const tempDirs: string[] = [];
 
@@ -104,6 +107,23 @@ describe("continuity config dependency classifier", () => {
         literalSensitiveValueCount: 0,
       },
     });
+  });
+
+  it("returns the guarded include closure only to the capture preparation", () => {
+    const dir = makeConfigDir();
+    const includedPath = path.join(dir, "gateway.json5");
+    fs.writeFileSync(includedPath, `{ gateway: { port: 18789 } }`);
+
+    const prepared = prepareContinuityConfigCapture({
+      configPath: path.join(dir, "openclaw.json"),
+      raw: `{ $include: "./gateway.json5" }`,
+      uiHints: buildConfigSchema().uiHints,
+      extensionMetadataComplete: true,
+    });
+
+    expect(prepared.includedFiles).toEqual([includedPath]);
+    expect(prepared.assessment.evidence.includeFileCount).toBe(1);
+    expect(JSON.stringify(prepared.assessment)).not.toContain(includedPath);
   });
 
   it("blocks literal sensitive values without returning their paths or bytes", () => {
