@@ -13,6 +13,10 @@ import {
   buildContinuityArchiveCapture,
   type ContinuityArchiveCapture,
 } from "./archive-manifest.js";
+import {
+  buildContinuityArchiveObligations,
+  type ContinuityArchiveObligations,
+} from "./archive-obligations.js";
 import type { ContinuityArchivePlan, ContinuityCaptureSource } from "./archive-plan.js";
 import { stageContinuityArchivePlan } from "./archive-stage.js";
 
@@ -39,6 +43,7 @@ type ContinuityManifest = {
   stateFilePaths: string[];
   sanitizedSqlitePaths: string[];
   continuityCapture: ContinuityArchiveCapture;
+  continuityObligations: ContinuityArchiveObligations;
 };
 
 export type ContinuityArchiveCreateResult = {
@@ -52,6 +57,7 @@ export type ContinuityArchiveCreateResult = {
   componentCount: number;
   entryCount: number;
   continuityCapture: ContinuityArchiveCapture;
+  continuityObligations: ContinuityArchiveObligations;
 };
 
 function buildContinuityComponents(
@@ -145,6 +151,7 @@ function buildManifest(params: {
     stateFilePaths: params.stateFilePaths,
     sanitizedSqlitePaths: params.sanitizedSqlitePaths,
     continuityCapture: params.continuityCapture,
+    continuityObligations: buildContinuityArchiveObligations(params.continuityCapture.evidence),
   };
 }
 
@@ -252,7 +259,11 @@ export async function createContinuityArchive(params: {
       { log: () => {}, error: () => {}, exit: () => {} },
       { archive: tempArchivePath },
     );
-    if (verification.artifactType !== "continuity" || !verification.continuityCapture) {
+    if (
+      verification.artifactType !== "continuity" ||
+      !verification.continuityCapture ||
+      !verification.continuityObligations
+    ) {
       throw new Error("Packaged continuity artifact did not verify as continuity.");
     }
     await publishTempArchive({ tempArchivePath, outputPath });
@@ -267,6 +278,7 @@ export async function createContinuityArchive(params: {
       componentCount: verification.componentCount,
       entryCount: verification.entryCount,
       continuityCapture: verification.continuityCapture,
+      continuityObligations: verification.continuityObligations,
     };
   } catch (error) {
     operationError = error;

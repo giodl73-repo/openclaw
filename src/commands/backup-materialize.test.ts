@@ -5,6 +5,7 @@ import * as tar from "tar";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildConfigSchema } from "../config/schema.js";
 import { createContinuityArchive } from "../continuity/archive-create.js";
+import type { ContinuityArchiveObligations } from "../continuity/archive-obligations.js";
 import { resolveContinuityArchivePlanFromPaths } from "../continuity/archive-plan.js";
 import type { ContinuityArchivePlan } from "../continuity/archive-plan.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
@@ -181,14 +182,27 @@ describe("backupMaterializeCommand", () => {
         supportedVersion: OPENCLAW_STATE_SCHEMA_VERSION,
       }),
     ]);
-    expect(result.surfaces.obligations).toEqual([
-      expect.objectContaining({
-        id: "host-dependencies",
-        disposition: "resolve-before-activation",
-      }),
-      expect.objectContaining({ id: "derived-state", disposition: "rebuild-before-activation" }),
-      expect.objectContaining({ id: "runtime-transients", disposition: "reset-on-activation" }),
-    ]);
+    expect(result.surfaces.obligations).toMatchObject({
+      reconstructed: {
+        authProfileRuntimeState: {
+          treatment: "safe-empty-default",
+          readiness: "non-blocking",
+          removedRowCount: 0,
+        },
+        pluginRuntimeDependencies: {
+          treatment: "owner-reinstall",
+          readiness: "owner-required",
+          omittedTreeCount: 0,
+        },
+      },
+      external: {
+        configSecretReferences: { readiness: "owner-required" },
+        authProfileCredentials: { credentialRows: 0, oauthCaptured: false },
+      },
+      ephemeral: {
+        runtimeTransients: { treatment: "normal-startup", readiness: "owner-owned" },
+      },
+    });
     expect(result.components.map((component) => component.kind)).toEqual([
       "config",
       "state",
@@ -258,7 +272,7 @@ describe("backupMaterializeCommand", () => {
       archiveSha256: string;
       components: Array<{ id: string }>;
       compatibility: { sqliteSchemas: Array<{ kind: string }> };
-      surfaces: { obligations: Array<{ id: string }> };
+      surfaces: { obligations: ContinuityArchiveObligations };
     };
     expect(receipt).toMatchObject({
       activated: false,

@@ -20,11 +20,13 @@ function validEvidence(): ContinuityArchiveCaptureEvidence {
     workspaceCount: 1,
     oauthExcluded: true,
     legacyTranscriptCount: 0,
+    legacyDeliveryQueueCount: 0,
     sqliteSnapshotCount: 1,
     removedAuthProfileStoreRows: 1,
     removedAuthProfileStateRows: 1,
     credentialStoreRows: 0,
     authProfileStateRows: 0,
+    omittedPluginDependencyTreeCount: 0,
     copiedFileCount: 4,
     skippedVolatileCount: 0,
   };

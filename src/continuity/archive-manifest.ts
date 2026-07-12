@@ -10,11 +10,13 @@ export type ContinuityArchiveCaptureEvidence = {
   workspaceCount: number;
   oauthExcluded: true;
   legacyTranscriptCount: 0;
+  legacyDeliveryQueueCount: 0;
   sqliteSnapshotCount: number;
   removedAuthProfileStoreRows: number;
   removedAuthProfileStateRows: number;
   credentialStoreRows: 0;
   authProfileStateRows: 0;
+  omittedPluginDependencyTreeCount: number;
   copiedFileCount: number;
   skippedVolatileCount: number;
 };
@@ -106,11 +108,16 @@ export function parseContinuityArchiveCapture(value: unknown): ContinuityArchive
       workspaceCount: readNonNegativeInteger(evidence, "workspaceCount"),
       oauthExcluded: readTrue(evidence, "oauthExcluded"),
       legacyTranscriptCount: readZero(evidence, "legacyTranscriptCount"),
+      legacyDeliveryQueueCount: readZero(evidence, "legacyDeliveryQueueCount"),
       sqliteSnapshotCount: readNonNegativeInteger(evidence, "sqliteSnapshotCount"),
       removedAuthProfileStoreRows: readNonNegativeInteger(evidence, "removedAuthProfileStoreRows"),
       removedAuthProfileStateRows: readNonNegativeInteger(evidence, "removedAuthProfileStateRows"),
       credentialStoreRows: readZero(evidence, "credentialStoreRows"),
       authProfileStateRows: readZero(evidence, "authProfileStateRows"),
+      omittedPluginDependencyTreeCount: readNonNegativeInteger(
+        evidence,
+        "omittedPluginDependencyTreeCount",
+      ),
       copiedFileCount: readNonNegativeInteger(evidence, "copiedFileCount"),
       skippedVolatileCount: readNonNegativeInteger(evidence, "skippedVolatileCount"),
     },

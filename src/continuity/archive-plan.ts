@@ -12,6 +12,7 @@ import {
 
 export type ContinuityCaptureBlockerCode =
   | ContinuityConfigBlockerCode
+  | "continuity.capture.legacy_delivery_queue"
   | "continuity.capture.legacy_transcripts"
   | "continuity.capture.source_missing"
   | "continuity.capture.source_overlap"
@@ -40,6 +41,7 @@ export type ContinuityArchivePlan = {
     configFileCount: number;
     workspaceCount: number;
     oauthExcluded: boolean;
+    legacyDeliveryQueueCount: number;
     legacyTranscriptCount: number;
   };
 };
@@ -159,6 +161,65 @@ function scanLegacyTranscripts(stateDir: string): { count: number; failed: boole
   );
 }
 
+function scanLegacyDeliveryQueueRoot(root: string): { count: number; failed: boolean } {
+  try {
+    const rootStat = fs.lstatSync(root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+      return { count: 0, failed: true };
+    }
+    let count = 0;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) {
+        return { count, failed: true };
+      }
+      if (entry.isFile() && (entry.name.endsWith(".json") || entry.name.endsWith(".delivered"))) {
+        count += 1;
+      }
+    }
+    const failedRoot = path.join(root, "failed");
+    try {
+      const failedStat = fs.lstatSync(failedRoot);
+      if (failedStat.isSymbolicLink() || !failedStat.isDirectory()) {
+        return { count, failed: true };
+      }
+      for (const entry of fs.readdirSync(failedRoot, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) {
+          return { count, failed: true };
+        }
+        if (entry.isFile() && entry.name.endsWith(".json")) {
+          count += 1;
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        return { count, failed: true };
+      }
+    }
+    return { count, failed: false };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { count: 0, failed: false };
+    }
+    return { count: 0, failed: true };
+  }
+}
+
+function scanLegacyDeliveryQueues(stateDir: string): { count: number; failed: boolean } {
+  return ["delivery-queue", "session-delivery-queue"].reduce<{
+    count: number;
+    failed: boolean;
+  }>(
+    (total, directory) => {
+      const result = scanLegacyDeliveryQueueRoot(path.join(stateDir, directory));
+      return {
+        count: total.count + result.count,
+        failed: total.failed || result.failed,
+      };
+    },
+    { count: 0, failed: false },
+  );
+}
+
 function hasUnsafeOverlap(
   stateDir: string,
   oauthDir: string,
@@ -225,6 +286,9 @@ export function resolveContinuityArchivePlanFromPaths(
   }
   const workspaceSources = presentSources.filter((source) => source.kind === "workspace");
   const legacy = state ? scanLegacyTranscripts(state.sourcePath) : { count: 0, failed: false };
+  const legacyDeliveryQueues = state
+    ? scanLegacyDeliveryQueues(state.sourcePath)
+    : { count: 0, failed: false };
   const oauthPath = fs.existsSync(params.oauthDir)
     ? fs.realpathSync(params.oauthDir)
     : path.resolve(params.oauthDir);
@@ -243,11 +307,24 @@ export function resolveContinuityArchivePlanFromPaths(
       ? [{ code: "continuity.capture.source_missing" as const, count: missingSourceCount }]
       : []),
     ...(sourceOverlap ? [{ code: "continuity.capture.source_overlap" as const, count: 1 }] : []),
-    ...(legacy.failed
-      ? [{ code: "continuity.capture.source_scan_failed" as const, count: 1 }]
+    ...(legacy.failed || legacyDeliveryQueues.failed
+      ? [
+          {
+            code: "continuity.capture.source_scan_failed" as const,
+            count: Number(legacy.failed) + Number(legacyDeliveryQueues.failed),
+          },
+        ]
       : []),
     ...(legacy.count > 0
       ? [{ code: "continuity.capture.legacy_transcripts" as const, count: legacy.count }]
+      : []),
+    ...(legacyDeliveryQueues.count > 0
+      ? [
+          {
+            code: "continuity.capture.legacy_delivery_queue" as const,
+            count: legacyDeliveryQueues.count,
+          },
+        ]
       : []),
   ];
   const fallbackState: RequiredSource = {
@@ -293,6 +370,7 @@ export function resolveContinuityArchivePlanFromPaths(
       configFileCount: configSources.length,
       workspaceCount: workspaceSources.length,
       oauthExcluded: true,
+      legacyDeliveryQueueCount: legacyDeliveryQueues.count,
       legacyTranscriptCount: legacy.count,
     },
   };

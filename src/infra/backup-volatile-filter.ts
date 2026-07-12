@@ -78,6 +78,41 @@ export function isLegacySessionTranscriptBackupPath(
   return false;
 }
 
+/** Returns true for legacy delivery queue files that migration still consumes. */
+export function isLegacyDeliveryQueueBackupPath(
+  absolutePath: string,
+  plan: VolatileFilterPlan,
+): boolean {
+  if (!absolutePath) {
+    return false;
+  }
+  const candidates = filePathCandidates(absolutePath);
+  for (const stateDir of plan.stateDirs) {
+    if (!stateDir) {
+      continue;
+    }
+    const stateDirPosix = normalizePosix(stateDir);
+    for (const queueDir of ["delivery-queue", "session-delivery-queue"]) {
+      const queueRoot = path.posix.join(stateDirPosix, queueDir);
+      for (const filePosix of candidates) {
+        if (!isUnder(filePosix, queueRoot)) {
+          continue;
+        }
+        const relative = path.posix.relative(queueRoot, filePosix);
+        const parts = relative.split("/").filter(Boolean);
+        if (
+          (parts.length === 1 &&
+            (hasExtension(filePosix, [".json"]) || hasExtension(filePosix, [".delivered"]))) ||
+          (parts.length === 2 && parts[0] === "failed" && hasExtension(filePosix, [".json"]))
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 function filePathCandidates(input: string): string[] {
   const normalized = normalizePosix(input);
   if (normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized)) {

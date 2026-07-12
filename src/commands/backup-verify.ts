@@ -13,6 +13,10 @@ import {
   type ContinuityArchiveCapture,
 } from "../continuity/archive-manifest.js";
 import {
+  parseContinuityArchiveObligations,
+  type ContinuityArchiveObligations,
+} from "../continuity/archive-obligations.js";
+import {
   BACKUP_CONTINUITY_BLOCKER_CODES,
   BACKUP_CONTINUITY_TARGET_LEVEL,
   type BackupContinuityAssessment,
@@ -66,6 +70,7 @@ export type BackupManifest = {
   }>;
   continuityAssessment?: BackupContinuityAssessment;
   continuityCapture?: ContinuityArchiveCapture;
+  continuityObligations?: ContinuityArchiveObligations;
   stateFilePaths?: string[];
   sanitizedSqlitePaths?: string[];
 };
@@ -92,6 +97,7 @@ export type BackupVerifyResult = {
   manifestSha256: string;
   continuityAssessment?: BackupContinuityAssessment;
   continuityCapture?: ContinuityArchiveCapture;
+  continuityObligations?: ContinuityArchiveObligations;
 };
 
 export type VerifiedBackupArchive = {
@@ -252,6 +258,10 @@ export function parseBackupManifest(raw: string): BackupManifest {
     parsed.continuityCapture === undefined
       ? undefined
       : parseContinuityArchiveCapture(parsed.continuityCapture);
+  const continuityObligations =
+    parsed.continuityObligations === undefined
+      ? undefined
+      : parseContinuityArchiveObligations(parsed.continuityObligations);
   const sanitizedSqlitePaths =
     parsed.sanitizedSqlitePaths === undefined
       ? undefined
@@ -261,12 +271,18 @@ export function parseBackupManifest(raw: string): BackupManifest {
       ? undefined
       : readStringArray(parsed.stateFilePaths, "Continuity manifest stateFilePaths");
   if (artifactType === "continuity") {
-    if (!continuityCapture || !stateFilePaths || !sanitizedSqlitePaths || continuityAssessment) {
+    if (
+      !continuityCapture ||
+      !continuityObligations ||
+      !stateFilePaths ||
+      !sanitizedSqlitePaths ||
+      continuityAssessment
+    ) {
       throw new Error(
         "Continuity artifacts require successful capture metadata, state and SQLite inventories, and no backup assessment.",
       );
     }
-  } else if (continuityCapture || stateFilePaths || sanitizedSqlitePaths) {
+  } else if (continuityCapture || continuityObligations || stateFilePaths || sanitizedSqlitePaths) {
     throw new Error("Ordinary backup artifacts cannot claim continuity capture metadata.");
   }
 
@@ -341,6 +357,7 @@ export function parseBackupManifest(raw: string): BackupManifest {
     skipped: Array.isArray(parsed.skipped) ? parsed.skipped : undefined,
     continuityAssessment,
     continuityCapture,
+    continuityObligations,
     stateFilePaths,
     sanitizedSqlitePaths,
   };
@@ -462,8 +479,26 @@ function verifyManifestAgainstEntries(
     continuityEntries: Array<{ normalized: string; type?: string }>,
   ): void {
     const capture = continuityManifest.continuityCapture;
-    if (!capture) {
+    const obligations = continuityManifest.continuityObligations;
+    if (!capture || !obligations) {
       return;
+    }
+    if (
+      obligations.reconstructed.authProfileRuntimeState.removedRowCount !==
+        capture.evidence.removedAuthProfileStateRows ||
+      obligations.reconstructed.pluginRuntimeDependencies.omittedTreeCount !==
+        capture.evidence.omittedPluginDependencyTreeCount ||
+      obligations.external.authProfileCredentials.removedRowCount !==
+        capture.evidence.removedAuthProfileStoreRows ||
+      Object.entries(obligations.external.configSecretReferences.referenceCounts).some(
+        ([source, count]) =>
+          count !==
+          capture.evidence.config.secretReferencesBySource[
+            source as keyof typeof capture.evidence.config.secretReferencesBySource
+          ],
+      )
+    ) {
+      throw new Error("Continuity obligations are inconsistent with capture evidence.");
     }
     const unsupportedEntry = continuityEntries.find(
       (entry) => entry.type !== "File" && entry.type !== "Directory",
@@ -845,6 +880,9 @@ export async function verifyBackupArchive(
       ? { continuityAssessment: manifest.continuityAssessment }
       : {}),
     ...(manifest.continuityCapture ? { continuityCapture: manifest.continuityCapture } : {}),
+    ...(manifest.continuityObligations
+      ? { continuityObligations: manifest.continuityObligations }
+      : {}),
   };
 
   return { manifest, result };

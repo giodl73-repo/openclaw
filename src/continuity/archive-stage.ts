@@ -9,6 +9,7 @@ import {
   createStateSqliteBackupPlan,
 } from "../infra/backup-create.js";
 import {
+  isLegacyDeliveryQueueBackupPath,
   isLegacySessionTranscriptBackupPath,
   isVolatileBackupPath,
 } from "../infra/backup-volatile-filter.js";
@@ -34,6 +35,7 @@ type CopyContext = {
   extensionsFilter: (sourcePath: string) => boolean;
   stats: {
     copiedFileCount: number;
+    omittedPluginDependencyTreeCount: number;
     skippedVolatileCount: number;
   };
 };
@@ -196,6 +198,12 @@ async function copyTree(params: {
   if (sourceStat.isSymbolicLink()) {
     throw new Error(`Continuity capture refuses symbolic links: ${params.sourcePath}`);
   }
+  if (!params.context.extensionsFilter(params.sourcePath)) {
+    if (sourceStat.isDirectory()) {
+      params.context.stats.omittedPluginDependencyTreeCount += 1;
+    }
+    return;
+  }
   if (sourceStat.isDirectory()) {
     await ensurePrivateDirectory(params.destinationPath);
     const entries = await fs.readdir(params.sourcePath, { withFileTypes: true });
@@ -211,15 +219,21 @@ async function copyTree(params: {
   if (!sourceStat.isFile()) {
     throw new Error(`Continuity capture refuses special files: ${params.sourcePath}`);
   }
-  if (!params.context.extensionsFilter(params.sourcePath)) {
-    return;
-  }
   if (
     isLegacySessionTranscriptBackupPath(params.sourcePath, {
       stateDirs: [params.context.stateDir],
     })
   ) {
     throw new Error(`Legacy transcript appeared during continuity capture: ${params.sourcePath}`);
+  }
+  if (
+    isLegacyDeliveryQueueBackupPath(params.sourcePath, {
+      stateDirs: [params.context.stateDir],
+    })
+  ) {
+    throw new Error(
+      `Legacy delivery queue input appeared during continuity capture: ${params.sourcePath}`,
+    );
   }
   if (params.context.snapshotSqlite) {
     const sqliteKind = classifyStateSqliteBackupSourcePath(
@@ -332,6 +346,7 @@ export async function stageContinuityArchivePlan(params: {
 
     const stats = {
       copiedFileCount: 0,
+      omittedPluginDependencyTreeCount: 0,
       skippedVolatileCount: 0,
     };
     const context: CopyContext = {
@@ -415,12 +430,14 @@ export async function stageContinuityArchivePlan(params: {
         configFileCount: params.plan.evidence.configFileCount,
         workspaceCount: params.plan.evidence.workspaceCount,
         oauthExcluded: true,
+        legacyDeliveryQueueCount: 0,
         legacyTranscriptCount: 0,
         sqliteSnapshotCount: sqlitePlan.snapshots.length,
         removedAuthProfileStoreRows,
         removedAuthProfileStateRows,
         credentialStoreRows: 0,
         authProfileStateRows: 0,
+        omittedPluginDependencyTreeCount: stats.omittedPluginDependencyTreeCount,
         copiedFileCount: stats.copiedFileCount,
         skippedVolatileCount: stats.skippedVolatileCount,
       },

@@ -2,12 +2,8 @@
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { ContinuityArchiveObligations } from "../continuity/archive-obligations.js";
 import { verifyContinuitySqliteSnapshot } from "../continuity/sqlite-sanitize.js";
-import {
-  listContinuityStateSurfaces,
-  type ContinuityStateOwner,
-  type ContinuityStateTreatment,
-} from "../continuity/state-inventory.js";
 import { sha256Hex } from "../infra/crypto-digest.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { compareComparableSemver, parseComparableSemver } from "../infra/semver-compare.js";
@@ -66,16 +62,8 @@ export type ContinuityCompatibilityEvidence = {
   sqliteSchemas: MaterializedSqliteSchemaEvidence[];
 };
 
-export type ContinuitySurfaceObligation = {
-  id: string;
-  owner: ContinuityStateOwner;
-  treatment: Exclude<ContinuityStateTreatment, "captured">;
-  sensitive: boolean;
-  disposition: "rebuild-before-activation" | "resolve-before-activation" | "reset-on-activation";
-};
-
 export type ContinuitySurfaceEvidence = {
-  obligations: ContinuitySurfaceObligation[];
+  obligations: ContinuityArchiveObligations;
   reconstructionPerformed: false;
   externalDependenciesResolved: false;
   transientsCreated: false;
@@ -444,27 +432,12 @@ function validateSqliteSchemas(
   });
 }
 
-function resolveSurfaceEvidence(): ContinuitySurfaceEvidence {
-  const dispositionByTreatment = {
-    reconstructed: "rebuild-before-activation",
-    external: "resolve-before-activation",
-    ephemeral: "reset-on-activation",
-  } as const;
-  const obligations = listContinuityStateSurfaces().flatMap((surface) =>
-    surface.treatment === "captured"
-      ? []
-      : [
-          {
-            id: surface.id,
-            owner: surface.owner,
-            treatment: surface.treatment,
-            sensitive: surface.sensitive,
-            disposition: dispositionByTreatment[surface.treatment],
-          },
-        ],
-  );
+function resolveSurfaceEvidence(manifest: BackupManifest): ContinuitySurfaceEvidence {
+  if (!manifest.continuityObligations) {
+    throw new Error("Continuity materialization requires artifact-specific obligations.");
+  }
   return {
-    obligations,
+    obligations: manifest.continuityObligations,
     reconstructionPerformed: false,
     externalDependenciesResolved: false,
     transientsCreated: false,
@@ -480,7 +453,7 @@ function formatResult(result: BackupMaterializeResult): string {
     `Components materialized: ${result.components.length}`,
     `Files materialized: ${result.materializedFileCount}`,
     `Compatibility validated: ${result.compatibility.runtimeDecision}, ${result.compatibility.platformDecision}, ${result.compatibility.sqliteSchemas.length} SQLite database(s)`,
-    `Activation obligations remaining: ${result.surfaces.obligations.length}`,
+    "Activation obligations remaining: 5",
     "This is an offline filesystem root; it has not been activated and does not establish effective Archived.",
   ].join("\n");
 }
@@ -543,7 +516,7 @@ async function materializeContinuityArchive(
       ...validateRuntimeCompatibility(manifest),
       sqliteSchemas: validateSqliteSchemas(retrievedDirectory, manifest),
     };
-    const surfaces = resolveSurfaceEvidence();
+    const surfaces = resolveSurfaceEvidence(manifest);
 
     await fs.mkdir(destination, { mode: 0o700 });
     destinationCreated = true;
