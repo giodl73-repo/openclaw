@@ -22,6 +22,7 @@ openclaw backup create --only-config
 openclaw backup verify ./2026-03-09T08-00-00.000+08-00-openclaw-backup.tar.gz
 openclaw backup retrieve ./backup.tar.gz --destination ./restored
 openclaw backup materialize ./continuity.tar.gz --destination ./offline-root
+openclaw backup plan-restore ./continuity.tar.gz --materialized ./offline-root --authorize ~/.openclaw ~/.openclaw.json
 ```
 
 ## Notes
@@ -36,6 +37,7 @@ openclaw backup materialize ./continuity.tar.gz --destination ./offline-root
 - Retrieval rejects links, special entries, unsafe paths, and archives that exceed its entry or expanded-size safety limits. If extraction fails, OpenClaw removes the incomplete destination.
 - Retrieval does **not** activate the staged files as live OpenClaw state. Inspect the staging directory manually; native restore and activation are not implemented by this command.
 - `openclaw backup materialize <archive> --destination <path>` accepts only a verified continuity artifact with a complete component graph. It copies state, config, and workspace files into a new owner-private offline filesystem root in declared dependency order and writes `.openclaw-continuity-materialization.json` with the exact archive and manifest identities.
+- `openclaw backup plan-restore <archive> --materialized <path> --authorize <path...>` re-verifies the continuity archive, matches its non-active materialization receipt, validates the safe tree shape, resolves exact original targets, and prints their publication groups. Every outer publication root must be listed explicitly. The result remains blocked on per-file materialized content identity, a launcher lease, and atomic no-replace publication. The command does not create restore staging, publish targets, or change Gateway startup.
 - Before creating the offline root, materialization rejects malformed or newer artifact runtime versions, artifacts captured on another platform, corrupt packaged SQLite databases, and newer shared-state or agent-state schemas. Arbitrary plugin and workspace databases are not interpreted as core schemas.
 - The materialization receipt reports `activated: false`, `activationReady: false`, and `effectiveArchived: false`. It projects the artifact's closed reconstruction, external-dependency, and ephemeral obligations; it does not infer executable work from the broad runtime state inventory.
 - Materialized absolute paths remain under their archive namespace (`posix/`, `windows/`, or `relative/`) inside the selected destination. Materialization never writes to the original source paths, activates live state, starts the Gateway, resolves credentials, or establishes effective Archived.

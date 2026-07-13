@@ -6,6 +6,7 @@ import { registerBackupCommand } from "./register.backup.js";
 const mocks = vi.hoisted(() => ({
   backupCreateCommand: vi.fn(),
   backupMaterializeCommand: vi.fn(),
+  backupPlanRestoreCommand: vi.fn(),
   backupRetrieveCommand: vi.fn(),
   backupVerifyCommand: vi.fn(),
   runtime: {
@@ -25,6 +26,10 @@ vi.mock("../../commands/backup.js", () => ({
 
 vi.mock("../../commands/backup-materialize.js", () => ({
   backupMaterializeCommand: mocks.backupMaterializeCommand,
+}));
+
+vi.mock("../../commands/backup-plan-restore.js", () => ({
+  backupPlanRestoreCommand: mocks.backupPlanRestoreCommand,
 }));
 
 vi.mock("../../commands/backup-retrieve.js", () => ({
@@ -50,6 +55,7 @@ describe("registerBackupCommand", () => {
     vi.clearAllMocks();
     backupCreateCommand.mockResolvedValue(undefined);
     mocks.backupMaterializeCommand.mockResolvedValue(undefined);
+    mocks.backupPlanRestoreCommand.mockResolvedValue(undefined);
     mocks.backupRetrieveCommand.mockResolvedValue(undefined);
     backupVerifyCommand.mockResolvedValue(undefined);
   });
@@ -138,6 +144,28 @@ describe("registerBackupCommand", () => {
     expect(options).toStrictEqual({
       archive: "/tmp/continuity.tar.gz",
       destination: "/tmp/offline-root",
+      json: true,
+    });
+  });
+
+  it("plans exact restore roots without activating them", async () => {
+    await runCli([
+      "backup",
+      "plan-restore",
+      "/tmp/continuity.tar.gz",
+      "--materialized",
+      "/tmp/offline-root",
+      "--authorize",
+      "/tmp/live-state",
+      "/tmp/live-config.json",
+      "--json",
+    ]);
+
+    const options = expectForwardedOptions(mocks.backupPlanRestoreCommand);
+    expect(options).toStrictEqual({
+      archive: "/tmp/continuity.tar.gz",
+      materialized: "/tmp/offline-root",
+      authorize: ["/tmp/live-state", "/tmp/live-config.json"],
       json: true,
     });
   });
