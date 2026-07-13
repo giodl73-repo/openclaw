@@ -51,6 +51,39 @@ function inventory(
   };
 }
 
+function continuityInventory(
+  entry: Partial<
+    Extract<HostIntegrationStatusInventoryV1["entries"][number], { kind: "lifecycle-restore-hold" }>
+  > = {},
+): HostIntegrationStatusInventoryV1 {
+  return {
+    version: "host-integration-status/v1",
+    bundle: {
+      id: "lobster/capi",
+      version: "1.0.0",
+      generation: "lobster/capi@1.0.0",
+    },
+    state: entry.state ?? "unresolved",
+    entries: [
+      {
+        owner: "continuity",
+        kind: "lifecycle-restore-hold",
+        id: "lobster/continuity",
+        version: "continuity-restore-hold/v1",
+        required: true,
+        readinessCriteria: ["continuity.restore-hold"],
+        status: "resolved",
+        resolvedVersion: "continuity-restore-hold/v1",
+        state: "unresolved",
+        reason: "OwnerEvidenceUnavailable",
+        message: "sensitive owner detail must not be copied",
+        generations: { bundle: "lobster/capi@1.0.0" },
+        ...entry,
+      },
+    ],
+  };
+}
+
 describe("host integration Doctor findings", () => {
   it("stays absent when no host integration bundle is registered", () => {
     expect(collectHostIntegrationHealthFindings()).toEqual([]);
@@ -223,12 +256,7 @@ describe("host integration Doctor findings", () => {
   it("exposes stable continuity reasons without owner detail", () => {
     expect(
       hostIntegrationStatusToHealthFindings(
-        inventory({
-          owner: "continuity",
-          kind: "lifecycle-restore-hold",
-          id: "lobster/continuity",
-          version: "continuity-restore-hold/v1",
-          readinessCriteria: ["continuity.restore-hold"],
+        continuityInventory({
           state: "unavailable",
           reason: "RestoreQuarantined",
           message: "restore-identity=secret receipt-identity=secret",
