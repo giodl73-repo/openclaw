@@ -1,18 +1,25 @@
 // Verifies backup archives by validating their manifest, payload entries, and hardlink targets.
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import * as tar from "tar";
 import {
+  parseContinuityArchiveCapture,
+  type ContinuityArchiveCapture,
+} from "../continuity/archive-manifest.js";
+import {
   BACKUP_CONTINUITY_BLOCKER_CODES,
   BACKUP_CONTINUITY_TARGET_LEVEL,
   type BackupContinuityAssessment,
   type BackupContinuityBlockerCode,
 } from "../continuity/backup-assessment.js";
-import { sha256Hex } from "../infra/crypto-digest.js";
+import { verifyContinuitySqliteSnapshot } from "../continuity/sqlite-sanitize.js";
+import { sha256File, sha256Hex } from "../infra/crypto-digest.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { isRecord, resolveUserPath } from "../utils.js";
 import {
@@ -23,16 +30,19 @@ import {
 const WINDOWS_ABSOLUTE_ARCHIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 export const DEFAULT_BACKUP_VERIFY_MAX_ENTRIES = 1_000_000;
+export const DEFAULT_BACKUP_VERIFY_MAX_CONTENT_BYTES = 16 * 1024 ** 3;
 
 type BackupManifestAsset = {
   kind: string;
   sourcePath: string;
   archivePath: string;
   component?: BackupManifestComponent;
+  contentSha256?: string;
 };
 
 type BackupManifest = {
   schemaVersion: number;
+  artifactType: "backup" | "continuity";
   createdAt: string;
   archiveRoot: string;
   runtimeVersion: string;
@@ -55,16 +65,21 @@ type BackupManifest = {
     coveredBy?: string;
   }>;
   continuityAssessment?: BackupContinuityAssessment;
+  continuityCapture?: ContinuityArchiveCapture;
+  stateFilePaths?: string[];
+  sanitizedSqlitePaths?: string[];
 };
 
 type BackupVerifyOptions = {
   archive: string;
   json?: boolean;
   maxEntries?: number;
+  maxContentBytes?: number;
 };
 
 export type BackupVerifyResult = {
   ok: true;
+  artifactType: "backup" | "continuity";
   archivePath: string;
   archiveRoot: string;
   createdAt: string;
@@ -75,12 +90,14 @@ export type BackupVerifyResult = {
   archiveSha256: string;
   manifestSha256: string;
   continuityAssessment?: BackupContinuityAssessment;
+  continuityCapture?: ContinuityArchiveCapture;
 };
 
 type ArchiveEntry = {
   path: string;
   linkpath?: string;
   type?: string;
+  size?: number;
 };
 
 function stripTrailingSlashes(value: string): string {
@@ -215,6 +232,37 @@ function parseManifest(raw: string): BackupManifest {
   if (!Array.isArray(parsed.assets)) {
     throw new Error("Backup manifest is missing assets.");
   }
+  const artifactType =
+    parsed.artifactType === undefined
+      ? "backup"
+      : parsed.artifactType === "backup" || parsed.artifactType === "continuity"
+        ? parsed.artifactType
+        : undefined;
+  if (!artifactType) {
+    throw new Error(`Unsupported backup artifactType: ${String(parsed.artifactType)}`);
+  }
+  const continuityAssessment = parseContinuityAssessment(parsed.continuityAssessment);
+  const continuityCapture =
+    parsed.continuityCapture === undefined
+      ? undefined
+      : parseContinuityArchiveCapture(parsed.continuityCapture);
+  const sanitizedSqlitePaths =
+    parsed.sanitizedSqlitePaths === undefined
+      ? undefined
+      : readStringArray(parsed.sanitizedSqlitePaths, "Continuity manifest sanitizedSqlitePaths");
+  const stateFilePaths =
+    parsed.stateFilePaths === undefined
+      ? undefined
+      : readStringArray(parsed.stateFilePaths, "Continuity manifest stateFilePaths");
+  if (artifactType === "continuity") {
+    if (!continuityCapture || !stateFilePaths || !sanitizedSqlitePaths || continuityAssessment) {
+      throw new Error(
+        "Continuity artifacts require successful capture metadata, state and SQLite inventories, and no backup assessment.",
+      );
+    }
+  } else if (continuityCapture || stateFilePaths || sanitizedSqlitePaths) {
+    throw new Error("Ordinary backup artifacts cannot claim continuity capture metadata.");
+  }
 
   const assets: BackupManifestAsset[] = [];
   for (const asset of parsed.assets) {
@@ -252,12 +300,14 @@ function parseManifest(raw: string): BackupManifest {
       sourcePath: asset.sourcePath,
       archivePath: asset.archivePath,
       ...(component ? { component } : {}),
+      ...(typeof asset.contentSha256 === "string" ? { contentSha256: asset.contentSha256 } : {}),
     });
   }
   validateBackupManifestComponents(assets);
 
   return {
     schemaVersion: 1,
+    artifactType,
     archiveRoot: parsed.archiveRoot,
     createdAt: parsed.createdAt,
     runtimeVersion:
@@ -283,7 +333,10 @@ function parseManifest(raw: string): BackupManifest {
       : undefined,
     assets,
     skipped: Array.isArray(parsed.skipped) ? parsed.skipped : undefined,
-    continuityAssessment: parseContinuityAssessment(parsed.continuityAssessment),
+    continuityAssessment,
+    continuityCapture,
+    stateFilePaths,
+    sanitizedSqlitePaths,
   };
 }
 
@@ -335,6 +388,7 @@ async function inspectArchive(
         path: entry.path,
         ...(entry.linkpath ? { linkpath: entry.linkpath } : {}),
         ...(entry.type ? { type: entry.type } : {}),
+        ...(Number.isSafeInteger(entry.size) && entry.size >= 0 ? { size: entry.size } : {}),
       });
       if (!isRootManifestEntry(entry.path)) {
         entry.resume();
@@ -370,7 +424,11 @@ function isRootManifestEntry(entryPath: string): boolean {
   return parts.length === 2 && parts[0] !== "" && parts[1] === "manifest.json";
 }
 
-function verifyManifestAgainstEntries(manifest: BackupManifest, entries: Set<string>): void {
+function verifyManifestAgainstEntries(
+  manifest: BackupManifest,
+  entries: Set<string>,
+  typedEntries: Array<{ normalized: string; type?: string }>,
+): void {
   const archiveRoot = normalizeArchiveRoot(manifest.archiveRoot);
   const manifestEntryPath = path.posix.join(archiveRoot, "manifest.json");
   const normalizedEntries = [...entries];
@@ -383,6 +441,143 @@ function verifyManifestAgainstEntries(manifest: BackupManifest, entries: Set<str
   for (const entry of normalizedEntries) {
     if (!isArchivePathWithin(entry, archiveRoot)) {
       throw new Error(`Archive entry is outside the declared archive root: ${entry}`);
+    }
+  }
+
+  function verifyContinuityManifestAgainstEntries(
+    continuityManifest: BackupManifest,
+    continuityEntries: Array<{ normalized: string; type?: string }>,
+  ): void {
+    const capture = continuityManifest.continuityCapture;
+    if (!capture) {
+      return;
+    }
+    const unsupportedEntry = continuityEntries.find(
+      (entry) => entry.type !== "File" && entry.type !== "Directory",
+    );
+    if (unsupportedEntry) {
+      throw new Error(
+        `Continuity archive contains unsupported entry type: ${unsupportedEntry.normalized}`,
+      );
+    }
+    const stateAssets = continuityManifest.assets.filter((asset) => asset.kind === "state");
+    const rootConfigAssets = continuityManifest.assets.filter((asset) => asset.kind === "config");
+    const configAssets = continuityManifest.assets.filter(
+      (asset) => asset.kind === "config" || asset.kind === "config-include",
+    );
+    const workspaceAssets = continuityManifest.assets.filter((asset) => asset.kind === "workspace");
+    const unsupportedAsset = continuityManifest.assets.find(
+      (asset) =>
+        asset.kind !== "state" &&
+        asset.kind !== "config" &&
+        asset.kind !== "config-include" &&
+        asset.kind !== "workspace",
+    );
+    if (
+      unsupportedAsset ||
+      stateAssets.length !== 1 ||
+      rootConfigAssets.length !== 1 ||
+      configAssets.length !== capture.evidence.configFileCount ||
+      workspaceAssets.length !== capture.evidence.workspaceCount ||
+      continuityManifest.assets.some((asset) => asset.component === undefined)
+    ) {
+      throw new Error("Continuity manifest assets are inconsistent with capture evidence.");
+    }
+    if (
+      configAssets.some(
+        (asset) => !asset.contentSha256 || !/^[a-f0-9]{64}$/u.test(asset.contentSha256),
+      )
+    ) {
+      throw new Error("Continuity config assets require SHA-256 content identities.");
+    }
+
+    const continuityRoot = normalizeArchiveRoot(continuityManifest.archiveRoot);
+    const continuityManifestEntryPath = path.posix.join(continuityRoot, "manifest.json");
+    const fileEntries = continuityEntries.filter((entry) => entry.type === "File");
+    const directoryEntrySet = new Set(
+      continuityEntries
+        .filter((entry) => entry.type === "Directory")
+        .map((entry) => entry.normalized),
+    );
+    const payloadFiles = fileEntries.filter(
+      (entry) => entry.normalized !== continuityManifestEntryPath,
+    );
+    const payloadFileSet = new Set(payloadFiles.map((entry) => entry.normalized));
+    const configAssetPaths = configAssets.map((asset) =>
+      normalizeArchivePath(asset.archivePath, "Continuity config asset path"),
+    );
+    const workspaceAssetPaths = workspaceAssets.map((asset) =>
+      normalizeArchivePath(asset.archivePath, "Continuity workspace asset path"),
+    );
+    if (
+      configAssetPaths.some((assetPath) => !payloadFileSet.has(assetPath)) ||
+      workspaceAssetPaths.some((assetPath) => !directoryEntrySet.has(assetPath))
+    ) {
+      throw new Error("Continuity config and workspace assets have invalid archive entry types.");
+    }
+    const uncoveredFile = payloadFiles.find(
+      (entry) =>
+        !continuityManifest.assets.some((asset) =>
+          isArchivePathWithin(
+            entry.normalized,
+            normalizeArchivePath(asset.archivePath, "Continuity manifest asset path"),
+          ),
+        ),
+    );
+    if (uncoveredFile) {
+      throw new Error(
+        `Continuity archive file is not covered by an asset: ${uncoveredFile.normalized}`,
+      );
+    }
+    if (payloadFiles.length !== capture.evidence.copiedFileCount) {
+      throw new Error("Continuity archive file count does not match capture evidence.");
+    }
+
+    const stateAssetPath = normalizeArchivePath(
+      stateAssets[0]!.archivePath,
+      "Continuity state asset path",
+    );
+    const separatelyCapturedPaths = [...configAssetPaths, ...workspaceAssetPaths];
+    const stateFilePaths = (continuityManifest.stateFilePaths ?? []).map((entryPath) =>
+      normalizeArchivePath(entryPath, "Continuity state file path"),
+    );
+    const sanitizedSqlitePaths = (continuityManifest.sanitizedSqlitePaths ?? []).map((entryPath) =>
+      normalizeArchivePath(entryPath, "Continuity sanitized SQLite path"),
+    );
+    const expectedSanitizedSqlitePaths = stateFilePaths.filter((entryPath) =>
+      entryPath.toLowerCase().endsWith(".sqlite"),
+    );
+    const sqliteSidecarPath = stateFilePaths.find((entryPath) =>
+      /\.sqlite-(?:wal|shm|journal)$/iu.test(entryPath),
+    );
+    const unownedFile = payloadFiles.find(
+      (entry) =>
+        !stateFilePaths.includes(entry.normalized) &&
+        !configAssetPaths.includes(entry.normalized) &&
+        !workspaceAssetPaths.some((assetPath) => isArchivePathWithin(entry.normalized, assetPath)),
+    );
+    if (
+      new Set(stateFilePaths).size !== stateFilePaths.length ||
+      stateFilePaths.some(
+        (entryPath) =>
+          !isArchivePathWithin(entryPath, stateAssetPath) ||
+          !payloadFileSet.has(entryPath) ||
+          separatelyCapturedPaths.some((assetPath) => isArchivePathWithin(entryPath, assetPath)),
+      ) ||
+      sqliteSidecarPath ||
+      unownedFile ||
+      new Set(sanitizedSqlitePaths).size !== sanitizedSqlitePaths.length ||
+      sanitizedSqlitePaths.length !== capture.evidence.sqliteSnapshotCount ||
+      sanitizedSqlitePaths.length !== expectedSanitizedSqlitePaths.length ||
+      sanitizedSqlitePaths.some((entryPath) => !expectedSanitizedSqlitePaths.includes(entryPath)) ||
+      sanitizedSqlitePaths.some(
+        (entryPath) =>
+          !entryPath.toLowerCase().endsWith(".sqlite") ||
+          !isArchivePathWithin(entryPath, stateAssetPath) ||
+          !payloadFileSet.has(entryPath),
+      )
+    ) {
+      throw new Error("Continuity state and SQLite inventories do not match archive contents.");
     }
   }
 
@@ -399,6 +594,91 @@ function verifyManifestAgainstEntries(manifest: BackupManifest, entries: Set<str
     if (!exact && !nested) {
       throw new Error(`Archive is missing payload for manifest asset: ${assetArchivePath}`);
     }
+  }
+  verifyContinuityManifestAgainstEntries(manifest, typedEntries);
+}
+
+async function verifyContinuityManifestContents(params: {
+  archivePath: string;
+  manifest: BackupManifest;
+  entries: Array<{ normalized: string; type?: string; size?: number }>;
+  maxContentBytes: number;
+}): Promise<void> {
+  if (!params.manifest.continuityCapture) {
+    return;
+  }
+  const configAssets = params.manifest.assets.filter(
+    (asset) => asset.kind === "config" || asset.kind === "config-include",
+  );
+  const sqlitePaths = (params.manifest.sanitizedSqlitePaths ?? []).map((entryPath) =>
+    normalizeArchivePath(entryPath, "Continuity sanitized SQLite path"),
+  );
+  const configPaths = configAssets.map((asset) =>
+    normalizeArchivePath(asset.archivePath, "Continuity config asset path"),
+  );
+  const selectedPaths = new Set([...sqlitePaths, ...configPaths]);
+  const selectedContentBytes = params.entries
+    .filter((entry) => entry.type === "File" && selectedPaths.has(entry.normalized))
+    .reduce((total, entry) => {
+      if (entry.size === undefined) {
+        throw new Error(`Continuity archive entry is missing its size: ${entry.normalized}`);
+      }
+      return total + entry.size;
+    }, 0);
+  if (
+    !Number.isSafeInteger(selectedContentBytes) ||
+    selectedContentBytes > params.maxContentBytes
+  ) {
+    throw new Error(
+      `Continuity verification content exceeds the ${params.maxContentBytes}-byte limit.`,
+    );
+  }
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-continuity-verify-"));
+  await fs.chmod(tempDir, 0o700);
+  let operationError: unknown;
+  try {
+    await tar.x({
+      file: params.archivePath,
+      cwd: tempDir,
+      gzip: true,
+      preserveOwner: false,
+      preservePaths: false,
+      strict: true,
+      filter: (entryPath) => selectedPaths.has(stripTrailingSlashes(entryPath)),
+    });
+    for (const asset of configAssets) {
+      const archivePath = normalizeArchivePath(asset.archivePath, "Continuity config asset path");
+      const extractedPath = path.join(tempDir, ...archivePath.split("/"));
+      if ((await sha256File(extractedPath)) !== asset.contentSha256) {
+        throw new Error(`Continuity config content identity mismatch: ${archivePath}`);
+      }
+    }
+    for (const archivePath of sqlitePaths) {
+      verifyContinuitySqliteSnapshot(path.join(tempDir, ...archivePath.split("/")));
+    }
+  } catch (error) {
+    operationError = error;
+  }
+  let cleanupError: unknown;
+  try {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  } catch (error) {
+    cleanupError = error;
+  }
+  if (operationError !== undefined) {
+    if (cleanupError !== undefined) {
+      throw new AggregateError(
+        [operationError, cleanupError],
+        "Continuity content verification failed and temporary cleanup was incomplete.",
+        { cause: operationError },
+      );
+    }
+    throw operationError;
+  }
+  if (cleanupError !== undefined) {
+    throw new Error("Continuity content verification cleanup failed.", {
+      cause: cleanupError,
+    });
   }
 }
 
@@ -430,7 +710,7 @@ function verifyHardlinkTargetsAgainstArchiveRoot(
 
 function formatResult(result: BackupVerifyResult): string {
   return [
-    `Backup archive OK: ${result.archivePath}`,
+    `${result.artifactType === "continuity" ? "Continuity" : "Backup"} archive OK: ${result.archivePath}`,
     `Archive root: ${result.archiveRoot}`,
     `Created at: ${result.createdAt}`,
     `Runtime version: ${result.runtimeVersion}`,
@@ -443,6 +723,12 @@ function formatResult(result: BackupVerifyResult): string {
       ? [
           `Archived continuity eligible: ${result.continuityAssessment.eligible ? "yes" : "no"}`,
           `Continuity blockers: ${result.continuityAssessment.blockers.map((blocker) => blocker.code).join(", ")}`,
+        ]
+      : []),
+    ...(result.continuityCapture
+      ? [
+          "Archived continuity eligible: yes",
+          `SQLite snapshots sanitized: ${result.continuityCapture.evidence.sqliteSnapshotCount}`,
         ]
       : []),
   ].join("\n");
@@ -468,8 +754,12 @@ export async function backupVerifyCommand(
 ): Promise<BackupVerifyResult> {
   const archivePath = resolveUserPath(opts.archive);
   const maxEntries = opts.maxEntries ?? DEFAULT_BACKUP_VERIFY_MAX_ENTRIES;
+  const maxContentBytes = opts.maxContentBytes ?? DEFAULT_BACKUP_VERIFY_MAX_CONTENT_BYTES;
   if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
     throw new Error("Backup verify maxEntries must be a positive safe integer.");
+  }
+  if (!Number.isSafeInteger(maxContentBytes) || maxContentBytes <= 0) {
+    throw new Error("Backup verify maxContentBytes must be a positive safe integer.");
   }
   const inspection = await inspectArchive(archivePath, maxEntries);
   const rawEntries = inspection.entries;
@@ -480,6 +770,8 @@ export async function backupVerifyCommand(
   const entries = rawEntries.map((entry) => ({
     raw: entry.path,
     normalized: normalizeArchivePath(entry.path, "Archive entry"),
+    ...(entry.type ? { type: entry.type } : {}),
+    ...(entry.size !== undefined ? { size: entry.size } : {}),
   }));
   const hardlinkTargets = rawEntries
     .filter((entry) => entry.type === "Link" && entry.linkpath)
@@ -506,15 +798,22 @@ export async function backupVerifyCommand(
   }
   const manifestRaw = manifestRawBytes.toString("utf8");
   const manifest = parseManifest(manifestRaw);
-  verifyManifestAgainstEntries(manifest, normalizedEntrySet);
+  verifyManifestAgainstEntries(manifest, normalizedEntrySet, entries);
   verifyHardlinkTargetsAgainstArchiveRoot(
     hardlinkTargets,
     manifest.archiveRoot,
     normalizedEntrySet,
   );
+  await verifyContinuityManifestContents({
+    archivePath,
+    manifest,
+    entries,
+    maxContentBytes,
+  });
 
   const result: BackupVerifyResult = {
     ok: true,
+    artifactType: manifest.artifactType,
     archivePath,
     archiveRoot: manifest.archiveRoot,
     createdAt: manifest.createdAt,
@@ -527,6 +826,7 @@ export async function backupVerifyCommand(
     ...(manifest.continuityAssessment
       ? { continuityAssessment: manifest.continuityAssessment }
       : {}),
+    ...(manifest.continuityCapture ? { continuityCapture: manifest.continuityCapture } : {}),
   };
 
   if (opts.json) {

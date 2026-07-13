@@ -198,7 +198,7 @@ async function removeBackupTempArchiveBestEffort(tempArchivePath: string): Promi
   await fs.rm(tempArchivePath, { force: true }).catch(() => undefined);
 }
 
-async function writeArchiveStreamToFile(params: {
+export async function writeArchiveStreamToFile(params: {
   archivePath: string;
   archiveStream: AsyncIterable<Uint8Array> | NodeJS.ReadableStream;
 }): Promise<void> {
@@ -368,7 +368,7 @@ function isLinkUnsupportedError(code: string | undefined): boolean {
   return code === "ENOTSUP" || code === "EOPNOTSUPP" || code === "EPERM";
 }
 
-async function publishTempArchive(params: {
+export async function publishTempArchive(params: {
   tempArchivePath: string;
   outputPath: string;
 }): Promise<void> {
@@ -552,13 +552,13 @@ export function buildExtensionsNodeModulesFilter(stateDir: string): (filePath: s
   };
 }
 
-type SqliteBackupAsset = {
+export type SqliteBackupAsset = {
   sourcePath: string;
   archiveSourcePath: string;
   skippedSourcePaths: Set<string>;
 };
 
-type StateSqliteBackupPlan = {
+export type StateSqliteBackupPlan = {
   snapshots: SqliteBackupAsset[];
   discoveredSourcePaths: Set<string>;
   authProfileStoreRowCount: number;
@@ -598,7 +598,7 @@ function resolveSqliteBackupBasePath(sourcePath: string): string {
   return sourcePath;
 }
 
-function classifyStateSqliteBackupSourcePath(
+export function classifyStateSqliteBackupSourcePath(
   sourcePath: string,
   stateDir: string,
 ): "excluded" | "sqlite" | undefined {
@@ -654,6 +654,7 @@ function sanitizeGlobalStateSqliteSnapshot(db: DatabaseSync): void {
 async function listStateSqlitePaths(params: {
   stateDir: string;
   globalStateSqlitePath: string;
+  excludePaths?: readonly string[];
 }): Promise<{
   snapshotPaths: string[];
   discoveredSourcePaths: Set<string>;
@@ -661,6 +662,12 @@ async function listStateSqlitePaths(params: {
   const snapshotPaths = new Set<string>();
   const discoveredSourcePaths = new Set<string>();
   const extensionsFilter = buildExtensionsNodeModulesFilter(params.stateDir);
+  const isExcluded = (sourcePath: string) =>
+    (params.excludePaths ?? []).some(
+      (excludedPath) =>
+        path.resolve(sourcePath) === path.resolve(excludedPath) ||
+        isPathWithin(path.resolve(sourcePath), path.resolve(excludedPath)),
+    );
   async function visit(dir: string): Promise<void> {
     let entries: import("node:fs").Dirent[];
     try {
@@ -670,6 +677,9 @@ async function listStateSqlitePaths(params: {
     }
     for (const entry of entries) {
       const entryPath = path.join(dir, entry.name);
+      if (isExcluded(entryPath)) {
+        continue;
+      }
       // Preserve state-tree symlinks in the archive instead of dereferencing
       // their SQLite-looking targets during snapshot discovery.
       if (entry.isSymbolicLink()) {
@@ -704,7 +714,9 @@ async function listStateSqlitePaths(params: {
       throw err;
     }
   }
-  if (globalStateEntry?.isFile()) {
+  if (isExcluded(globalStateSqlitePath)) {
+    // The continuity path can exclude separately captured state subtrees.
+  } else if (globalStateEntry?.isFile()) {
     snapshotPaths.add(globalStateSqlitePath);
     discoveredSourcePaths.add(globalStateSqlitePath);
   } else if (globalStateEntry?.isSymbolicLink()) {
@@ -736,9 +748,11 @@ async function listStateSqlitePaths(params: {
   };
 }
 
-async function createStateSqliteBackupPlan(params: {
+export async function createStateSqliteBackupPlan(params: {
   stateDir: string;
   tempDir: string;
+  excludePaths?: readonly string[];
+  rejectHardlinks?: boolean;
 }): Promise<StateSqliteBackupPlan> {
   // Complete discovery before writing snapshots. chooseBackupTempRoot keeps
   // tempDir outside stateDir, and this ordering prevents future overlap from
@@ -752,6 +766,7 @@ async function createStateSqliteBackupPlan(params: {
   const discovery = await listStateSqlitePaths({
     stateDir: params.stateDir,
     globalStateSqlitePath,
+    excludePaths: params.excludePaths,
   });
   const sqlite = requireNodeSqlite();
   const snapshots: SqliteBackupAsset[] = [];
@@ -766,6 +781,11 @@ async function createStateSqliteBackupPlan(params: {
       path.resolve(archiveSourcePath) === globalStateSqlitePath
         ? await fs.realpath(archiveSourcePath)
         : archiveSourcePath;
+    if (params.rejectHardlinks && (await fs.stat(sourceDatabasePath)).nlink > 1) {
+      throw new Error(
+        `Continuity SQLite capture refuses hard-linked sources: ${archiveSourcePath}`,
+      );
+    }
     const source = new sqlite.DatabaseSync(sourceDatabasePath, {
       allowExtension: true,
       readOnly: true,
