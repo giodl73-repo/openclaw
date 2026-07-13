@@ -540,6 +540,8 @@ export type GatewayServerOptions = {
    * reparsing openclaw.json during server startup.
    */
   startupConfigSnapshotRead?: ReadConfigFileSnapshotWithPluginMetadataResult;
+  /** Keep CLI-composed configuration stable and read-only for this server lifetime. */
+  configLayersReadOnly?: boolean;
 };
 
 type SetupWizardRunner = NonNullable<GatewayServerOptions["wizardRunner"]>;
@@ -1647,6 +1649,13 @@ export async function startGatewayServer(
           deps,
           runtimeState,
           getRuntimeConfig,
+          ...(opts.configLayersReadOnly
+            ? {
+                configSnapshot,
+                configReadOnlyReason:
+                  "configuration writes are unavailable while --config-layer is active",
+              }
+            : {}),
           resolveTerminalLaunchPolicy: terminalLaunchPolicy.resolve,
           isTerminalEnabled: terminalLaunchPolicy.isEnabled,
           execApprovalManager,
@@ -1956,66 +1965,68 @@ export async function startGatewayServer(
     postAttachRuntimeReturned = true;
     activateScheduledServicesWhenReady();
 
-    const { startManagedGatewayConfigReloader } = await import("./server-reload-handlers.js");
-    runtimeState.configReloader = startManagedGatewayConfigReloader({
-      minimalTestGateway,
-      initialConfig: cfgAtStart,
-      initialCompareConfig: startupLastGoodSnapshot.sourceConfig,
-      initialInternalWriteHash: startupInternalWriteHash,
-      watchPath: configSnapshot.path,
-      readSnapshot: readConfigFileSnapshot,
-      promoteSnapshot: promoteConfigSnapshotToLastKnownGood,
-      subscribeToWrites: registerConfigWriteListener,
-      deps,
-      broadcast,
-      getState: () => ({
-        hooksConfig: runtimeState.hooksConfig,
-        hookClientIpConfig: runtimeState.hookClientIpConfig,
-        heartbeatRunner: runtimeState.heartbeatRunner,
-        cronState: runtimeState.cronState,
-        channelHealthMonitor: runtimeState.channelHealthMonitor,
-      }),
-      setState: (nextState) => {
-        const cronStateChanged = nextState.cronState !== runtimeState.cronState;
-        runtimeState.hooksConfig = nextState.hooksConfig;
-        runtimeState.hookClientIpConfig = nextState.hookClientIpConfig;
-        runtimeState.heartbeatRunner = nextState.heartbeatRunner;
-        runtimeState.cronState = nextState.cronState;
-        deps.cron = runtimeState.cronState.cron;
-        runtimeState.channelHealthMonitor = nextState.channelHealthMonitor;
-        if (cronStateChanged) {
+    if (!opts.configLayersReadOnly) {
+      const { startManagedGatewayConfigReloader } = await import("./server-reload-handlers.js");
+      runtimeState.configReloader = startManagedGatewayConfigReloader({
+        minimalTestGateway,
+        initialConfig: cfgAtStart,
+        initialCompareConfig: startupLastGoodSnapshot.sourceConfig,
+        initialInternalWriteHash: startupInternalWriteHash,
+        watchPath: configSnapshot.path,
+        readSnapshot: readConfigFileSnapshot,
+        promoteSnapshot: promoteConfigSnapshotToLastKnownGood,
+        subscribeToWrites: registerConfigWriteListener,
+        deps,
+        broadcast,
+        getState: () => ({
+          hooksConfig: runtimeState.hooksConfig,
+          hookClientIpConfig: runtimeState.hookClientIpConfig,
+          heartbeatRunner: runtimeState.heartbeatRunner,
+          cronState: runtimeState.cronState,
+          channelHealthMonitor: runtimeState.channelHealthMonitor,
+        }),
+        setState: (nextState) => {
+          const cronStateChanged = nextState.cronState !== runtimeState.cronState;
+          runtimeState.hooksConfig = nextState.hooksConfig;
+          runtimeState.hookClientIpConfig = nextState.hookClientIpConfig;
+          runtimeState.heartbeatRunner = nextState.heartbeatRunner;
+          runtimeState.cronState = nextState.cronState;
+          deps.cron = runtimeState.cronState.cron;
+          runtimeState.channelHealthMonitor = nextState.channelHealthMonitor;
+          if (cronStateChanged) {
+            gatewayCronStartHandled = true;
+          }
+        },
+        startChannel,
+        stopChannel,
+        getChannelAutostartSuppression: channelManager.getAutostartSuppression,
+        stopPostReadySidecars: stopRegisteredPostReadySidecars,
+        reloadPlugins: reloadAttachedGatewayPlugins,
+        logHooks,
+        logChannels,
+        logCron,
+        logReload,
+        cronReconciliation,
+        onCronRestart: () => {
           gatewayCronStartHandled = true;
-        }
-      },
-      startChannel,
-      stopChannel,
-      getChannelAutostartSuppression: channelManager.getAutostartSuppression,
-      stopPostReadySidecars: stopRegisteredPostReadySidecars,
-      reloadPlugins: reloadAttachedGatewayPlugins,
-      logHooks,
-      logChannels,
-      logCron,
-      logReload,
-      cronReconciliation,
-      onCronRestart: () => {
-        gatewayCronStartHandled = true;
-      },
-      reconcileTerminalSessions: (plan, nextConfig) => {
-        terminalLaunchPolicy.prepareConfig(nextConfig, { restartPending: plan.restartGateway });
-        terminalSessions.closeDisallowedAgents(
-          (agentId) => terminalLaunchPolicy.resolve(agentId).ok,
-        );
-      },
-      commitTerminalConfig: terminalLaunchPolicy.commitConfig,
-      channelManager,
-      activateRuntimeSecrets,
-      resolveSharedGatewaySessionGenerationForConfig,
-      sharedGatewaySessionGenerationState,
-      clients,
-    });
-    await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
-      log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
-    });
+        },
+        reconcileTerminalSessions: (plan, nextConfig) => {
+          terminalLaunchPolicy.prepareConfig(nextConfig, { restartPending: plan.restartGateway });
+          terminalSessions.closeDisallowedAgents(
+            (agentId) => terminalLaunchPolicy.resolve(agentId).ok,
+          );
+        },
+        commitTerminalConfig: terminalLaunchPolicy.commitConfig,
+        channelManager,
+        activateRuntimeSecrets,
+        resolveSharedGatewaySessionGenerationForConfig,
+        sharedGatewaySessionGenerationState,
+        clients,
+      });
+      await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
+        log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
+      });
+    }
     if (!minimalTestGateway) {
       const gatewayRuntimeServices = await loadScheduledServicesModule();
       postReadyMaintenanceTimer = gatewayRuntimeServices.scheduleGatewayPostReadyMaintenance({

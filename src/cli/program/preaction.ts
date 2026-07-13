@@ -153,26 +153,33 @@ export function registerPreActionHooks(program: Command, programVersion: string)
     ) {
       return;
     }
+    let managedConfigActive = false;
     let beforeStateMigrations: ((snapshot?: ConfigFileSnapshot) => Promise<boolean>) | undefined;
     if (isGatewayRunAction(actionCommand)) {
       const { prepareGatewayRunBootstrap, recheckGatewayRunBootstrap } =
         await import("../gateway-cli/pre-bootstrap.js");
       const { resolveGatewayRunOptions } = await import("../gateway-cli/run-options.js");
       const resolvedOptions = resolveGatewayRunOptions(actionCommand.opts(), actionCommand);
-      const opts = {
-        force: resolvedOptions.force === true,
-        reset: resolvedOptions.reset === true,
-      };
-      const shouldBootstrap = await prepareGatewayRunBootstrap({ opts, runtime: defaultRuntime });
-      if (!shouldBootstrap) {
-        return;
+      managedConfigActive =
+        (typeof resolvedOptions.configLayer === "string" &&
+          resolvedOptions.configLayer.length > 0) ||
+        (Array.isArray(resolvedOptions.configLayer) && resolvedOptions.configLayer.length > 0);
+      if (!managedConfigActive) {
+        const opts = {
+          force: resolvedOptions.force === true,
+          reset: resolvedOptions.reset === true,
+        };
+        const shouldBootstrap = await prepareGatewayRunBootstrap({ opts, runtime: defaultRuntime });
+        if (!shouldBootstrap) {
+          return;
+        }
+        beforeStateMigrations = (snapshot) =>
+          recheckGatewayRunBootstrap({
+            opts,
+            runtime: defaultRuntime,
+            ...(snapshot ? { snapshot } : {}),
+          });
       }
-      beforeStateMigrations = (snapshot) =>
-        recheckGatewayRunBootstrap({
-          opts,
-          runtime: defaultRuntime,
-          ...(snapshot ? { snapshot } : {}),
-        });
     }
     await ensureCliExecutionBootstrap({
       runtime: defaultRuntime,
@@ -180,7 +187,7 @@ export function registerPreActionHooks(program: Command, programVersion: string)
       startupPolicy,
       allowInvalid: shouldAllowInvalidConfigForAction(actionCommand, commandPath),
       ...(beforeStateMigrations ? { beforeStateMigrations } : {}),
-      skipConfigGuard: shouldBypassConfigGuardForCommandPath(commandPath),
+      skipConfigGuard: managedConfigActive || shouldBypassConfigGuardForCommandPath(commandPath),
     });
     if (beforeStateMigrations) {
       const { reloadTrustedGatewayRunEnvironment } =
