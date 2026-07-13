@@ -175,6 +175,61 @@ describe("provider request traffic policy", () => {
     });
   });
 
+  it("matches WebIQ only as request-response web-search traffic", () => {
+    registerProviderRequestTrafficPolicyV1(
+      registration({
+        rules: [
+          ...registration().rules,
+          {
+            id: "webiq",
+            match: {
+              providers: ["webiq"],
+              capabilities: ["web-search"],
+              transports: ["request-response"],
+              endpointClasses: ["custom"],
+            },
+            outcome: {
+              action: "allow",
+              routeProfileId: "lobster/managed",
+              allowedOrigins: ["https://api.microsoft.ai"],
+              allowPrivateNetwork: false,
+              maximumTimeoutMs: 30_000,
+            },
+          },
+        ],
+      }),
+    );
+    const webIqFacts: ProviderRequestTrafficPolicyFactsV1 = {
+      provider: "webiq",
+      capability: "web-search",
+      transport: "request-response",
+      endpointClass: "custom",
+      url: "https://api.microsoft.ai/v3/search/web",
+      allowPrivateNetwork: false,
+    };
+    expect(evaluateCurrentProviderRequestTrafficPolicyV1(webIqFacts)).toMatchObject({
+      action: "allow",
+      routeProfileId: "lobster/managed",
+      dispatchBindingId: "lobster/egress",
+    });
+    for (const [factsOverride, reason] of [
+      [{ capability: "llm" as const }, "RequiredPolicyNoMatch"],
+      [{ transport: "stream" as const }, "RequiredPolicyNoMatch"],
+      [{ url: "https://other.example.test/v3/search/web" }, "DestinationOutsidePolicy"],
+      [{ provider: "microsoft-capi" }, "RequiredPolicyNoMatch"],
+    ] as const) {
+      expect(
+        evaluateCurrentProviderRequestTrafficPolicyV1({
+          ...webIqFacts,
+          ...factsOverride,
+        }),
+      ).toMatchObject({
+        action: "deny",
+        reason,
+      });
+    }
+  });
+
   it("denies conflicting route selections and configured proxy replacement", () => {
     const conflictingRule = {
       id: "second-route",

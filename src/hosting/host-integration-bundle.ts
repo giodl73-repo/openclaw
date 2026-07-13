@@ -6,6 +6,10 @@ export type HostIntegrationContributionTypeV1 =
       kind: "model-provider-adapter";
     }
   | {
+      owner: "web-search-provider";
+      kind: "web-search-provider-adapter";
+    }
+  | {
       owner: "provider-request";
       kind: "credential-slot-resolver";
     }
@@ -139,6 +143,15 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
     return {
       owner: "model-provider",
       kind: "model-provider-adapter",
+    };
+  }
+  if (
+    contribution.owner === "web-search-provider" &&
+    contribution.kind === "web-search-provider-adapter"
+  ) {
+    return {
+      owner: "web-search-provider",
+      kind: "web-search-provider-adapter",
     };
   }
   if (

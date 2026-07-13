@@ -1,0 +1,42 @@
+{
+  "request": {
+    "config": {
+      "version": "webiq-web-search-provider-adapter/v1",
+      "baseUrl": "https://api.microsoft.ai",
+      "region": "US",
+      "language": "en",
+      "contentFormat": "passage",
+      "maxLength": 6000
+    },
+    "request": {
+      "query": "OpenClaw hosted integrations",
+      "maxResults": 5
+    }
+  },
+  "expected": {
+    "url": "https://api.microsoft.ai/v3/search/web",
+    "credentialSlotRefs": ["lobster/webiq-key"],
+    "headers": {
+      "accept": "application/json",
+      "content-type": "application/json"
+    },
+    "body": {
+      "query": "OpenClaw hosted integrations",
+      "maxResults": 5,
+      "region": "US",
+      "language": "en",
+      "contentFormat": "passage",
+      "maxLength": 6000
+    }
+  },
+  "response": {
+    "webResults": [
+      {
+        "title": "OpenClaw",
+        "url": "https://openclaw.ai/",
+        "content": "Hosted integration documentation.",
+        "isAdult": false
+      }
+    ]
+  }
+}
