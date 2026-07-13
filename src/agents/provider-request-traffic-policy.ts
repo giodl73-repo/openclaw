@@ -9,10 +9,10 @@ export type ProviderRequestTrafficPolicyProvenanceV1 = {
   revision: string;
 };
 
-// V1 is attached only to the guarded streaming LLM fetch path. Additional
-// capabilities and transports require equivalent enforcement before expansion.
-export type ProviderRequestTrafficPolicyCapabilityV1 = "llm";
-export type ProviderRequestTrafficPolicyTransportV1 = "stream";
+// V1 is attached only to guarded provider fetch paths with equivalent
+// redirect, credential-slot, dispatcher, and network-policy enforcement.
+export type ProviderRequestTrafficPolicyCapabilityV1 = "llm" | "web-search";
+export type ProviderRequestTrafficPolicyTransportV1 = "stream" | "request-response";
 
 export type ProviderRequestTrafficPolicyMatchV1 = {
   providers?: readonly string[];

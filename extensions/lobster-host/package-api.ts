@@ -3,7 +3,7 @@ import type { HostIntegrationBundleManifestV1 } from "openclaw/plugin-sdk/types"
 export const LOBSTER_HOST_BUNDLE_MANIFEST_V1 = {
   version: "host-integration-bundle/v1",
   id: "lobster/host",
-  bundleVersion: "1.0.0",
+  bundleVersion: "1.1.0",
   contributions: [
     {
       owner: "model-provider",
@@ -20,6 +20,22 @@ export const LOBSTER_HOST_BUNDLE_MANIFEST_V1 = {
       version: "credential-slot-resolver/v1",
       required: true,
       readinessCriteria: ["provider.request.credentials.capi"],
+    },
+    {
+      owner: "web-search-provider",
+      kind: "web-search-provider-adapter",
+      id: "lobster/webiq",
+      version: "webiq-web-search-provider-adapter/v1",
+      required: true,
+      readinessCriteria: ["web-search.provider.webiq"],
+    },
+    {
+      owner: "provider-request",
+      kind: "credential-slot-resolver",
+      id: "lobster/webiq-key",
+      version: "credential-slot-resolver/v1",
+      required: true,
+      readinessCriteria: ["provider.request.credentials.webiq"],
     },
     {
       owner: "provider-request",
