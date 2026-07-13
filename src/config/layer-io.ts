@@ -4,6 +4,7 @@ import {
   identifyAuthorityChain,
   writeConfigLayer,
   type LayerWriteFinding,
+  type LayerWriteResult,
   type PersistConfigLayer,
 } from "./layer-management.js";
 import {
@@ -29,6 +30,19 @@ export type ManagedConfigReadiness = {
   attemptGeneration: number;
 };
 
+export type ManagedConfigIO = {
+  configIO: ReturnType<typeof createConfigIO>;
+  activate: () => Promise<LayerActivationResult>;
+  write: (params: {
+    targetLayerId: string;
+    proposedContent: string | Uint8Array;
+    expectedTargetDigest: string;
+    expectedAuthorityChainIdentity: string;
+  }) => Promise<LayerWriteResult>;
+  inspect: LayerGenerationJournal["inspect"];
+  readiness: () => ManagedConfigReadiness;
+};
+
 export function getManagedConfigReadiness(): ManagedConfigReadiness | null {
   return registeredJournal?.readiness() ?? null;
 }
@@ -48,7 +62,7 @@ export function createManagedConfigIO<Source>(params: {
   persist: PersistConfigLayer<Source>;
   publish: (candidate: LayerActivationCandidate) => void | Promise<void>;
   configIO?: Parameters<typeof createConfigIO>[0];
-}) {
+}): ManagedConfigIO {
   if (registeredJournal !== null) {
     throw new Error("managed configuration I/O is already registered for this process");
   }
@@ -62,6 +76,7 @@ export function createManagedConfigIO<Source>(params: {
       resolveSource: params.resolveSource,
       parseSource: params.parseSource,
       publish: params.publish,
+      configIO: params.configIO,
     });
     if (result.valid) {
       journal.recordActivated(result.candidate);
@@ -73,7 +88,7 @@ export function createManagedConfigIO<Source>(params: {
 
   async function persistWithCurrentChainCheck(
     persistence: Parameters<PersistConfigLayer<Source>>[0],
-  ): Promise<void> {
+  ): Promise<{ persistedContent: string | Uint8Array }> {
     const current = await resolveConfigLayerSources(
       params.descriptors,
       params.resolveSource,
@@ -90,7 +105,7 @@ export function createManagedConfigIO<Source>(params: {
     ) {
       throw new Error("managed configuration chain changed before persistence; reload and retry");
     }
-    await params.persist(persistence);
+    return await params.persist(persistence);
   }
 
   async function write(writeParams: {
@@ -106,6 +121,7 @@ export function createManagedConfigIO<Source>(params: {
       parseSource: params.parseSource,
       persist: persistWithCurrentChainCheck,
       publish: params.publish,
+      configIO: params.configIO,
     });
     if (result.valid) {
       journal.recordActivated(result.candidate);

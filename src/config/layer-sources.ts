@@ -14,6 +14,7 @@ export type ConfigLayerDescriptor<Source> = {
 export type ResolvedConfigLayer = ConfigLayer & {
   access: ConfigLayerAccess;
   sourceIdentity: string;
+  sourceGenerationIdentity?: string;
   contentDigest: `sha256:${string}`;
 };
 
@@ -35,11 +36,15 @@ export type ConfigLayerSourceFinding = {
 export type ResolveConfigLayerSource<Source> = (
   source: Source,
   context: { layerId: string },
-) => Promise<{ content: string | Uint8Array; sourceIdentity: string }>;
+) => Promise<{
+  content: string | Uint8Array;
+  sourceIdentity: string;
+  sourceGenerationIdentity?: string;
+}>;
 
 export type ParseConfigLayerSource = (
   content: Uint8Array,
-  context: { layerId: string; sourceIdentity: string },
+  context: { layerId: string; sourceIdentity: string; source?: unknown },
 ) => unknown | Promise<unknown>;
 
 export type ResolveConfigLayerSourcesResult =
@@ -117,6 +122,7 @@ export async function resolveConfigLayerSources<Source>(
           const config = await parseSource(content, {
             layerId: descriptor.id,
             sourceIdentity: resolved.sourceIdentity,
+            source: descriptor.source,
           });
           return {
             layer: {
@@ -124,6 +130,9 @@ export async function resolveConfigLayerSources<Source>(
               config,
               access: descriptor.access,
               sourceIdentity: resolved.sourceIdentity,
+              ...(resolved.sourceGenerationIdentity
+                ? { sourceGenerationIdentity: resolved.sourceGenerationIdentity }
+                : {}),
               contentDigest,
             },
           };

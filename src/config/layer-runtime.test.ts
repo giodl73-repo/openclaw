@@ -74,6 +74,25 @@ describe("prepareLayeredRuntimeConfig", () => {
     }
   });
 
+  it("resolves the effective source with the managed environment", () => {
+    const result = prepareLayeredRuntimeConfig(
+      [
+        {
+          id: "tenant",
+          config: { gateway: { controlUi: { allowedOrigins: ["${TENANT_ORIGIN}"] } } },
+        },
+      ],
+      { env: { TENANT_ORIGIN: "https://tenant.example" } },
+    );
+
+    expect(result).toMatchObject({
+      valid: true,
+      sourceConfig: {
+        gateway: { controlUi: { allowedOrigins: ["https://tenant.example"] } },
+      },
+    });
+  });
+
   it("treats alternate authored representations as distinct exact claims", () => {
     const result = prepareLayeredRuntimeConfig([
       {
@@ -382,5 +401,17 @@ describe("activateLayeredRuntimeConfig", () => {
       },
     });
     expect(publish).toHaveBeenCalledOnce();
+  });
+});
+
+describe("effective managed source resolution", () => {
+  it("returns a structured finding when effective resolution fails", () => {
+    const result = prepareLayeredRuntimeConfig([
+      { id: "managed", config: { $include: "./missing-managed-config.json" } },
+    ]);
+    expect(result).toMatchObject({
+      valid: false,
+      findings: [{ reason: "InvalidEffectiveConfig", issues: [{ path: "" }] }],
+    });
   });
 });
