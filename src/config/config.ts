@@ -78,7 +78,9 @@ export type {
 } from "./mutate.js";
 export {
   assertConfigWriteAllowedInCurrentMode,
+  ManagedConfigMutationError,
   NixModeConfigMutationError,
+  setManagedConfigWritesBlocked,
 } from "./nix-mode-write-guard.js";
 export * from "./paths.js";
 export * from "./recovery-policy.js";

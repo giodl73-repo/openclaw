@@ -5,6 +5,7 @@ import { parseConfigJson5, resolveConfigSourceText } from "./io.js";
 import { createManagedConfigIO } from "./layer-io.js";
 import type { PersistConfigLayer } from "./layer-management.js";
 import type { LayerActivationCandidate } from "./layer-runtime.js";
+import { resolveConfigLayerSources } from "./layer-sources.js";
 import type {
   ConfigLayerDescriptor,
   ParseConfigLayerSource,
@@ -179,5 +180,9 @@ export function createLocalFileManagedConfigIO(params: {
     publish: params.publish,
     configIO: params.configIO,
   });
-  return facade;
+  return {
+    ...facade,
+    resolveLayers: async () =>
+      await resolveConfigLayerSources(params.descriptors, resolveSource, parseSource),
+  };
 }

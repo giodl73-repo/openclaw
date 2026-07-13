@@ -6,6 +6,29 @@ const NIX_OPENCLAW_AGENT_FIRST_URL = "https://github.com/openclaw/nix-openclaw#q
 /** Public OpenClaw Nix overview shown with immutable-config errors. */
 const OPENCLAW_NIX_OVERVIEW_URL = "https://docs.openclaw.ai/install/nix";
 
+let managedConfigWritesBlocked = false;
+
+/** Error thrown when CLI managed startup owns the effective config chain. */
+export class ManagedConfigMutationError extends Error {
+  readonly code = "OPENCLAW_MANAGED_CONFIG_IMMUTABLE";
+
+  constructor(params: { configPath?: string } = {}) {
+    super(
+      [
+        "Config writes are disabled in read-only managed configuration startup mode.",
+        ...(params.configPath ? [`Config path: ${params.configPath}`] : []),
+        "Edit the owning layer source and restart the Gateway.",
+      ].join("\n"),
+    );
+    this.name = "ManagedConfigMutationError";
+  }
+}
+
+/** Toggle the process-local write guard used only by the opt-in CLI startup surface. */
+export function setManagedConfigWritesBlocked(blocked: boolean): void {
+  managedConfigWritesBlocked = blocked;
+}
+
 /** Error thrown when a mutating config path is attempted while Nix owns config state. */
 export class NixModeConfigMutationError extends Error {
   readonly code = "OPENCLAW_NIX_MODE_CONFIG_IMMUTABLE";
@@ -36,6 +59,9 @@ export function assertConfigWriteAllowedInCurrentMode(
     env?: NodeJS.ProcessEnv;
   } = {},
 ): void {
+  if (managedConfigWritesBlocked) {
+    throw new ManagedConfigMutationError({ configPath: params.configPath });
+  }
   if (!resolveIsNixMode(params.env)) {
     return;
   }
