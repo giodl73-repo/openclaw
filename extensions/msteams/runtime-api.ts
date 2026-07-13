@@ -61,6 +61,18 @@ export type { PluginRuntime } from "openclaw/plugin-sdk/runtime-store";
 export type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
 export type { SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
 export { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
+export {
+  dispatchHostedProviderRequestV1,
+  PROVIDER_REQUEST_DISPATCHER_VERSION,
+  PROVIDER_REQUEST_TRAFFIC_POLICY_VERSION,
+  resolveHostIntegrationContributionFromSnapshotV1,
+  type HostIntegrationBundleSnapshotV1,
+  type HostIntegrationContributionReferenceV1,
+  type PreparedHostedProviderRequestV1,
+  type PreparedCredentialSlotBindingsV1,
+  type ProviderRequestHostedBindingImplementationsV1,
+  type ProviderRequestTrafficPolicyDecisionV1,
+} from "openclaw/plugin-sdk/provider-request-runtime";
 export { normalizeStringEntries } from "openclaw/plugin-sdk/string-normalization-runtime";
 export { chunkTextForOutbound } from "openclaw/plugin-sdk/text-chunking";
 export { DEFAULT_WEBHOOK_MAX_BODY_BYTES } from "openclaw/plugin-sdk/webhook-ingress";

@@ -1,0 +1,29 @@
+{
+  "version": "msteams-acf-channel-request-fixture/v1",
+  "request": {
+    "context": {
+      "tenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47",
+      "agentId": "28:agent-1",
+      "recipientId": "29:user-1",
+      "conversationId": "19:conversation@thread.tacv2"
+    },
+    "method": "POST",
+    "url": "https://smba.trafficmanager.net/amer/v3/conversations/19%3Aconversation%40thread.tacv2/activities",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "teams.ts[apps]/2.0.13 OpenClaw/2026.6.11"
+    },
+    "body": "{\"type\":\"message\",\"text\":\"hello\",\"from\":{\"id\":\"28:agent-1\",\"role\":\"bot\"},\"recipient\":{\"id\":\"29:user-1\"},\"conversation\":{\"id\":\"19:conversation@thread.tacv2\",\"tenantId\":\"72f988bf-86f1-41af-91ab-2d7cd011db47\"},\"channelData\":{\"tenant\":{\"id\":\"72f988bf-86f1-41af-91ab-2d7cd011db47\"}},\"tenantId\":\"72f988bf-86f1-41af-91ab-2d7cd011db47\"}"
+  },
+  "expected": {
+    "provider": "msteams-acf",
+    "capability": "channel",
+    "transport": "request-response",
+    "endpointClass": "bot-framework-connector",
+    "credentialSlotRefs": ["lobster/acf-token"],
+    "responsePolicy": {
+      "mode": "msteams-acf",
+      "streaming": false
+    }
+  }
+}
