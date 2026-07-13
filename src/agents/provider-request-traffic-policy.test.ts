@@ -249,14 +249,17 @@ describe("provider request traffic policy", () => {
       ),
     ).toThrow("cannot disable TLS verification");
 
+    const allowOutcome = registration().rules[0]!.outcome;
+    if (allowOutcome.action !== "allow") {
+      throw new Error("fixture rule must allow");
+    }
     registerProviderRequestTrafficPolicyV1(
       registration({
         rules: [
           {
             ...registration().rules[0]!,
             outcome: {
-              ...registration().rules[0]!.outcome,
-              action: "allow",
+              ...allowOutcome,
               allowPrivateNetwork: true,
             },
           },

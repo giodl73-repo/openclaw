@@ -480,10 +480,17 @@ export function resolveHostIntegrationContributionV1(
       "No host integration bundle is registered",
     );
   }
+  return resolveHostIntegrationContributionFromSnapshotV1(currentSnapshot, reference);
+}
+
+export function resolveHostIntegrationContributionFromSnapshotV1(
+  snapshot: HostIntegrationBundleSnapshotV1,
+  reference: HostIntegrationContributionReferenceV1,
+): HostIntegrationBundleInventoryEntryV1 {
   const type = assertContributionType(reference);
   const id = normalizeNamespacedId(reference.id, "Host integration contribution reference");
   const version = normalizeContractVersion(reference.version);
-  const entry = currentSnapshot.inventory.find(
+  const entry = snapshot.inventory.find(
     (candidate) => contributionKey(candidate) === contributionKey({ ...type, id }),
   );
   if (!entry || entry.status === "missing") {

@@ -125,7 +125,7 @@ function normalizeDefinition(definition: CredentialSlotDefinitionV1): Credential
   if (definition.version !== CREDENTIAL_SLOT_VERSION) {
     throw new CredentialSlotError(
       "invalid-definition",
-      `Unsupported credential slot version: ${definition.version}`,
+      "Unsupported credential slot version",
       definition.slotId,
     );
   }
@@ -166,7 +166,7 @@ function normalizeResolver(resolver: CredentialSlotResolverV1): CredentialSlotRe
   if (resolver.version !== CREDENTIAL_SLOT_RESOLVER_VERSION) {
     throw new CredentialSlotError(
       "incompatible-resolver",
-      `Unsupported credential resolver version: ${resolver.version}`,
+      "Unsupported credential resolver version",
       resolver.slotId,
     );
   }

@@ -464,6 +464,13 @@ export function evaluateCurrentProviderRequestTrafficPolicyV1(
   if (!policy) {
     return undefined;
   }
+  return evaluateProviderRequestTrafficPolicyV1(policy, facts);
+}
+
+export function evaluateProviderRequestTrafficPolicyV1(
+  policy: ProviderRequestTrafficPolicySnapshotV1,
+  facts: ProviderRequestTrafficPolicyFactsV1,
+): ProviderRequestTrafficPolicyDecisionV1 | undefined {
   const origin = new URL(facts.url).origin;
   const matching = policy.rules.filter((rule) => matchesRule(rule.match, facts, origin));
   if (matching.length === 0) {
@@ -526,8 +533,7 @@ export function evaluateCurrentProviderRequestTrafficPolicyV1(
         ? { dispatchBindingId: routeProfile.dispatchBindingId }
         : {}),
       allowPrivateNetwork:
-        facts.allowPrivateNetwork &&
-        allowed.every((rule) => rule.outcome.allowPrivateNetwork === true),
+        facts.allowPrivateNetwork && allowed.every((rule) => rule.outcome.allowPrivateNetwork),
       ...(() => {
         const timeouts = [
           facts.timeoutMs,

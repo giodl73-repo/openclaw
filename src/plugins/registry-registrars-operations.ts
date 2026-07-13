@@ -15,6 +15,7 @@ import {
   clearCurrentHostIntegrationBundleSnapshotV1,
   getCurrentHostIntegrationBundleSnapshotV1,
   registerHostIntegrationBundleV1,
+  type AvailableHostIntegrationContributionV1,
   type HostIntegrationBundleManifestV1,
 } from "../hosting/host-integration-bundle.js";
 import {
@@ -304,17 +305,16 @@ export function createOperationRegistrars(state: PluginRegistryState) {
   ): (() => void) => {
     const snapshot = registerHostIntegrationBundleV1({
       manifest,
-      availableContributions: manifest.contributions.map((contribution) => ({
-        owner: contribution.owner,
-        kind: contribution.kind,
-        id: contribution.id,
-        version: contribution.version,
-        provenance: {
-          pluginId: record.id,
-          source: record.source,
-          origin: record.origin,
-        },
-      })),
+      availableContributions: manifest.contributions.map(
+        (contribution): AvailableHostIntegrationContributionV1 => ({
+          ...contribution,
+          provenance: {
+            pluginId: record.id,
+            source: record.source,
+            origin: record.origin,
+          },
+        }),
+      ),
     });
     return () => {
       if (getCurrentHostIntegrationBundleSnapshotV1() === snapshot) {

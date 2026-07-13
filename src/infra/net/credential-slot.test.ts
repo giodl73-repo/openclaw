@@ -5,6 +5,7 @@ import {
   CredentialSlotError,
   type CredentialSlotDefinitionV1,
   type CredentialSlotResolverV1,
+  type PreparedCredentialSlotBindingsV1,
   prepareCredentialSlotBindingsV1,
 } from "./credential-slot.js";
 import {
