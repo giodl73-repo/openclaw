@@ -9,27 +9,27 @@ import {
   type ProviderRequestTrafficPolicyDecisionV1,
 } from "../provider-request-traffic-policy.js";
 import {
-  CAPI_BEARER_SLOT_ID,
-  CAPI_MODEL_ADAPTER_ID,
-  CAPI_MODEL_ADAPTER_VERSION,
-  adaptCapiModelResponseV1,
-  prepareCapiModelRequestV1,
-  type CapiModelAdapterConfigV1,
-  type CapiModelRequestContextV1,
-} from "./capi.js";
+  ANTHROPIC_API_KEY_SLOT_ID,
+  ANTHROPIC_DIRECT_MODEL_ADAPTER_ID,
+  ANTHROPIC_DIRECT_MODEL_ADAPTER_VERSION,
+  adaptAnthropicDirectResponseV1,
+  prepareAnthropicDirectRequestV1,
+  type AnthropicDirectAdapterConfigV1,
+  type AnthropicDirectRequestContextV1,
+} from "./anthropic-direct.js";
 import {
   PROVIDER_REQUEST_DISPATCHER_VERSION,
   dispatchHostedModelRequestV1,
   type ModelProviderHostedBindingImplementationsV1,
 } from "./model-provider-hosted-dispatch.js";
 
-export const CAPI_HOSTED_BINDING_VERSION = "capi-hosted-binding/v1" as const;
-export { PROVIDER_REQUEST_DISPATCHER_VERSION };
+export const ANTHROPIC_DIRECT_HOSTED_BINDING_VERSION =
+  "anthropic-direct-hosted-binding/v1" as const;
 
-type CapiBindingReference = HostIntegrationContributionReferenceV1;
+type AnthropicDirectBindingReference = HostIntegrationContributionReferenceV1;
 
-export type CapiHostedBindingSelectionV1 = {
-  version: typeof CAPI_HOSTED_BINDING_VERSION;
+export type AnthropicDirectHostedBindingSelectionV1 = {
+  version: typeof ANTHROPIC_DIRECT_HOSTED_BINDING_VERSION;
   configGeneration: string;
   ownerGeneration: string;
   configSource: {
@@ -37,32 +37,33 @@ export type CapiHostedBindingSelectionV1 = {
     path?: string;
   };
   providerId: string;
-  adapter: CapiBindingReference;
-  credentialSlot: CapiBindingReference;
-  trafficPolicy: CapiBindingReference;
-  dispatcher: CapiBindingReference;
+  adapter: AnthropicDirectBindingReference;
+  credentialSlot: AnthropicDirectBindingReference;
+  trafficPolicy: AnthropicDirectBindingReference;
+  dispatcher: AnthropicDirectBindingReference;
 };
 
-export type CapiHostedBindingImplementationsV1 = ModelProviderHostedBindingImplementationsV1;
+export type AnthropicDirectHostedBindingImplementationsV1 =
+  ModelProviderHostedBindingImplementationsV1;
 
-export type CapiHostedBindingGenerationFenceV1 = {
+export type AnthropicDirectHostedBindingGenerationFenceV1 = {
   configGeneration: string;
   bundleGeneration: string;
   ownerGeneration: string;
 };
 
-export type PreparedCapiHostedBindingV1 = {
-  version: typeof CAPI_HOSTED_BINDING_VERSION;
+export type PreparedAnthropicDirectHostedBindingV1 = {
+  version: typeof ANTHROPIC_DIRECT_HOSTED_BINDING_VERSION;
   configGeneration: string;
   bundleGeneration: string;
   ownerGeneration: string;
   policyGeneration: string;
   mode: "local" | "hosted";
-  selection: Readonly<CapiHostedBindingSelectionV1>;
+  selection: Readonly<AnthropicDirectHostedBindingSelectionV1>;
   ownerEvidence: HostIntegrationOwnerEvidenceV1;
   dispatch: (params: {
-    fence: CapiHostedBindingGenerationFenceV1;
-    context: CapiModelRequestContextV1;
+    fence: AnthropicDirectHostedBindingGenerationFenceV1;
+    context: AnthropicDirectRequestContextV1;
     method: string;
     headers?: HeadersInit;
     body: string | Uint8Array;
@@ -74,21 +75,21 @@ export type PreparedCapiHostedBindingV1 = {
   }>;
 };
 
-export type CapiHostedBindingFailureCode =
-  | "invalid-selection"
+type AnthropicDirectHostedBindingFailureCode =
   | "incompatible-implementation"
-  | "traffic-policy-denied"
-  | "traffic-policy-route-mismatch"
-  | "stale-config-generation"
+  | "invalid-selection"
   | "stale-bundle-generation"
-  | "stale-owner-generation";
+  | "stale-config-generation"
+  | "stale-owner-generation"
+  | "traffic-policy-denied"
+  | "traffic-policy-route-mismatch";
 
-export class CapiHostedBindingError extends Error {
-  readonly code: CapiHostedBindingFailureCode;
+export class AnthropicDirectHostedBindingError extends Error {
+  readonly code: AnthropicDirectHostedBindingFailureCode;
 
-  constructor(code: CapiHostedBindingFailureCode, message: string) {
+  constructor(code: AnthropicDirectHostedBindingFailureCode, message: string) {
     super(message);
-    this.name = "CapiHostedBindingError";
+    this.name = "AnthropicDirectHostedBindingError";
     this.code = code;
   }
 }
@@ -98,18 +99,20 @@ const GENERATION_RE = /^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$/;
 function normalizeGeneration(value: string, label: string): string {
   const normalized = value.trim();
   if (!GENERATION_RE.test(normalized)) {
-    throw new CapiHostedBindingError("invalid-selection", `${label} is invalid`);
+    throw new AnthropicDirectHostedBindingError("invalid-selection", `${label} is invalid`);
   }
   return normalized;
 }
 
-function freezeReference(reference: CapiBindingReference): CapiBindingReference {
+function freezeReference(
+  reference: AnthropicDirectBindingReference,
+): AnthropicDirectBindingReference {
   return Object.freeze({ ...reference });
 }
 
 function expectedReference(
-  reference: CapiBindingReference,
-  expected: CapiBindingReference,
+  reference: AnthropicDirectBindingReference,
+  expected: AnthropicDirectBindingReference,
   label: string,
 ): void {
   if (
@@ -118,7 +121,7 @@ function expectedReference(
     reference.id !== expected.id ||
     reference.version !== expected.version
   ) {
-    throw new CapiHostedBindingError(
+    throw new AnthropicDirectHostedBindingError(
       "invalid-selection",
       `${label} must select ${expected.id}@${expected.version}`,
     );
@@ -126,12 +129,12 @@ function expectedReference(
 }
 
 function assertImplementation(
-  selected: CapiBindingReference,
+  selected: AnthropicDirectBindingReference,
   implementation: { id: string; version: string },
   label: string,
 ): void {
   if (implementation.id !== selected.id || implementation.version !== selected.version) {
-    throw new CapiHostedBindingError(
+    throw new AnthropicDirectHostedBindingError(
       "incompatible-implementation",
       `${label} implementation does not match the selected contribution`,
     );
@@ -140,59 +143,62 @@ function assertImplementation(
 
 function assertFence(
   binding: Pick<
-    PreparedCapiHostedBindingV1,
+    PreparedAnthropicDirectHostedBindingV1,
     "configGeneration" | "bundleGeneration" | "ownerGeneration"
   >,
-  fence: CapiHostedBindingGenerationFenceV1,
+  fence: AnthropicDirectHostedBindingGenerationFenceV1,
 ): void {
   if (fence.configGeneration !== binding.configGeneration) {
-    throw new CapiHostedBindingError(
+    throw new AnthropicDirectHostedBindingError(
       "stale-config-generation",
-      "CAPI binding effective config generation is stale",
+      "Anthropic direct binding effective config generation is stale",
     );
   }
   if (fence.bundleGeneration !== binding.bundleGeneration) {
-    throw new CapiHostedBindingError(
+    throw new AnthropicDirectHostedBindingError(
       "stale-bundle-generation",
-      "CAPI binding host bundle generation is stale",
+      "Anthropic direct binding host bundle generation is stale",
     );
   }
   if (fence.ownerGeneration !== binding.ownerGeneration) {
-    throw new CapiHostedBindingError(
+    throw new AnthropicDirectHostedBindingError(
       "stale-owner-generation",
-      "CAPI binding owner generation is stale",
+      "Anthropic direct binding owner generation is stale",
     );
   }
 }
 
-export function prepareCapiHostedBindingV1(params: {
-  selection: CapiHostedBindingSelectionV1;
-  adapterConfig: CapiModelAdapterConfigV1;
+export function prepareAnthropicDirectHostedBindingV1(params: {
+  selection: AnthropicDirectHostedBindingSelectionV1;
+  adapterConfig: AnthropicDirectAdapterConfigV1;
   bundle: HostIntegrationBundleSnapshotV1;
-  implementations: CapiHostedBindingImplementationsV1;
-}): PreparedCapiHostedBindingV1 {
-  if (params.selection.version !== CAPI_HOSTED_BINDING_VERSION) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI binding version is unsupported");
+  implementations: AnthropicDirectHostedBindingImplementationsV1;
+}): PreparedAnthropicDirectHostedBindingV1 {
+  if (params.selection.version !== ANTHROPIC_DIRECT_HOSTED_BINDING_VERSION) {
+    throw new AnthropicDirectHostedBindingError(
+      "invalid-selection",
+      "Anthropic direct binding version is unsupported",
+    );
   }
   expectedReference(
     params.selection.adapter,
     {
       owner: "model-provider",
       kind: "model-provider-adapter",
-      id: CAPI_MODEL_ADAPTER_ID,
-      version: CAPI_MODEL_ADAPTER_VERSION,
+      id: ANTHROPIC_DIRECT_MODEL_ADAPTER_ID,
+      version: ANTHROPIC_DIRECT_MODEL_ADAPTER_VERSION,
     },
-    "CAPI adapter",
+    "Anthropic direct adapter",
   );
   expectedReference(
     params.selection.credentialSlot,
     {
       owner: "provider-request",
       kind: "credential-slot-resolver",
-      id: CAPI_BEARER_SLOT_ID,
+      id: ANTHROPIC_API_KEY_SLOT_ID,
       version: "credential-slot-resolver/v1",
     },
-    "CAPI credential slot",
+    "Anthropic direct credential slot",
   );
   expectedReference(
     params.selection.trafficPolicy,
@@ -202,19 +208,18 @@ export function prepareCapiHostedBindingV1(params: {
       id: "lobster/enterprise-egress",
       version: PROVIDER_REQUEST_TRAFFIC_POLICY_VERSION,
     },
-    "CAPI traffic policy",
+    "Anthropic direct traffic policy",
   );
   if (
     params.selection.dispatcher.owner !== "provider-request" ||
     params.selection.dispatcher.kind !== "provider-request-dispatcher" ||
     params.selection.dispatcher.version !== PROVIDER_REQUEST_DISPATCHER_VERSION
   ) {
-    throw new CapiHostedBindingError(
+    throw new AnthropicDirectHostedBindingError(
       "invalid-selection",
-      "CAPI dispatcher selection is incompatible",
+      "Anthropic direct dispatcher selection is incompatible",
     );
   }
-
   for (const reference of [
     params.selection.adapter,
     params.selection.credentialSlot,
@@ -239,7 +244,7 @@ export function prepareCapiHostedBindingV1(params: {
     "Dispatcher",
   );
   if (params.implementations.trafficPolicy.snapshot.id !== params.selection.trafficPolicy.id) {
-    throw new CapiHostedBindingError(
+    throw new AnthropicDirectHostedBindingError(
       "incompatible-implementation",
       "Traffic policy snapshot does not match the selected contribution",
     );
@@ -247,15 +252,18 @@ export function prepareCapiHostedBindingV1(params: {
 
   const configGeneration = normalizeGeneration(
     params.selection.configGeneration,
-    "CAPI config generation",
+    "Anthropic direct config generation",
   );
   const ownerGeneration = normalizeGeneration(
     params.selection.ownerGeneration,
-    "CAPI owner generation",
+    "Anthropic direct owner generation",
   );
   const providerId = params.selection.providerId.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(providerId)) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI provider ID is invalid");
+    throw new AnthropicDirectHostedBindingError(
+      "invalid-selection",
+      "Anthropic direct provider ID is invalid",
+    );
   }
   const bundleGeneration = `${params.bundle.id}@${params.bundle.bundleVersion}`;
   const adapterConfig = Object.freeze({ ...params.adapterConfig });
@@ -270,7 +278,10 @@ export function prepareCapiHostedBindingV1(params: {
   const source = params.selection.configSource.source.trim();
   const path = params.selection.configSource.path?.trim();
   if (!source) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI config source is required");
+    throw new AnthropicDirectHostedBindingError(
+      "invalid-selection",
+      "Anthropic direct config source is required",
+    );
   }
   const selection = Object.freeze({
     ...params.selection,
@@ -287,8 +298,8 @@ export function prepareCapiHostedBindingV1(params: {
     dispatcher: freezeReference(params.selection.dispatcher),
   });
 
-  const binding: PreparedCapiHostedBindingV1 = {
-    version: CAPI_HOSTED_BINDING_VERSION,
+  const binding: PreparedAnthropicDirectHostedBindingV1 = {
+    version: ANTHROPIC_DIRECT_HOSTED_BINDING_VERSION,
     configGeneration,
     bundleGeneration,
     ownerGeneration,
@@ -298,11 +309,11 @@ export function prepareCapiHostedBindingV1(params: {
     ownerEvidence: Object.freeze({
       owner: "model-provider",
       kind: "model-provider-adapter",
-      id: CAPI_MODEL_ADAPTER_ID,
+      id: ANTHROPIC_DIRECT_MODEL_ADAPTER_ID,
       bundleGeneration,
       state: "ready",
       reason: "BindingPrepared",
-      message: "CAPI model-owner binding is prepared and inactive.",
+      message: "Anthropic direct model-owner binding is prepared and inactive.",
       config: Object.freeze({
         source,
         ...(path ? { path } : {}),
@@ -313,7 +324,7 @@ export function prepareCapiHostedBindingV1(params: {
     }),
     dispatch: async ({ fence, context, method, headers, body, signal }) => {
       assertFence(binding, fence);
-      const prepared = prepareCapiModelRequestV1({
+      const prepared = prepareAnthropicDirectRequestV1({
         config: adapterConfig,
         context,
         method,
@@ -324,17 +335,17 @@ export function prepareCapiHostedBindingV1(params: {
       const result = await dispatchHostedModelRequestV1({
         policy: trafficPolicy,
         providerId,
-        providerLabel: "CAPI",
-        endpointClass: "custom",
+        providerLabel: "Anthropic direct",
+        endpointClass: "anthropic-public",
         dispatcherSelectionId,
         dispatcherRouteProfileId,
         dispatcher,
         request: prepared,
         ...(signal ? { signal } : {}),
-        createError: (code, message) => new CapiHostedBindingError(code, message),
+        createError: (code, message) => new AnthropicDirectHostedBindingError(code, message),
       });
       return {
-        response: adaptCapiModelResponseV1(result.response, prepared.responsePolicy),
+        response: adaptAnthropicDirectResponseV1(result.response, prepared.responsePolicy),
         release: result.release,
         policyDecision: result.policyDecision,
       };

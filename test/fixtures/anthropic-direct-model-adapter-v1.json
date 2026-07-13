@@ -1,0 +1,48 @@
+{
+  "request": {
+    "config": {
+      "endpoint": "https://api.anthropic.com/v1/messages"
+    },
+    "context": {
+      "originalUrl": "https://api.anthropic.com/v1/messages"
+    },
+    "method": "POST",
+    "headers": {
+      "accept": "text/event-stream",
+      "anthropic-beta": "prompt-caching-2024-07-31",
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "x-api-key": "must-not-survive"
+    },
+    "body": {
+      "model": "claude-opus-4-6",
+      "max_tokens": 1024,
+      "stream": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Describe this <lobster-image data=\"data:image/png;base64,aW1hZ2U=\" /> and summarize <lobster-document data=\"data:application/pdf;base64,cGRm\" />",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expected": {
+    "url": "https://api.anthropic.com/v1/messages",
+    "credentialSlotRefs": [
+      "lobster/anthropic-key"
+    ],
+    "rewrittenAttachmentMessages": 1,
+    "responsePolicy": {
+      "mode": "anthropic-messages",
+      "streaming": true
+    }
+  }
+}
