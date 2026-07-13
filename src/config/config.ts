@@ -31,6 +31,12 @@ export {
   setRuntimeConfigSnapshot,
   writeConfigFile,
 } from "./io.js";
+export {
+  createLocalFileManagedConfigIO,
+  parseLocalConfigLayerSource,
+  resolveLocalConfigLayerSource,
+} from "./layer-file-io.js";
+export type { LocalConfigLayerSource } from "./layer-file-io.js";
 export { createManagedConfigIO, getManagedConfigReadiness } from "./layer-io.js";
 export type { ManagedConfigReadiness } from "./layer-io.js";
 export {

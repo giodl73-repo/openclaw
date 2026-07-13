@@ -260,6 +260,12 @@ export type ConfigWriteOptions = {
    */
   skipPluginValidation?: boolean;
   /**
+   * Internal managed-config path: persist a sparse layer after the complete
+   * composed candidate has already passed validation. Ordinary config writes
+   * must retain the default full validation mode.
+   */
+  validationMode?: "full" | "already-validated";
+  /**
    * Preserve an older writer version for update handoff writes that must be
    * readable by the parent process after a candidate doctor repair.
    */
@@ -269,6 +275,12 @@ export type ConfigWriteOptions = {
    * will be committed. The exported writer composes it after runtime preflight.
    */
   preCommitRuntimePreflight?: (sourceConfig: OpenClawConfig) => Promise<unknown>;
+  /** Internal managed-config source used only by the ordinary runtime preflight. */
+  runtimePreflightSourceConfig?: OpenClawConfig;
+  /** Disable mutation-style restoration when replacing an exact authored layer. */
+  preserveEnvReferences?: boolean;
+  /** Persist the supplied document exactly instead of projecting a runtime merge patch. */
+  persistenceMode?: "merge" | "replace";
   /** Internal snapshot-time hashes for include files that mutation writers may update directly. */
   includeFileHashesForWrite?: Record<string, string>;
   /** Internal snapshot-time canonical targets for include files that mutation writers may update. */
@@ -1089,6 +1101,40 @@ export function parseConfigJson5(
   } catch (err) {
     return { ok: false, error: String(err) };
   }
+}
+
+/** Resolves captured config text with the ordinary include and environment read semantics. */
+export function resolveConfigSourceText(
+  raw: string,
+  configPath: string,
+  overrides: ConfigIoDeps = {},
+  options: {
+    resolveEnvironment?: boolean;
+    includeFileHashes?: Record<string, string>;
+    requireObjectRoot?: boolean;
+  } = {},
+): OpenClawConfig {
+  const deps = normalizeDeps({ ...overrides, configPath });
+  maybeLoadDotEnvForConfig(deps.env);
+  const parsed = parseConfigJson5(raw, deps.json5);
+  if (!parsed.ok) {
+    throw new Error(parsed.error);
+  }
+  const included = resolveConfigIncludesForRead(
+    parsed.parsed,
+    configPath,
+    deps,
+    options.includeFileHashes,
+  );
+  const resolved =
+    options.resolveEnvironment === false
+      ? included
+      : resolveConfigForRead(included, deps.env, deps.lowerPrecedenceEnv).resolvedConfigRaw;
+  const config = stripShippedPluginInstallConfigRecords(resolved);
+  if (options.requireObjectRoot && !isRecord(config)) {
+    throw new Error("resolved config root must contain an object");
+  }
+  return coerceConfig(config);
 }
 
 function findJsonRootSuffix(
@@ -2376,7 +2422,7 @@ export function createConfigIO(
     // is broken. Malformed directives remain removable by replacement repairs.
     const hasResolvedAuthoredIncludes =
       hasAuthoredIncludes && !containsConfigIncludeDirective(snapshot.sourceConfig);
-    if (snapshot.valid && snapshot.exists) {
+    if (options.persistenceMode !== "replace" && snapshot.valid && snapshot.exists) {
       persistCandidate = resolvePersistCandidateForWrite({
         runtimeConfig: snapshot.config,
         sourceConfig: snapshot.resolved,
@@ -2389,7 +2435,7 @@ export function createConfigIO(
           ? collectManifestModelIdNormalizationPolicies(snapshotRead.pluginMetadataSnapshot.plugins)
           : undefined,
       });
-    } else if (snapshot.exists && hasAuthoredIncludes) {
+    } else if (options.persistenceMode !== "replace" && snapshot.exists && hasAuthoredIncludes) {
       persistCandidate = preserveIncludeOwnedConfigForWrite({
         runtimeConfig: snapshot.config,
         sourceConfig: snapshot.resolved,
@@ -2397,7 +2443,11 @@ export function createConfigIO(
         rootAuthoredConfig: snapshot.parsed,
       });
     }
-    if (snapshot.exists && (snapshot.valid || hasResolvedAuthoredIncludes)) {
+    if (
+      options.preserveEnvReferences !== false &&
+      snapshot.exists &&
+      (snapshot.valid || hasResolvedAuthoredIncludes)
+    ) {
       try {
         const resolvedIncludes = resolveConfigIncludes(
           snapshot.parsed,
@@ -2431,16 +2481,21 @@ export function createConfigIO(
 
     const envForRestore = options.envSnapshotForRestore ?? deps.env;
     const validationSourceCandidate = containsConfigIncludeDirective(persistCandidate)
-      ? restoreEnvVarRefs(persistCandidate, snapshot.parsed, envForRestore)
+      ? options.preserveEnvReferences === false
+        ? persistCandidate
+        : restoreEnvVarRefs(persistCandidate, snapshot.parsed, envForRestore)
       : persistCandidate;
     const validationCandidate = containsConfigIncludeDirective(validationSourceCandidate)
       ? resolveRuntimePreflightSourceConfig(validationSourceCandidate as OpenClawConfig)
       : validationSourceCandidate;
-    const validated = validateConfigObjectRawWithPlugins(validationCandidate, {
-      env: deps.env,
-      pluginValidation: options.skipPluginValidation ? "skip" : "full",
-      preservedLegacyRootKeys: options.preservedLegacyRootKeys,
-    });
+    const validated =
+      options.validationMode === "already-validated"
+        ? { ok: true as const, warnings: [] }
+        : validateConfigObjectRawWithPlugins(validationCandidate, {
+            env: deps.env,
+            pluginValidation: options.skipPluginValidation ? "skip" : "full",
+            preservedLegacyRootKeys: options.preservedLegacyRootKeys,
+          });
     if (!validated.ok) {
       const issue = validated.issues[0];
       const pathLabel = issue?.path ? issue.path : "<root>";
@@ -2464,7 +2519,7 @@ export function createConfigIO(
     // persisted even though we bypass validated.config.
     let cfgToWrite = persistCandidate as OpenClawConfig;
     try {
-      if (deps.fs.existsSync(configPath)) {
+      if (options.preserveEnvReferences !== false && deps.fs.existsSync(configPath)) {
         const currentRaw = await deps.fs.promises.readFile(configPath, "utf-8");
         const parsedRes = parseConfigJson5(currentRaw, deps.json5);
         if (parsedRes.ok) {
@@ -2664,7 +2719,11 @@ export function createConfigIO(
             ),
         });
       });
-    await preCommitRuntimePreflight(resolveRuntimePreflightSourceConfig(stampedOutputConfig));
+    await preCommitRuntimePreflight(
+      resolveRuntimePreflightSourceConfig(
+        options.runtimePreflightSourceConfig ?? stampedOutputConfig,
+      ),
+    );
 
     const pluginInstallConfigMigration =
       ensureShippedPluginInstallConfigRecordsMigratedForWrite(snapshot);
