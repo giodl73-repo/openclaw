@@ -20,6 +20,10 @@ export type HostIntegrationContributionTypeV1 =
   | {
       owner: "provider-request";
       kind: "provider-request-carrier";
+    }
+  | {
+      owner: "continuity";
+      kind: "lifecycle-restore-hold";
     };
 
 export type HostIntegrationBundleContributionV1 = HostIntegrationContributionTypeV1 & {
@@ -175,6 +179,12 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
     return {
       owner: "provider-request",
       kind: "provider-request-carrier",
+    };
+  }
+  if (contribution.owner === "continuity" && contribution.kind === "lifecycle-restore-hold") {
+    return {
+      owner: "continuity",
+      kind: "lifecycle-restore-hold",
     };
   }
   throw new HostIntegrationBundleError(

@@ -219,4 +219,32 @@ describe("host integration Doctor findings", () => {
       },
     ]);
   });
+
+  it("exposes stable continuity reasons without owner detail", () => {
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({
+          owner: "continuity",
+          kind: "lifecycle-restore-hold",
+          id: "lobster/continuity",
+          version: "continuity-restore-hold/v1",
+          readinessCriteria: ["continuity.restore-hold"],
+          state: "unavailable",
+          reason: "RestoreQuarantined",
+          message: "restore-identity=secret receipt-identity=secret",
+        }),
+      ),
+    ).toEqual([
+      {
+        checkId: HOST_INTEGRATION_BINDINGS_CHECK_ID,
+        severity: "error",
+        message:
+          "Host integration lobster/continuity is unavailable for continuity/lifecycle-restore-hold in bundle lobster/capi@1.0.0 (RestoreQuarantined).",
+        target: "lobster/continuity",
+        requirement: "RestoreQuarantined",
+        fixHint:
+          "Inspect lobster/continuity and owner continuity; preserve the configured authority mode while correcting RestoreQuarantined.",
+      },
+    ]);
+  });
 });
