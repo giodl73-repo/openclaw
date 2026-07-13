@@ -20,6 +20,12 @@ const EXPOSED_REASON_CODES = new Set([
   "OwnerEvidenceUnavailable",
   "PolicyConflict",
   "RequiredCriterionUnknown",
+  "RestoreCommittedAwaitingStartup",
+  "RestoreHeld",
+  "RestoreHoldAuthorityUnavailable",
+  "RestoreHoldRunnable",
+  "RestorePublicationInProgress",
+  "RestoreQuarantined",
 ]);
 
 function exposedReason(entry: HostIntegrationBindingStatusEntryV1): string {

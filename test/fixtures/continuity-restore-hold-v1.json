@@ -1,0 +1,66 @@
+{
+  "version": "continuity-restore-hold/v1",
+  "phases": [
+    "runnable",
+    "restore-held",
+    "restore-committed",
+    "restore-quarantined"
+  ],
+  "transitions": [
+    {
+      "operation": "acquire",
+      "from": "runnable",
+      "to": "restore-held",
+      "requires": ["ownerId", "ownerGeneration", "expectedRevision", "restoreIdentity"]
+    },
+    {
+      "operation": "publication-started",
+      "from": "restore-held",
+      "to": "restore-held",
+      "requires": ["ownerId", "ownerGeneration", "expectedRevision", "restoreIdentity"]
+    },
+    {
+      "operation": "cancel",
+      "from": "restore-held",
+      "to": "runnable",
+      "requires": ["publicationStarted=false", "restoreIdentity"]
+    },
+    {
+      "operation": "commit",
+      "from": "restore-held",
+      "to": "restore-committed",
+      "requires": ["publicationStarted=true", "restoreIdentity", "receiptIdentity"]
+    },
+    {
+      "operation": "quarantine-from-held",
+      "from": "restore-held",
+      "to": "restore-quarantined",
+      "requires": ["publicationStarted=true", "restoreIdentity"]
+    },
+    {
+      "operation": "quarantine-from-committed",
+      "from": "restore-committed",
+      "to": "restore-quarantined",
+      "requires": ["restoreIdentity"]
+    },
+    {
+      "operation": "admit-restored-start",
+      "from": "restore-committed",
+      "to": "runnable",
+      "requires": ["restoreIdentity", "receiptIdentity"]
+    }
+  ],
+  "failureCodes": [
+    "authority-unavailable",
+    "owner-mismatch",
+    "stale-owner-generation",
+    "stale-revision",
+    "invalid-transition",
+    "restore-identity-mismatch",
+    "receipt-identity-mismatch",
+    "restore-held",
+    "restore-quarantined",
+    "restored-start-required",
+    "ordinary-start-required"
+  ]
+}

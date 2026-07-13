@@ -75,6 +75,21 @@ describe("host integration bundle registration", () => {
       bundleVersion: "1.0.0",
       inventory: [
         {
+          owner: "continuity",
+          kind: "lifecycle-restore-hold",
+          id: "lobster/continuity",
+          version: "continuity-restore-hold/v1",
+          required: true,
+          readinessCriteria: ["continuity.restore-hold"],
+          status: "resolved",
+          resolvedVersion: "continuity-restore-hold/v1",
+          provenance: {
+            pluginId: "lobster-host",
+            source: "/plugins/lobster-host/openclaw.plugin.json",
+            origin: "config",
+          },
+        },
+        {
           owner: "model-provider",
           kind: "model-provider-adapter",
           id: CAPI_MODEL_ADAPTER_ID,
@@ -230,7 +245,7 @@ describe("host integration bundle registration", () => {
       ),
     });
 
-    expect(snapshot.inventory[1]).toEqual(
+    expect(snapshot.inventory.find((entry) => entry.id === CAPI_BEARER_SLOT_ID)).toEqual(
       expect.objectContaining({
         id: CAPI_BEARER_SLOT_ID,
         required: false,
