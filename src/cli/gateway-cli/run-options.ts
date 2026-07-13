@@ -9,6 +9,7 @@ export type GatewayRunOpts = {
   auth?: unknown;
   password?: unknown;
   passwordFile?: unknown;
+  configLayer?: unknown;
   tailscale?: unknown;
   tailscaleResetOnExit?: boolean;
   allowUnconfigured?: boolean;
@@ -32,6 +33,7 @@ const GATEWAY_RUN_VALUE_KEYS = [
   "auth",
   "password",
   "passwordFile",
+  "configLayer",
   "tailscale",
   "wsLog",
   "rawStreamPath",
@@ -55,6 +57,18 @@ export function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command
 
   for (const key of GATEWAY_RUN_VALUE_KEYS) {
     const inherited = inheritOptionFromParent(command, key);
+    if (key === "configLayer") {
+      const inheritedLayers =
+        typeof inherited === "string" ? [inherited] : Array.isArray(inherited) ? inherited : [];
+      const localLayers =
+        typeof resolved.configLayer === "string"
+          ? [resolved.configLayer]
+          : Array.isArray(resolved.configLayer)
+            ? resolved.configLayer
+            : [];
+      resolved.configLayer = [...inheritedLayers, ...localLayers];
+      continue;
+    }
     if (key === "wsLog") {
       // wsLog has a child default ("auto"), so prefer inherited parent CLI value when present.
       resolved[key] = inherited ?? resolved[key];
