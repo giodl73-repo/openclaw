@@ -87,6 +87,7 @@ describe("managed Gateway configuration", () => {
     expect(() => assertConfigWriteAllowedInCurrentMode({ configPath: operatorPath })).toThrow(
       "read-only managed configuration startup mode",
     );
+    await expect(controller?.previewSourceConfig()).resolves.toMatchObject({ valid: true });
     const activation = await controller?.activate();
     expect(activation?.valid).toBe(true);
     if (!activation?.valid) {

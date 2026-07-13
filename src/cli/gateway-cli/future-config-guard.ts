@@ -12,7 +12,7 @@ import type { ConfigFileSnapshot, OpenClawConfig } from "../../config/types.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import type { GatewayRunOpts } from "./run-options.js";
 
-export type GatewayRunPreBootstrapOptions = Pick<GatewayRunOpts, "force" | "reset">;
+export type GatewayRunPreBootstrapOptions = Pick<GatewayRunOpts, "configLayer" | "force" | "reset">;
 
 type GatewayRunFutureConfigGuardParams = {
   opts: GatewayRunPreBootstrapOptions;

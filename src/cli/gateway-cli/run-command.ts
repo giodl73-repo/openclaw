@@ -1,5 +1,6 @@
 // Gateway run command option registration and lazy handoff to runtime startup.
 import type { Command } from "commander";
+import { collectOption } from "../program/helpers.js";
 import type { GatewayRunOpts } from "./run-options.js";
 import { resolveGatewayRunOptions } from "./run-options.js";
 import { getGatewayRunRuntimeHooks } from "./runtime-hooks.js";
@@ -12,7 +13,9 @@ function formatModeChoices(modes: readonly string[]): string {
 }
 
 type GatewayRunCommandHooks = {
-  beforeRun?: (opts: Pick<GatewayRunOpts, "force" | "reset">) => Promise<void> | void;
+  beforeRun?: (
+    opts: Pick<GatewayRunOpts, "configLayer" | "force" | "reset">,
+  ) => Promise<void> | void;
 };
 
 export function addGatewayRunCommand(cmd: Command, hooks: GatewayRunCommandHooks = {}): Command {
@@ -29,6 +32,11 @@ export function addGatewayRunCommand(cmd: Command, hooks: GatewayRunCommandHooks
     .option("--auth <mode>", `Gateway auth mode (${formatModeChoices(GATEWAY_AUTH_MODES)})`)
     .option("--password <password>", "Password for auth mode=password")
     .option("--password-file <path>", "Read gateway password from file")
+    .option(
+      "--config-layer <id=path>",
+      "Add an ordered managed configuration layer (repeatable; first has highest authority)",
+      collectOption,
+    )
     .option(
       "--tailscale <mode>",
       `Tailscale exposure mode (${formatModeChoices(GATEWAY_TAILSCALE_MODES)})`,

@@ -153,13 +153,19 @@ export function registerPreActionHooks(program: Command, programVersion: string)
     ) {
       return;
     }
-    let beforeStateMigrations: ((snapshot?: ConfigFileSnapshot) => Promise<boolean>) | undefined;
+    let beforeStateMigrations:
+      | ((snapshot?: ConfigFileSnapshot) => Promise<boolean | ConfigFileSnapshot>)
+      | undefined;
     if (isGatewayRunAction(actionCommand)) {
       const { prepareGatewayRunBootstrap, recheckGatewayRunBootstrap } =
         await import("../gateway-cli/pre-bootstrap.js");
       const { resolveGatewayRunOptions } = await import("../gateway-cli/run-options.js");
       const resolvedOptions = resolveGatewayRunOptions(actionCommand.opts(), actionCommand);
+      const hasManagedLayers =
+        typeof resolvedOptions.configLayer === "string" ||
+        (Array.isArray(resolvedOptions.configLayer) && resolvedOptions.configLayer.length > 0);
       const opts = {
+        ...(hasManagedLayers ? { configLayer: resolvedOptions.configLayer } : {}),
         force: resolvedOptions.force === true,
         reset: resolvedOptions.reset === true,
       };

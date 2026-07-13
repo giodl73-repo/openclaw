@@ -424,6 +424,23 @@ describe("gateway run option collisions", () => {
     expect(callOrder).toEqual(["bootstrap", "normalize", "normalize", "start"]);
   });
 
+  it("preserves repeatable managed layers declared before and after run", async () => {
+    await runGatewayCli([
+      "gateway",
+      "--config-layer",
+      "global=/etc/openclaw/global.json",
+      "run",
+      "--config-layer",
+      "operator=/etc/openclaw/operator.json",
+      "--allow-unconfigured",
+    ]);
+    expect(beforeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configLayer: ["global=/etc/openclaw/global.json", "operator=/etc/openclaw/operator.json"],
+      }),
+    );
+  });
+
   it("refreshes the managed proxy from the final accepted config before gateway startup", async () => {
     const finalConfig = {
       gateway: { mode: "local" },

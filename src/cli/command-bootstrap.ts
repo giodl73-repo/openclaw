@@ -19,7 +19,7 @@ export async function ensureCliCommandBootstrap(params: {
   suppressDoctorStdout?: boolean;
   skipConfigGuard?: boolean;
   allowInvalid?: boolean;
-  beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean>;
+  beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean | ConfigFileSnapshot>;
   loadPlugins?: boolean;
   pluginRegistry?: CliPluginRegistryPolicy;
 }) {

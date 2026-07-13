@@ -187,8 +187,10 @@ async function tryRunGatewayRunFastPath(
     process.exitCode = typeof err.exitCode === "number" ? err.exitCode : 1;
     throw err;
   });
-  const beforeRun = async (opts: { force?: boolean; reset?: boolean }) => {
-    let beforeStateMigrations: ((snapshot?: ConfigFileSnapshot) => Promise<boolean>) | undefined;
+  const beforeRun = async (opts: { configLayer?: unknown; force?: boolean; reset?: boolean }) => {
+    let beforeStateMigrations:
+      | ((snapshot?: ConfigFileSnapshot) => Promise<boolean | ConfigFileSnapshot>)
+      | undefined;
     const shouldBootstrap = await startupTrace.measure("gateway-run-pre-bootstrap", async () => {
       const { prepareGatewayRunBootstrap, recheckGatewayRunBootstrap } =
         await import("./gateway-cli/pre-bootstrap.js");

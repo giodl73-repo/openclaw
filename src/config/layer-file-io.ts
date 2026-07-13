@@ -101,13 +101,52 @@ export function createLocalFileManagedConfigIO(params: {
   configIO?: Parameters<typeof createManagedConfigIO<LocalConfigLayerSource>>[0]["configIO"];
 }) {
   const ioFs = params.configIO?.fs ?? fs;
-  const resolveSource: ResolveConfigLayerSource<LocalConfigLayerSource> = async (source) => {
+  const inspectSourceConfigs = async () =>
+    await Promise.all(
+      params.descriptors.map(async ({ id, source }) => {
+        const content = await ioFs.promises.readFile(source.path);
+        const sourceGenerationIdentity = resolveLocalSourceGeneration(
+          content,
+          source.path,
+          params.configIO,
+        );
+        const raw = new TextDecoder().decode(content);
+        const parsed = parseConfigJson5(raw);
+        if (!parsed.ok) {
+          throw new Error(parsed.error);
+        }
+        const config = resolveConfigSourceText(raw, source.path, params.configIO, {
+          resolveEnvironment: false,
+          requireObjectRoot: true,
+        }) as OpenClawConfig;
+        const verifiedGenerationIdentity = resolveLocalSourceGeneration(
+          content,
+          source.path,
+          params.configIO,
+        );
+        if (sourceGenerationIdentity !== verifiedGenerationIdentity) {
+          throw new Error("managed configuration include changed during metadata inspection");
+        }
+        return {
+          id,
+          config,
+          contentDigest: sha256(content),
+          ...(sourceGenerationIdentity ? { sourceGenerationIdentity } : {}),
+        };
+      }),
+    );
+  const resolvedGenerationByLayerId = new Map<string, string | undefined>();
+  const resolveSource: ResolveConfigLayerSource<LocalConfigLayerSource> = async (
+    source,
+    context,
+  ) => {
     const content = await ioFs.promises.readFile(source.path);
     const sourceGenerationIdentity = resolveLocalSourceGeneration(
       content,
       source.path,
       params.configIO,
     );
+    resolvedGenerationByLayerId.set(context.layerId, sourceGenerationIdentity);
     return {
       content,
       sourceIdentity: source.identity,
@@ -132,6 +171,14 @@ export function createLocalFileManagedConfigIO(params: {
       resolveEnvironment: false,
       requireObjectRoot: true,
     });
+    const verifiedGenerationIdentity = resolveLocalSourceGeneration(
+      content,
+      descriptor.source.path,
+      params.configIO,
+    );
+    if (resolvedGenerationByLayerId.get(context.layerId) !== verifiedGenerationIdentity) {
+      throw new Error("managed configuration include changed while resolving the layer");
+    }
     const declared = { ...resolved };
     delete declared.meta;
     return declared;
@@ -182,6 +229,7 @@ export function createLocalFileManagedConfigIO(params: {
   });
   return {
     ...facade,
+    inspectSourceConfigs,
     resolveLayers: async () =>
       await resolveConfigLayerSources(params.descriptors, resolveSource, parseSource),
   };

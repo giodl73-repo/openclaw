@@ -1,6 +1,6 @@
 // Source-aware gateway run option resolution shared by pre-action and runtime startup.
 import type { Command } from "commander";
-import { inheritOptionFromParent } from "../command-options.js";
+import { collectOptionValuesFromParents, inheritOptionFromParent } from "../command-options.js";
 
 export type GatewayRunOpts = {
   port?: unknown;
@@ -56,10 +56,8 @@ export function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command
   const resolved: GatewayRunOpts = { ...opts };
 
   for (const key of GATEWAY_RUN_VALUE_KEYS) {
-    const inherited = inheritOptionFromParent(command, key);
     if (key === "configLayer") {
-      const inheritedLayers =
-        typeof inherited === "string" ? [inherited] : Array.isArray(inherited) ? inherited : [];
+      const inheritedLayers = collectOptionValuesFromParents(command, key);
       const localLayers =
         typeof resolved.configLayer === "string"
           ? [resolved.configLayer]
@@ -69,6 +67,7 @@ export function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command
       resolved.configLayer = [...inheritedLayers, ...localLayers];
       continue;
     }
+    const inherited = inheritOptionFromParent(command, key);
     if (key === "wsLog") {
       // wsLog has a child default ("auto"), so prefer inherited parent CLI value when present.
       resolved[key] = inherited ?? resolved[key];

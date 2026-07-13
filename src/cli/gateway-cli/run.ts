@@ -243,6 +243,8 @@ async function readGatewayStartupConfig(params: {
   snapshot: ConfigFileSnapshot | null;
   startupConfigSnapshotRead?: ReadConfigFileSnapshotWithPluginMetadataResult;
 }> {
+  const { isManagedGatewayConfigActive } = await import("./managed-config.js");
+  const managedConfigActive = isManagedGatewayConfigActive();
   const { readConfigFileSnapshotWithPluginMetadata } = await import("../../config/config.js");
   let blockedRecoveryConfig: OpenClawConfig | null = null;
   const snapshotRead: ReadConfigFileSnapshotWithPluginMetadataResult | null =
@@ -252,7 +254,7 @@ async function readGatewayStartupConfig(params: {
         ...(Object.keys(params.lowerPrecedenceEnv).length > 0
           ? { lowerPrecedenceEnv: params.lowerPrecedenceEnv }
           : {}),
-        recoverSuspicious: true,
+        recoverSuspicious: !managedConfigActive,
         allowSuspiciousRecovery: (config, current) => {
           const blockedConfig = [current, config].find(
             (candidate) =>
@@ -636,11 +638,22 @@ export async function runGatewayCommand(opts: GatewayRunOpts, hooks: GatewayRunR
   }
 
   gatewayLog.info("loading configuration…");
+  const { isManagedGatewayConfigActive, takePreparedManagedGatewaySnapshotRead } =
+    await import("./managed-config.js");
+  const managedConfigActive = isManagedGatewayConfigActive();
+  const preparedManagedSnapshotRead = takePreparedManagedGatewaySnapshotRead();
   const { cfg, lowerPrecedenceEnv, snapshot, startupConfigSnapshotRead } =
-    await readGatewayStartupConfigWithShellEnv({
-      opts,
-      startupTrace,
-    });
+    preparedManagedSnapshotRead
+      ? {
+          cfg: preparedManagedSnapshotRead.snapshot.config,
+          lowerPrecedenceEnv: {},
+          snapshot: preparedManagedSnapshotRead.snapshot,
+          startupConfigSnapshotRead: preparedManagedSnapshotRead,
+        }
+      : await readGatewayStartupConfigWithShellEnv({
+          opts,
+          startupTrace,
+        });
   if (
     !enforceGatewayRunFutureConfigGuard({
       opts,
@@ -990,7 +1003,9 @@ export async function runGatewayCommand(opts: GatewayRunOpts, hooks: GatewayRunR
       completeBoot,
       start: async ({ startupStartedAt } = {}) => {
         const startupConfigSnapshotReadForThisStart = startupConfigSnapshotReadForNextStart;
-        startupConfigSnapshotReadForNextStart = undefined;
+        if (!managedConfigActive) {
+          startupConfigSnapshotReadForNextStart = undefined;
+        }
         return await startGatewayServer(port, {
           bind,
           auth: authOverride,
@@ -999,6 +1014,7 @@ export async function runGatewayCommand(opts: GatewayRunOpts, hooks: GatewayRunR
           ...(startupConfigSnapshotReadForThisStart
             ? { startupConfigSnapshotRead: startupConfigSnapshotReadForThisStart }
             : {}),
+          ...(managedConfigActive ? { disableConfigReload: true } : {}),
           ...(envSidecarStartupMode !== "start" ? { sidecarStartup: envSidecarStartupMode } : {}),
           ...(channelAutostartSuppression ? { channelAutostartSuppression } : {}),
         });

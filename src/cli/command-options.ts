@@ -44,3 +44,26 @@ export function inheritOptionFromParent<T = unknown>(
   }
   return undefined;
 }
+
+export function collectOptionValuesFromParents<T = unknown>(
+  command: Command | undefined,
+  name: string,
+): T[] {
+  const values: T[] = [];
+  let depth = 0;
+  let ancestor = command?.parent;
+  while (ancestor && depth < MAX_INHERIT_DEPTH) {
+    const source = getOptionSource(ancestor, name);
+    if (source && source !== "default") {
+      const value = ancestor.opts<Record<string, unknown>>()[name];
+      if (Array.isArray(value)) {
+        values.unshift(...(value as T[]));
+      } else if (value !== undefined) {
+        values.unshift(value as T);
+      }
+    }
+    depth += 1;
+    ancestor = ancestor.parent;
+  }
+  return values;
+}

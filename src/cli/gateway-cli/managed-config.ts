@@ -56,8 +56,10 @@ export function takePreparedManagedGatewaySnapshotRead():
   return prepared;
 }
 
-export function setPreparedManagedGatewaySnapshot(snapshot: ConfigFileSnapshot): void {
-  preparedManagedGatewaySnapshotRead = { snapshot };
+export function setPreparedManagedGatewaySnapshot(
+  snapshotRead: ReadConfigFileSnapshotWithPluginMetadataResult,
+): void {
+  preparedManagedGatewaySnapshotRead = snapshotRead;
 }
 
 export function resetManagedGatewayConfigForTest(): void {
@@ -128,9 +130,30 @@ export function createManagedGatewayConfigController(params: {
 
   let publishedPrimaryRead: ReadConfigFileSnapshotWithPluginMetadataResult | undefined;
   let activeSnapshot: ConfigFileSnapshot | undefined;
+  let activeSnapshotRead: ReadConfigFileSnapshotWithPluginMetadataResult | undefined;
+  let inspectedLayerGenerations:
+    | Array<{ id: string; contentDigest: string; sourceGenerationIdentity?: string }>
+    | undefined;
+  const matchesInspectedGeneration = (layer: {
+    id: string;
+    contentDigest: string;
+    sourceGenerationIdentity?: string;
+  }) => {
+    const inspected = inspectedLayerGenerations?.find((candidate) => candidate.id === layer.id);
+    return (
+      inspected?.contentDigest === layer.contentDigest &&
+      inspected.sourceGenerationIdentity === layer.sourceGenerationIdentity
+    );
+  };
   const io = createLocalFileManagedConfigIO({
     descriptors,
     publish: async (candidate) => {
+      if (
+        inspectedLayerGenerations?.length !== candidate.layers.length ||
+        candidate.layers.some((layer) => !matchesInspectedGeneration(layer))
+      ) {
+        throw new Error("managed configuration source changed after metadata inspection");
+      }
       publishedPrimaryRead = await io.configIO.readConfigFileSnapshotWithPluginMetadata();
       setRuntimeConfigSnapshot(candidate.runtimeConfig, publishedPrimaryRead.snapshot.sourceConfig);
     },
@@ -160,14 +183,62 @@ export function createManagedGatewayConfigController(params: {
     getActiveSnapshot() {
       return activeSnapshot;
     },
+    getActiveSnapshotRead() {
+      return activeSnapshotRead;
+    },
     async previewSourceConfig() {
       const resolved = await io.resolveLayers();
       if (!resolved.valid) {
         return resolved;
       }
+      let inspected: Awaited<ReturnType<typeof io.inspectSourceConfigs>>;
+      try {
+        inspected = await io.inspectSourceConfigs();
+      } catch (error) {
+        return {
+          valid: false as const,
+          findings: [
+            {
+              reason: "LayerSourceInspectionFailed",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        };
+      }
+      const inspectedById = new Map(inspected.map((entry) => [entry.id, entry]));
+      const changedLayer = resolved.layers.find((layer) => {
+        const source = inspectedById.get(layer.id);
+        return (
+          source?.contentDigest !== layer.contentDigest ||
+          source.sourceGenerationIdentity !== layer.sourceGenerationIdentity
+        );
+      });
+      if (changedLayer) {
+        return {
+          valid: false as const,
+          findings: [
+            {
+              reason: "LayerSourceChangedDuringPreview",
+              layer: changedLayer.id,
+              message: "managed configuration source changed during metadata inspection",
+            },
+          ],
+        };
+      }
+      inspectedLayerGenerations = inspected.map(
+        ({ id, contentDigest, sourceGenerationIdentity }) => ({
+          id,
+          contentDigest,
+          ...(sourceGenerationIdentity ? { sourceGenerationIdentity } : {}),
+        }),
+      );
       const composed = composeConfigLayers(resolved.layers);
       return composed.valid
-        ? { valid: true as const, config: composed.config as OpenClawConfig }
+        ? {
+            valid: true as const,
+            config: composed.config as OpenClawConfig,
+            sourceConfigs: inspected.map((entry) => entry.config),
+          }
         : composed;
     },
     async activate(): Promise<ManagedGatewayConfigActivation> {
@@ -192,11 +263,17 @@ export function createManagedGatewayConfigController(params: {
         legacyIssues: [],
       };
       activeSnapshot = snapshot;
+      activeSnapshotRead = {
+        snapshot,
+        ...(candidate.pluginMetadataSnapshot
+          ? { pluginMetadataSnapshot: candidate.pluginMetadataSnapshot }
+          : {}),
+      };
       return {
         valid: true,
         cfg: candidate.runtimeConfig,
         snapshot,
-        startupConfigSnapshotRead: { snapshot },
+        startupConfigSnapshotRead: activeSnapshotRead,
       };
     },
   };

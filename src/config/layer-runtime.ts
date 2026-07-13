@@ -1,5 +1,11 @@
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope-config.js";
 import { loadDotEnv } from "../infra/dotenv.js";
 import { isPlainObject } from "../infra/plain-object.js";
+import { createConfigValidationMetadataPluginIdScope } from "../plugins/gateway-startup-plugin-ids.js";
+import {
+  resolvePluginMetadataSnapshot,
+  type PluginMetadataSnapshot,
+} from "../plugins/plugin-metadata-snapshot.js";
 import { cloneEnvWithPlatformSemantics } from "./env-vars.js";
 import { resolveConfigSourceText, type ConfigIoDeps } from "./io.js";
 import {
@@ -35,6 +41,7 @@ export type LayerRuntimeResult =
       sourceConfig: Record<string, unknown>;
       runtimeConfig: RuntimeConfig;
       provenance: ConfigPathProvenance[];
+      pluginMetadataSnapshot: PluginMetadataSnapshot;
     }
   | {
       valid: false;
@@ -56,11 +63,13 @@ export type LayerActivationCandidate = {
   sourceConfig: Record<string, unknown>;
   runtimeConfig: RuntimeConfig;
   provenance: ConfigPathProvenance[];
+  pluginMetadataSnapshot?: PluginMetadataSnapshot;
   layers: Array<{
     id: string;
     access: "read-only" | "read-write";
     sourceIdentity: string;
     contentDigest: string;
+    sourceGenerationIdentity?: string;
   }>;
   advisories: Array<{
     reason: "NoDeclaredValues";
@@ -172,8 +181,23 @@ export function prepareLayeredRuntimeConfig(
       ],
     };
   }
+  const pluginMetadataSnapshot = resolvePluginMetadataSnapshot({
+    config: effectiveSourceConfig,
+    workspaceDir: resolveAgentWorkspaceDir(
+      effectiveSourceConfig,
+      resolveDefaultAgentId(effectiveSourceConfig),
+      effectiveEnv,
+    ),
+    env: effectiveEnv,
+    allowWorkspaceScopedCurrent: true,
+    pluginIdScope: createConfigValidationMetadataPluginIdScope({
+      config: effectiveSourceConfig,
+      env: effectiveEnv,
+    }),
+  });
   const effectiveValidation = validateConfigObjectWithPlugins(effectiveSourceConfig, {
     env: effectiveEnv,
+    pluginMetadataSnapshot,
   });
   if (!effectiveValidation.ok) {
     return {
@@ -196,8 +220,11 @@ export function prepareLayeredRuntimeConfig(
       composition.config,
       effectiveValidation.config as OpenClawConfig,
     ) as Record<string, unknown>,
-    runtimeConfig: materializeRuntimeConfig(effectiveValidation.config, "load"),
+    runtimeConfig: materializeRuntimeConfig(effectiveValidation.config, "load", {
+      manifestRegistry: pluginMetadataSnapshot.manifestRegistry,
+    }),
     provenance: composition.provenance,
+    pluginMetadataSnapshot,
   };
 }
 
@@ -227,11 +254,15 @@ export async function activateLayeredRuntimeConfig<Source>(params: {
     sourceConfig: prepared.sourceConfig,
     runtimeConfig: prepared.runtimeConfig,
     provenance: prepared.provenance,
+    pluginMetadataSnapshot: prepared.pluginMetadataSnapshot,
     layers: resolved.layers.map((layer) => ({
       id: layer.id,
       access: layer.access,
       sourceIdentity: layer.sourceIdentity,
       contentDigest: layer.contentDigest,
+      ...(layer.sourceGenerationIdentity
+        ? { sourceGenerationIdentity: layer.sourceGenerationIdentity }
+        : {}),
     })),
     advisories: resolved.layers
       .filter(

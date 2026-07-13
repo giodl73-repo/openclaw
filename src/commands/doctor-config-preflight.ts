@@ -180,7 +180,9 @@ export async function runDoctorConfigPreflight(
     invalidConfigNote?: string | false;
     observe?: boolean;
     /** Return false or reject on config drift; the preflight always unwinds owned resources. */
-    beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean>;
+    beforeStateMigrations?: (
+      snapshot?: ConfigFileSnapshot,
+    ) => Promise<boolean | ConfigFileSnapshot>;
     requireStartupMigrationCheckpoint?: boolean;
     /**
      * Allows legacy imports whose source lives in the DEFAULT home state dir
@@ -214,10 +216,11 @@ export async function runDoctorConfigPreflight(
   try {
     // The gateway uses this last-moment guard to ensure its prepared config did not change before
     // any automatic migration mutates state. A rejected guard skips every state migration stage.
-    const stateMigrationsAllowed =
-      stateMigrations === undefined ||
-      options.beforeStateMigrations === undefined ||
-      (await options.beforeStateMigrations());
+    const initialStateMigrationGuard =
+      stateMigrations === undefined || options.beforeStateMigrations === undefined
+        ? true
+        : await options.beforeStateMigrations();
+    const stateMigrationsAllowed = initialStateMigrationGuard !== false;
     if (startupCheckpoint && !stateMigrationsAllowed) {
       throwStartupMigrationGuardRejected();
     }
@@ -293,13 +296,18 @@ export async function runDoctorConfigPreflight(
       note(formatConfigIssueLines(warnings, "-").join("\n"), "Config warnings");
     }
 
-    const baseConfig = snapshot.sourceConfig ?? snapshot.config ?? {};
-    const stateMigrationInput = resolveStateMigrationConfigInput({ snapshot, baseConfig });
-    const freshConfigGuardAllowed =
+    const freshConfigGuard =
       stateMigrations === undefined ||
       !stateMigrationsAllowed ||
-      options.beforeStateMigrations === undefined ||
-      (await options.beforeStateMigrations(snapshot));
+      options.beforeStateMigrations === undefined
+        ? true
+        : await options.beforeStateMigrations(snapshot);
+    const freshConfigGuardAllowed = freshConfigGuard !== false;
+    if (typeof freshConfigGuard !== "boolean") {
+      snapshot = freshConfigGuard;
+    }
+    const baseConfig = snapshot.sourceConfig ?? snapshot.config ?? {};
+    const stateMigrationInput = resolveStateMigrationConfigInput({ snapshot, baseConfig });
     if (startupCheckpoint && !freshConfigGuardAllowed) {
       throwStartupMigrationGuardRejected();
     }
