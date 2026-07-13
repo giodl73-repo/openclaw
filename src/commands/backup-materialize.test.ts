@@ -8,6 +8,7 @@ import { createContinuityArchive } from "../continuity/archive-create.js";
 import type { ContinuityArchiveObligations } from "../continuity/archive-obligations.js";
 import { resolveContinuityArchivePlanFromPaths } from "../continuity/archive-plan.js";
 import type { ContinuityArchivePlan } from "../continuity/archive-plan.js";
+import { sha256File } from "../infra/crypto-digest.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../state/openclaw-agent-db.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "../state/openclaw-state-db.js";
@@ -271,6 +272,15 @@ describe("backupMaterializeCommand", () => {
       activationReady: boolean;
       archiveSha256: string;
       components: Array<{ id: string }>;
+      contentInventory: {
+        version: number;
+        files: Array<{
+          archivePath: string;
+          sha256: string;
+          size: number;
+          executable: boolean;
+        }>;
+      };
       compatibility: { sqliteSchemas: Array<{ kind: string }> };
       surfaces: { obligations: ContinuityArchiveObligations };
     };
@@ -285,6 +295,17 @@ describe("backupMaterializeCommand", () => {
     expect(receipt.components.map((component) => component.id)).toEqual(
       result.components.map((component) => component.id),
     );
+    expect(receipt.contentInventory).toEqual(result.contentInventory);
+    expect(receipt.contentInventory.version).toBe(1);
+    expect(receipt.contentInventory.files).toHaveLength(result.materializedFileCount);
+    expect(receipt.contentInventory.files.map((file) => file.archivePath)).toEqual(
+      receipt.contentInventory.files.map((file) => file.archivePath).toSorted(),
+    );
+    const toolEntry = receipt.contentInventory.files.find(
+      (file) => file.archivePath === path.posix.join(workspaceAsset.archivePath, "tool.sh"),
+    );
+    expect(toolEntry).toMatchObject({ executable: true });
+    expect(toolEntry?.sha256).toBe(await sha256File(materializedToolPath));
     await expect(
       fs.access(path.join(fixture.destination, ".openclaw-materialize-incomplete")),
     ).rejects.toMatchObject({ code: "ENOENT" });
