@@ -64,6 +64,8 @@ export type GatewayServerOptions = {
   startupConfigSnapshotRead?: import("../config/io.js").ReadConfigFileSnapshotWithPluginMetadataResult;
   /** Restart request override; direct servers fail closed on restart-required reloads. */
   hotReloadRecovery?: GatewayRestartEmitter;
+  /** Keep CLI-composed configuration stable and read-only for this server lifetime. */
+  configLayersReadOnly?: boolean;
 };
 
 export function shouldRetainControlUiDeviceAuthMigrationSession(params: {

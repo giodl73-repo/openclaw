@@ -28,9 +28,13 @@ function createConfigGetResponse(
 
 /** Reads and projects config.get once per watcher-owned runtime and plugin-schema revision. */
 export async function readConfigGetResponse(params: {
+  configSnapshot?: ConfigFileSnapshot;
   getHotReloadStatus?: () => GatewayHotReloadStatus | undefined;
   loadUiHints: () => Parameters<typeof redactConfigSnapshot>[1];
 }): Promise<ConfigGetResponse> {
+  if (params.configSnapshot) {
+    return createConfigGetResponse(params.configSnapshot, params.loadUiHints());
+  }
   const getHotReloadStatus = params.getHotReloadStatus;
   if (!getHotReloadStatus || getHotReloadStatus() !== "active") {
     return createConfigGetResponse(await readConfigFileSnapshot(), params.loadUiHints());
