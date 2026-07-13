@@ -9,27 +9,26 @@ import {
   type ProviderRequestTrafficPolicyDecisionV1,
 } from "../provider-request-traffic-policy.js";
 import {
-  CAPI_BEARER_SLOT_ID,
-  CAPI_MODEL_ADAPTER_ID,
-  CAPI_MODEL_ADAPTER_VERSION,
-  adaptCapiModelResponseV1,
-  prepareCapiModelRequestV1,
-  type CapiModelAdapterConfigV1,
-  type CapiModelRequestContextV1,
-} from "./capi.js";
-import {
   PROVIDER_REQUEST_DISPATCHER_VERSION,
   dispatchHostedModelRequestV1,
   type ModelProviderHostedBindingImplementationsV1,
 } from "./model-provider-hosted-dispatch.js";
+import {
+  SUBSTRATE_BEARER_SLOT_ID,
+  SUBSTRATE_LLMAPI_MODEL_ADAPTER_ID,
+  SUBSTRATE_LLMAPI_MODEL_ADAPTER_VERSION,
+  prepareSubstrateLlmApiRequestV1,
+  type SubstrateLlmApiAdapterConfigV1,
+  type SubstrateLlmApiRequestContextV1,
+} from "./substrate-llmapi.js";
 
-export const CAPI_HOSTED_BINDING_VERSION = "capi-hosted-binding/v1" as const;
-export { PROVIDER_REQUEST_DISPATCHER_VERSION };
+export const SUBSTRATE_LLMAPI_HOSTED_BINDING_VERSION =
+  "substrate-llmapi-hosted-binding/v1" as const;
 
-type CapiBindingReference = HostIntegrationContributionReferenceV1;
+type SubstrateBindingReference = HostIntegrationContributionReferenceV1;
 
-export type CapiHostedBindingSelectionV1 = {
-  version: typeof CAPI_HOSTED_BINDING_VERSION;
+export type SubstrateLlmApiHostedBindingSelectionV1 = {
+  version: typeof SUBSTRATE_LLMAPI_HOSTED_BINDING_VERSION;
   configGeneration: string;
   ownerGeneration: string;
   configSource: {
@@ -37,32 +36,33 @@ export type CapiHostedBindingSelectionV1 = {
     path?: string;
   };
   providerId: string;
-  adapter: CapiBindingReference;
-  credentialSlot: CapiBindingReference;
-  trafficPolicy: CapiBindingReference;
-  dispatcher: CapiBindingReference;
+  adapter: SubstrateBindingReference;
+  credentialSlot: SubstrateBindingReference;
+  trafficPolicy: SubstrateBindingReference;
+  dispatcher: SubstrateBindingReference;
 };
 
-export type CapiHostedBindingImplementationsV1 = ModelProviderHostedBindingImplementationsV1;
+export type SubstrateLlmApiHostedBindingImplementationsV1 =
+  ModelProviderHostedBindingImplementationsV1;
 
-export type CapiHostedBindingGenerationFenceV1 = {
+export type SubstrateLlmApiHostedBindingGenerationFenceV1 = {
   configGeneration: string;
   bundleGeneration: string;
   ownerGeneration: string;
 };
 
-export type PreparedCapiHostedBindingV1 = {
-  version: typeof CAPI_HOSTED_BINDING_VERSION;
+export type PreparedSubstrateLlmApiHostedBindingV1 = {
+  version: typeof SUBSTRATE_LLMAPI_HOSTED_BINDING_VERSION;
   configGeneration: string;
   bundleGeneration: string;
   ownerGeneration: string;
   policyGeneration: string;
   mode: "local" | "hosted";
-  selection: Readonly<CapiHostedBindingSelectionV1>;
+  selection: Readonly<SubstrateLlmApiHostedBindingSelectionV1>;
   ownerEvidence: HostIntegrationOwnerEvidenceV1;
   dispatch: (params: {
-    fence: CapiHostedBindingGenerationFenceV1;
-    context: CapiModelRequestContextV1;
+    fence: SubstrateLlmApiHostedBindingGenerationFenceV1;
+    context: SubstrateLlmApiRequestContextV1;
     method: string;
     headers?: HeadersInit;
     body: string | Uint8Array;
@@ -74,7 +74,7 @@ export type PreparedCapiHostedBindingV1 = {
   }>;
 };
 
-export type CapiHostedBindingFailureCode =
+export type SubstrateLlmApiHostedBindingFailureCode =
   | "invalid-selection"
   | "incompatible-implementation"
   | "traffic-policy-denied"
@@ -83,12 +83,12 @@ export type CapiHostedBindingFailureCode =
   | "stale-bundle-generation"
   | "stale-owner-generation";
 
-export class CapiHostedBindingError extends Error {
-  readonly code: CapiHostedBindingFailureCode;
+export class SubstrateLlmApiHostedBindingError extends Error {
+  readonly code: SubstrateLlmApiHostedBindingFailureCode;
 
-  constructor(code: CapiHostedBindingFailureCode, message: string) {
+  constructor(code: SubstrateLlmApiHostedBindingFailureCode, message: string) {
     super(message);
-    this.name = "CapiHostedBindingError";
+    this.name = "SubstrateLlmApiHostedBindingError";
     this.code = code;
   }
 }
@@ -98,18 +98,18 @@ const GENERATION_RE = /^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$/;
 function normalizeGeneration(value: string, label: string): string {
   const normalized = value.trim();
   if (!GENERATION_RE.test(normalized)) {
-    throw new CapiHostedBindingError("invalid-selection", `${label} is invalid`);
+    throw new SubstrateLlmApiHostedBindingError("invalid-selection", `${label} is invalid`);
   }
   return normalized;
 }
 
-function freezeReference(reference: CapiBindingReference): CapiBindingReference {
+function freezeReference(reference: SubstrateBindingReference): SubstrateBindingReference {
   return Object.freeze({ ...reference });
 }
 
 function expectedReference(
-  reference: CapiBindingReference,
-  expected: CapiBindingReference,
+  reference: SubstrateBindingReference,
+  expected: SubstrateBindingReference,
   label: string,
 ): void {
   if (
@@ -118,7 +118,7 @@ function expectedReference(
     reference.id !== expected.id ||
     reference.version !== expected.version
   ) {
-    throw new CapiHostedBindingError(
+    throw new SubstrateLlmApiHostedBindingError(
       "invalid-selection",
       `${label} must select ${expected.id}@${expected.version}`,
     );
@@ -126,12 +126,12 @@ function expectedReference(
 }
 
 function assertImplementation(
-  selected: CapiBindingReference,
+  selected: SubstrateBindingReference,
   implementation: { id: string; version: string },
   label: string,
 ): void {
   if (implementation.id !== selected.id || implementation.version !== selected.version) {
-    throw new CapiHostedBindingError(
+    throw new SubstrateLlmApiHostedBindingError(
       "incompatible-implementation",
       `${label} implementation does not match the selected contribution`,
     );
@@ -140,59 +140,75 @@ function assertImplementation(
 
 function assertFence(
   binding: Pick<
-    PreparedCapiHostedBindingV1,
+    PreparedSubstrateLlmApiHostedBindingV1,
     "configGeneration" | "bundleGeneration" | "ownerGeneration"
   >,
-  fence: CapiHostedBindingGenerationFenceV1,
+  fence: SubstrateLlmApiHostedBindingGenerationFenceV1,
 ): void {
   if (fence.configGeneration !== binding.configGeneration) {
-    throw new CapiHostedBindingError(
+    throw new SubstrateLlmApiHostedBindingError(
       "stale-config-generation",
-      "CAPI binding effective config generation is stale",
+      "Substrate binding effective config generation is stale",
     );
   }
   if (fence.bundleGeneration !== binding.bundleGeneration) {
-    throw new CapiHostedBindingError(
+    throw new SubstrateLlmApiHostedBindingError(
       "stale-bundle-generation",
-      "CAPI binding host bundle generation is stale",
+      "Substrate binding host bundle generation is stale",
     );
   }
   if (fence.ownerGeneration !== binding.ownerGeneration) {
-    throw new CapiHostedBindingError(
+    throw new SubstrateLlmApiHostedBindingError(
       "stale-owner-generation",
-      "CAPI binding owner generation is stale",
+      "Substrate binding owner generation is stale",
     );
   }
 }
 
-export function prepareCapiHostedBindingV1(params: {
-  selection: CapiHostedBindingSelectionV1;
-  adapterConfig: CapiModelAdapterConfigV1;
+function freezeAdapterConfig(
+  config: SubstrateLlmApiAdapterConfigV1,
+): SubstrateLlmApiAdapterConfigV1 {
+  return Object.freeze({
+    ...config,
+    modelMap: Object.freeze({ ...config.modelMap }),
+    taxonomy: Object.freeze({
+      ...config.taxonomy,
+      extendedProperties: Object.freeze({ ...config.taxonomy.extendedProperties }),
+    }),
+  });
+}
+
+export function prepareSubstrateLlmApiHostedBindingV1(params: {
+  selection: SubstrateLlmApiHostedBindingSelectionV1;
+  adapterConfig: SubstrateLlmApiAdapterConfigV1;
   bundle: HostIntegrationBundleSnapshotV1;
-  implementations: CapiHostedBindingImplementationsV1;
-}): PreparedCapiHostedBindingV1 {
-  if (params.selection.version !== CAPI_HOSTED_BINDING_VERSION) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI binding version is unsupported");
+  implementations: SubstrateLlmApiHostedBindingImplementationsV1;
+}): PreparedSubstrateLlmApiHostedBindingV1 {
+  if (params.selection.version !== SUBSTRATE_LLMAPI_HOSTED_BINDING_VERSION) {
+    throw new SubstrateLlmApiHostedBindingError(
+      "invalid-selection",
+      "Substrate binding version is unsupported",
+    );
   }
   expectedReference(
     params.selection.adapter,
     {
       owner: "model-provider",
       kind: "model-provider-adapter",
-      id: CAPI_MODEL_ADAPTER_ID,
-      version: CAPI_MODEL_ADAPTER_VERSION,
+      id: SUBSTRATE_LLMAPI_MODEL_ADAPTER_ID,
+      version: SUBSTRATE_LLMAPI_MODEL_ADAPTER_VERSION,
     },
-    "CAPI adapter",
+    "Substrate adapter",
   );
   expectedReference(
     params.selection.credentialSlot,
     {
       owner: "provider-request",
       kind: "credential-slot-resolver",
-      id: CAPI_BEARER_SLOT_ID,
+      id: SUBSTRATE_BEARER_SLOT_ID,
       version: "credential-slot-resolver/v1",
     },
-    "CAPI credential slot",
+    "Substrate credential slot",
   );
   expectedReference(
     params.selection.trafficPolicy,
@@ -202,16 +218,16 @@ export function prepareCapiHostedBindingV1(params: {
       id: "lobster/enterprise-egress",
       version: PROVIDER_REQUEST_TRAFFIC_POLICY_VERSION,
     },
-    "CAPI traffic policy",
+    "Substrate traffic policy",
   );
   if (
     params.selection.dispatcher.owner !== "provider-request" ||
     params.selection.dispatcher.kind !== "provider-request-dispatcher" ||
     params.selection.dispatcher.version !== PROVIDER_REQUEST_DISPATCHER_VERSION
   ) {
-    throw new CapiHostedBindingError(
+    throw new SubstrateLlmApiHostedBindingError(
       "invalid-selection",
-      "CAPI dispatcher selection is incompatible",
+      "Substrate dispatcher selection is incompatible",
     );
   }
 
@@ -239,7 +255,7 @@ export function prepareCapiHostedBindingV1(params: {
     "Dispatcher",
   );
   if (params.implementations.trafficPolicy.snapshot.id !== params.selection.trafficPolicy.id) {
-    throw new CapiHostedBindingError(
+    throw new SubstrateLlmApiHostedBindingError(
       "incompatible-implementation",
       "Traffic policy snapshot does not match the selected contribution",
     );
@@ -247,18 +263,21 @@ export function prepareCapiHostedBindingV1(params: {
 
   const configGeneration = normalizeGeneration(
     params.selection.configGeneration,
-    "CAPI config generation",
+    "Substrate config generation",
   );
   const ownerGeneration = normalizeGeneration(
     params.selection.ownerGeneration,
-    "CAPI owner generation",
+    "Substrate owner generation",
   );
   const providerId = params.selection.providerId.trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(providerId)) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI provider ID is invalid");
+    throw new SubstrateLlmApiHostedBindingError(
+      "invalid-selection",
+      "Substrate provider ID is invalid",
+    );
   }
   const bundleGeneration = `${params.bundle.id}@${params.bundle.bundleVersion}`;
-  const adapterConfig = Object.freeze({ ...params.adapterConfig });
+  const adapterConfig = freezeAdapterConfig(params.adapterConfig);
   const credentialReadiness = params.implementations.credentialSlot.bindings.readiness();
   const dispatcherTarget = params.implementations.dispatcher.dispatcher;
   const dispatcher = Object.freeze({
@@ -270,7 +289,10 @@ export function prepareCapiHostedBindingV1(params: {
   const source = params.selection.configSource.source.trim();
   const path = params.selection.configSource.path?.trim();
   if (!source) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI config source is required");
+    throw new SubstrateLlmApiHostedBindingError(
+      "invalid-selection",
+      "Substrate config source is required",
+    );
   }
   const selection = Object.freeze({
     ...params.selection,
@@ -287,8 +309,8 @@ export function prepareCapiHostedBindingV1(params: {
     dispatcher: freezeReference(params.selection.dispatcher),
   });
 
-  const binding: PreparedCapiHostedBindingV1 = {
-    version: CAPI_HOSTED_BINDING_VERSION,
+  const binding: PreparedSubstrateLlmApiHostedBindingV1 = {
+    version: SUBSTRATE_LLMAPI_HOSTED_BINDING_VERSION,
     configGeneration,
     bundleGeneration,
     ownerGeneration,
@@ -298,11 +320,11 @@ export function prepareCapiHostedBindingV1(params: {
     ownerEvidence: Object.freeze({
       owner: "model-provider",
       kind: "model-provider-adapter",
-      id: CAPI_MODEL_ADAPTER_ID,
+      id: SUBSTRATE_LLMAPI_MODEL_ADAPTER_ID,
       bundleGeneration,
       state: "ready",
       reason: "BindingPrepared",
-      message: "CAPI model-owner binding is prepared and inactive.",
+      message: "Substrate model-owner binding is prepared and inactive.",
       config: Object.freeze({
         source,
         ...(path ? { path } : {}),
@@ -313,7 +335,7 @@ export function prepareCapiHostedBindingV1(params: {
     }),
     dispatch: async ({ fence, context, method, headers, body, signal }) => {
       assertFence(binding, fence);
-      const prepared = prepareCapiModelRequestV1({
+      const prepared = prepareSubstrateLlmApiRequestV1({
         config: adapterConfig,
         context,
         method,
@@ -321,22 +343,17 @@ export function prepareCapiHostedBindingV1(params: {
         body,
         credentialSlots: credentialReadiness,
       });
-      const result = await dispatchHostedModelRequestV1({
+      return await dispatchHostedModelRequestV1({
         policy: trafficPolicy,
         providerId,
-        providerLabel: "CAPI",
+        providerLabel: "Substrate",
         dispatcherSelectionId,
         dispatcherRouteProfileId,
         dispatcher,
         request: prepared,
         ...(signal ? { signal } : {}),
-        createError: (code, message) => new CapiHostedBindingError(code, message),
+        createError: (code, message) => new SubstrateLlmApiHostedBindingError(code, message),
       });
-      return {
-        response: adaptCapiModelResponseV1(result.response, prepared.responsePolicy),
-        release: result.release,
-        policyDecision: result.policyDecision,
-      };
     },
   };
   return Object.freeze(binding);
