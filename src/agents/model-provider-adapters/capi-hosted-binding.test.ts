@@ -431,13 +431,16 @@ describe("CAPI hosted binding", () => {
       dispatch: dispatcher,
     });
     const adapterConfig = { ...capiFixture.request.config };
+    const bindingSelection = selection();
     const binding = prepareCapiHostedBindingV1({
-      selection: selection(),
+      selection: bindingSelection,
       adapterConfig,
       bundle: bundle(),
       implementations,
     });
     adapterConfig.endpointTemplate = "https://mutated.example/{tenant_id}/{model}";
+    bindingSelection.dispatcher.id = "mutated/dispatcher";
+    implementations.dispatcher.routeProfileId = "mutated/route";
     dispatcher.dispatch = vi.fn(async () => new Response("mutated"));
 
     const result = await binding.dispatch({

@@ -39,10 +39,13 @@ describe("lobster-host plugin", () => {
   });
 
   it("declares one complete provider-host snapshot", () => {
-    expect(LOBSTER_HOST_BUNDLE_MANIFEST_V1.contributions).toHaveLength(5);
+    expect(LOBSTER_HOST_BUNDLE_MANIFEST_V1.bundleVersion).toBe("1.1.0");
+    expect(LOBSTER_HOST_BUNDLE_MANIFEST_V1.contributions).toHaveLength(7);
     expect(LOBSTER_HOST_BUNDLE_MANIFEST_V1.contributions.map((entry) => entry.id)).toEqual([
       "lobster/capi",
       "lobster/capi-token",
+      "lobster/substrate-llmapi",
+      "lobster/substrate-token",
       "lobster/enterprise-egress",
       "lobster/egress",
       "lobster/reverse-provider",
