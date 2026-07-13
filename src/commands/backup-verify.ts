@@ -1,17 +1,34 @@
 // Verifies backup archives by validating their manifest, payload entries, and hardlink targets.
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import path from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import * as tar from "tar";
+import {
+  BACKUP_CONTINUITY_BLOCKER_CODES,
+  BACKUP_CONTINUITY_TARGET_LEVEL,
+  type BackupContinuityAssessment,
+  type BackupContinuityBlockerCode,
+} from "../continuity/backup-assessment.js";
+import { sha256Hex } from "../infra/crypto-digest.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { isRecord, resolveUserPath } from "../utils.js";
+import {
+  type BackupManifestComponent,
+  validateBackupManifestComponents,
+} from "./backup-manifest-components.js";
 
 const WINDOWS_ABSOLUTE_ARCHIVE_PATH_RE = /^[A-Za-z]:[\\/]/;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
+export const DEFAULT_BACKUP_VERIFY_MAX_ENTRIES = 1_000_000;
 
 type BackupManifestAsset = {
   kind: string;
   sourcePath: string;
   archivePath: string;
+  component?: BackupManifestComponent;
 };
 
 type BackupManifest = {
@@ -37,21 +54,27 @@ type BackupManifest = {
     reason?: string;
     coveredBy?: string;
   }>;
+  continuityAssessment?: BackupContinuityAssessment;
 };
 
 type BackupVerifyOptions = {
   archive: string;
   json?: boolean;
+  maxEntries?: number;
 };
 
-type BackupVerifyResult = {
+export type BackupVerifyResult = {
   ok: true;
   archivePath: string;
   archiveRoot: string;
   createdAt: string;
   runtimeVersion: string;
   assetCount: number;
+  componentCount: number;
   entryCount: number;
+  archiveSha256: string;
+  manifestSha256: string;
+  continuityAssessment?: BackupContinuityAssessment;
 };
 
 type ArchiveEntry = {
@@ -92,6 +115,76 @@ function normalizeArchiveRoot(rootName: string): string {
     throw new Error(`Backup manifest archiveRoot must be a single path segment: ${rootName}`);
   }
   return normalized;
+}
+
+function readStringArray(value: unknown, label: string): string[] {
+  if (
+    !Array.isArray(value) ||
+    !value.every((entry): entry is string => typeof entry === "string")
+  ) {
+    throw new Error(`${label} must be an array of strings.`);
+  }
+  return value;
+}
+
+const BACKUP_CONTINUITY_BLOCKER_CODE_SET = new Set<string>(BACKUP_CONTINUITY_BLOCKER_CODES);
+
+function isBackupContinuityBlockerCode(value: unknown): value is BackupContinuityBlockerCode {
+  return typeof value === "string" && BACKUP_CONTINUITY_BLOCKER_CODE_SET.has(value);
+}
+
+function parseContinuityAssessment(value: unknown): BackupContinuityAssessment | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error("Backup manifest continuityAssessment must be an object.");
+  }
+  if (value.targetLevel !== BACKUP_CONTINUITY_TARGET_LEVEL || value.eligible !== false) {
+    throw new Error("Backup manifest continuityAssessment has unsupported eligibility metadata.");
+  }
+  if (!Array.isArray(value.blockers) || value.blockers.length === 0) {
+    throw new Error("Backup manifest continuityAssessment must contain blockers.");
+  }
+  const blockers = value.blockers.map((blocker) => {
+    if (!isRecord(blocker)) {
+      throw new Error("Backup manifest continuityAssessment contains a non-object blocker.");
+    }
+    if (!isBackupContinuityBlockerCode(blocker.code)) {
+      throw new Error(
+        `Backup manifest continuityAssessment blocker code is invalid: ${String(blocker.code)}`,
+      );
+    }
+    if (
+      typeof blocker.count !== "number" ||
+      !Number.isSafeInteger(blocker.count) ||
+      blocker.count <= 0
+    ) {
+      throw new Error(
+        `Backup manifest continuityAssessment blocker count is invalid: ${blocker.code}`,
+      );
+    }
+    return {
+      code: blocker.code,
+      count: blocker.count,
+    };
+  });
+  if (new Set(blockers.map((blocker) => blocker.code)).size !== blockers.length) {
+    throw new Error("Backup manifest continuityAssessment contains duplicate blocker codes.");
+  }
+  if (
+    !blockers.some(
+      (blocker) =>
+        blocker.code === "continuity.config.secret_classification_unproven" && blocker.count === 1,
+    )
+  ) {
+    throw new Error("Backup manifest continuityAssessment is missing its fail-closed blocker.");
+  }
+  return {
+    targetLevel: BACKUP_CONTINUITY_TARGET_LEVEL,
+    eligible: false,
+    blockers,
+  };
 }
 
 function isArchivePathWithin(child: string, parent: string): boolean {
@@ -137,12 +230,31 @@ function parseManifest(raw: string): BackupManifest {
     if (typeof asset.archivePath !== "string" || !asset.archivePath.trim()) {
       throw new Error("Backup manifest asset is missing archivePath.");
     }
+    let component: BackupManifestComponent | undefined;
+    if (asset.component !== undefined) {
+      if (!isRecord(asset.component)) {
+        throw new Error("Backup manifest asset component must be an object.");
+      }
+      component = {
+        id: readStringValue(asset.component.id) ?? "",
+        restoreOrder:
+          typeof asset.component.restoreOrder === "number"
+            ? asset.component.restoreOrder
+            : Number.NaN,
+        dependsOn: readStringArray(
+          asset.component.dependsOn,
+          "Backup manifest component dependsOn",
+        ),
+      };
+    }
     assets.push({
       kind: asset.kind,
       sourcePath: asset.sourcePath,
       archivePath: asset.archivePath,
+      ...(component ? { component } : {}),
     });
   }
+  validateBackupManifestComponents(assets);
 
   return {
     schemaVersion: 1,
@@ -171,91 +283,86 @@ function parseManifest(raw: string): BackupManifest {
       : undefined,
     assets,
     skipped: Array.isArray(parsed.skipped) ? parsed.skipped : undefined,
+    continuityAssessment: parseContinuityAssessment(parsed.continuityAssessment),
   };
 }
 
-async function listArchiveEntries(archivePath: string): Promise<ArchiveEntry[]> {
+async function readManifestEntry(
+  entry: tar.ReadEntry,
+): Promise<{ content?: Buffer; error?: Error }> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  let exceededLimit = false;
+  for await (const chunk of entry) {
+    if (exceededLimit) {
+      continue;
+    }
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.byteLength;
+    if (totalBytes > MAX_MANIFEST_BYTES) {
+      exceededLimit = true;
+      chunks.length = 0;
+      continue;
+    }
+    chunks.push(buffer);
+  }
+  if (exceededLimit) {
+    return { error: new Error(`Backup manifest exceeds ${MAX_MANIFEST_BYTES} byte limit.`) };
+  }
+  return { content: Buffer.concat(chunks, totalBytes) };
+}
+
+async function inspectArchive(
+  archivePath: string,
+  maxEntries: number,
+): Promise<{
+  entries: ArchiveEntry[];
+  manifestContents: Buffer[];
+  archiveSha256: string;
+}> {
   const entries: ArchiveEntry[] = [];
-  await tar.t({
-    file: archivePath,
+  const manifestPromises: Array<ReturnType<typeof readManifestEntry>> = [];
+  const digest = createHash("sha256");
+  const parser: tar.Parser = tar.t({
     gzip: true,
     onentry: (entry) => {
+      if (entries.length >= maxEntries) {
+        entry.resume();
+        parser.abort(new Error(`Backup archive exceeds the ${maxEntries}-entry limit.`));
+        return;
+      }
       entries.push({
         path: entry.path,
         ...(entry.linkpath ? { linkpath: entry.linkpath } : {}),
         ...(entry.type ? { type: entry.type } : {}),
       });
-      entry.resume();
-    },
-  });
-  return entries;
-}
-
-async function extractManifest(params: {
-  archivePath: string;
-  manifestEntryPath: string;
-}): Promise<string> {
-  let manifestContentPromise: Promise<{ content?: string; error?: Error }> | undefined;
-  await tar.t({
-    file: params.archivePath,
-    gzip: true,
-    onentry: (entry) => {
-      if (entry.path !== params.manifestEntryPath) {
+      if (!isRootManifestEntry(entry.path)) {
         entry.resume();
         return;
       }
-
-      manifestContentPromise = new Promise<{ content?: string; error?: Error }>((resolve) => {
-        const chunks: Buffer[] = [];
-        let totalBytes = 0;
-        let exceededLimit = false;
-        let settled = false;
-        const settle = (result: { content?: string; error?: Error }) => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          resolve(result);
-        };
-        entry.on("data", (chunk: Buffer | string) => {
-          if (exceededLimit) {
-            return;
-          }
-          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-          totalBytes += buffer.byteLength;
-          if (totalBytes > MAX_MANIFEST_BYTES) {
-            exceededLimit = true;
-            chunks.length = 0;
-            return;
-          }
-          chunks.push(buffer);
-        });
-        entry.on("error", (error) => {
-          settle({
-            error: error instanceof Error ? error : new Error(String(error)),
-          });
-        });
-        entry.on("end", () => {
-          if (exceededLimit) {
-            settle({
-              error: new Error(`Backup manifest exceeds ${MAX_MANIFEST_BYTES} byte limit.`),
-            });
-            return;
-          }
-          settle({ content: Buffer.concat(chunks, totalBytes).toString("utf8") });
-        });
-      });
+      manifestPromises.push(readManifestEntry(entry));
     },
   });
-
-  if (!manifestContentPromise) {
-    throw new Error(`Archive is missing manifest entry: ${params.manifestEntryPath}`);
+  await pipeline(
+    createReadStream(archivePath),
+    new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        digest.update(chunk);
+        callback(null, chunk);
+      },
+    }),
+    parser,
+  );
+  const manifestResults = await Promise.all(manifestPromises);
+  const manifestError = manifestResults.find((result) => result.error)?.error;
+  if (manifestError) {
+    throw manifestError;
   }
-  const result = await manifestContentPromise;
-  if (result.error) {
-    throw result.error;
-  }
-  return result.content ?? "";
+  return {
+    entries,
+    manifestContents: manifestResults.flatMap((result) => (result.content ? [result.content] : [])),
+    archiveSha256: digest.digest("hex"),
+  };
 }
 
 function isRootManifestEntry(entryPath: string): boolean {
@@ -328,7 +435,16 @@ function formatResult(result: BackupVerifyResult): string {
     `Created at: ${result.createdAt}`,
     `Runtime version: ${result.runtimeVersion}`,
     `Assets verified: ${result.assetCount}`,
+    `Components verified: ${result.componentCount}`,
     `Archive entries scanned: ${result.entryCount}`,
+    `Archive SHA-256: ${result.archiveSha256}`,
+    `Manifest SHA-256: ${result.manifestSha256}`,
+    ...(result.continuityAssessment
+      ? [
+          `Archived continuity eligible: ${result.continuityAssessment.eligible ? "yes" : "no"}`,
+          `Continuity blockers: ${result.continuityAssessment.blockers.map((blocker) => blocker.code).join(", ")}`,
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -351,7 +467,12 @@ export async function backupVerifyCommand(
   opts: BackupVerifyOptions,
 ): Promise<BackupVerifyResult> {
   const archivePath = resolveUserPath(opts.archive);
-  const rawEntries = await listArchiveEntries(archivePath);
+  const maxEntries = opts.maxEntries ?? DEFAULT_BACKUP_VERIFY_MAX_ENTRIES;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+    throw new Error("Backup verify maxEntries must be a positive safe integer.");
+  }
+  const inspection = await inspectArchive(archivePath, maxEntries);
+  const rawEntries = inspection.entries;
   if (rawEntries.length === 0) {
     throw new Error("Backup archive is empty.");
   }
@@ -379,12 +500,11 @@ export async function backupVerifyCommand(
   if (duplicateEntryPath) {
     throw new Error(`Archive contains duplicate entry path: ${duplicateEntryPath}`);
   }
-  const manifestEntryPath = manifestMatches[0]?.raw;
-  if (!manifestEntryPath) {
-    throw new Error("Backup archive manifest entry could not be resolved.");
+  const manifestRawBytes = inspection.manifestContents[0];
+  if (!manifestRawBytes) {
+    throw new Error("Backup archive manifest contents could not be resolved.");
   }
-
-  const manifestRaw = await extractManifest({ archivePath, manifestEntryPath });
+  const manifestRaw = manifestRawBytes.toString("utf8");
   const manifest = parseManifest(manifestRaw);
   verifyManifestAgainstEntries(manifest, normalizedEntrySet);
   verifyHardlinkTargetsAgainstArchiveRoot(
@@ -400,7 +520,13 @@ export async function backupVerifyCommand(
     createdAt: manifest.createdAt,
     runtimeVersion: manifest.runtimeVersion,
     assetCount: manifest.assets.length,
+    componentCount: manifest.assets.filter((asset) => asset.component !== undefined).length,
     entryCount: rawEntries.length,
+    archiveSha256: inspection.archiveSha256,
+    manifestSha256: sha256Hex(manifestRawBytes),
+    ...(manifest.continuityAssessment
+      ? { continuityAssessment: manifest.continuityAssessment }
+      : {}),
   };
 
   if (opts.json) {

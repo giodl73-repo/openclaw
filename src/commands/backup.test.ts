@@ -6,6 +6,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { RuntimeEnv } from "../runtime.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { createTempHomeEnv, type TempHomeEnv } from "../test-utils/temp-home.js";
+import {
+  buildBackupManifestComponents,
+  type BackupManifestComponent,
+} from "./backup-manifest-components.js";
 import * as backupShared from "./backup-shared.js";
 import {
   buildBackupArchiveRoot,
@@ -41,7 +45,11 @@ type CapturedBackupManifest = {
     oauthDir: string;
     workspaceDirs: string[];
   };
-  assets: Array<Pick<BackupAsset, "kind" | "sourcePath" | "archivePath">>;
+  assets: Array<
+    Pick<BackupAsset, "kind" | "sourcePath" | "archivePath"> & {
+      component: BackupManifestComponent;
+    }
+  >;
   skipped: Array<{ kind: string; sourcePath: string; reason: string; coveredBy?: string }>;
 };
 
@@ -304,11 +312,13 @@ describe("backup commands", () => {
         oauthDir: path.join(stateDir, "credentials"),
         workspaceDirs: [externalWorkspace],
       });
+      const components = buildBackupManifestComponents(result.assets);
       expect(manifest.assets).toEqual(
-        result.assets.map((asset) => ({
+        result.assets.map((asset, index) => ({
           kind: asset.kind,
           sourcePath: asset.sourcePath,
           archivePath: asset.archivePath,
+          component: components[index],
         })),
       );
       expect(manifest.assets.map((asset) => asset.kind).toSorted()).toEqual([

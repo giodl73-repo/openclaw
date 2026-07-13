@@ -1,18 +1,19 @@
-// Backup command registration for local state archive creation and verification.
+// Backup command registration for local archive creation, verification, and retrieval.
 import type { Command } from "commander";
 import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
+import { backupRetrieveCommand } from "../../commands/backup-retrieve.js";
 import { backupVerifyCommand } from "../../commands/backup-verify.js";
 import { backupCreateCommand } from "../../commands/backup.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
 
-/** Register backup create/verify subcommands. */
+/** Register backup create, verify, and retrieve subcommands. */
 export function registerBackupCommand(program: Command) {
   const backup = program
     .command("backup")
-    .description("Create and verify local backup archives for OpenClaw state")
+    .description("Create, verify, and retrieve local backup archives for OpenClaw state")
     .addHelpText(
       "after",
       () =>
@@ -87,6 +88,31 @@ export function registerBackupCommand(program: Command) {
       await runCommandWithRuntime(defaultRuntime, async () => {
         await backupVerifyCommand(defaultRuntime, {
           archive: archive as string,
+          json: Boolean(opts.json),
+        });
+      });
+    });
+
+  backup
+    .command("retrieve <archive>")
+    .description("Verify and retrieve a backup into a new staging directory")
+    .requiredOption("--destination <path>", "New staging directory (must not exist)")
+    .option("--json", "Output JSON", false)
+    .addHelpText(
+      "after",
+      () =>
+        `\n${theme.heading("Examples:")}\n${formatHelpExamples([
+          [
+            "openclaw backup retrieve ./backup.tar.gz --destination ./restored",
+            "Verify and extract a backup into a non-active staging directory.",
+          ],
+        ])}`,
+    )
+    .action(async (archive, opts) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        await backupRetrieveCommand(defaultRuntime, {
+          archive: archive as string,
+          destination: opts.destination as string,
           json: Boolean(opts.json),
         });
       });

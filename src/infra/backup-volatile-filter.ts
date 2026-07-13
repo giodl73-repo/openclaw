@@ -50,6 +50,34 @@ function isAgentSessionTranscriptPath(filePosix: string, stateDirPosix: string):
   return parts.length >= 3 && parts[1] === "sessions";
 }
 
+/** Returns true for legacy file-backed transcripts omitted from live backups. */
+export function isLegacySessionTranscriptBackupPath(
+  absolutePath: string,
+  plan: VolatileFilterPlan,
+): boolean {
+  if (!absolutePath) {
+    return false;
+  }
+  const candidates = filePathCandidates(absolutePath);
+  for (const stateDir of plan.stateDirs) {
+    if (!stateDir) {
+      continue;
+    }
+    const stateDirPosix = normalizePosix(stateDir);
+    const sessionsRoot = path.posix.join(stateDirPosix, "sessions");
+    for (const filePosix of candidates) {
+      if (
+        (isUnder(filePosix, sessionsRoot) ||
+          isAgentSessionTranscriptPath(filePosix, stateDirPosix)) &&
+        hasExtension(filePosix, [".jsonl", ".log"])
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function filePathCandidates(input: string): string[] {
   const normalized = normalizePosix(input);
   if (normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized)) {
@@ -83,6 +111,10 @@ export function isVolatileBackupPath(absolutePath: string, plan: VolatileFilterP
   }
   const candidates = filePathCandidates(absolutePath);
 
+  if (isLegacySessionTranscriptBackupPath(absolutePath, plan)) {
+    return true;
+  }
+
   for (const stateDir of plan.stateDirs) {
     if (!stateDir) {
       continue;
@@ -90,18 +122,6 @@ export function isVolatileBackupPath(absolutePath: string, plan: VolatileFilterP
     const stateDirPosix = normalizePosix(stateDir);
 
     for (const filePosix of candidates) {
-      const sessionsRoot = path.posix.join(stateDirPosix, "sessions");
-      if (isUnder(filePosix, sessionsRoot) && hasExtension(filePosix, [".jsonl", ".log"])) {
-        return true;
-      }
-
-      if (
-        isAgentSessionTranscriptPath(filePosix, stateDirPosix) &&
-        hasExtension(filePosix, [".jsonl", ".log"])
-      ) {
-        return true;
-      }
-
       const cronRunsRoot = path.posix.join(stateDirPosix, "cron", "runs");
       if (isUnder(filePosix, cronRunsRoot) && hasExtension(filePosix, [".jsonl", ".log"])) {
         return true;
