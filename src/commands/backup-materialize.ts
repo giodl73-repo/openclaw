@@ -1,8 +1,17 @@
 // Materializes verified continuity components into a new offline filesystem root.
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ContinuityArchiveObligations } from "../continuity/archive-obligations.js";
+import {
+  assignContinuityPayloadFiles,
+  type ContinuityMaterializationContentInventory,
+  listContinuityRegularFiles,
+  type MaterializedContinuityFile,
+  resolveOwnedContinuityAssets,
+  type OwnedContinuityAsset,
+} from "../continuity/materialization-files.js";
 import { verifyContinuitySqliteSnapshot } from "../continuity/sqlite-sanitize.js";
 import { sha256Hex } from "../infra/crypto-digest.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
@@ -21,12 +30,7 @@ import {
   backupRetrieveCommand,
   DEFAULT_BACKUP_RETRIEVE_MAX_BYTES,
 } from "./backup-retrieve.js";
-import {
-  parseBackupManifest,
-  type BackupManifest,
-  type BackupManifestAsset,
-  verifyBackupArchive,
-} from "./backup-verify.js";
+import { parseBackupManifest, type BackupManifest, verifyBackupArchive } from "./backup-verify.js";
 import { isPathWithin } from "./cleanup-utils.js";
 
 export type BackupMaterializeOptions = {
@@ -78,6 +82,7 @@ export type BackupMaterializeResult = {
   archiveSha256: string;
   manifestSha256: string;
   materializedFileCount: number;
+  contentInventory: ContinuityMaterializationContentInventory;
   components: MaterializedContinuityComponent[];
   compatibility: ContinuityCompatibilityEvidence;
   surfaces: ContinuitySurfaceEvidence;
@@ -85,19 +90,6 @@ export type BackupMaterializeResult = {
   activationReady: false;
   effectiveArchived: false;
 };
-
-type OwnedAsset = BackupManifestAsset & {
-  component: NonNullable<BackupManifestAsset["component"]>;
-};
-
-function hasComponent(asset: BackupManifestAsset): asset is OwnedAsset {
-  return asset.component !== undefined;
-}
-
-function isArchivePathWithin(child: string, parent: string): boolean {
-  const relative = path.posix.relative(parent, child);
-  return relative === "" || (!relative.startsWith("../") && relative !== "..");
-}
 
 async function assertDestinationDoesNotExist(destination: string): Promise<void> {
   try {
@@ -137,7 +129,7 @@ async function canonicalizeProspectivePath(targetPath: string): Promise<string> 
 
 async function assertDestinationOutsideSources(
   destination: string,
-  assets: readonly OwnedAsset[],
+  assets: readonly OwnedContinuityAsset[],
 ): Promise<void> {
   const canonicalDestination = await canonicalizeProspectivePath(destination);
   const canonicalSources = await Promise.all(
@@ -156,23 +148,6 @@ async function assertDestinationOutsideSources(
       `Continuity materialize destination must be outside every captured source: ${overlap.asset.sourcePath}`,
     );
   }
-}
-
-async function listRegularFiles(directory: string, relative = ""): Promise<string[]> {
-  const files: string[] = [];
-  const currentDirectory = path.join(directory, ...relative.split("/").filter(Boolean));
-  for (const entry of await fs.readdir(currentDirectory, { withFileTypes: true })) {
-    const relativePath = path.posix.join(relative, entry.name);
-    const entryPath = path.join(currentDirectory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listRegularFiles(directory, relativePath)));
-    } else if (entry.isFile()) {
-      files.push(relativePath);
-    } else {
-      throw new Error(`Retrieved continuity payload contains an unsupported entry: ${entryPath}`);
-    }
-  }
-  return files.toSorted();
 }
 
 function resolveRetrievedPath(
@@ -199,66 +174,11 @@ function resolveMaterializedPath(
   return path.join(destination, ...relativePath.split("/"));
 }
 
-function resolveOwnedAssets(manifest: BackupManifest): OwnedAsset[] {
-  if (manifest.artifactType !== "continuity" || !manifest.continuityCapture) {
-    throw new Error("Only verified continuity artifacts can be materialized.");
-  }
-  if (!manifest.assets.every(hasComponent)) {
-    throw new Error("Continuity materialization requires a complete component graph.");
-  }
-  return manifest.assets
-    .filter(hasComponent)
-    .toSorted((left, right) => left.component.restoreOrder - right.component.restoreOrder);
-}
-
-function assignPayloadFiles(params: {
-  manifest: BackupManifest;
-  assets: OwnedAsset[];
-  payloadFiles: string[];
-}): Map<string, string[]> {
-  const stateAsset = params.assets.find((asset) => asset.kind === "state");
-  if (!stateAsset) {
-    throw new Error("Continuity materialization requires one state component.");
-  }
-  const stateFilePaths = new Set(params.manifest.stateFilePaths ?? []);
-  const configAssets = params.assets.filter(
-    (asset) => asset.kind === "config" || asset.kind === "config-include",
-  );
-  const workspaceAssets = params.assets.filter((asset) => asset.kind === "workspace");
-  const filesByComponent = new Map(
-    params.assets.map((asset) => [asset.component.id, [] as string[]]),
-  );
-
-  for (const archivePath of params.payloadFiles) {
-    let owner: OwnedAsset;
-    if (stateFilePaths.has(archivePath)) {
-      owner = stateAsset;
-    } else {
-      const configOwners = configAssets.filter((asset) => asset.archivePath === archivePath);
-      if (configOwners.length > 1) {
-        throw new Error(`Continuity payload has ambiguous config ownership: ${archivePath}`);
-      }
-      if (configOwners[0]) {
-        owner = configOwners[0];
-      } else {
-        const workspaceOwners = workspaceAssets.filter((asset) =>
-          isArchivePathWithin(archivePath, asset.archivePath),
-        );
-        if (workspaceOwners.length !== 1) {
-          throw new Error(`Continuity payload has invalid workspace ownership: ${archivePath}`);
-        }
-        owner = workspaceOwners[0]!;
-      }
-    }
-    filesByComponent.get(owner.component.id)!.push(archivePath);
-  }
-  return filesByComponent;
-}
-
 async function copyOwnedFile(params: {
+  archivePath: string;
   sourcePath: string;
   destinationPath: string;
-}): Promise<void> {
+}): Promise<MaterializedContinuityFile> {
   const sourceStat = await fs.lstat(params.sourcePath);
   if (!sourceStat.isFile() || sourceStat.isSymbolicLink() || sourceStat.nlink !== 1) {
     throw new Error(`Continuity materialization source must be a private regular file.`);
@@ -284,11 +204,15 @@ async function copyOwnedFile(params: {
       destinationMode,
     );
     const buffer = Buffer.allocUnsafe(64 * 1024);
+    const digest = createHash("sha256");
+    let copiedBytes = 0;
     while (true) {
       const { bytesRead } = await sourceHandle.read(buffer, 0, buffer.length, null);
       if (bytesRead === 0) {
         break;
       }
+      digest.update(buffer.subarray(0, bytesRead));
+      copiedBytes += bytesRead;
       let offset = 0;
       while (offset < bytesRead) {
         const { bytesWritten } = await destinationHandle.write(
@@ -303,8 +227,14 @@ async function copyOwnedFile(params: {
         offset += bytesWritten;
       }
     }
-    await destinationHandle.sync();
     await destinationHandle.chmod(destinationMode);
+    await destinationHandle.sync();
+    return {
+      archivePath: params.archivePath,
+      sha256: digest.digest("hex"),
+      size: copiedBytes,
+      executable: destinationMode === 0o700,
+    };
   } catch (error) {
     await fs.rm(params.destinationPath, { force: true }).catch(() => undefined);
     throw error;
@@ -471,7 +401,7 @@ async function materializeContinuityArchive(
     ...(opts.maxEntries === undefined ? {} : { maxEntries: opts.maxEntries }),
     maxContentBytes: maxBytes,
   });
-  const assets = resolveOwnedAssets(preflight.manifest);
+  const assets = resolveOwnedContinuityAssets(preflight.manifest);
   await assertDestinationOutsideSources(destination, assets);
   const parentDirectory = path.dirname(destination);
   await fs.mkdir(parentDirectory, { recursive: true });
@@ -508,10 +438,10 @@ async function materializeContinuityArchive(
     }
     const payloadRoot = path.posix.join(manifest.archiveRoot, "payload");
     const retrievedPayloadDirectory = path.join(retrievedDirectory, "payload");
-    const payloadFiles = (await listRegularFiles(retrievedPayloadDirectory)).map((relativePath) =>
-      path.posix.join(payloadRoot, relativePath),
+    const payloadFiles = (await listContinuityRegularFiles(retrievedPayloadDirectory)).map(
+      (relativePath) => path.posix.join(payloadRoot, relativePath),
     );
-    const filesByComponent = assignPayloadFiles({ manifest, assets, payloadFiles });
+    const filesByComponent = assignContinuityPayloadFiles({ manifest, assets, payloadFiles });
     const compatibility: ContinuityCompatibilityEvidence = {
       ...validateRuntimeCompatibility(manifest),
       sqliteSchemas: validateSqliteSchemas(retrievedDirectory, manifest),
@@ -528,6 +458,7 @@ async function materializeContinuityArchive(
     });
 
     const components: MaterializedContinuityComponent[] = [];
+    const materializedFiles: MaterializedContinuityFile[] = [];
     for (const asset of assets) {
       const componentFiles = filesByComponent.get(asset.component.id) ?? [];
       if (asset.kind === "state" || asset.kind === "workspace") {
@@ -537,10 +468,13 @@ async function materializeContinuityArchive(
         });
       }
       for (const componentFile of componentFiles) {
-        await copyOwnedFile({
-          sourcePath: resolveRetrievedPath(retrievedDirectory, manifest, componentFile),
-          destinationPath: resolveMaterializedPath(destination, payloadRoot, componentFile),
-        });
+        materializedFiles.push(
+          await copyOwnedFile({
+            archivePath: componentFile,
+            sourcePath: resolveRetrievedPath(retrievedDirectory, manifest, componentFile),
+            destinationPath: resolveMaterializedPath(destination, payloadRoot, componentFile),
+          }),
+        );
       }
       components.push({
         id: asset.component.id,
@@ -558,6 +492,12 @@ async function materializeContinuityArchive(
     if (materializedFileCount !== payloadFiles.length) {
       throw new Error("Continuity materialization did not consume every payload file.");
     }
+    const contentInventory: ContinuityMaterializationContentInventory = {
+      version: 1,
+      files: materializedFiles.toSorted((left, right) =>
+        left.archivePath < right.archivePath ? -1 : left.archivePath > right.archivePath ? 1 : 0,
+      ),
+    };
     const receiptPath = path.join(destination, ".openclaw-continuity-materialization.json");
     const receipt = {
       schemaVersion: 1,
@@ -567,6 +507,7 @@ async function materializeContinuityArchive(
       manifestSha256: retrieval.manifestSha256,
       components,
       materializedFileCount,
+      contentInventory,
       compatibility,
       surfaces,
       activated: false,
@@ -593,6 +534,7 @@ async function materializeContinuityArchive(
       archiveSha256: retrieval.archiveSha256,
       manifestSha256: retrieval.manifestSha256,
       materializedFileCount,
+      contentInventory,
       components,
       compatibility,
       surfaces,

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sha256File } from "../infra/crypto-digest.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { backupPlanRestoreCommand } from "./backup-plan-restore.js";
 import type { VerifiedBackupArchive } from "./backup-verify.js";
@@ -96,6 +97,26 @@ async function makeFixture() {
     activated: false,
     activationReady: false,
     effectiveArchived: false,
+    contentInventory: {
+      version: 1,
+      files: await Promise.all(
+        [
+          "continuity/payload/includes/gateway.json",
+          "continuity/payload/state/openclaw.json",
+          "continuity/payload/state/workspace/AGENTS.md",
+        ].map(async (inventoryPath) => {
+          const relativePath = path.posix.relative("continuity/payload", inventoryPath);
+          const materializedPath = path.join(materializedRoot, ...relativePath.split("/"));
+          const stat = await fs.stat(materializedPath);
+          return {
+            archivePath: inventoryPath,
+            sha256: await sha256File(materializedPath),
+            size: stat.size,
+            executable: false,
+          };
+        }),
+      ),
+    },
   };
   const receiptPath = path.join(materializedRoot, ".openclaw-continuity-materialization.json");
   await fs.writeFile(receiptPath, `${JSON.stringify(receipt)}\n`);
@@ -153,11 +174,11 @@ describe("backupPlanRestoreCommand", () => {
         },
       ],
       blockers: [
-        { code: "continuity.restore.materialization_content_identity_required" },
         { code: "continuity.restore.launcher_lease_required" },
         { code: "continuity.restore.publication_capability_missing" },
       ],
     });
+    expect(result.plan.groups.flatMap((group) => group.files ?? [])).toHaveLength(3);
     await expect(fs.access(fixture.stateTarget)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(
       fs.access(path.join(fixture.targetParent, ".openclaw-restore")),
@@ -194,6 +215,36 @@ describe("backupPlanRestoreCommand", () => {
     ).rejects.toThrow(/receipt does not match/);
   });
 
+  it("keeps older receipts previewable but execution-blocked", async () => {
+    const fixture = await makeFixture();
+    const { contentInventory: _contentInventory, ...legacyReceipt } = fixture.receipt;
+    await fs.writeFile(fixture.receiptPath, `${JSON.stringify(legacyReceipt)}\n`);
+
+    const result = await backupPlanRestoreCommand(runtime, {
+      archive: fixture.archivePath,
+      materialized: fixture.materializedRoot,
+      authorize: [fixture.stateTarget, fixture.includeTarget],
+    });
+
+    expect(result.plan.blockers[0]).toEqual({
+      code: "continuity.restore.materialization_content_identity_required",
+    });
+    expect(result.plan.groups.every((group) => group.files === undefined)).toBe(true);
+  });
+
+  it("rejects changed materialized bytes against the receipt inventory", async () => {
+    const fixture = await makeFixture();
+    await fs.writeFile(path.join(fixture.materializedRoot, "state", "openclaw.json"), "changed\n");
+
+    await expect(
+      backupPlanRestoreCommand(runtime, {
+        archive: fixture.archivePath,
+        materialized: fixture.materializedRoot,
+        authorize: [fixture.stateTarget, fixture.includeTarget],
+      }),
+    ).rejects.toThrow(/file identity mismatch/i);
+  });
+
   it("rejects a missing materialized asset", async () => {
     const fixture = await makeFixture();
     await fs.rm(path.join(fixture.materializedRoot, "includes", "gateway.json"));
@@ -204,7 +255,20 @@ describe("backupPlanRestoreCommand", () => {
         materialized: fixture.materializedRoot,
         authorize: [fixture.stateTarget, fixture.includeTarget],
       }),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    ).rejects.toThrow(/inventory does not match/i);
+  });
+
+  it("rejects an extra materialized file outside the receipt inventory", async () => {
+    const fixture = await makeFixture();
+    await fs.writeFile(path.join(fixture.materializedRoot, "state", "foreign.txt"), "foreign\n");
+
+    await expect(
+      backupPlanRestoreCommand(runtime, {
+        archive: fixture.archivePath,
+        materialized: fixture.materializedRoot,
+        authorize: [fixture.stateTarget, fixture.includeTarget],
+      }),
+    ).rejects.toThrow(/inventory does not match/i);
   });
 
   it("rejects authorization that does not exactly cover publication roots", async () => {

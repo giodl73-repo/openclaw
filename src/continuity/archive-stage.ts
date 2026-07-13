@@ -15,6 +15,7 @@ import {
 } from "../infra/backup-volatile-filter.js";
 import type { ContinuityArchiveCaptureEvidence } from "./archive-manifest.js";
 import type { ContinuityArchivePlan, ContinuityCaptureSource } from "./archive-plan.js";
+import { CONTINUITY_RESTORE_CLAIM_MARKER } from "./restore-claim.js";
 import { sanitizeContinuitySqliteSnapshot } from "./sqlite-sanitize.js";
 
 export type ContinuityArchiveStagingEvidence = ContinuityArchiveCaptureEvidence;
@@ -49,6 +50,20 @@ function isExcluded(sourcePath: string, excludePaths: readonly string[]): boolea
       isPathWithin(resolvedSourcePath, resolvedExcludePath)
     );
   });
+}
+
+function claimMarkerExclusions(
+  source: ContinuityCaptureSource,
+  directorySources: readonly ContinuityCaptureSource[],
+): string[] {
+  return [
+    ...source.excludePaths,
+    ...directorySources
+      .map((directorySource) =>
+        path.join(directorySource.sourcePath, CONTINUITY_RESTORE_CLAIM_MARKER),
+      )
+      .filter((markerPath) => isPathWithin(markerPath, source.sourcePath)),
+  ];
 }
 
 function resolveStagedPath(stagingDir: string, archivePath: string): string {
@@ -311,6 +326,7 @@ export async function stageContinuityArchivePlan(params: {
     ...params.plan.sources.config,
     ...params.plan.sources.workspaces,
   ];
+  const directorySources = [params.plan.sources.state, ...params.plan.sources.workspaces];
   const prospectiveParent = await canonicalizeProspectivePath(params.stagingParent);
   assertStagingOutsideSources(prospectiveParent, allSources);
   await fs.mkdir(params.stagingParent, { recursive: true, mode: 0o700 });
@@ -326,7 +342,7 @@ export async function stageContinuityArchivePlan(params: {
     const sqlitePlan = await createStateSqliteBackupPlan({
       stateDir: params.plan.sources.state.sourcePath,
       tempDir: snapshotDir,
-      excludePaths: params.plan.sources.state.excludePaths,
+      excludePaths: claimMarkerExclusions(params.plan.sources.state, directorySources),
       rejectHardlinks: true,
     });
     const skippedSqliteSourcePaths = new Set<string>();
@@ -351,7 +367,7 @@ export async function stageContinuityArchivePlan(params: {
     };
     const context: CopyContext = {
       stateDir: params.plan.sources.state.sourcePath,
-      excludePaths: params.plan.sources.state.excludePaths,
+      excludePaths: claimMarkerExclusions(params.plan.sources.state, directorySources),
       skippedSqliteSourcePaths,
       snapshotSqlite: true,
       extensionsFilter: buildExtensionsNodeModulesFilter(params.plan.sources.state.sourcePath),
@@ -410,7 +426,7 @@ export async function stageContinuityArchivePlan(params: {
         destinationPath: resolveStagedPath(stagingDir, workspaceSource.archivePath),
         context: {
           ...context,
-          excludePaths: workspaceSource.excludePaths,
+          excludePaths: claimMarkerExclusions(workspaceSource, directorySources),
           skippedSqliteSourcePaths: undefined,
           snapshotSqlite: false,
         },

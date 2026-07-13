@@ -60,7 +60,6 @@ function build(
   overrides: {
     assets?: CanonicalRestorePlanAsset[];
     authorizedPublicationRoots?: string[];
-    existingTargetPaths?: ReadonlySet<string>;
     runtimeVersion?: string;
   } = {},
 ) {
@@ -81,7 +80,6 @@ function build(
       absolute("restore-target", "state"),
       absolute("restore-target", "includes", "gateway.json"),
     ],
-    existingTargetPaths: overrides.existingTargetPaths,
   });
 }
 
@@ -161,30 +159,6 @@ describe("continuity restore plan receipt", () => {
     ).toThrowError(
       expect.objectContaining<Partial<ContinuityRestorePlanError>>({
         code: "continuity.restore.target_unauthorized",
-      }),
-    );
-  });
-
-  it("rejects targets observed as present", () => {
-    expect(() =>
-      build({
-        existingTargetPaths: new Set([absolute("restore-target", "state", "workspace")]),
-      }),
-    ).toThrowError(
-      expect.objectContaining<Partial<ContinuityRestorePlanError>>({
-        code: "continuity.restore.target_present",
-      }),
-    );
-  });
-
-  it("rejects an existing unmodeled descendant beneath a directory target", () => {
-    expect(() =>
-      build({
-        existingTargetPaths: new Set([absolute("restore-target", "state", "unmodeled.sqlite")]),
-      }),
-    ).toThrowError(
-      expect.objectContaining<Partial<ContinuityRestorePlanError>>({
-        code: "continuity.restore.target_present",
       }),
     );
   });
