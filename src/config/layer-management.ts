@@ -95,11 +95,15 @@ function activationCandidate(
       sourceConfig: prepared.sourceConfig,
       runtimeConfig: prepared.runtimeConfig,
       provenance: prepared.provenance,
+      pluginMetadataSnapshot: prepared.pluginMetadataSnapshot,
       layers: layers.map((layer) => ({
         id: layer.id,
         access: layer.access,
         sourceIdentity: layer.sourceIdentity,
         contentDigest: layer.contentDigest,
+        ...(layer.sourceGenerationIdentity
+          ? { sourceGenerationIdentity: layer.sourceGenerationIdentity }
+          : {}),
       })),
       advisories: layers
         .filter(

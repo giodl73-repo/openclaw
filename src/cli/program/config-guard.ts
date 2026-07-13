@@ -214,7 +214,7 @@ export async function ensureConfigReady(params: {
   commandPath?: string[];
   suppressDoctorStdout?: boolean;
   allowInvalid?: boolean;
-  beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean>;
+  beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean | ConfigFileSnapshot>;
 }): Promise<void> {
   const commandPath = params.commandPath ?? [];
   const commandName = commandPath[0];

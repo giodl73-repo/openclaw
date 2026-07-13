@@ -746,4 +746,5 @@ _Related: [Configuration Examples](/gateway/configuration-examples) · [Configur
 
 - [Configuration reference](/gateway/configuration-reference)
 - [Configuration examples](/gateway/configuration-examples)
+- [Managed configuration](/gateway/managed-configuration) for opt-in ordered configuration sources
 - [Gateway runbook](/gateway)

@@ -68,7 +68,7 @@ export async function ensureCliExecutionBootstrap(params: {
   commandPath: string[];
   startupPolicy: CliStartupPolicy;
   allowInvalid?: boolean;
-  beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean>;
+  beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean | ConfigFileSnapshot>;
   loadPlugins?: boolean;
   skipConfigGuard?: boolean;
 }) {

@@ -213,6 +213,7 @@ type ManagedGatewayConfigReloaderParams = Omit<
   GatewayReloadHandlerParams,
   "createHealthMonitor" | "logReload"
 > & {
+  disabled?: boolean;
   minimalTestGateway: boolean;
   initialConfig: OpenClawConfig;
   initialCompareConfig?: OpenClawConfig;
@@ -756,7 +757,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
 export function startManagedGatewayConfigReloader(
   params: ManagedGatewayConfigReloaderParams,
 ): GatewayConfigReloaderHandle {
-  if (params.minimalTestGateway) {
+  if (params.minimalTestGateway || params.disabled) {
     return { stop: async () => {} };
   }
 

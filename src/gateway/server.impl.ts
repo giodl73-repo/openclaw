@@ -541,6 +541,8 @@ export type GatewayServerOptions = {
    * reparsing openclaw.json during server startup.
    */
   startupConfigSnapshotRead?: ReadConfigFileSnapshotWithPluginMetadataResult;
+  /** Disable ordinary single-file reload when an external owner supplies startup config. */
+  disableConfigReload?: boolean;
 };
 
 type SetupWizardRunner = NonNullable<GatewayServerOptions["wizardRunner"]>;
@@ -1960,6 +1962,7 @@ export async function startGatewayServer(
 
     const { startManagedGatewayConfigReloader } = await import("./server-reload-handlers.js");
     runtimeState.configReloader = startManagedGatewayConfigReloader({
+      disabled: opts.disableConfigReload,
       minimalTestGateway,
       initialConfig: cfgAtStart,
       initialCompareConfig: startupLastGoodSnapshot.sourceConfig,
@@ -2015,9 +2018,11 @@ export async function startGatewayServer(
       sharedGatewaySessionGenerationState,
       clients,
     });
-    await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
-      log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
-    });
+    if (!opts.disableConfigReload) {
+      await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
+        log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
+      });
+    }
     if (!minimalTestGateway) {
       const gatewayRuntimeServices = await loadScheduledServicesModule();
       postReadyMaintenanceTimer = gatewayRuntimeServices.scheduleGatewayPostReadyMaintenance({

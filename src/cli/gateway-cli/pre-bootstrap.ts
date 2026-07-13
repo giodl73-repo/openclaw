@@ -4,6 +4,12 @@ import type { ConfigFileSnapshot } from "../../config/types.js";
 import { ExitError, type RuntimeEnv } from "../../runtime.js";
 import type { GatewayRunPreBootstrapOptions } from "./future-config-guard.js";
 import { enforceGatewayRunFutureConfigGuard } from "./future-config-guard.js";
+import {
+  assertManagedGatewayBootstrapCompatibility,
+  createManagedGatewayConfigController,
+  formatManagedGatewayConfigFailure,
+  setPreparedManagedGatewaySnapshot,
+} from "./managed-config.js";
 import { getGatewayRunRuntimeHooks } from "./runtime-hooks.js";
 
 type GatewayRunGuardParams = {
@@ -27,6 +33,10 @@ let appliedGatewayRunConfigEnvironment: GatewayRunEnvironmentSelection | undefin
 let lastGuardedGatewayRunSnapshot: ConfigFileSnapshot | undefined;
 let preparedGatewayRunBootstrapSnapshot: ConfigFileSnapshot | undefined;
 let preparedGatewayRunReset: PreparedGatewayRunReset | undefined;
+type ManagedGatewayConfigController = NonNullable<
+  ReturnType<typeof createManagedGatewayConfigController>
+>;
+let preparedManagedGatewayConfigController: ManagedGatewayConfigController | undefined;
 let gatewayRunTargetSelectedByConfig = false;
 
 async function pinGatewayRunRuntimePaths(): Promise<void> {
@@ -619,6 +629,48 @@ export async function selectGatewayRunEnvironment(params: GatewayRunGuardParams)
   return guarded;
 }
 
+async function activateManagedGatewayConfig(params: {
+  controller: ManagedGatewayConfigController;
+  opts: GatewayRunPreBootstrapOptions;
+  runtime: RuntimeEnv;
+}): Promise<boolean> {
+  try {
+    params.controller.assertSelectedPrimary();
+  } catch (error) {
+    params.runtime.error(String(error));
+    params.runtime.exit(1);
+    return false;
+  }
+  const preview = await params.controller.previewSourceConfig();
+  if (!preview.valid) {
+    params.runtime.error(formatManagedGatewayConfigFailure(preview));
+    params.runtime.exit(1);
+    return false;
+  }
+  try {
+    assertManagedGatewayBootstrapCompatibility(preview.config);
+  } catch (error) {
+    params.runtime.error(String(error));
+    params.runtime.exit(1);
+    return false;
+  }
+  for (const sourceConfig of preview.sourceConfigs) {
+    if (!enforceGatewayRunFutureConfigGuard({ ...params, config: sourceConfig })) {
+      return false;
+    }
+  }
+  if (!enforceGatewayRunFutureConfigGuard({ ...params, config: preview.config })) {
+    return false;
+  }
+  const activation = await params.controller.activate();
+  if (!activation.valid) {
+    params.runtime.error(formatManagedGatewayConfigFailure(activation));
+    params.runtime.exit(1);
+    return false;
+  }
+  return enforceGatewayRunFutureConfigGuard({ ...params, config: activation.cfg });
+}
+
 export async function prepareGatewayRunBootstrap(params: GatewayRunGuardParams): Promise<boolean> {
   preparedGatewayRunReset = undefined;
   // Stop the early proxy before recovery can select another config/state target. Its lifecycle
@@ -629,19 +681,67 @@ export async function prepareGatewayRunBootstrap(params: GatewayRunGuardParams):
   if (!environmentSelection) {
     gatewayRunTargetSelectedByConfig = false;
   }
-  const guarded = params.opts.reset
-    ? await guardGatewayRunReset(params)
-    : await guardGatewayRunSelectedConfig({
+  let managedController: ManagedGatewayConfigController | undefined;
+  try {
+    managedController = createManagedGatewayConfigController({ opts: params.opts });
+  } catch (error) {
+    params.runtime.error(String(error));
+    params.runtime.exit(1);
+    return false;
+  }
+  if (managedController && params.opts.reset) {
+    params.runtime.error("--reset is not available with read-only managed configuration layers");
+    params.runtime.exit(1);
+    return false;
+  }
+  let guarded: boolean;
+  if (managedController) {
+    guarded = await activateManagedGatewayConfig({ ...params, controller: managedController });
+    if (guarded) {
+      guarded = await guardGatewayRunSelectedConfig({
         ...params,
         environmentSelection,
-        recoverSuspicious: true,
+        recoverSuspicious: false,
         restoreSuspicious: true,
       });
+    }
+    if (guarded) {
+      guarded = await activateManagedGatewayConfig({ ...params, controller: managedController });
+    }
+    if (guarded) {
+      guarded = await guardGatewayRunSelectedConfig({
+        ...params,
+        recoverSuspicious: false,
+        restoreSuspicious: false,
+      });
+    }
+    if (guarded) {
+      try {
+        managedController.assertSelectedPrimary();
+      } catch (error) {
+        params.runtime.error(String(error));
+        params.runtime.exit(1);
+        guarded = false;
+      }
+    }
+  } else {
+    guarded = params.opts.reset
+      ? await guardGatewayRunReset(params)
+      : await guardGatewayRunSelectedConfig({
+          ...params,
+          environmentSelection,
+          recoverSuspicious: true,
+          restoreSuspicious: true,
+        });
+  }
   await pinGatewayRunRuntimePaths();
   // Dev reset deletes the state directory before recreating config. Migrating first would
   // archive legacy state and then delete its imported SQLite rows.
   const shouldBootstrap = guarded && !params.opts.reset;
-  preparedGatewayRunBootstrapSnapshot = shouldBootstrap ? lastGuardedGatewayRunSnapshot : undefined;
+  preparedGatewayRunBootstrapSnapshot = shouldBootstrap
+    ? (managedController?.getActiveSnapshot() ?? lastGuardedGatewayRunSnapshot)
+    : undefined;
+  preparedManagedGatewayConfigController = shouldBootstrap ? managedController : undefined;
   if (guarded && params.opts.reset && lastGuardedGatewayRunSnapshot) {
     preparedGatewayRunReset = {
       selectionEnvironment: snapshotGatewayConfigSelectionEnvironment(process.env),
@@ -654,7 +754,7 @@ export async function prepareGatewayRunBootstrap(params: GatewayRunGuardParams):
 
 export async function recheckGatewayRunBootstrap(
   params: GatewayRunGuardParams & { snapshot?: ConfigFileSnapshot },
-): Promise<boolean> {
+): Promise<boolean | ConfigFileSnapshot> {
   // This callback can run while startup preflight owns the shared migration lease.
   // Throw a typed exit so its finally releases the lease before the CLI exits.
   const deferredExitRuntime: RuntimeEnv = {
@@ -664,21 +764,30 @@ export async function recheckGatewayRunBootstrap(
     },
   };
   const expected = preparedGatewayRunBootstrapSnapshot;
+  const managedController = preparedManagedGatewayConfigController;
   if (!expected) {
     params.runtime.error(
       "Refusing to run automatic gateway startup migrations without a prepared config snapshot. Retry startup.",
     );
     throw new ExitError(1);
   }
-  const current = params.snapshot
-    ? enforceGatewayRunFutureConfigGuard({
-        opts: params.opts,
-        runtime: deferredExitRuntime,
-        snapshot: params.snapshot,
-      })
-      ? params.snapshot
-      : null
-    : await readGuardedGatewayRunConfig({ ...params, runtime: deferredExitRuntime });
+  if (
+    managedController &&
+    !(await activateManagedGatewayConfig({ ...params, controller: managedController }))
+  ) {
+    return false;
+  }
+  const current = managedController
+    ? managedController.getActiveSnapshot()
+    : params.snapshot
+      ? enforceGatewayRunFutureConfigGuard({
+          opts: params.opts,
+          runtime: deferredExitRuntime,
+          snapshot: params.snapshot,
+        })
+        ? params.snapshot
+        : null
+      : await readGuardedGatewayRunConfig({ ...params, runtime: deferredExitRuntime });
   if (!current) {
     return false;
   }
@@ -687,6 +796,17 @@ export async function recheckGatewayRunBootstrap(
       allowPathChange: params.snapshot !== undefined,
     })
   ) {
+    if (managedController) {
+      const activeSnapshotRead = managedController.getActiveSnapshotRead();
+      if (!activeSnapshotRead) {
+        params.runtime.error(
+          "Refusing to start the managed gateway without its accepted metadata snapshot.",
+        );
+        throw new ExitError(1);
+      }
+      setPreparedManagedGatewaySnapshot(activeSnapshotRead);
+      return current;
+    }
     return true;
   }
   params.runtime.error(
