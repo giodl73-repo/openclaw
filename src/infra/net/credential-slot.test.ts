@@ -5,6 +5,7 @@ import {
   CredentialSlotError,
   type CredentialSlotDefinitionV1,
   type CredentialSlotResolverV1,
+  type PreparedCredentialSlotBindingsV1,
   prepareCredentialSlotBindingsV1,
 } from "./credential-slot.js";
 import {
@@ -102,7 +103,12 @@ describe("credential slot bindings", () => {
       definitions: [createDefinition()],
       resolvers: [createResolver(resolve)],
     });
-    const fetchImpl = vi.fn(async () => new Response("ok"));
+    const fetchImpl = vi.fn(
+      async (
+        _url: string,
+        _init: Parameters<PreparedCredentialSlotBindingsV1["apply"]>[0]["init"],
+      ) => new Response("ok"),
+    );
     const dispatcher = createLocalOneHopFetchDispatcher(fetchImpl, bindings);
     const init = { redirect: "manual" as const, headers: { Accept: "application/json" } };
 

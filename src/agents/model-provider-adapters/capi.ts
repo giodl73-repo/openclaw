@@ -70,10 +70,7 @@ function parseEndpointTemplate(config: CapiModelAdapterConfigV1): {
   templateMode: boolean;
 } {
   if (config.version !== CAPI_MODEL_ADAPTER_VERSION) {
-    throw new CapiModelAdapterError(
-      "invalid-config",
-      `Unsupported CAPI model adapter version: ${config.version}`,
-    );
+    throw new CapiModelAdapterError("invalid-config", "Unsupported CAPI model adapter version");
   }
   const template = config.endpointTemplate.trim();
   const hasTenant = template.includes("{tenant_id}");
@@ -148,7 +145,7 @@ function assertCredentialSlot(slots: CredentialSlotReadinessV1[], expectedOrigin
     slot.resolverVersion !== CREDENTIAL_SLOT_RESOLVER_VERSION ||
     slot.placement !== "header" ||
     slot.headerName !== "authorization" ||
-    slot.required !== true ||
+    !slot.required ||
     slot.allowedOrigins.length !== 1 ||
     slot.allowedOrigins[0] !== expectedOrigin
   ) {
@@ -312,7 +309,7 @@ function transformSseBlock(blockBytes: Uint8Array): Uint8Array | undefined {
 
 function injectCapiSseEventTypes(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const reader = body.getReader();
-  let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
+  let buffer: Uint8Array = new Uint8Array();
   let oversizedEvent = false;
 
   return new ReadableStream<Uint8Array>({

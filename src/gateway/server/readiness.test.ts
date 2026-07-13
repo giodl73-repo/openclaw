@@ -7,6 +7,7 @@ import type { ChannelManager, ChannelRuntimeSnapshot } from "../server-channels.
 import {
   createReadinessChecker,
   mergeGatewayAndHostingReadiness,
+  type ReadinessResult,
   withReadinessEvaluationTimeout,
 } from "./readiness.js";
 
@@ -151,7 +152,7 @@ function failingSnapshot(
   failing: string[],
   uptimeMs = FIVE_MIN_MS,
   startupPendingReason?: string,
-): Record<string, unknown> {
+): ReadinessResult {
   const draining = failing.includes("gateway-draining");
   const startupPending = !draining && failing.includes("startup-sidecars");
   return {
@@ -176,12 +177,12 @@ function coreConditions(
     suppressed?: string[];
     eventLoop?: { degraded: boolean; reasons: string[] };
   } = {},
-) {
+): NonNullable<ReadinessResult["conditions"]> {
   const channelChecked =
     params.channelFailing !== undefined || (!params.startupPending && !params.draining);
   const channelFailing = params.channelFailing ?? [];
   const eventLoop = params.eventLoop;
-  return [
+  const conditions: NonNullable<ReadinessResult["conditions"]> = [
     {
       type: "GatewayStartupComplete",
       status: params.startupPending ? "False" : "True",
@@ -215,33 +216,32 @@ function coreConditions(
           ? `Selected channels are not ready: ${channelFailing.join(", ")}.`
           : "Selected channel runtimes are ready.",
     },
-    ...(params.suppressed?.length
-      ? [
-          {
-            type: "ChannelRuntimeSuppressed",
-            status: "False",
-            requirement: "advisory",
-            reason: "ChannelRuntimeSuppressed",
-            message: `Channel runtime failures are suppressed: ${params.suppressed.join(", ")}.`,
-          },
-        ]
-      : []),
-    {
-      type: "EventLoopHealthy",
-      status: !eventLoop ? "Unknown" : eventLoop.degraded ? "False" : "True",
-      requirement: "advisory",
-      reason: !eventLoop
-        ? "EventLoopStatusUnavailable"
-        : eventLoop.degraded
-          ? "EventLoopDegraded"
-          : "EventLoopHealthy",
-      message: !eventLoop
-        ? "Event-loop health is not available yet."
-        : eventLoop.degraded
-          ? `Event-loop health is degraded: ${eventLoop.reasons.join(", ")}.`
-          : "Event-loop health is within its healthy thresholds.",
-    },
   ];
+  if (params.suppressed?.length) {
+    conditions.push({
+      type: "ChannelRuntimeSuppressed",
+      status: "False",
+      requirement: "advisory",
+      reason: "ChannelRuntimeSuppressed",
+      message: `Channel runtime failures are suppressed: ${params.suppressed.join(", ")}.`,
+    });
+  }
+  conditions.push({
+    type: "EventLoopHealthy",
+    status: !eventLoop ? "Unknown" : eventLoop.degraded ? "False" : "True",
+    requirement: "advisory",
+    reason: !eventLoop
+      ? "EventLoopStatusUnavailable"
+      : eventLoop.degraded
+        ? "EventLoopDegraded"
+        : "EventLoopHealthy",
+    message: !eventLoop
+      ? "Event-loop health is not available yet."
+      : eventLoop.degraded
+        ? `Event-loop health is degraded: ${eventLoop.reasons.join(", ")}.`
+        : "Event-loop health is within its healthy thresholds.",
+  });
+  return conditions;
 }
 
 describe("createReadinessChecker", () => {

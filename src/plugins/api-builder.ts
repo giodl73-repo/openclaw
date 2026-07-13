@@ -105,6 +105,7 @@ const noopRegisterSecurityAuditCollector: OpenClawPluginApi["registerSecurityAud
   () => {};
 const noopRegisterReadinessCriterion: OpenClawPluginApi["registerReadinessCriterion"] = () => {};
 const noopRegisterHostIntegrationBundle: OpenClawPluginApi["registerHostIntegrationBundle"] =
+  () => () => {};
 const noopRegisterProviderRequestTrafficPolicy: OpenClawPluginApi["registerProviderRequestTrafficPolicy"] =
   () => () => {};
 const noopRegisterService: OpenClawPluginApi["registerService"] = () => {};
