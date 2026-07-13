@@ -200,6 +200,13 @@ export async function finishGatewayStartup(params: {
       sessionObserver,
       getMcpAppSandboxPort,
       ensureSandboxHostPort,
+      ...(opts.configLayersReadOnly
+        ? {
+            configSnapshot,
+            configReadOnlyReason:
+              "configuration writes are unavailable while --config-layer is active",
+          }
+        : {}),
       resolveTerminalLaunchPolicy: terminalLaunchPolicy.resolve,
       isTerminalEnabled: terminalLaunchPolicy.isEnabled,
       execApprovalManager,
@@ -533,8 +540,9 @@ export async function finishGatewayStartup(params: {
   postAttachRuntimeReturned = true;
   activateScheduledServicesWhenReady();
 
-  const { startManagedGatewayConfigReloader } = await import("./server-reload-handlers.js");
-  runtimeState.configReloader = startManagedGatewayConfigReloader({
+  if (!opts.configLayersReadOnly) {
+    const { startManagedGatewayConfigReloader } = await import("./server-reload-handlers.js");
+    runtimeState.configReloader = startManagedGatewayConfigReloader({
     minimalTestGateway,
     initialConfig: cfgAtStart,
     initialCompareConfig: startupLastGoodSnapshot.sourceConfig,
@@ -620,10 +628,11 @@ export async function finishGatewayStartup(params: {
     clients,
     ...(opts.hotReloadRecovery ? { requestRecoveryRestart: opts.hotReloadRecovery } : {}),
     restartRecoveryAvailable: opts.hotReloadRecovery !== undefined,
-  });
-  await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
-    log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
-  });
+    });
+    await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
+      log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
+    });
+  }
   if (!minimalTestGateway) {
     const gatewayRuntimeServices = await loadScheduledServicesModule();
     postReadyState.maintenanceTimer = gatewayRuntimeServices.scheduleGatewayPostReadyMaintenance({
