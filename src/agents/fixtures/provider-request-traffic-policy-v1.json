@@ -45,6 +45,28 @@
           "allowPrivateNetwork": false,
           "maximumTimeoutMs": 20000
         }
+      },
+      {
+        "id": "msteams-acf",
+        "match": {
+          "providers": ["msteams-acf"],
+          "capabilities": ["channel"],
+          "transports": ["request-response"],
+          "endpointClasses": ["bot-framework-connector"]
+        },
+        "outcome": {
+          "action": "allow",
+          "routeProfileId": "lobster/managed",
+          "allowedOrigins": [
+            "https://msteams.botframework.azure.cn",
+            "https://smba.infra.dod.teams.microsoft.us",
+            "https://smba.infra.gcc.teams.microsoft.com",
+            "https://smba.infra.gov.teams.microsoft.us",
+            "https://smba.trafficmanager.net"
+          ],
+          "allowPrivateNetwork": false,
+          "maximumTimeoutMs": 30000
+        }
       }
     ]
   },
@@ -72,6 +94,67 @@
           "mode": "explicit-proxy",
           "proxyUrl": "https://proxy.example.test/"
         }
+      }
+    },
+    {
+      "id": "managed-msteams-acf",
+      "facts": {
+        "provider": "msteams-acf",
+        "capability": "channel",
+        "transport": "request-response",
+        "endpointClass": "bot-framework-connector",
+        "url": "https://smba.trafficmanager.net/amer/v3/conversations/c1/activities",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 60000
+      },
+      "expected": {
+        "action": "allow",
+        "policyId": "lobster/enterprise-egress",
+        "policyGeneration": "policy-7",
+        "routeProfileId": "lobster/managed",
+        "dispatchBindingId": "lobster/egress",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 30000,
+        "dispatcherPolicy": {
+          "mode": "explicit-proxy",
+          "proxyUrl": "https://proxy.example.test/"
+        }
+      }
+    },
+    {
+      "id": "msteams-acf-wrong-capability",
+      "facts": {
+        "provider": "msteams-acf",
+        "capability": "llm",
+        "transport": "request-response",
+        "endpointClass": "bot-framework-connector",
+        "url": "https://smba.trafficmanager.net/amer/v3/conversations/c1/activities",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 30000
+      },
+      "expected": {
+        "action": "deny",
+        "policyId": "lobster/enterprise-egress",
+        "policyGeneration": "policy-7",
+        "reason": "RequiredPolicyNoMatch"
+      }
+    },
+    {
+      "id": "msteams-acf-wrong-transport",
+      "facts": {
+        "provider": "msteams-acf",
+        "capability": "channel",
+        "transport": "stream",
+        "endpointClass": "bot-framework-connector",
+        "url": "https://smba.trafficmanager.net/amer/v3/conversations/c1/activities",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 30000
+      },
+      "expected": {
+        "action": "deny",
+        "policyId": "lobster/enterprise-egress",
+        "policyGeneration": "policy-7",
+        "reason": "RequiredPolicyNoMatch"
       }
     },
     {

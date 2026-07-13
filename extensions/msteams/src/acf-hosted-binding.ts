@@ -1,69 +1,67 @@
 import {
+  dispatchHostedProviderRequestV1,
+  PROVIDER_REQUEST_DISPATCHER_VERSION,
+  PROVIDER_REQUEST_TRAFFIC_POLICY_VERSION,
   resolveHostIntegrationContributionFromSnapshotV1,
   type HostIntegrationBundleSnapshotV1,
   type HostIntegrationContributionReferenceV1,
-} from "../../hosting/host-integration-bundle.js";
-import type { HostIntegrationOwnerEvidenceV1 } from "../../hosting/host-integration-status.js";
-import {
-  dispatchHostedProviderRequestV1,
-  PROVIDER_REQUEST_DISPATCHER_VERSION,
   type ProviderRequestHostedBindingImplementationsV1,
-} from "../provider-request-hosted-dispatch.js";
-import {
-  PROVIDER_REQUEST_TRAFFIC_POLICY_VERSION,
   type ProviderRequestTrafficPolicyDecisionV1,
-} from "../provider-request-traffic-policy.js";
+} from "../runtime-api.js";
 import {
-  CAPI_BEARER_SLOT_ID,
-  CAPI_MODEL_ADAPTER_ID,
-  CAPI_MODEL_ADAPTER_VERSION,
-  adaptCapiModelResponseV1,
-  prepareCapiModelRequestV1,
-  type CapiModelAdapterConfigV1,
-  type CapiModelRequestContextV1,
-} from "./capi.js";
+  adaptMSTeamsAcfChannelResponseV1,
+  MSTEAMS_ACF_BEARER_SLOT_ID,
+  MSTEAMS_ACF_ENDPOINT_CLASS,
+  MSTEAMS_ACF_PROVIDER_ID,
+  prepareMSTeamsAcfChannelRequestV1,
+  type MSTeamsAcfRequestContextV1,
+} from "./acf-channel-request.js";
 
-export const CAPI_HOSTED_BINDING_VERSION = "capi-hosted-binding/v1" as const;
-type CapiBindingReference = HostIntegrationContributionReferenceV1;
+export const MSTEAMS_ACF_HOSTED_BINDING_VERSION = "msteams-acf-hosted-binding/v1" as const;
 
-export type CapiHostedBindingSelectionV1 = {
-  version: typeof CAPI_HOSTED_BINDING_VERSION;
+type BindingReference = HostIntegrationContributionReferenceV1;
+
+export type MSTeamsAcfHostedBindingSelectionV1 = {
+  version: typeof MSTEAMS_ACF_HOSTED_BINDING_VERSION;
   configGeneration: string;
   ownerGeneration: string;
   configSource: {
     source: string;
     path?: string;
   };
-  providerId: string;
-  adapter: CapiBindingReference;
-  credentialSlot: CapiBindingReference;
-  trafficPolicy: CapiBindingReference;
-  dispatcher: CapiBindingReference;
+  credentialSlot: BindingReference;
+  trafficPolicy: BindingReference;
+  dispatcher: BindingReference;
 };
 
-export type CapiHostedBindingImplementationsV1 = ProviderRequestHostedBindingImplementationsV1;
-
-export type CapiHostedBindingGenerationFenceV1 = {
+export type MSTeamsAcfHostedBindingGenerationFenceV1 = {
   configGeneration: string;
   bundleGeneration: string;
   ownerGeneration: string;
 };
 
-export type PreparedCapiHostedBindingV1 = {
-  version: typeof CAPI_HOSTED_BINDING_VERSION;
+export type PreparedMSTeamsAcfHostedBindingV1 = {
+  version: typeof MSTEAMS_ACF_HOSTED_BINDING_VERSION;
   configGeneration: string;
   bundleGeneration: string;
   ownerGeneration: string;
   policyGeneration: string;
   mode: "local" | "hosted";
-  selection: Readonly<CapiHostedBindingSelectionV1>;
-  ownerEvidence: HostIntegrationOwnerEvidenceV1;
+  selection: Readonly<MSTeamsAcfHostedBindingSelectionV1>;
+  readiness: {
+    owner: "channel";
+    channel: "msteams";
+    state: "ready";
+    reason: "BindingPrepared";
+    authorityMode: "openclaw";
+  };
   dispatch: (params: {
-    fence: CapiHostedBindingGenerationFenceV1;
-    context: CapiModelRequestContextV1;
+    fence: MSTeamsAcfHostedBindingGenerationFenceV1;
+    context: MSTeamsAcfRequestContextV1;
     method: string;
+    url: string;
     headers?: HeadersInit;
-    body: string | Uint8Array;
+    body?: string | Uint8Array;
     signal?: AbortSignal;
   }) => Promise<{
     response: Response;
@@ -72,21 +70,21 @@ export type PreparedCapiHostedBindingV1 = {
   }>;
 };
 
-export type CapiHostedBindingFailureCode =
-  | "invalid-selection"
+export type MSTeamsAcfHostedBindingFailureCode =
   | "incompatible-implementation"
-  | "traffic-policy-denied"
-  | "traffic-policy-route-mismatch"
-  | "stale-config-generation"
+  | "invalid-selection"
   | "stale-bundle-generation"
-  | "stale-owner-generation";
+  | "stale-config-generation"
+  | "stale-owner-generation"
+  | "traffic-policy-denied"
+  | "traffic-policy-route-mismatch";
 
-export class CapiHostedBindingError extends Error {
-  readonly code: CapiHostedBindingFailureCode;
+export class MSTeamsAcfHostedBindingError extends Error {
+  readonly code: MSTeamsAcfHostedBindingFailureCode;
 
-  constructor(code: CapiHostedBindingFailureCode, message: string) {
+  constructor(code: MSTeamsAcfHostedBindingFailureCode, message: string) {
     super(message);
-    this.name = "CapiHostedBindingError";
+    this.name = "MSTeamsAcfHostedBindingError";
     this.code = code;
   }
 }
@@ -96,18 +94,14 @@ const GENERATION_RE = /^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$/;
 function normalizeGeneration(value: string, label: string): string {
   const normalized = value.trim();
   if (!GENERATION_RE.test(normalized)) {
-    throw new CapiHostedBindingError("invalid-selection", `${label} is invalid`);
+    throw new MSTeamsAcfHostedBindingError("invalid-selection", `${label} is invalid`);
   }
   return normalized;
 }
 
-function freezeReference(reference: CapiBindingReference): CapiBindingReference {
-  return Object.freeze({ ...reference });
-}
-
 function expectedReference(
-  reference: CapiBindingReference,
-  expected: CapiBindingReference,
+  reference: BindingReference,
+  expected: BindingReference,
   label: string,
 ): void {
   if (
@@ -116,7 +110,7 @@ function expectedReference(
     reference.id !== expected.id ||
     reference.version !== expected.version
   ) {
-    throw new CapiHostedBindingError(
+    throw new MSTeamsAcfHostedBindingError(
       "invalid-selection",
       `${label} must select ${expected.id}@${expected.version}`,
     );
@@ -124,12 +118,12 @@ function expectedReference(
 }
 
 function assertImplementation(
-  selected: CapiBindingReference,
+  selected: BindingReference,
   implementation: { id: string; version: string },
   label: string,
 ): void {
   if (implementation.id !== selected.id || implementation.version !== selected.version) {
-    throw new CapiHostedBindingError(
+    throw new MSTeamsAcfHostedBindingError(
       "incompatible-implementation",
       `${label} implementation does not match the selected contribution`,
     );
@@ -138,59 +132,51 @@ function assertImplementation(
 
 function assertFence(
   binding: Pick<
-    PreparedCapiHostedBindingV1,
+    PreparedMSTeamsAcfHostedBindingV1,
     "configGeneration" | "bundleGeneration" | "ownerGeneration"
   >,
-  fence: CapiHostedBindingGenerationFenceV1,
+  fence: MSTeamsAcfHostedBindingGenerationFenceV1,
 ): void {
   if (fence.configGeneration !== binding.configGeneration) {
-    throw new CapiHostedBindingError(
+    throw new MSTeamsAcfHostedBindingError(
       "stale-config-generation",
-      "CAPI binding effective config generation is stale",
+      "Microsoft Teams ACF effective config generation is stale",
     );
   }
   if (fence.bundleGeneration !== binding.bundleGeneration) {
-    throw new CapiHostedBindingError(
+    throw new MSTeamsAcfHostedBindingError(
       "stale-bundle-generation",
-      "CAPI binding host bundle generation is stale",
+      "Microsoft Teams ACF host bundle generation is stale",
     );
   }
   if (fence.ownerGeneration !== binding.ownerGeneration) {
-    throw new CapiHostedBindingError(
+    throw new MSTeamsAcfHostedBindingError(
       "stale-owner-generation",
-      "CAPI binding owner generation is stale",
+      "Microsoft Teams ACF Channel owner generation is stale",
     );
   }
 }
 
-export function prepareCapiHostedBindingV1(params: {
-  selection: CapiHostedBindingSelectionV1;
-  adapterConfig: CapiModelAdapterConfigV1;
+export function prepareMSTeamsAcfHostedBindingV1(params: {
+  selection: MSTeamsAcfHostedBindingSelectionV1;
   bundle: HostIntegrationBundleSnapshotV1;
-  implementations: CapiHostedBindingImplementationsV1;
-}): PreparedCapiHostedBindingV1 {
-  if (params.selection.version !== CAPI_HOSTED_BINDING_VERSION) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI binding version is unsupported");
+  implementations: ProviderRequestHostedBindingImplementationsV1;
+}): PreparedMSTeamsAcfHostedBindingV1 {
+  if (params.selection.version !== MSTEAMS_ACF_HOSTED_BINDING_VERSION) {
+    throw new MSTeamsAcfHostedBindingError(
+      "invalid-selection",
+      "Microsoft Teams ACF binding version is unsupported",
+    );
   }
-  expectedReference(
-    params.selection.adapter,
-    {
-      owner: "model-provider",
-      kind: "model-provider-adapter",
-      id: CAPI_MODEL_ADAPTER_ID,
-      version: CAPI_MODEL_ADAPTER_VERSION,
-    },
-    "CAPI adapter",
-  );
   expectedReference(
     params.selection.credentialSlot,
     {
       owner: "provider-request",
       kind: "credential-slot-resolver",
-      id: CAPI_BEARER_SLOT_ID,
+      id: MSTEAMS_ACF_BEARER_SLOT_ID,
       version: "credential-slot-resolver/v1",
     },
-    "CAPI credential slot",
+    "Microsoft Teams ACF credential slot",
   );
   expectedReference(
     params.selection.trafficPolicy,
@@ -200,21 +186,19 @@ export function prepareCapiHostedBindingV1(params: {
       id: "lobster/enterprise-egress",
       version: PROVIDER_REQUEST_TRAFFIC_POLICY_VERSION,
     },
-    "CAPI traffic policy",
+    "Microsoft Teams ACF traffic policy",
   );
   if (
     params.selection.dispatcher.owner !== "provider-request" ||
     params.selection.dispatcher.kind !== "provider-request-dispatcher" ||
     params.selection.dispatcher.version !== PROVIDER_REQUEST_DISPATCHER_VERSION
   ) {
-    throw new CapiHostedBindingError(
+    throw new MSTeamsAcfHostedBindingError(
       "invalid-selection",
-      "CAPI dispatcher selection is incompatible",
+      "Microsoft Teams ACF dispatcher selection is incompatible",
     );
   }
-
   for (const reference of [
-    params.selection.adapter,
     params.selection.credentialSlot,
     params.selection.trafficPolicy,
     params.selection.dispatcher,
@@ -237,7 +221,7 @@ export function prepareCapiHostedBindingV1(params: {
     "Dispatcher",
   );
   if (params.implementations.trafficPolicy.snapshot.id !== params.selection.trafficPolicy.id) {
-    throw new CapiHostedBindingError(
+    throw new MSTeamsAcfHostedBindingError(
       "incompatible-implementation",
       "Traffic policy snapshot does not match the selected contribution",
     );
@@ -245,94 +229,90 @@ export function prepareCapiHostedBindingV1(params: {
 
   const configGeneration = normalizeGeneration(
     params.selection.configGeneration,
-    "CAPI config generation",
+    "Microsoft Teams ACF config generation",
   );
   const ownerGeneration = normalizeGeneration(
     params.selection.ownerGeneration,
-    "CAPI owner generation",
+    "Microsoft Teams ACF owner generation",
   );
-  const providerId = params.selection.providerId.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9._-]*$/.test(providerId)) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI provider ID is invalid");
-  }
   const bundleGeneration = `${params.bundle.id}@${params.bundle.bundleVersion}`;
-  const adapterConfig = Object.freeze({ ...params.adapterConfig });
   const credentialReadiness = params.implementations.credentialSlot.bindings.readiness();
+  const trafficPolicy = params.implementations.trafficPolicy.snapshot;
+  const dispatcherRouteProfileId = params.implementations.dispatcher.routeProfileId;
   const dispatcherTarget = params.implementations.dispatcher.dispatcher;
   const dispatcher = Object.freeze({
     dispatch: dispatcherTarget.dispatch.bind(dispatcherTarget),
   });
-  const trafficPolicy = params.implementations.trafficPolicy.snapshot;
   const source = params.selection.configSource.source.trim();
   const path = params.selection.configSource.path?.trim();
   if (!source) {
-    throw new CapiHostedBindingError("invalid-selection", "CAPI config source is required");
+    throw new MSTeamsAcfHostedBindingError(
+      "invalid-selection",
+      "Microsoft Teams ACF config source is required",
+    );
   }
   const selection = Object.freeze({
     ...params.selection,
     configGeneration,
     ownerGeneration,
-    providerId,
     configSource: Object.freeze({
       source,
       ...(path ? { path } : {}),
     }),
-    adapter: freezeReference(params.selection.adapter),
-    credentialSlot: freezeReference(params.selection.credentialSlot),
-    trafficPolicy: freezeReference(params.selection.trafficPolicy),
-    dispatcher: freezeReference(params.selection.dispatcher),
+    credentialSlot: Object.freeze({ ...params.selection.credentialSlot }),
+    trafficPolicy: Object.freeze({ ...params.selection.trafficPolicy }),
+    dispatcher: Object.freeze({ ...params.selection.dispatcher }),
   });
 
-  const binding: PreparedCapiHostedBindingV1 = {
-    version: CAPI_HOSTED_BINDING_VERSION,
+  const binding: PreparedMSTeamsAcfHostedBindingV1 = {
+    version: MSTEAMS_ACF_HOSTED_BINDING_VERSION,
     configGeneration,
     bundleGeneration,
     ownerGeneration,
     policyGeneration: trafficPolicy.generation,
     mode: params.implementations.dispatcher.mode,
     selection,
-    ownerEvidence: Object.freeze({
-      owner: "model-provider",
-      kind: "model-provider-adapter",
-      id: CAPI_MODEL_ADAPTER_ID,
-      bundleGeneration,
+    readiness: Object.freeze({
+      owner: "channel",
+      channel: "msteams",
       state: "ready",
       reason: "BindingPrepared",
-      message: "CAPI model-owner binding is prepared and inactive.",
-      config: Object.freeze({
-        source,
-        ...(path ? { path } : {}),
-      }),
-      ownerGeneration,
-      reloadDisposition: "reload-required",
       authorityMode: "openclaw",
     }),
-    dispatch: async ({ fence, context, method, headers, body, signal }) => {
+    dispatch: async ({ fence, context, method, url, headers, body, signal }) => {
       assertFence(binding, fence);
-      const prepared = prepareCapiModelRequestV1({
-        config: adapterConfig,
+      const prepared = prepareMSTeamsAcfChannelRequestV1({
         context,
         method,
+        url,
         ...(headers ? { headers } : {}),
-        body,
+        ...(body !== undefined ? { body } : {}),
         credentialSlots: credentialReadiness,
       });
       const result = await dispatchHostedProviderRequestV1({
         policy: trafficPolicy,
-        providerId,
-        providerLabel: "CAPI",
-        capability: "llm",
-        transport: "stream",
-        endpointClass: "custom",
-        dispatcherSelectionId: params.selection.dispatcher.id,
-        dispatcherRouteProfileId: params.implementations.dispatcher.routeProfileId,
+        providerId: MSTEAMS_ACF_PROVIDER_ID,
+        providerLabel: "Microsoft Teams ACF",
+        capability: "channel",
+        transport: "request-response",
+        endpointClass: MSTEAMS_ACF_ENDPOINT_CLASS,
+        dispatcherSelectionId: selection.dispatcher.id,
+        dispatcherRouteProfileId,
         dispatcher,
         request: prepared,
         ...(signal ? { signal } : {}),
-        createError: (code, message) => new CapiHostedBindingError(code, message),
+        validateUrl: (candidate) => {
+          if (candidate.toString() !== prepared.url) {
+            throw new MSTeamsAcfHostedBindingError(
+              "traffic-policy-denied",
+              "Microsoft Teams ACF redirects are not supported",
+            );
+          }
+        },
+        createError: (code, message) => new MSTeamsAcfHostedBindingError(code, message),
       });
       return {
-        response: adaptCapiModelResponseV1(result.response, prepared.responsePolicy),
+        response: adaptMSTeamsAcfChannelResponseV1(result.response, prepared.responsePolicy),
         release: result.release,
         policyDecision: result.policyDecision,
       };
