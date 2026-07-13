@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import * as tar from "tar";
 import type { BackupContinuityAssessment } from "../continuity/backup-assessment.js";
-import { root as fsSafeRoot } from "../infra/fs-safe.js";
+import { root as fsSafeRoot, type Root } from "../infra/fs-safe.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { resolveUserPath } from "../utils.js";
 import { backupVerifyCommand, type BackupVerifyResult } from "./backup-verify.js";
@@ -45,9 +45,10 @@ function isAllowedRetrievePath(rawPath: string, archiveRoot: string): boolean {
   if (rawPath.includes("\\")) {
     return false;
   }
-  const normalized = path.posix.normalize(rawPath);
+  const withoutTrailingSlashes = rawPath.replace(/\/+$/u, "");
+  const normalized = path.posix.normalize(withoutTrailingSlashes);
   if (
-    normalized !== rawPath.replace(/\/+$/u, "") ||
+    normalized !== withoutTrailingSlashes ||
     normalized.startsWith("/") ||
     normalized.startsWith("../")
   ) {
@@ -71,6 +72,133 @@ async function assertDestinationDoesNotExist(destination: string): Promise<void>
     throw error;
   }
   throw new Error(`Backup retrieve destination already exists: ${destination}`);
+}
+
+async function copyArchiveSnapshot(params: {
+  archivePath: string;
+  snapshotPath: string;
+  maxBytes: number;
+}): Promise<void> {
+  const sourceStat = await fs.lstat(params.archivePath);
+  if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) {
+    throw new Error(`Backup retrieve archive must be a regular file: ${params.archivePath}`);
+  }
+  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+  const sourceHandle = await fs.open(params.archivePath, fsConstants.O_RDONLY | noFollow);
+  let destinationHandle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    const openedStat = await sourceHandle.stat();
+    if (
+      !openedStat.isFile() ||
+      openedStat.dev !== sourceStat.dev ||
+      openedStat.ino !== sourceStat.ino
+    ) {
+      throw new Error(`Backup retrieve archive changed before snapshot: ${params.archivePath}`);
+    }
+    if (openedStat.size > params.maxBytes) {
+      throw new Error(`Backup archive exceeds the ${params.maxBytes}-byte retrieve limit.`);
+    }
+    destinationHandle = await fs.open(
+      params.snapshotPath,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow,
+      0o600,
+    );
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let copiedBytes = 0;
+    while (true) {
+      const { bytesRead } = await sourceHandle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) {
+        break;
+      }
+      copiedBytes += bytesRead;
+      if (copiedBytes > params.maxBytes) {
+        throw new Error(`Backup archive exceeds the ${params.maxBytes}-byte retrieve limit.`);
+      }
+      let offset = 0;
+      while (offset < bytesRead) {
+        const { bytesWritten } = await destinationHandle.write(
+          buffer,
+          offset,
+          bytesRead - offset,
+          null,
+        );
+        if (bytesWritten === 0) {
+          throw new Error(`Backup retrieve archive snapshot write stalled.`);
+        }
+        offset += bytesWritten;
+      }
+    }
+    await destinationHandle.sync();
+    await destinationHandle.chmod(0o600);
+  } catch (error) {
+    await fs.rm(params.snapshotPath, { force: true }).catch(() => undefined);
+    throw error;
+  } finally {
+    await destinationHandle?.close().catch(() => undefined);
+    await sourceHandle.close().catch(() => undefined);
+  }
+}
+
+async function assertSafeTreeFiles(params: {
+  root: Root;
+  relativeDirectory: string;
+  maxBytes: number;
+  excludedBytePaths: ReadonlySet<string>;
+  totalBytes: { value: number };
+}): Promise<void> {
+  const entries = await params.root.list(params.relativeDirectory, { withFileTypes: true });
+  for (const entry of entries) {
+    const relativePath = path.posix.join(params.relativeDirectory, entry.name);
+    if (entry.isSymbolicLink) {
+      throw new Error(`Backup retrieved tree contains a symbolic link: ${relativePath}`);
+    }
+    if (entry.isDirectory) {
+      await assertSafeTreeFiles({ ...params, relativeDirectory: relativePath });
+      continue;
+    }
+    if (!entry.isFile || entry.nlink !== 1) {
+      throw new Error(`Backup retrieved tree contains an unsafe entry: ${relativePath}`);
+    }
+    const opened = await params.root.open(relativePath);
+    try {
+      if (
+        !opened.stat.isFile() ||
+        opened.stat.dev !== entry.dev ||
+        opened.stat.ino !== entry.ino ||
+        opened.stat.nlink !== 1
+      ) {
+        throw new Error(`Backup retrieved tree changed during validation: ${relativePath}`);
+      }
+      if (!params.excludedBytePaths.has(relativePath)) {
+        params.totalBytes.value += opened.stat.size;
+        if (params.totalBytes.value > params.maxBytes) {
+          throw new Error(`Backup retrieved tree exceeds the ${params.maxBytes}-byte limit.`);
+        }
+      }
+    } finally {
+      await opened.handle.close();
+    }
+  }
+}
+
+export async function assertSafeRetrievedTree(
+  rootDirectory: string,
+  maxBytes: number,
+  excludedBytePaths: ReadonlySet<string> = new Set(),
+): Promise<void> {
+  const safeRoot = await fsSafeRoot(rootDirectory, {
+    symlinks: "reject",
+    hardlinks: "reject",
+    maxBytes,
+    nonBlockingRead: true,
+  });
+  await assertSafeTreeFiles({
+    root: safeRoot,
+    relativeDirectory: "",
+    maxBytes,
+    excludedBytePaths,
+    totalBytes: { value: 0 },
+  });
 }
 
 function formatResult(result: BackupRetrieveResult): string {
@@ -98,13 +226,6 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
     throw new Error("Backup retrieve maxEntries must be a positive safe integer.");
   }
 
-  const archiveStat = await fs.lstat(archivePath);
-  if (!archiveStat.isFile() || archiveStat.isSymbolicLink()) {
-    throw new Error(`Backup retrieve archive must be a regular file: ${archivePath}`);
-  }
-  if (archiveStat.size > maxBytes) {
-    throw new Error(`Backup archive exceeds the ${maxBytes}-byte retrieve limit.`);
-  }
   await assertDestinationDoesNotExist(destination);
 
   const parentDir = path.dirname(destination);
@@ -119,8 +240,7 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
   let operationFailure: unknown;
   let result: BackupRetrieveResult | undefined;
   try {
-    await fs.copyFile(archivePath, snapshotPath, fsConstants.COPYFILE_EXCL);
-    await fs.chmod(snapshotPath, 0o600);
+    await copyArchiveSnapshot({ archivePath, snapshotPath, maxBytes });
     const verification: BackupVerifyResult = await backupVerifyCommand(
       { log: () => {}, error: () => {}, exit: () => {} },
       { archive: snapshotPath, maxEntries, maxContentBytes: maxBytes },
@@ -190,12 +310,7 @@ async function retrieveBackupArchive(opts: BackupRetrieveOptions): Promise<Backu
       throw new Error("Backup contains an unsupported or unsafe retrieve entry.");
     }
 
-    await fsSafeRoot(destination, {
-      symlinks: "reject",
-      hardlinks: "reject",
-      maxBytes,
-      nonBlockingRead: true,
-    });
+    await assertSafeRetrievedTree(destination, maxBytes);
     await fs.rm(incompleteMarker);
 
     result = {

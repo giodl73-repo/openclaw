@@ -120,6 +120,7 @@ describe("continuity archive staging", () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
     expect(staged.evidence).toMatchObject({
       oauthExcluded: true,
+      legacyDeliveryQueueCount: 0,
       legacyTranscriptCount: 0,
       sqliteSnapshotCount: 1,
       removedAuthProfileStoreRows: 1,
@@ -167,6 +168,48 @@ describe("continuity archive staging", () => {
     ).rejects.toThrow(/config changed after classification/);
 
     expect(await fs.readdir(fixture.stagingParent)).toEqual([]);
+  });
+
+  it("rejects a legacy delivery queue entry that appears after planning", async () => {
+    const fixture = await makeFixture();
+    const plan = await createPlan(fixture);
+    const queueDir = path.join(fixture.stateDir, "delivery-queue");
+    await fs.mkdir(queueDir);
+    await fs.writeFile(path.join(queueDir, "pending.json"), "{}\n");
+
+    await expect(
+      stageContinuityArchivePlan({
+        plan,
+        stagingParent: fixture.stagingParent,
+      }),
+    ).rejects.toThrow(/Legacy delivery queue input appeared/);
+
+    expect(await fs.readdir(fixture.stagingParent)).toEqual([]);
+  });
+
+  it("omits and counts each installed plugin dependency tree once", async () => {
+    const fixture = await makeFixture();
+    const plan = await createPlan(fixture);
+    const dependencyTree = path.join(fixture.stateDir, "extensions", "example", "node_modules");
+    await fs.mkdir(path.join(dependencyTree, "package-a"), { recursive: true });
+    await fs.writeFile(path.join(dependencyTree, "package-a", "index.js"), "module.exports = {};");
+
+    const staged = await stageContinuityArchivePlan({
+      plan,
+      stagingParent: fixture.stagingParent,
+    });
+
+    expect(staged.evidence.omittedPluginDependencyTreeCount).toBe(1);
+    await expect(
+      fs.access(
+        path.join(
+          stagedPath(staged.stagingDir, plan.sources.state.archivePath),
+          "extensions",
+          "example",
+          "node_modules",
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects staging beneath a source before creating any live-state path", async () => {

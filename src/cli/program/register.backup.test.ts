@@ -5,6 +5,7 @@ import { registerBackupCommand } from "./register.backup.js";
 
 const mocks = vi.hoisted(() => ({
   backupCreateCommand: vi.fn(),
+  backupMaterializeCommand: vi.fn(),
   backupRetrieveCommand: vi.fn(),
   backupVerifyCommand: vi.fn(),
   runtime: {
@@ -20,6 +21,10 @@ const runtime = mocks.runtime;
 
 vi.mock("../../commands/backup.js", () => ({
   backupCreateCommand: mocks.backupCreateCommand,
+}));
+
+vi.mock("../../commands/backup-materialize.js", () => ({
+  backupMaterializeCommand: mocks.backupMaterializeCommand,
 }));
 
 vi.mock("../../commands/backup-retrieve.js", () => ({
@@ -44,6 +49,7 @@ describe("registerBackupCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     backupCreateCommand.mockResolvedValue(undefined);
+    mocks.backupMaterializeCommand.mockResolvedValue(undefined);
     mocks.backupRetrieveCommand.mockResolvedValue(undefined);
     backupVerifyCommand.mockResolvedValue(undefined);
   });
@@ -114,6 +120,24 @@ describe("registerBackupCommand", () => {
     expect(options).toStrictEqual({
       archive: "/tmp/openclaw-backup.tar.gz",
       destination: "/tmp/restored",
+      json: true,
+    });
+  });
+
+  it("materializes a continuity archive into a required clean destination", async () => {
+    await runCli([
+      "backup",
+      "materialize",
+      "/tmp/continuity.tar.gz",
+      "--destination",
+      "/tmp/offline-root",
+      "--json",
+    ]);
+
+    const options = expectForwardedOptions(mocks.backupMaterializeCommand);
+    expect(options).toStrictEqual({
+      archive: "/tmp/continuity.tar.gz",
+      destination: "/tmp/offline-root",
       json: true,
     });
   });

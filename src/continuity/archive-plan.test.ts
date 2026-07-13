@@ -63,6 +63,7 @@ describe("continuity archive plan", () => {
       configFileCount: 1,
       workspaceCount: 1,
       oauthExcluded: true,
+      legacyDeliveryQueueCount: 0,
       legacyTranscriptCount: 0,
     });
   });
@@ -114,6 +115,42 @@ describe("continuity archive plan", () => {
       count: 1,
     });
     expect(plan.evidence.legacyTranscriptCount).toBe(1);
+  });
+
+  it.each([
+    ["delivery-queue", "pending.json"],
+    ["delivery-queue", "done.delivered"],
+    [path.join("session-delivery-queue", "failed"), "failed.json"],
+  ])("fails closed when authoritative legacy queue input remains in %s", (queueDir, file) => {
+    const fixture = makeFixture();
+    const targetDir = path.join(fixture.stateDir, queueDir);
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.writeFileSync(path.join(targetDir, file), "{}\n");
+
+    const plan = resolveFixture(fixture);
+
+    expect(plan.eligible).toBe(false);
+    expect(plan.blockers).toContainEqual({
+      code: "continuity.capture.legacy_delivery_queue",
+      count: 1,
+    });
+    expect(plan.evidence.legacyDeliveryQueueCount).toBe(1);
+  });
+
+  it("fails closed when a legacy queue root is a symbolic link", () => {
+    const fixture = makeFixture();
+    fs.symlinkSync(
+      path.join(fixture.root, "missing-queue"),
+      path.join(fixture.stateDir, "delivery-queue"),
+    );
+
+    const plan = resolveFixture(fixture);
+
+    expect(plan.eligible).toBe(false);
+    expect(plan.blockers).toContainEqual({
+      code: "continuity.capture.source_scan_failed",
+      count: 1,
+    });
   });
 
   it("fails closed on missing sources and incomplete extension metadata", () => {

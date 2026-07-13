@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
 import { afterEach, describe, expect, it } from "vitest";
-import { backupVerifyCommand } from "../commands/backup-verify.js";
+import { backupVerifyCommand, parseBackupManifest } from "../commands/backup-verify.js";
 import { buildConfigSchema } from "../config/schema.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { createContinuityArchive } from "./archive-create.js";
@@ -90,6 +90,15 @@ describe("continuity archive creation", () => {
         authProfileStateRows: 0,
       },
     });
+    expect(verified.continuityObligations).toMatchObject({
+      reconstructed: {
+        authProfileRuntimeState: { removedRowCount: 0, readiness: "non-blocking" },
+        pluginRuntimeDependencies: { omittedTreeCount: 0, readiness: "owner-required" },
+      },
+      external: {
+        authProfileCredentials: { removedRowCount: 1, credentialRows: 0, oauthCaptured: false },
+      },
+    });
     expect((await fs.stat(fixture.outputPath)).mode & 0o777).toBe(0o600);
     expect(await fs.readdir(fixture.stagingParent)).toEqual([]);
   });
@@ -172,6 +181,70 @@ describe("continuity archive creation", () => {
         { archive: tamperedPath },
       ),
     ).rejects.toThrow(/file count does not match/i);
+  });
+
+  it("rejects unknown artifact obligation ownership during verification", async () => {
+    const fixture = await makeFixture();
+    const created = await createContinuityArchive({
+      plan: fixture.plan,
+      outputPath: fixture.outputPath,
+      stagingParent: fixture.stagingParent,
+      nowMs: 0,
+    });
+    const extractedDir = path.join(fixture.root, "unknown-obligation");
+    const tamperedPath = path.join(fixture.root, "unknown-obligation.tar.gz");
+    await fs.mkdir(extractedDir);
+    await tar.x({ file: fixture.outputPath, cwd: extractedDir, gzip: true });
+    const manifestPath = path.join(extractedDir, created.archiveRoot, "manifest.json");
+    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
+      continuityObligations: {
+        reconstructed: { authProfileRuntimeState: { owner: string } };
+      };
+    };
+    manifest.continuityObligations.reconstructed.authProfileRuntimeState.owner = "runtime";
+    await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await tar.c(
+      {
+        file: tamperedPath,
+        cwd: extractedDir,
+        gzip: true,
+        portable: true,
+      },
+      [created.archiveRoot],
+    );
+
+    await expect(
+      backupVerifyCommand(
+        { log: () => {}, error: () => {}, exit: () => {} },
+        { archive: tamperedPath },
+      ),
+    ).rejects.toThrow(/obligation owner/i);
+  });
+
+  it("does not let ordinary backups claim continuity obligations", async () => {
+    const fixture = await makeFixture();
+    const created = await createContinuityArchive({
+      plan: fixture.plan,
+      outputPath: fixture.outputPath,
+      stagingParent: fixture.stagingParent,
+      nowMs: 0,
+    });
+
+    expect(() =>
+      parseBackupManifest(
+        JSON.stringify({
+          schemaVersion: 1,
+          artifactType: "backup",
+          createdAt: created.createdAt,
+          archiveRoot: "backup",
+          runtimeVersion: "1.0.0",
+          platform: process.platform,
+          nodeVersion: process.version,
+          assets: [],
+          continuityObligations: created.continuityObligations,
+        }),
+      ),
+    ).toThrow(/Ordinary backup artifacts cannot claim continuity capture metadata/);
   });
 
   it("reopens packaged SQLite snapshots and rejects credential-row tampering", async () => {

@@ -1,9 +1,10 @@
 ---
-summary: "CLI reference for creating, verifying, and retrieving local OpenClaw backups"
+summary: "CLI reference for creating, verifying, retrieving, and materializing local OpenClaw archives"
 read_when:
   - You want a first-class backup archive for local OpenClaw state
   - You want to preview which paths would be included before reset or uninstall
   - You want to inspect a verified backup in a non-active staging directory
+  - You want to materialize a continuity archive into a clean offline root
 title: "Backup"
 ---
 
@@ -20,6 +21,7 @@ openclaw backup create --no-include-workspace
 openclaw backup create --only-config
 openclaw backup verify ./2026-03-09T08-00-00.000+08-00-openclaw-backup.tar.gz
 openclaw backup retrieve ./backup.tar.gz --destination ./restored
+openclaw backup materialize ./continuity.tar.gz --destination ./offline-root
 ```
 
 ## Notes
@@ -33,6 +35,13 @@ openclaw backup retrieve ./backup.tar.gz --destination ./restored
 - `openclaw backup retrieve <archive> --destination <path>` copies and verifies the archive, then extracts its manifest and payload into a new private staging directory. The destination must not already exist.
 - Retrieval rejects links, special entries, unsafe paths, and archives that exceed its entry or expanded-size safety limits. If extraction fails, OpenClaw removes the incomplete destination.
 - Retrieval does **not** activate the staged files as live OpenClaw state. Inspect the staging directory manually; native restore and activation are not implemented by this command.
+- `openclaw backup materialize <archive> --destination <path>` accepts only a verified continuity artifact with a complete component graph. It copies state, config, and workspace files into a new owner-private offline filesystem root in declared dependency order and writes `.openclaw-continuity-materialization.json` with the exact archive and manifest identities.
+- Before creating the offline root, materialization rejects malformed or newer artifact runtime versions, artifacts captured on another platform, corrupt packaged SQLite databases, and newer shared-state or agent-state schemas. Arbitrary plugin and workspace databases are not interpreted as core schemas.
+- The materialization receipt reports `activated: false`, `activationReady: false`, and `effectiveArchived: false`. It projects the artifact's closed reconstruction, external-dependency, and ephemeral obligations; it does not infer executable work from the broad runtime state inventory.
+- Materialized absolute paths remain under their archive namespace (`posix/`, `windows/`, or `relative/`) inside the selected destination. Materialization never writes to the original source paths, activates live state, starts the Gateway, resolves credentials, or establishes effective Archived.
+- Materialization refuses existing destinations, links, hard links, ambiguous component ownership, unexpected overwrite, and incomplete payload ownership. Failed output is removed rather than left success-shaped.
+- Compatibility validation does not rebuild derived state, resolve host credentials or placement, create runtime transients, start OpenClaw, or rewrite live paths.
+- Continuity capture fails closed while legacy file-backed delivery queue entries or delivered markers remain. Installed plugin `node_modules` trees are omitted and counted in the artifact's owner-reinstall obligation.
 
 ## What gets backed up
 
