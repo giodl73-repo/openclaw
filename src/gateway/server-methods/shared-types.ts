@@ -172,6 +172,8 @@ export type GatewayRequestContext = {
   notifyPluginMetadataChanged: () => void;
   getMcpAppSandboxPort?: () => number | undefined;
   ensureSandboxHostPort?: () => Promise<number>;
+  configSnapshot?: ConfigFileSnapshot;
+  configReadOnlyReason?: string;
   resolveTerminalLaunchPolicy: (agentId?: string) => TerminalLaunchResolution;
   isTerminalEnabled: () => boolean;
   execApprovalManager?: ExecApprovalManager;
