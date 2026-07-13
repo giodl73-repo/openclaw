@@ -64,6 +64,8 @@ export type GuardedFetchMode = (typeof GUARDED_FETCH_MODE)[keyof typeof GUARDED_
 export type GuardedFetchOptions = {
   url: string;
   fetchImpl?: FetchLike;
+  oneHopDispatcher?: OneHopFetchDispatcher;
+  credentialSlotRefs?: string[];
   init?: RequestInit;
   capture?:
     | false
@@ -81,6 +83,8 @@ export type GuardedFetchOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   requireHttps?: boolean;
+  /** Validate every request URL, including each redirect target, before dispatch. */
+  validateUrl?: (url: URL) => void;
   policy?: SsrFPolicy;
   lookupFn?: LookupFn;
   dispatcherPolicy?: PinnedDispatcherPolicy;
@@ -489,12 +493,12 @@ async function fetchWithSsrFGuardInternal(
       await release();
       throw new Error("URL must use https");
     }
-
     let dispatcher: Dispatcher | null = null;
     // Resolve inside the redirect loop so exact-origin trust never carries across origins.
     const policyForUrl = resolveSsrFPolicyForUrl(parsedUrl, params.policy);
     const dispatcherPolicy = params.resolveDispatcherPolicy?.(parsedUrl) ?? params.dispatcherPolicy;
     try {
+      params.validateUrl?.(parsedUrl);
       const usesTrustedExplicitProxyMode =
         mode === GUARDED_FETCH_MODE.TRUSTED_EXPLICIT_PROXY &&
         dispatcherPolicy?.mode === "explicit-proxy";
@@ -503,7 +507,10 @@ async function fetchWithSsrFGuardInternal(
         dispatcherPolicy,
         usesTrustedExplicitProxyMode ? false : params.pinDns,
       );
-      await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy);
+      const usesExternalOneHopDispatcher = params.oneHopDispatcher !== undefined;
+      if (!usesExternalOneHopDispatcher) {
+        await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy);
+      }
       const isStrictManagedProxyActive =
         mode === GUARDED_FETCH_MODE.STRICT && isManagedProxyActive();
       const shouldCheckManagedProxyBypass =
@@ -537,7 +544,15 @@ async function fetchWithSsrFGuardInternal(
         assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
       }
 
-      if (canUseTrustedEnvProxy) {
+      if (usesExternalOneHopDispatcher) {
+        if (!dispatcherPolicy || dispatcherPolicy.mode === "direct") {
+          throw new Error("External one-hop dispatch requires a host-owned proxy route");
+        }
+        routeMode =
+          dispatcherPolicy.mode === "explicit-proxy" ? "explicit-proxy" : "environment-proxy";
+        resolutionMode = "proxy";
+        assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
+      } else if (canUseTrustedEnvProxy) {
         routeMode = "environment-proxy";
         resolutionMode = "proxy";
         dispatcher = createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
@@ -621,13 +636,18 @@ async function fetchWithSsrFGuardInternal(
       // because the default global fetch path will not honor per-request
       // dispatchers.
       const shouldUseRuntimeFetch = Boolean(dispatcher) && !supportsDispatcherInit;
-      const oneHopDispatcher: OneHopFetchDispatcher = createLocalOneHopFetchDispatcher(
-        shouldUseRuntimeFetch ? fetchWithRuntimeDispatcher : defaultFetch,
-      );
+      const oneHopDispatcher =
+        params.oneHopDispatcher ??
+        createLocalOneHopFetchDispatcher(
+          shouldUseRuntimeFetch ? fetchWithRuntimeDispatcher : defaultFetch,
+        );
       const response = await oneHopDispatcher.dispatch({
         url: parsedUrl.toString(),
         init,
         networkGuard,
+        ...(params.credentialSlotRefs?.length
+          ? { credentialSlotRefs: params.credentialSlotRefs }
+          : {}),
       });
       const capturedByGlobalFetchPatch =
         !shouldUseRuntimeFetch &&

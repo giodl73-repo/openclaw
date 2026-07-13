@@ -24,6 +24,7 @@ const SESSION_REPLACED_CLOSE_CODE = 4001;
 
 type PendingOperation = {
   frames: ReverseProviderDispatchFrameV1[];
+  frameController: ReadableStreamDefaultController<ReverseProviderDispatchFrameV1>;
   resolve: (result: ReverseProviderDispatchTraceResult) => void;
   result: Promise<ReverseProviderDispatchTraceResult>;
   timer: ReturnType<typeof setTimeout>;
@@ -49,6 +50,7 @@ export type HostProviderSession = {
 
 export type HostProviderOperation = {
   open: ReverseProviderDispatchOperationOpenV1;
+  frames: ReadableStream<ReverseProviderDispatchFrameV1>;
   result: Promise<ReverseProviderDispatchTraceResult>;
   send: (frame: ReverseProviderDispatchFrameV1) => boolean;
 };
@@ -229,6 +231,12 @@ export class HostProviderRegistry {
     const result = new Promise<ReverseProviderDispatchTraceResult>((resolve) => {
       resolveResult = resolve;
     });
+    let frameController!: ReadableStreamDefaultController<ReverseProviderDispatchFrameV1>;
+    const frames = new ReadableStream<ReverseProviderDispatchFrameV1>({
+      start(controller) {
+        frameController = controller;
+      },
+    });
     const timer = setTimeout(
       () => {
         const pending = this.operations.get(open.operationId);
@@ -252,6 +260,7 @@ export class HostProviderRegistry {
     timer.unref?.();
     const operation: PendingOperation = {
       frames: [open],
+      frameController,
       resolve: resolveResult,
       result,
       timer,
@@ -273,6 +282,7 @@ export class HostProviderRegistry {
     }
     return {
       open,
+      frames,
       result,
       send: (frame) => this.sendOperationFrame(frame),
     };
@@ -292,6 +302,7 @@ export class HostProviderRegistry {
       throw new Error(`host provider operation is not active: ${frame.operationId}`);
     }
     this.assertSessionFrame(session, frame);
+    operation.frameController.enqueue(frame);
     return this.appendAndEvaluate(frame.operationId, frame);
   }
 
@@ -517,6 +528,7 @@ export class HostProviderRegistry {
     this.totalTraceBytes -= operation.traceBytes;
     this.queue = this.queue.filter((entry) => entry.operationId !== operationId);
     this.queuedBytes = this.queue.reduce((total, entry) => total + entry.bytes, 0);
+    operation.frameController.close();
     operation.resolve(result);
   }
 
