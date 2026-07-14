@@ -26,6 +26,8 @@ export type TrajectoryAuditRunSummary = {
   usage?: Partial<Record<AuditRunUsageField, number>>;
   skillInvocations: Array<{
     invocationId: string;
+    parentInvocationId?: string;
+    parentRunId?: string;
     commandName?: string;
     skillName?: string;
     skillSource?: string;
@@ -56,6 +58,8 @@ function readSkillInvocations(
       continue;
     }
     const current = invocations.get(invocationId) ?? { invocationId };
+    const parentInvocationId = toOptionalString(event.data?.parentInvocationId);
+    const parentRunId = toOptionalString(event.data?.parentRunId);
     const commandName = toOptionalString(event.data?.commandName);
     const skillName = toOptionalString(event.data?.skillName);
     const skillSource = toOptionalString(event.data?.skillSource);
@@ -64,6 +68,8 @@ function readSkillInvocations(
     const toolCallId = toOptionalString(event.data?.toolCallId);
     invocations.set(invocationId, {
       ...current,
+      ...(parentInvocationId ? { parentInvocationId } : {}),
+      ...(parentRunId ? { parentRunId } : {}),
       ...(commandName ? { commandName } : {}),
       ...(skillName ? { skillName } : {}),
       ...(skillSource ? { skillSource } : {}),

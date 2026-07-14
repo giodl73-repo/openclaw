@@ -156,6 +156,81 @@ describe("summarizeTrajectoryAuditRuns", () => {
     ]);
   });
 
+  it("exposes child skill lineage without rolling child usage into the parent run", () => {
+    const summaries = summarizeTrajectoryAuditRuns([
+      event({
+        type: "skill.invocation.started",
+        seq: 1,
+        runId: "run-parent",
+        data: {
+          invocationId: "skill-parent",
+          skillName: "customer-support",
+        },
+      }),
+      event({
+        type: "model.completed",
+        seq: 2,
+        runId: "run-parent",
+        data: { usage: { input: 20, output: 5, total: 25 } },
+      }),
+      event({
+        type: "skill.invocation.started",
+        seq: 3,
+        runId: "run-child",
+        data: {
+          invocationId: "skill-child",
+          parentInvocationId: "skill-parent",
+          parentRunId: "run-parent",
+          skillName: "issue-triage",
+        },
+      }),
+      event({
+        type: "model.completed",
+        seq: 4,
+        runId: "run-child",
+        data: { usage: { input: 40, output: 10, total: 50 } },
+      }),
+      event({
+        type: "skill.invocation.completed",
+        seq: 5,
+        runId: "run-child",
+        data: {
+          invocationId: "skill-child",
+          parentInvocationId: "skill-parent",
+          parentRunId: "run-parent",
+          status: "success",
+        },
+      }),
+    ]);
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        runId: "run-parent",
+        usage: { input: 20, output: 5, total: 25 },
+        skillInvocations: [
+          {
+            invocationId: "skill-parent",
+            skillName: "customer-support",
+          },
+        ],
+      }),
+      expect.objectContaining({
+        runId: "run-child",
+        status: "success",
+        usage: { input: 40, output: 10, total: 50 },
+        skillInvocations: [
+          {
+            invocationId: "skill-child",
+            parentInvocationId: "skill-parent",
+            parentRunId: "run-parent",
+            skillName: "issue-triage",
+            status: "success",
+          },
+        ],
+      }),
+    ]);
+  });
+
   it("ignores events without a run id and runs without auditable facts", () => {
     expect(
       summarizeTrajectoryAuditRuns([
