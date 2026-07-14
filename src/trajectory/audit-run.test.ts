@@ -32,14 +32,25 @@ describe("summarizeTrajectoryAuditRuns", () => {
     const summaries = summarizeTrajectoryAuditRuns([
       event({ type: "session.started", seq: 1, runId: "run-1" }),
       event({
-        type: "skill.used",
+        type: "skill.invocation.started",
         seq: 2,
+        runId: "run-1",
+        data: {
+          invocationId: "skill-1",
+          commandName: "support",
+          skillName: "customer-support",
+          skillSource: "workspace",
+        },
+      }),
+      event({
+        type: "skill.used",
+        seq: 3,
         runId: "run-1",
         data: { skillName: "customer-support", skillSource: "workspace", activation: "read" },
       }),
       event({
         type: "audit.receipt",
-        seq: 3,
+        seq: 4,
         runId: "run-1",
         data: {
           type: "case.updated",
@@ -50,7 +61,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
       }),
       event({
         type: "model.completed",
-        seq: 4,
+        seq: 5,
         runId: "run-1",
         provider: "openai",
         modelId: "gpt-5.6-luna",
@@ -58,13 +69,19 @@ describe("summarizeTrajectoryAuditRuns", () => {
       }),
       event({
         type: "model.completed",
-        seq: 5,
+        seq: 6,
         runId: "run-1",
         provider: "openai",
         modelId: "gpt-5.6-luna",
         data: { usage: { input: 40, output: 5, total: 45 } },
       }),
-      event({ type: "session.ended", seq: 6, runId: "run-1", data: { status: "success" } }),
+      event({
+        type: "skill.invocation.completed",
+        seq: 7,
+        runId: "run-1",
+        data: { invocationId: "skill-1", status: "success" },
+      }),
+      event({ type: "session.ended", seq: 8, runId: "run-1", data: { status: "success" } }),
     ]);
 
     expect(summaries).toEqual([
@@ -75,6 +92,15 @@ describe("summarizeTrajectoryAuditRuns", () => {
         status: "success",
         models: [{ provider: "openai", modelId: "gpt-5.6-luna" }],
         usage: { input: 140, output: 25, cacheRead: 10, total: 175 },
+        skillInvocations: [
+          {
+            invocationId: "skill-1",
+            commandName: "support",
+            skillName: "customer-support",
+            skillSource: "workspace",
+            status: "success",
+          },
+        ],
         skills: [{ skillName: "customer-support", skillSource: "workspace", activation: "read" }],
         receipts: [
           expect.objectContaining({

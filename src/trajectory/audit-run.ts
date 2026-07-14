@@ -24,6 +24,13 @@ export type TrajectoryAuditRunSummary = {
   status?: string;
   models: Array<{ provider?: string; modelId?: string }>;
   usage?: Partial<Record<AuditRunUsageField, number>>;
+  skillInvocations: Array<{
+    invocationId: string;
+    commandName?: string;
+    skillName?: string;
+    skillSource?: string;
+    status?: string;
+  }>;
   skills: Array<{
     skillName: string;
     skillSource?: string;
@@ -33,6 +40,34 @@ export type TrajectoryAuditRunSummary = {
   }>;
   receipts: Array<Record<string, unknown>>;
 };
+
+function readSkillInvocations(
+  events: TrajectoryEvent[],
+): TrajectoryAuditRunSummary["skillInvocations"] {
+  const invocations = new Map<string, TrajectoryAuditRunSummary["skillInvocations"][number]>();
+  for (const event of events) {
+    if (event.type !== "skill.invocation.started" && event.type !== "skill.invocation.completed") {
+      continue;
+    }
+    const invocationId = toOptionalString(event.data?.invocationId);
+    if (!invocationId) {
+      continue;
+    }
+    const current = invocations.get(invocationId) ?? { invocationId };
+    const commandName = toOptionalString(event.data?.commandName);
+    const skillName = toOptionalString(event.data?.skillName);
+    const skillSource = toOptionalString(event.data?.skillSource);
+    const status = toOptionalString(event.data?.status);
+    invocations.set(invocationId, {
+      ...current,
+      ...(commandName ? { commandName } : {}),
+      ...(skillName ? { skillName } : {}),
+      ...(skillSource ? { skillSource } : {}),
+      ...(status ? { status } : {}),
+    });
+  }
+  return [...invocations.values()];
+}
 
 type AuditRunAccumulator = {
   events: TrajectoryEvent[];
@@ -142,9 +177,15 @@ export function summarizeTrajectoryAuditRuns(
       return [];
     }
     const skills = readSkills(run.events);
+    const skillInvocations = readSkillInvocations(run.events);
     const usage = readUsage(run.events);
     const hasModelCompletion = run.events.some((event) => event.type === "model.completed");
-    if (receiptEvents.length === 0 && skills.length === 0 && !hasModelCompletion) {
+    if (
+      receiptEvents.length === 0 &&
+      skills.length === 0 &&
+      skillInvocations.length === 0 &&
+      !hasModelCompletion
+    ) {
       return [];
     }
     const sessionKey = toOptionalString(run.first.sessionKey);
@@ -161,6 +202,7 @@ export function summarizeTrajectoryAuditRuns(
         ...(status ? { status } : {}),
         models: readModels(run.events),
         ...(usage ? { usage } : {}),
+        skillInvocations,
         skills,
         receipts: receiptEvents.flatMap((event) => (event.data ? [event.data] : [])),
       },

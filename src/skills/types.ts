@@ -51,6 +51,14 @@ type SkillCommandDispatchSpec = {
 
 export type SkillTelemetrySource = "bundled" | "unknown" | "workspace";
 
+/** Trusted identity for one explicit, user-requested skill invocation. */
+export type ExplicitSkillInvocation = {
+  invocationId: string;
+  commandName: string;
+  skillName: string;
+  skillSource?: SkillTelemetrySource;
+};
+
 export type SkillUsagePath = {
   /** Path visible to the tool runtime when it reads SKILL.md. */
   readPath: string;

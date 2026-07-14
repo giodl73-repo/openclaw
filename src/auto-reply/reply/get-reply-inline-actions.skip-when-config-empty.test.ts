@@ -810,6 +810,51 @@ describe("handleInlineActions", () => {
     );
   });
 
+  it("carries explicit prompt skill invocation identity into the agent run context", async () => {
+    const typing = createTypingController();
+    const ctx = buildTestCtx({
+      Body: "/support case 42",
+      CommandBody: "/support case 42",
+    });
+    const skillCommands: SkillCommandSpec[] = [
+      {
+        name: "support",
+        skillName: "customer-support",
+        skillSource: "workspace",
+        description: "Handle a customer support request",
+      },
+    ];
+
+    const result = await handleInlineActions(
+      createHandleInlineActionsInput({
+        ctx,
+        typing,
+        cleanedBody: "/support case 42",
+        command: {
+          isAuthorizedSender: true,
+          rawBodyNormalized: "/support case 42",
+          commandBodyNormalized: "/support case 42",
+        },
+        overrides: {
+          cfg: { commands: { text: true } },
+          allowTextCommands: true,
+          skillCommands,
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "continue",
+      cleanedBody: 'Use the "customer-support" skill for this request.\n\nUser input:\ncase 42',
+    });
+    expect(ctx.ExplicitSkillInvocation).toMatchObject({
+      invocationId: expect.stringMatching(/^skill_/u),
+      commandName: "support",
+      skillName: "customer-support",
+      skillSource: "workspace",
+    });
+  });
+
   it("passes requesterAgentIdOverride into inline tool runtimes", async () => {
     const typing = createTypingController();
     const toolExecute = vi.fn(async () => ({ text: "spawned" }));

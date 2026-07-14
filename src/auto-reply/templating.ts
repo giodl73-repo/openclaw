@@ -7,6 +7,7 @@ import type {
 } from "../media-understanding/types.js";
 import type { PluginHookChannelContext } from "../plugins/hook-channel-context.types.js";
 import type { InputProvenance } from "../sessions/input-provenance.js";
+import type { ExplicitSkillInvocation } from "../skills/types.js";
 import type { CommandTurnContext } from "./command-turn-context.js";
 import type { CommandArgs } from "./commands-args.types.js";
 import type { HistoryEntry } from "./reply/history.types.js";
@@ -86,6 +87,8 @@ export type MsgContext = {
    * Should use real newlines (`\n`), not escaped `\\n`.
    */
   BodyForAgent?: string;
+  /** Trusted metadata for a user-invoked skill command carried into the agent run. */
+  ExplicitSkillInvocation?: ExplicitSkillInvocation;
   /**
    * Recent chat history for context (untrusted user content). Prefer passing this
    * as structured context blocks in the user prompt rather than rendering plaintext envelopes.

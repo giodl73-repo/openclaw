@@ -449,10 +449,20 @@ export async function handleInlineActions(params: {
         ]
           .filter((entry): entry is string => Boolean(entry))
           .join("\n\n");
+    const explicitSkillInvocation = {
+      invocationId: `skill_${generateSecureToken(8)}`,
+      commandName: skillInvocation.command.name,
+      skillName: skillInvocation.command.skillName,
+      ...(skillInvocation.command.skillSource
+        ? { skillSource: skillInvocation.command.skillSource }
+        : {}),
+    };
     ctx.Body = rewrittenBody;
     ctx.BodyForAgent = rewrittenBody;
+    ctx.ExplicitSkillInvocation = explicitSkillInvocation;
     sessionCtx.Body = rewrittenBody;
     sessionCtx.BodyForAgent = rewrittenBody;
+    sessionCtx.ExplicitSkillInvocation = explicitSkillInvocation;
     sessionCtx.BodyStripped = rewrittenBody;
     cleanedBody = rewrittenBody;
   }
