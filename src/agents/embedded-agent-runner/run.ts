@@ -246,6 +246,10 @@ import {
   EMBEDDED_RUN_LANE_TIMEOUT_GRACE_MS,
   resolveEmbeddedRunLaneTimeoutMs,
 } from "./run/lane-runtime.js";
+import {
+  assertOrchestrationBudgetAvailable,
+  chargeOrchestrationBudgetUsage,
+} from "./run/orchestration-budget-accounting.js";
 import type { RunEmbeddedAgentParams } from "./run/params.js";
 import { buildEmbeddedRunPayloads } from "./run/payloads.js";
 import { createEmbeddedRunProgressController } from "./run/progress-controller.js";
@@ -1992,6 +1996,10 @@ async function runEmbeddedAgentInternal(
             runLoopIterations,
             maxRunLoopIterations: MAX_RUN_LOOP_ITERATIONS,
           });
+          assertOrchestrationBudgetAvailable({
+            config: params.config,
+            explicitSkillInvocation: params.explicitSkillInvocation,
+          });
           const rawAttempt = await runEmbeddedAttemptWithBackend({
             sessionId: activeSessionId,
             sessionKey: resolvedSessionKey,
@@ -2318,6 +2326,11 @@ async function runEmbeddedAgentInternal(
           });
           const attemptUsage = attempt.attemptUsage ?? callUsage.currentAttempt;
           mergeUsageIntoAccumulator(usageAccumulator, attemptUsage);
+          await chargeOrchestrationBudgetUsage({
+            config: params.config,
+            explicitSkillInvocation: params.explicitSkillInvocation,
+            usage: attemptUsage,
+          });
           // Keep prompt size from the latest model call so session totalTokens
           // reflects current context usage, not accumulated tool-loop usage.
           lastRunPromptUsage = callUsage.latest;

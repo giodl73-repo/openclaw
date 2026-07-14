@@ -9,6 +9,7 @@ export {
 } from "../config/agent-limits.js";
 export { getRuntimeConfig } from "../config/config.js";
 export { loadSessionEntry, upsertSessionEntry } from "../config/sessions/session-accessor.js";
+export { createSessionOrchestrationBudget } from "../config/sessions/orchestration-budgets.js";
 export { forkSessionEntryFromParent } from "../auto-reply/reply/session-fork.js";
 export { ensureContextEnginesInitialized } from "../context-engine/init.js";
 export { resolveContextEngine } from "../context-engine/registry.js";

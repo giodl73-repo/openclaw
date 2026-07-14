@@ -69,6 +69,12 @@ export const ExplicitSkillInvocationSchema = closedObject({
   executionHints: Type.Optional(SkillExecutionHintsSchema),
   parentInvocationId: Type.Optional(NonEmptyString),
   parentRunId: Type.Optional(NonEmptyString),
+  orchestrationBudget: Type.Optional(
+    closedObject({
+      ownerSessionKey: NonEmptyString,
+      rootRunId: NonEmptyString,
+    }),
+  ),
 });
 
 /** Stream event emitted by the agent runtime over the gateway protocol. */

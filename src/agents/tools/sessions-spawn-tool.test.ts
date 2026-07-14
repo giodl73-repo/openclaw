@@ -6,12 +6,19 @@ const hoisted = vi.hoisted(() => {
   const spawnSubagentDirectMock = vi.fn();
   const spawnAcpDirectMock = vi.fn();
   const registerSubagentRunMock = vi.fn();
+  const assertSessionOrchestrationBudgetAvailableMock = vi.fn();
   return {
     spawnSubagentDirectMock,
     spawnAcpDirectMock,
     registerSubagentRunMock,
+    assertSessionOrchestrationBudgetAvailableMock,
   };
 });
+
+vi.mock("../../config/sessions/orchestration-budgets.js", () => ({
+  assertSessionOrchestrationBudgetAvailable: (...args: unknown[]) =>
+    hoisted.assertSessionOrchestrationBudgetAvailableMock(...args),
+}));
 
 vi.mock("../subagent-spawn.js", () => ({
   SUBAGENT_SPAWN_CONTEXT_MODES: ["isolated", "fork"],
@@ -52,6 +59,7 @@ describe("sessions_spawn tool", () => {
       runId: "run-acp",
     });
     hoisted.registerSubagentRunMock.mockReset();
+    hoisted.assertSessionOrchestrationBudgetAvailableMock.mockReset();
   });
 
   function registerAcpBackendForTest() {
@@ -1236,6 +1244,143 @@ describe("sessions_spawn tool", () => {
     expect(requireRecord(result.details, "result details").error).toContain(
       'Skill "invoice-paid" is not declared by parent skill "support-case"',
     );
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
+  it("starts a root child skill with an explicit token budget", async () => {
+    const tool = createSessionsSpawnTool({
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "invoice-paid" }],
+        resolvedSkills: [
+          {
+            name: "invoice-paid",
+            description: "Record a paid invoice.",
+            filePath: "/skills/invoice-paid/SKILL.md",
+            baseDir: "/skills/invoice-paid",
+            source: "workspace",
+            sourceInfo: {
+              source: "workspace",
+              path: "/skills/invoice-paid/SKILL.md",
+              scope: "project",
+              origin: "top-level",
+            },
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    await tool.execute("call-budgeted-skill", {
+      task: "Record payment.",
+      skill: "invoice-paid",
+      tokenBudget: 5_000,
+    });
+
+    const spawnParams = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawnSubagentDirect");
+    expect(spawnParams.orchestrationTokenBudget).toBe(5_000);
+  });
+
+  it("inherits the root budget owner for descendant skill runs", async () => {
+    const tool = createSessionsSpawnTool({
+      parentRunId: "run-parent",
+      parentSkillInvocation: {
+        invocationId: "skill-parent",
+        commandName: "support-case",
+        skillName: "support-case",
+        executionHints: { usesSkills: ["invoice-paid"] },
+        orchestrationBudget: {
+          ownerSessionKey: "agent:support:subagent:root",
+          rootRunId: "run-root",
+        },
+      },
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "invoice-paid" }],
+        resolvedSkills: [
+          {
+            name: "invoice-paid",
+            description: "Record a paid invoice.",
+            filePath: "/skills/invoice-paid/SKILL.md",
+            baseDir: "/skills/invoice-paid",
+            source: "workspace",
+            sourceInfo: {
+              source: "workspace",
+              path: "/skills/invoice-paid/SKILL.md",
+              scope: "project",
+              origin: "top-level",
+            },
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    await tool.execute("call-descendant-skill", { task: "Record payment.", skill: "invoice-paid" });
+
+    const spawnParams = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawnSubagentDirect");
+    expect(spawnParams.explicitSkillInvocation.orchestrationBudget).toEqual({
+      ownerSessionKey: "agent:support:subagent:root",
+      rootRunId: "run-root",
+    });
+    expect(spawnParams.orchestrationTokenBudget).toBeUndefined();
+  });
+
+  it("does not start a descendant skill after the shared budget is exhausted", async () => {
+    hoisted.assertSessionOrchestrationBudgetAvailableMock.mockImplementationOnce(() => {
+      throw new Error("orchestration token budget exhausted (5000/5000)");
+    });
+    const tool = createSessionsSpawnTool({
+      parentSkillInvocation: {
+        invocationId: "skill-parent",
+        commandName: "support-case",
+        skillName: "support-case",
+        executionHints: { usesSkills: ["invoice-paid"] },
+        orchestrationBudget: {
+          ownerSessionKey: "agent:support:subagent:root",
+          rootRunId: "run-root",
+        },
+      },
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "invoice-paid" }],
+        resolvedSkills: [
+          {
+            name: "invoice-paid",
+            description: "Record a paid invoice.",
+            filePath: "/skills/invoice-paid/SKILL.md",
+            baseDir: "/skills/invoice-paid",
+            source: "workspace",
+            sourceInfo: {
+              source: "workspace",
+              path: "/skills/invoice-paid/SKILL.md",
+              scope: "project",
+              origin: "top-level",
+            },
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    const result = await tool.execute("call-exhausted-child", {
+      task: "Record payment.",
+      skill: "invoice-paid",
+    });
+
+    expectDetailFields(result.details, { status: "error" });
+    expect(requireRecord(result.details, "result details").error).toContain(
+      "orchestration token budget exhausted (5000/5000)",
+    );
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects token budgets without a root named skill", async () => {
+    const tool = createSessionsSpawnTool();
+
+    await expect(
+      tool.execute("call-unscoped-budget", { task: "Do work.", tokenBudget: 100 }),
+    ).rejects.toThrow("tokenBudget requires a named skill");
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 
