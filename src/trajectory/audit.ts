@@ -1,4 +1,5 @@
 import type { AgentToolAuditRecord } from "../../packages/agent-core/src/types.js";
+import type { SessionRegarding } from "../config/sessions/types.js";
 import type { TrajectoryEvent } from "./types.js";
 
 export type ObservedToolAuditResult = {
@@ -9,9 +10,28 @@ export type ObservedToolAuditResult = {
 };
 
 export type TrajectoryAuditReceipt = AgentToolAuditRecord & {
+  regarding?: TrajectoryAuditRegarding;
   toolCallId: string;
   toolName: string;
 };
+
+export type TrajectoryAuditRegarding = Omit<SessionRegarding, "key"> & {
+  reference?: string;
+};
+
+export function snapshotAuditReceiptRegarding(
+  receipt: TrajectoryAuditReceipt,
+  regarding: SessionRegarding | undefined,
+): TrajectoryAuditReceipt {
+  if (!regarding) {
+    return receipt;
+  }
+  const { key, ...identity } = regarding;
+  return {
+    ...receipt,
+    regarding: key ? { ...identity, reference: key } : identity,
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { collectToolAuditReceipts, isTrajectoryAuditReceipt } from "./audit.js";
+import {
+  collectToolAuditReceipts,
+  isTrajectoryAuditReceipt,
+  snapshotAuditReceiptRegarding,
+} from "./audit.js";
 import type { TrajectoryEvent } from "./types.js";
 
 describe("collectToolAuditReceipts", () => {
@@ -104,5 +108,34 @@ describe("isTrajectoryAuditReceipt", () => {
         data: { data: { authorizationCode: "auth-456" } },
       }),
     ).toBe(false);
+  });
+});
+
+describe("snapshotAuditReceiptRegarding", () => {
+  it("adds a receipt-safe snapshot without changing the source receipt", () => {
+    const receipt = collectToolAuditReceipts({
+      toolCallId: "call-1",
+      toolName: "payments.authorize",
+      isError: false,
+      result: { audit: [{ type: "payment.authorized" }] },
+    })[0]!;
+
+    expect(
+      snapshotAuditReceiptRegarding(receipt, {
+        system: "dynamics",
+        type: "case",
+        id: "case-42",
+        key: "CAS-42",
+      }),
+    ).toEqual({
+      ...receipt,
+      regarding: {
+        system: "dynamics",
+        type: "case",
+        id: "case-42",
+        reference: "CAS-42",
+      },
+    });
+    expect(receipt).not.toHaveProperty("regarding");
   });
 });
