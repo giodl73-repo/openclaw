@@ -35,6 +35,7 @@ import { listRegisteredPluginAgentPromptGuidance } from "../plugins/command-regi
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
 import { isValidAgentId, normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import { recordSubagentSpawned } from "../sessions/session-state-events.js";
+import type { ExplicitSkillInvocation } from "../skills/types.js";
 import { resolveUserPath } from "../utils.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import { listAgentIds, resolveAgentDir } from "./agent-scope-config.js";
@@ -143,6 +144,8 @@ const MAX_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 300_000;
 
 type SpawnSubagentParams = {
   task: string;
+  /** Trusted receipt identity for a skill explicitly assigned to this child run. */
+  explicitSkillInvocation?: ExplicitSkillInvocation;
   label?: string;
   agentId?: string;
   model?: string;
@@ -189,6 +192,7 @@ type SpawnSubagentResult = {
   status: "accepted" | "forbidden" | "error";
   childSessionKey?: string;
   runId?: string;
+  skillInvocationId?: string;
   mode?: SpawnSubagentMode;
   taskName?: string;
   note?: string;
@@ -1537,6 +1541,7 @@ export async function spawnSubagentDirect(
             ? stringifyRouteThreadId(childSessionOrigin.threadId)
             : undefined,
         idempotencyKey: childIdem,
+        explicitSkillInvocation: params.explicitSkillInvocation,
         deliver: deliverInitialChildRunDirectly,
         lane: AGENT_LANE_SUBAGENT,
         disableMessageTool: true,
@@ -1721,6 +1726,7 @@ export async function spawnSubagentDirect(
     status: "accepted",
     childSessionKey,
     runId: childRunId,
+    skillInvocationId: params.explicitSkillInvocation?.invocationId,
     mode: spawnMode,
     taskName,
     note: preparedSpawnContext.forkFallbackNote

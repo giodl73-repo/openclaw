@@ -142,6 +142,17 @@ export function prepareAgentRequestPreflight(
     );
     return undefined;
   }
+  if (request.explicitSkillInvocation && !canUseInternalRuntimeHandoff) {
+    params.respond(
+      false,
+      undefined,
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        "explicit skill invocation identity is reserved for backend callers.",
+      ),
+    );
+    return undefined;
+  }
   const cfg = params.context.getRuntimeConfig();
   const runId = request.idempotencyKey;
   const execApprovalFollowupApprovalId = parseExecApprovalFollowupApprovalId(runId);

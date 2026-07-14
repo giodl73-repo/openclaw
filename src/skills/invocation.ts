@@ -12,11 +12,20 @@ export type CreateExplicitSkillInvocationParams = {
   skillSource?: SkillTelemetrySource;
   skillDigest?: string;
   executionHints?: SkillExecutionHints;
+  parentInvocationId?: string;
+  parentRunId?: string;
 };
 
 export function createExplicitSkillInvocation(
   params: CreateExplicitSkillInvocationParams,
 ): ExplicitSkillInvocation {
+  const parentLineage =
+    params.parentInvocationId && params.parentRunId
+      ? {
+          parentInvocationId: params.parentInvocationId,
+          parentRunId: params.parentRunId,
+        }
+      : {};
   return {
     invocationId: `skill_${generateSecureToken(8)}`,
     commandName: params.commandName,
@@ -24,5 +33,6 @@ export function createExplicitSkillInvocation(
     ...(params.skillSource ? { skillSource: params.skillSource } : {}),
     ...(params.skillDigest ? { skillDigest: params.skillDigest } : {}),
     ...(params.executionHints ? { executionHints: params.executionHints } : {}),
+    ...parentLineage,
   };
 }

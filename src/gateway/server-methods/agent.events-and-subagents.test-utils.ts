@@ -1420,4 +1420,59 @@ describe("gateway agent handler", () => {
     const callArgs = await waitForAgentCommandCall<{ bashElevated?: unknown }>();
     expect(callArgs).not.toHaveProperty("bashElevated");
   });
+
+  it("rejects explicit skill invocation identity from non-backend callers", async () => {
+    const respond = await invokeAgent(
+      {
+        message: "forged child skill",
+        idempotencyKey: "forged-child-skill",
+        explicitSkillInvocation: {
+          invocationId: "skill-forged",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+        },
+      },
+      {
+        reqId: "forged-child-skill",
+        client: operatorWriteCliClient(),
+        flushDispatch: false,
+      },
+    );
+
+    expectRespondError(respond, {
+      code: ErrorCodes.INVALID_REQUEST,
+      message: "explicit skill invocation identity is reserved for backend callers.",
+    });
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
+  });
+
+  it("forwards backend child skill identity into the admitted agent run", async () => {
+    primeMainAgentRun({ cfg: mocks.loadConfigReturn });
+    mocks.agentCommand.mockResolvedValue({ payloads: [{ text: "ok" }], meta: {} });
+
+    await invokeAgent(
+      {
+        message: "run child skill",
+        sessionKey: "agent:main:main",
+        idempotencyKey: "child-skill-run",
+        explicitSkillInvocation: {
+          invocationId: "skill-child",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+          parentInvocationId: "skill-parent",
+          parentRunId: "run-parent",
+        },
+      },
+      { reqId: "child-skill-run", client: backendGatewayClient() },
+    );
+
+    const callArgs = await waitForAgentCommandCall<{
+      explicitSkillInvocation?: Record<string, unknown>;
+    }>();
+    expect(callArgs.explicitSkillInvocation).toMatchObject({
+      invocationId: "skill-child",
+      parentInvocationId: "skill-parent",
+      parentRunId: "run-parent",
+    });
+  });
 });

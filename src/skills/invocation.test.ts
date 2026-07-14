@@ -20,4 +20,29 @@ describe("createExplicitSkillInvocation", () => {
       executionHints: { outcomes: ["case.resolved"], usesSkills: ["verify-customer"] },
     });
   });
+
+  it("preserves child invocation lineage", () => {
+    const invocation = createExplicitSkillInvocation({
+      commandName: "invoice-paid",
+      skillName: "invoice-paid",
+      parentInvocationId: "skill_parent",
+      parentRunId: "run_parent",
+    });
+
+    expect(invocation).toMatchObject({
+      parentInvocationId: "skill_parent",
+      parentRunId: "run_parent",
+    });
+  });
+
+  it("omits incomplete child invocation lineage", () => {
+    const invocation = createExplicitSkillInvocation({
+      commandName: "invoice-paid",
+      skillName: "invoice-paid",
+      parentInvocationId: "skill_parent",
+    });
+
+    expect(invocation).not.toHaveProperty("parentInvocationId");
+    expect(invocation).not.toHaveProperty("parentRunId");
+  });
 });

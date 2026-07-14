@@ -1053,6 +1053,13 @@ describe("spawnSubagentDirect seam flow", () => {
     const result = await spawnSubagentDirect(
       {
         task,
+        explicitSkillInvocation: {
+          invocationId: "skill-child",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+          parentInvocationId: "skill-parent",
+          parentRunId: "run-parent",
+        },
       },
       {
         agentSessionKey: "agent:main:main",
@@ -1062,12 +1069,22 @@ describe("spawnSubagentDirect seam flow", () => {
 
     expect(result.status).toBe("accepted");
     const agentCall = calls.find((call) => call.method === "agent");
-    const params = agentCall?.params as { message?: string; extraSystemPrompt?: string };
+    const params = agentCall?.params as {
+      message?: string;
+      extraSystemPrompt?: string;
+      explicitSkillInvocation?: Record<string, unknown>;
+    };
     expect(params.message).toContain("[Subagent Task]");
     expect(params.message).toContain("UNIQUE_LONG_SUBAGENT_TASK_TOKEN");
     expect(params.message).toContain("  keep indentation");
     expect(params.message).not.toContain("**Your Role**");
     expect(params.extraSystemPrompt).toBe("system-prompt");
+    expect(params.explicitSkillInvocation).toMatchObject({
+      invocationId: "skill-child",
+      parentInvocationId: "skill-parent",
+      parentRunId: "run-parent",
+    });
+    expect(result.skillInvocationId).toBe("skill-child");
   });
 
   it("returns an error when the initial child session patch is rejected", async () => {
