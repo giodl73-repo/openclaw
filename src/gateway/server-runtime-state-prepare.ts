@@ -36,9 +36,8 @@ import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
 import {
   createReadinessChecker,
   createStartupChecker,
-  mergeReadinessResults,
-  type ReadinessResult,
-  withReadinessEvaluationTimeout,
+  evaluateCanonicalGatewayReadiness,
+  type CanonicalGatewayReadinessResult,
 } from "./server/readiness.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 
@@ -457,24 +456,25 @@ export async function prepareGatewayKernelState(params: {
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   const resolveSelectedReadiness = createSelectedReadinessResolver();
-  const evaluateReadiness = async (): Promise<ReadinessResult> => {
-    const gatewayReadiness = await getGatewayReadiness();
+  const evaluateRuntimeReadiness = async () => {
     const config = getRuntimeConfig();
     const additionalConditions = await resolveSelectedReadiness({
       config,
       registry: pluginRuntime.registry,
       env: process.env,
     });
-    const runtimeReadiness = buildRuntimeReadiness({
+    return buildRuntimeReadiness({
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRuntime.registry),
       additionalConditions,
     });
-    return mergeReadinessResults(gatewayReadiness, runtimeReadiness);
   };
-  const getReadiness = (): Promise<ReadinessResult> =>
-    withReadinessEvaluationTimeout(evaluateReadiness());
+  const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
+    evaluateCanonicalGatewayReadiness({
+      evaluateGateway: getGatewayReadiness,
+      evaluateRuntime: evaluateRuntimeReadiness,
+    });
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   } = {};
@@ -598,6 +598,7 @@ export async function prepareGatewayKernelState(params: {
     runtimeStateRef,
     cronStartState,
     gatewayTls,
+    getReadiness,
     readinessEventLoopHealth,
     startupState,
     lifecycle,
