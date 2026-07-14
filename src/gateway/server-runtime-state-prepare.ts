@@ -6,6 +6,7 @@ import { createDefaultDeps } from "../cli/deps.js";
 import { getRuntimeConfig } from "../config/io.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isTruthyEnvValue } from "../infra/env.js";
+import { createNodeModeReadinessEvidenceResolver } from "../hosting/node-mode.js";
 import {
   buildHostingProfileConditions,
   requiredCriteriaForHostingProfile,
@@ -31,6 +32,7 @@ import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.
 import { createAuthRateLimiter, type AuthRateLimiter } from "./auth-rate-limit.js";
 import { resolveGatewayAuth } from "./auth.js";
 import { createNodeReapprovalCoordinator } from "./node-reapproval-coordinator.js";
+import type { NodeSession } from "./node-registry.js";
 import { resolveGatewayPluginConfig } from "./runtime-plugin-config.js";
 import { resolveGatewayControlUiRootState } from "./server-control-ui-root.js";
 import type { GatewayInstanceRuntime } from "./server-instance-runtime.types.js";
