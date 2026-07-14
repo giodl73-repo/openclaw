@@ -283,8 +283,23 @@ async function readGatewayStartupConfig(params: {
   cfg: OpenClawConfig;
   snapshot: ConfigFileSnapshot | null;
   startupConfigSnapshotRead?: ReadConfigFileSnapshotWithPluginMetadataResult;
+  configLayersReadOnly?: boolean;
 }> {
-  const { readConfigFileSnapshotWithPluginMetadata } = await import("../../config/config.js");
+  const [{ loadConfigLayers }, { readConfigFileSnapshotWithPluginMetadata }] = await Promise.all([
+    import("./config-layers.js"),
+    import("../../config/config.js"),
+  ]);
+  const layeredConfig = await params.startupTrace.measure("cli.config-layers", () =>
+    loadConfigLayers(params.opts.configLayer),
+  );
+  if (layeredConfig) {
+    return {
+      cfg: layeredConfig.snapshot.config,
+      snapshot: layeredConfig.snapshot,
+      startupConfigSnapshotRead: layeredConfig,
+      configLayersReadOnly: true,
+    };
+  }
   let blockedRecoveryConfig: OpenClawConfig | null = null;
   const snapshotRead: ReadConfigFileSnapshotWithPluginMetadataResult | null =
     await params.startupTrace.measure("cli.config-snapshot", () =>
@@ -796,11 +811,16 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
   }
 
   gatewayLog.info("loading configuration…");
-  const { cfg, lowerPrecedenceEnv, snapshot, startupConfigSnapshotRead } =
-    await readGatewayStartupConfigWithShellEnv({
-      opts,
-      startupTrace,
-    });
+  const {
+    cfg,
+    lowerPrecedenceEnv,
+    snapshot,
+    startupConfigSnapshotRead,
+    configLayersReadOnly = false,
+  } = await readGatewayStartupConfigWithShellEnv({
+    opts,
+    startupTrace,
+  });
   if (
     !enforceGatewayRunFutureConfigGuard({
       opts,
@@ -1205,6 +1225,7 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
           ...(startupConfigSnapshotReadForThisStart
             ? { startupConfigSnapshotRead: startupConfigSnapshotReadForThisStart }
             : {}),
+          ...(configLayersReadOnly ? { configLayersReadOnly: true } : {}),
           ...(envSidecarStartupMode !== "start" ? { sidecarStartup: envSidecarStartupMode } : {}),
           ...(channelAutostartSuppression ? { channelAutostartSuppression } : {}),
           ...(devMode
@@ -1218,6 +1239,11 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
 
   const { detectRespawnSupervisor } = await import("../../infra/supervisor-markers.js");
   const supervisor = detectRespawnSupervisor(process.env);
+  const restoreConfigWrites = configLayersReadOnly
+    ? (await import("../../config/nix-mode-write-guard.js")).blockConfigWritesForRuntime(
+        "configuration writes are unavailable while --config-layer is active",
+      )
+    : undefined;
   try {
     await runGatewayLoopWithSupervisedLockRecovery({
       startLoop,
@@ -1285,6 +1311,8 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
       `Gateway failed to start: ${formatErrorMessage(err)}. Run ${formatCliCommand("openclaw gateway status --deep")} for diagnostics.`,
     );
     defaultRuntime.exit(resolveGatewayStartupFailureExitCode(err));
+  } finally {
+    restoreConfigWrites?.();
   }
 }
 
