@@ -1,4 +1,4 @@
-import { isNixMode } from "../config/paths.js";
+import { isNixMode, resolveConfigPath } from "../config/paths.js";
 import { blockConfigWritesForRuntime } from "../config/nix-mode-write-guard.js";
 import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
@@ -149,9 +149,10 @@ export async function startGatewayServer(
     terminalSessions,
   } = lifecycleRuntime;
   const restoreConfigWritesForServer = opts.configLayersReadOnly
-    ? blockConfigWritesForRuntime(
-        "configuration writes are unavailable while --config-layer is active",
-      )
+    ? blockConfigWritesForRuntime({
+        configPath: resolveConfigPath(),
+        reason: "configuration writes are unavailable while --config-layer is active",
+      })
     : () => {};
   try {
     const coreRuntime = await startGatewayCoreRuntime({
