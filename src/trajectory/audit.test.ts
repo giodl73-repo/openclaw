@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { collectToolAuditReceipts } from "./audit.js";
+import { collectToolAuditReceipts, isTrajectoryAuditReceipt } from "./audit.js";
+import type { TrajectoryEvent } from "./types.js";
 
 describe("collectToolAuditReceipts", () => {
   it("collects successful receipts that can be filtered by business type", () => {
@@ -67,5 +68,41 @@ describe("collectToolAuditReceipts", () => {
         toolName: "inventory.send",
       },
     ]);
+  });
+});
+
+describe("isTrajectoryAuditReceipt", () => {
+  const receiptEvent: TrajectoryEvent = {
+    traceSchema: "openclaw-trajectory",
+    schemaVersion: 1,
+    traceId: "trace-1",
+    source: "runtime",
+    type: "audit.receipt",
+    ts: "2026-07-13T12:00:00.000Z",
+    seq: 1,
+    sessionId: "session-1",
+    data: {
+      type: "payment.authorized",
+      data: { authorizationCode: "auth-456" },
+    },
+  };
+
+  it("matches any valid receipt when no business type is requested", () => {
+    expect(isTrajectoryAuditReceipt(receiptEvent)).toBe(true);
+  });
+
+  it("filters receipts by exact business type", () => {
+    expect(isTrajectoryAuditReceipt(receiptEvent, "payment.authorized")).toBe(true);
+    expect(isTrajectoryAuditReceipt(receiptEvent, "inventory.sent")).toBe(false);
+  });
+
+  it("rejects non-receipt and untyped events", () => {
+    expect(isTrajectoryAuditReceipt({ ...receiptEvent, type: "tool.result" })).toBe(false);
+    expect(
+      isTrajectoryAuditReceipt({
+        ...receiptEvent,
+        data: { data: { authorizationCode: "auth-456" } },
+      }),
+    ).toBe(false);
   });
 });

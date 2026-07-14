@@ -19,6 +19,7 @@ import { parseStrictNonNegativeInteger } from "../infra/parse-finite-number.js";
 import { readRegularFileSync } from "../infra/regular-file.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { isTrajectoryAuditReceipt } from "../trajectory/audit.js";
 import {
   resolveTrajectoryFilePath,
   TRAJECTORY_RUNTIME_FILE_MAX_BYTES,
@@ -35,6 +36,8 @@ type SessionsTailOptions = {
   allAgents?: boolean;
   sessionKey?: string;
   follow?: boolean;
+  json?: boolean;
+  receiptType?: string;
   tail?: string | number;
 };
 
@@ -277,6 +280,10 @@ function safePreview(event: TrajectoryEvent): string {
       return `${toolName(data)} timeout`;
     case "tool.result":
       return `${toolName(data)} ${resultStatus(data)}`;
+    case "audit.receipt": {
+      const receiptType = toOptionalString(data?.type);
+      return receiptType ?? "receipt";
+    }
     case "model.completed": {
       const model = modelLabel(event);
       const status = modelCompletionStatus(data);
@@ -344,11 +351,20 @@ function readTailSnapshot(selection: TailSelection): TrajectorySnapshot {
     : readTrajectorySnapshot(selection.source.path);
 }
 
-function renderEvents(events: TrajectoryEvent[], runtime: RuntimeEnv): TrajectoryCursor | null {
+type TailRenderOptions = Pick<SessionsTailOptions, "json" | "receiptType">;
+
+function renderEvents(
+  events: TrajectoryEvent[],
+  runtime: RuntimeEnv,
+  options: TailRenderOptions = {},
+): TrajectoryCursor | null {
   let cursor: TrajectoryCursor | null = null;
   for (const event of events) {
-    runtime.log(formatProgressLine(event));
     cursor = maxCursor(cursor, event);
+    if (options.receiptType && !isTrajectoryAuditReceipt(event, options.receiptType)) {
+      continue;
+    }
+    runtime.log(options.json ? JSON.stringify(event) : formatProgressLine(event));
   }
   return cursor;
 }
@@ -565,8 +581,9 @@ function renderFollowEvents(
   events: TrajectoryEvent[],
   state: FollowState,
   runtime: RuntimeEnv,
+  options: TailRenderOptions,
 ): void {
-  const cursor = renderEvents(events, runtime);
+  const cursor = renderEvents(events, runtime, options);
   if (cursor) {
     state.cursor = maxCursorValue(state.cursor, cursor);
   }
@@ -576,6 +593,7 @@ async function followSelections(
   selections: TailSelection[],
   runtime: RuntimeEnv,
   initialSnapshots: Map<TailSelection, TrajectorySnapshot>,
+  options: TailRenderOptions,
 ): Promise<void> {
   const states = selections.map((selection): FollowState => {
     const snapshot = initialSnapshots.get(selection);
@@ -605,7 +623,7 @@ async function followSelections(
     const interval = setInterval(() => {
       for (const state of states) {
         try {
-          renderFollowEvents(readNewFollowEvents(state), state, runtime);
+          renderFollowEvents(readNewFollowEvents(state), state, runtime, options);
         } catch (error) {
           runtime.error(
             `Failed to read trajectory progress for ${state.selection.key}: ${formatErrorMessage(
@@ -645,6 +663,19 @@ export async function sessionsTailCommand(
     runtime.exit(1);
     return;
   }
+
+  const receiptType = opts.receiptType?.trim();
+  if (opts.receiptType !== undefined && !receiptType) {
+    runtime.error("--receipt-type must be a non-empty business type.");
+    runtime.exit(1);
+    return;
+  }
+  if (opts.json && !receiptType) {
+    runtime.error("--json requires --receipt-type so only sanitized audit receipts are emitted.");
+    runtime.exit(1);
+    return;
+  }
+  const renderOptions: TailRenderOptions = { json: opts.json, receiptType };
 
   const cfg = getRuntimeConfig();
   const targets = resolveSessionStoreTargetsOrExit({
@@ -688,10 +719,13 @@ export async function sessionsTailCommand(
   for (const selection of selected) {
     const snapshot = readTailSnapshot(selection);
     followSnapshots.set(selection, snapshot);
-    renderEvents(tailCount > 0 ? snapshot.events.slice(-tailCount) : [], runtime);
+    const outputEvents = receiptType
+      ? snapshot.events.filter((event) => isTrajectoryAuditReceipt(event, receiptType))
+      : snapshot.events;
+    renderEvents(tailCount > 0 ? outputEvents.slice(-tailCount) : [], runtime, renderOptions);
   }
 
   if (opts.follow) {
-    await followSelections(selected, runtime, followSnapshots);
+    await followSelections(selected, runtime, followSnapshots, renderOptions);
   }
 }

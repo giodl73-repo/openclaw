@@ -1,4 +1,5 @@
 import type { AgentToolAuditRecord } from "../../packages/agent-core/src/types.js";
+import type { TrajectoryEvent } from "./types.js";
 
 export type ObservedToolAuditResult = {
   toolCallId: string;
@@ -45,6 +46,19 @@ function normalizeAuditRecord(value: unknown): AgentToolAuditRecord | undefined 
     ...(subject ? { subject } : {}),
     ...(data ? { data } : {}),
   };
+}
+
+/** Returns whether a trajectory event is a receipt, optionally of an exact business type. */
+export function isTrajectoryAuditReceipt(event: TrajectoryEvent, receiptType?: string): boolean {
+  if (event.type !== "audit.receipt") {
+    return false;
+  }
+  const eventReceiptType = typeof event.data?.type === "string" ? event.data.type.trim() : "";
+  if (!eventReceiptType) {
+    return false;
+  }
+  const expectedType = receiptType?.trim();
+  return !expectedType || eventReceiptType === expectedType;
 }
 
 /**
