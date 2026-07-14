@@ -17,6 +17,7 @@ import {
   listReservedChatSlashCommandNames,
   resolveSkillCommandInvocation,
 } from "../../skills/discovery/chat-commands.js";
+import { createExplicitSkillInvocation } from "../../skills/invocation.js";
 import type { SkillCommandSpec } from "../../skills/types.js";
 import { markCommandReplyForDelivery } from "../reply-payload.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
@@ -366,14 +367,11 @@ export async function handleInlineActions(params: {
       const rawArgs = (skillInvocation.args ?? "").trim();
       const runId = `skill_run_${generateSecureToken(16)}`;
       const toolCallId = `cmd_${generateSecureToken(8)}`;
-      const invocation = {
-        invocationId: `skill_${generateSecureToken(8)}`,
+      const invocation = createExplicitSkillInvocation({
         commandName: skillInvocation.command.name,
         skillName: skillInvocation.command.skillName,
-        ...(skillInvocation.command.skillSource
-          ? { skillSource: skillInvocation.command.skillSource }
-          : {}),
-      };
+        skillSource: skillInvocation.command.skillSource,
+      });
       let audit: ReturnType<DirectSkillInvocationAuditRuntime["createDirectSkillInvocationAudit"]> =
         null;
       if (targetSessionEntry?.sessionId && storePath) {
@@ -507,14 +505,11 @@ export async function handleInlineActions(params: {
         ]
           .filter((entry): entry is string => Boolean(entry))
           .join("\n\n");
-    const explicitSkillInvocation = {
-      invocationId: `skill_${generateSecureToken(8)}`,
+    const explicitSkillInvocation = createExplicitSkillInvocation({
       commandName: skillInvocation.command.name,
       skillName: skillInvocation.command.skillName,
-      ...(skillInvocation.command.skillSource
-        ? { skillSource: skillInvocation.command.skillSource }
-        : {}),
-    };
+      skillSource: skillInvocation.command.skillSource,
+    });
     ctx.Body = rewrittenBody;
     ctx.BodyForAgent = rewrittenBody;
     ctx.ExplicitSkillInvocation = explicitSkillInvocation;
