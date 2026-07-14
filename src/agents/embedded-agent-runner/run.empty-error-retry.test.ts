@@ -3,6 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
 import {
   loadRunOverflowCompactionHarness,
+  mockedAssertOrchestrationBudgetAvailable,
+  mockedChargeOrchestrationBudgetUsage,
   mockedClassifyAssistantFailoverReason,
   mockedClassifyFailoverReason,
   mockedGlobalHookRunner,
@@ -83,6 +85,74 @@ describe("runEmbeddedAgent silent-error retry", () => {
 
     expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
     expect(result.payloads).toBeUndefined();
+  });
+
+  it("accounts for each completed attempt before dispatching its retry", async () => {
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(emptyErrorAttempt("ollama", "glm-5.1:cloud"));
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(successAttempt("ollama", "glm-5.1:cloud"));
+    const explicitSkillInvocation = {
+      invocationId: "invocation-child",
+      commandName: "child-skill",
+      skillName: "child-skill",
+      orchestrationBudget: {
+        ownerSessionKey: "agent:main:subagent:budget-owner",
+        rootRunId: "run-root",
+      },
+    };
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "ollama",
+      model: "glm-5.1:cloud",
+      runId: "run-budget-accounting-retry",
+      explicitSkillInvocation,
+    });
+
+    expect(mockedChargeOrchestrationBudgetUsage).toHaveBeenCalledTimes(2);
+    expect(mockedChargeOrchestrationBudgetUsage).toHaveBeenNthCalledWith(1, {
+      config: overflowBaseRunParams.config,
+      explicitSkillInvocation,
+      // The shared run harness preserves the assistant fixture's raw usage shape.
+      usage: { input: 100, output: 0, totalTokens: 100 },
+    });
+    expect(mockedChargeOrchestrationBudgetUsage).toHaveBeenNthCalledWith(2, {
+      config: overflowBaseRunParams.config,
+      explicitSkillInvocation,
+      usage: { input: 100, output: 5, totalTokens: 105 },
+    });
+    expect(mockedChargeOrchestrationBudgetUsage.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedRunEmbeddedAttempt.mock.invocationCallOrder[1],
+    );
+  });
+
+  it("stops before a retry when the shared budget is exhausted", async () => {
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(emptyErrorAttempt("ollama", "glm-5.1:cloud"));
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(successAttempt("ollama", "glm-5.1:cloud"));
+    mockedAssertOrchestrationBudgetAvailable
+      .mockReturnValueOnce(undefined)
+      .mockImplementationOnce(() => {
+        throw new Error("orchestration token budget exhausted (100/100)");
+      });
+
+    await expect(
+      runEmbeddedAgent({
+        ...overflowBaseRunParams,
+        provider: "ollama",
+        model: "glm-5.1:cloud",
+        runId: "run-budget-enforcement-retry",
+        explicitSkillInvocation: {
+          invocationId: "invocation-child",
+          commandName: "child-skill",
+          skillName: "child-skill",
+          orchestrationBudget: {
+            ownerSessionKey: "agent:main:subagent:budget-owner",
+            rootRunId: "run-root",
+          },
+        },
+      }),
+    ).rejects.toThrow("orchestration token budget exhausted (100/100)");
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expect(mockedChargeOrchestrationBudgetUsage).toHaveBeenCalledTimes(1);
   });
 
   it("retries when stopReason=error emitted only thinking blocks and output tokens", async () => {

@@ -68,6 +68,24 @@ describe("AgentParamsSchema", () => {
     ).toBe(true);
   });
 
+  it("accepts a trusted shared-budget reference on explicit skill invocations", () => {
+    expect(
+      Value.Check(AgentParamsSchema, {
+        message: "run child skill",
+        idempotencyKey: "budget-child-1",
+        explicitSkillInvocation: {
+          invocationId: "skill-child",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+          orchestrationBudget: {
+            ownerSessionKey: "agent:support:subagent:root",
+            rootRunId: "run-root",
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("accepts generated music attachments on internal completion events", () => {
     const params = makeAgentParamsWithInternalEvent(musicCompletionEvent);
 

@@ -81,6 +81,7 @@ import {
   DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
   buildSubagentSystemPrompt,
   callGateway,
+  createSessionOrchestrationBudget,
   dispatchGatewayMethodInProcess,
   emitSessionLifecycleEvent,
   forkSessionEntryFromParent,
@@ -146,6 +147,8 @@ type SpawnSubagentParams = {
   task: string;
   /** Trusted receipt identity for a skill explicitly assigned to this child run. */
   explicitSkillInvocation?: ExplicitSkillInvocation;
+  /** Creates the shared budget owner for a root child skill invocation. */
+  orchestrationTokenBudget?: number;
   label?: string;
   agentId?: string;
   model?: string;
@@ -1056,6 +1059,23 @@ export async function spawnSubagentDirect(
       error: taskNameResult.error,
     };
   }
+  if (params.orchestrationTokenBudget !== undefined) {
+    if (
+      !Number.isSafeInteger(params.orchestrationTokenBudget) ||
+      params.orchestrationTokenBudget <= 0
+    ) {
+      return {
+        status: "error",
+        error: "orchestration token budget must be a positive safe integer",
+      };
+    }
+    if (!params.explicitSkillInvocation) {
+      return { status: "error", error: "orchestration token budget requires a skill invocation" };
+    }
+    if (params.explicitSkillInvocation.orchestrationBudget) {
+      return { status: "error", error: "descendant skill runs inherit the root token budget" };
+    }
+  }
   const taskName = taskNameResult.taskName;
   const label = params.label?.trim() || "";
   const requestedAgentId = params.agentId?.trim();
@@ -1215,6 +1235,7 @@ export async function spawnSubagentDirect(
     };
   }
   const childSessionKey = `agent:${targetAgentId}:subagent:${crypto.randomUUID()}`;
+  const childSessionTarget = resolveGatewaySessionStoreTarget({ cfg, key: childSessionKey });
   const requesterRuntime = resolveSandboxRuntimeStatus({
     cfg,
     sessionKey: requesterInternalKey,
@@ -1280,14 +1301,10 @@ export async function spawnSubagentDirect(
   const resolvedModelMetadata = buildResolvedSubagentModelMetadata(resolvedModel);
   const patchChildSession = async (patch: Record<string, unknown>): Promise<string | undefined> => {
     try {
-      const target = resolveGatewaySessionStoreTarget({
-        cfg,
-        key: childSessionKey,
-      });
       await upsertSessionEntry(
         {
-          storePath: target.storePath,
-          sessionKey: target.canonicalKey,
+          storePath: childSessionTarget.storePath,
+          sessionKey: childSessionTarget.canonicalKey,
         },
         buildDirectChildSessionPatch(patch),
       );
@@ -1463,6 +1480,18 @@ export async function spawnSubagentDirect(
 
   const childIdem = crypto.randomUUID();
   let childRunId: string = childIdem;
+  const inheritedBudget = params.explicitSkillInvocation?.orchestrationBudget;
+  const orchestrationBudget =
+    inheritedBudget ??
+    (params.orchestrationTokenBudget
+      ? { ownerSessionKey: childSessionTarget.canonicalKey, rootRunId: childIdem }
+      : undefined);
+  const explicitSkillInvocation = params.explicitSkillInvocation
+    ? {
+        ...params.explicitSkillInvocation,
+        ...(orchestrationBudget ? { orchestrationBudget } : {}),
+      }
+    : undefined;
   const spawnedMetadata = normalizeSpawnedRunMetadata({
     spawnedBy: spawnedByKey,
     ...toolSpawnMetadata,
@@ -1517,6 +1546,31 @@ export async function spawnSubagentDirect(
   }
   const contextEnginePreparation = contextEnginePrepareResult.preparation;
 
+  if (params.orchestrationTokenBudget) {
+    try {
+      await createSessionOrchestrationBudget({
+        ownerSessionKey: childSessionTarget.canonicalKey,
+        storePath: childSessionTarget.storePath,
+        rootRunId: childIdem,
+        tokenLimit: params.orchestrationTokenBudget,
+      });
+    } catch (err) {
+      await rollbackPreparedContextEngine(contextEnginePreparation);
+      await cleanupFailedSpawnBeforeAgentStart({
+        childSessionKey,
+        attachmentAbsDir,
+        emitLifecycleHooks: threadBindingReady,
+        deleteTranscript: true,
+      });
+      return {
+        status: "error",
+        error: `Failed to create orchestration budget: ${summarizeError(err)}`,
+        childSessionKey,
+        runId: childIdem,
+      };
+    }
+  }
+
   const deliverInitialChildRunDirectly =
     requestThreadBinding && spawnMode === "session" && hasBoundThreadDeliveryOrigin;
   const shouldAnnounceCompletion = deliverInitialChildRunDirectly
@@ -1541,7 +1595,7 @@ export async function spawnSubagentDirect(
             ? stringifyRouteThreadId(childSessionOrigin.threadId)
             : undefined,
         idempotencyKey: childIdem,
-        explicitSkillInvocation: params.explicitSkillInvocation,
+        explicitSkillInvocation,
         deliver: deliverInitialChildRunDirectly,
         lane: AGENT_LANE_SUBAGENT,
         disableMessageTool: true,
@@ -1726,7 +1780,7 @@ export async function spawnSubagentDirect(
     status: "accepted",
     childSessionKey,
     runId: childRunId,
-    skillInvocationId: params.explicitSkillInvocation?.invocationId,
+    skillInvocationId: explicitSkillInvocation?.invocationId,
     mode: spawnMode,
     taskName,
     note: preparedSpawnContext.forkFallbackNote

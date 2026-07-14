@@ -35,6 +35,22 @@ describe("createExplicitSkillInvocation", () => {
     });
   });
 
+  it("preserves the trusted orchestration budget owner", () => {
+    const invocation = createExplicitSkillInvocation({
+      commandName: "invoice-paid",
+      skillName: "invoice-paid",
+      orchestrationBudget: {
+        ownerSessionKey: "agent:support:subagent:root",
+        rootRunId: "run-root",
+      },
+    });
+
+    expect(invocation.orchestrationBudget).toEqual({
+      ownerSessionKey: "agent:support:subagent:root",
+      rootRunId: "run-root",
+    });
+  });
+
   it("preserves each available parent identifier", () => {
     const invocation = createExplicitSkillInvocation({
       commandName: "invoice-paid",

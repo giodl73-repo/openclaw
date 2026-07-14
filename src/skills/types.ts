@@ -57,6 +57,13 @@ type SkillCommandDispatchSpec = {
 
 export type SkillTelemetrySource = "bundled" | "unknown" | "workspace";
 
+export type SkillOrchestrationBudgetRef = {
+  /** Root child session that owns the shared budget counter. */
+  ownerSessionKey: string;
+  /** Root agent run covered by the budget. */
+  rootRunId: string;
+};
+
 /** Trusted identity for one explicit, user-requested skill invocation. */
 export type ExplicitSkillInvocation = {
   invocationId: string;
@@ -69,6 +76,8 @@ export type ExplicitSkillInvocation = {
   parentInvocationId?: string;
   /** Agent run that requested this child skill run. */
   parentRunId?: string;
+  /** Trusted shared-budget owner inherited by descendant skill runs. */
+  orchestrationBudget?: SkillOrchestrationBudgetRef;
 };
 
 export type SkillUsagePath = {

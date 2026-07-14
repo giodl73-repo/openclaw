@@ -10,6 +10,7 @@ import {
   supportsAutomaticThreadBindingSpawn,
 } from "../../channels/thread-bindings-policy.js";
 import { getRuntimeConfig } from "../../config/config.js";
+import { assertSessionOrchestrationBudgetAvailable } from "../../config/sessions/orchestration-budgets.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
@@ -175,6 +176,12 @@ function createSessionsSpawnToolSchema(params: {
         description: "Available skill to run in the spawned subagent.",
       }),
     ),
+    tokenBudget: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        description: "Token limit shared by this root skill run and its descendant skill runs.",
+      }),
+    ),
     taskName: Type.Optional(
       Type.String({
         description:
@@ -315,6 +322,13 @@ export function createSessionsSpawnTool(
       const requestedSkillMetadata = requestedSkillName
         ? opts?.skillsSnapshot?.skills.find((skill) => skill.name.trim() === requestedSkillName)
         : undefined;
+      const tokenBudget = params.tokenBudget;
+      if (
+        tokenBudget !== undefined &&
+        (typeof tokenBudget !== "number" || !Number.isSafeInteger(tokenBudget) || tokenBudget <= 0)
+      ) {
+        throw new ToolInputError("tokenBudget must be a positive safe integer");
+      }
       const availableSkillNames = new Set(
         (opts?.skillsSnapshot?.skills ?? []).map((skill) => skill.name.trim()),
       );
@@ -346,6 +360,24 @@ export function createSessionsSpawnTool(
         });
       }
       const requestedSkill = matchingSkills[0];
+      if (tokenBudget !== undefined && !requestedSkill) {
+        throw new ToolInputError("tokenBudget requires a named skill");
+      }
+      if (tokenBudget !== undefined && opts?.parentSkillInvocation?.orchestrationBudget) {
+        throw new ToolInputError("descendant skill runs inherit the root tokenBudget");
+      }
+      if (requestedSkill && opts?.parentSkillInvocation?.orchestrationBudget) {
+        const budget = opts.parentSkillInvocation.orchestrationBudget;
+        try {
+          assertSessionOrchestrationBudgetAvailable({
+            ownerSessionKey: budget.ownerSessionKey,
+            rootRunId: budget.rootRunId,
+            config: opts.config,
+          });
+        } catch (err) {
+          return jsonResult({ status: "error", error: summarizeError(err) });
+        }
+      }
       const childTask = requestedSkill
         ? `Use the ${requestedSkill.name} skill to complete this task:\n\n${task}`
         : task;
@@ -552,8 +584,10 @@ export function createSessionsSpawnTool(
                 executionHints: requestedSkillMetadata?.executionHints,
                 parentInvocationId: opts?.parentSkillInvocation?.invocationId,
                 parentRunId: opts?.parentRunId,
+                orchestrationBudget: opts?.parentSkillInvocation?.orchestrationBudget,
               })
             : undefined,
+          orchestrationTokenBudget: typeof tokenBudget === "number" ? tokenBudget : undefined,
           taskName,
           label: label || undefined,
           agentId: requestedAgentId,

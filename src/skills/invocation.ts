@@ -2,6 +2,7 @@ import { generateSecureToken } from "../infra/secure-random.js";
 import type {
   ExplicitSkillInvocation,
   SkillExecutionHints,
+  SkillOrchestrationBudgetRef,
   SkillTelemetrySource,
 } from "./types.js";
 
@@ -14,6 +15,7 @@ export type CreateExplicitSkillInvocationParams = {
   executionHints?: SkillExecutionHints;
   parentInvocationId?: string;
   parentRunId?: string;
+  orchestrationBudget?: SkillOrchestrationBudgetRef;
 };
 
 export function createExplicitSkillInvocation(
@@ -28,5 +30,6 @@ export function createExplicitSkillInvocation(
     ...(params.executionHints ? { executionHints: params.executionHints } : {}),
     ...(params.parentInvocationId ? { parentInvocationId: params.parentInvocationId } : {}),
     ...(params.parentRunId ? { parentRunId: params.parentRunId } : {}),
+    ...(params.orchestrationBudget ? { orchestrationBudget: params.orchestrationBudget } : {}),
   };
 }
