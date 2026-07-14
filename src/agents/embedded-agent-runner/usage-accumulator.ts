@@ -1,7 +1,12 @@
 /**
  * Accumulates and normalizes per-call token usage across embedded runs.
  */
-import type { ContextUsage, NormalizedUsage } from "../usage.js";
+import {
+  mergeUsageCostBasis,
+  type ContextUsage,
+  type NormalizedUsage,
+  type UsageCostBasis,
+} from "../usage.js";
 
 export type UsageAccumulator = {
   input: number;
@@ -10,6 +15,8 @@ export type UsageAccumulator = {
   cacheWrite: number;
   reasoningTokens: number;
   total: number;
+  costUsd: number;
+  costBasis?: UsageCostBasis;
   /** Exact usage snapshot from the most recent API call. */
   lastInput: number;
   lastOutput: number;
@@ -18,6 +25,8 @@ export type UsageAccumulator = {
   lastContextUsage?: ContextUsage;
   lastReasoningTokens: number;
   lastTotal: number;
+  lastCostUsd?: number;
+  lastCostBasis?: UsageCostBasis;
 };
 
 export const createUsageAccumulator = (): UsageAccumulator => ({
@@ -27,6 +36,7 @@ export const createUsageAccumulator = (): UsageAccumulator => ({
   cacheWrite: 0,
   reasoningTokens: 0,
   total: 0,
+  costUsd: 0,
   lastInput: 0,
   lastOutput: 0,
   lastCacheRead: 0,
@@ -51,8 +61,10 @@ const hasUsageValues = (usage: MaybeUsage): usage is NormalizedUsage => {
       usage.contextUsage?.state === "available" ? usage.contextUsage.totalTokens : undefined,
       usage.reasoningTokens,
       usage.total,
+      usage.cost?.usd,
     ].some((value) => typeof value === "number" && Number.isFinite(value) && value > 0) ||
-    usage.contextUsage?.state === "unavailable"
+    usage.contextUsage?.state === "unavailable" ||
+    usage.cost !== undefined
   );
 };
 
@@ -69,6 +81,10 @@ export const mergeUsageIntoAccumulator = (target: UsageAccumulator, usage: Maybe
   target.cacheWrite += usage.cacheWrite ?? 0;
   target.reasoningTokens += usage.reasoningTokens ?? 0;
   target.total += callTotal;
+  if (usage.cost) {
+    target.costUsd += usage.cost.usd;
+    target.costBasis = mergeUsageCostBasis(target.costBasis, usage.cost.basis);
+  }
   target.lastInput = usage.input ?? 0;
   target.lastOutput = usage.output ?? 0;
   target.lastCacheRead = usage.cacheRead ?? 0;
@@ -76,6 +92,8 @@ export const mergeUsageIntoAccumulator = (target: UsageAccumulator, usage: Maybe
   target.lastContextUsage = usage.contextUsage ? { ...usage.contextUsage } : undefined;
   target.lastReasoningTokens = usage.reasoningTokens ?? 0;
   target.lastTotal = callTotal;
+  target.lastCostUsd = usage.cost?.usd;
+  target.lastCostBasis = usage.cost?.basis;
 };
 
 export const toNormalizedUsage = (usage: UsageAccumulator): NormalizedUsage | undefined => {
@@ -85,7 +103,8 @@ export const toNormalizedUsage = (usage: UsageAccumulator): NormalizedUsage | un
     usage.cacheRead > 0 ||
     usage.cacheWrite > 0 ||
     usage.reasoningTokens > 0 ||
-    usage.total > 0;
+    usage.total > 0 ||
+    usage.costBasis !== undefined;
   if (!hasUsage) {
     return undefined;
   }
@@ -96,6 +115,7 @@ export const toNormalizedUsage = (usage: UsageAccumulator): NormalizedUsage | un
     cacheWrite: usage.cacheWrite || undefined,
     ...(usage.reasoningTokens > 0 ? { reasoningTokens: usage.reasoningTokens } : {}),
     total: usage.total || undefined,
+    ...(usage.costBasis ? { cost: { usd: usage.costUsd, basis: usage.costBasis } } : {}),
   };
 };
 
@@ -107,7 +127,8 @@ export const toLastCallUsage = (usage: UsageAccumulator): NormalizedUsage | unde
     usage.lastCacheWrite > 0 ||
     usage.lastContextUsage !== undefined ||
     usage.lastReasoningTokens > 0 ||
-    usage.lastTotal > 0;
+    usage.lastTotal > 0 ||
+    usage.lastCostBasis !== undefined;
   if (!hasUsage) {
     return undefined;
   }
@@ -119,5 +140,8 @@ export const toLastCallUsage = (usage: UsageAccumulator): NormalizedUsage | unde
     ...(usage.lastContextUsage ? { contextUsage: { ...usage.lastContextUsage } } : {}),
     ...(usage.lastReasoningTokens > 0 ? { reasoningTokens: usage.lastReasoningTokens } : {}),
     total: usage.lastTotal || undefined,
+    ...(usage.lastCostBasis && usage.lastCostUsd !== undefined
+      ? { cost: { usd: usage.lastCostUsd, basis: usage.lastCostBasis } }
+      : {}),
   };
 };

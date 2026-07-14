@@ -69,6 +69,19 @@ describe("usage-accumulator", () => {
       expect(acc.total).toBe(251_490);
     });
 
+    it("sums captured cost and preserves mixed provenance", () => {
+      const acc = createAccumulatorWithUsage(
+        { input: 10, cost: { usd: 0.004, basis: "provider-billed" } },
+        { output: 5, cost: { usd: 0.003, basis: "catalog-estimate" } },
+      );
+
+      expect(toNormalizedUsage(acc)?.cost).toEqual({ usd: 0.007, basis: "mixed" });
+      expect(toLastCallUsage(acc)?.cost).toEqual({
+        usd: 0.003,
+        basis: "catalog-estimate",
+      });
+    });
+
     it("stores the exact final call snapshot", () => {
       const acc = createAccumulatorWithUsage(FIRST_USAGE, FINAL_USAGE);
 

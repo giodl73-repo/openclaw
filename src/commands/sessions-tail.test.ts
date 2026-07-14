@@ -442,6 +442,87 @@ describe("sessionsTailCommand", () => {
     expect(runtime.exit).toHaveBeenCalledWith(1);
   });
 
+  it("sums orchestration usage across parent and child session trajectories", async () => {
+    const runtime = makeRuntime();
+    const childSessionKey = "agent:main:subagent:child";
+    await writeSessionEntry(sessionKey, {
+      sessionId: "session-parent",
+      sessionFile: formatSqliteSessionFileMarker({
+        agentId: "main",
+        sessionId: "session-parent",
+        storePath,
+      }),
+      updatedAt: Date.now() - 1,
+      status: "idle",
+    });
+    await writeSessionEntry(childSessionKey, {
+      sessionId: "session-child",
+      sessionFile: formatSqliteSessionFileMarker({
+        agentId: "main",
+        sessionId: "session-child",
+        storePath,
+      }),
+      updatedAt: Date.now(),
+      status: "idle",
+    });
+    appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-parent", storePath }, [
+      makeEvent({
+        type: "skill.invocation.started",
+        ts: "2026-05-18T12:04:18.000Z",
+        runId: "run-parent",
+        sessionId: "session-parent",
+        data: { invocationId: "skill-parent", skillName: "customer-support" },
+      }),
+      makeEvent({
+        type: "model.completed",
+        ts: "2026-05-18T12:04:19.000Z",
+        runId: "run-parent",
+        sessionId: "session-parent",
+        data: { usage: { input: 20, output: 5, total: 25 } },
+      }),
+    ]);
+    appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-child", storePath }, [
+      makeEvent({
+        type: "skill.invocation.started",
+        ts: "2026-05-18T12:04:20.000Z",
+        runId: "run-child",
+        sessionId: "session-child",
+        data: {
+          invocationId: "skill-child",
+          parentInvocationId: "skill-parent",
+          parentRunId: "run-parent",
+          skillName: "issue-triage",
+        },
+      }),
+      makeEvent({
+        type: "model.completed",
+        ts: "2026-05-18T12:04:21.000Z",
+        runId: "run-child",
+        sessionId: "session-child",
+        data: { usage: { input: 40, output: 10, total: 50 } },
+      }),
+    ]);
+
+    await sessionsTailCommand({ store: storePath, auditOrchestrations: true, json: true }, runtime);
+
+    expect(runtime.log).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(String(vi.mocked(runtime.log).mock.calls[0]?.[0]));
+    expect(output).toMatchObject({
+      auditSchema: "openclaw-audit-orchestration",
+      accountingScope: "observed-runs",
+      rootRunId: "run-parent",
+      usage: { input: 60, output: 15, total: 75 },
+      runs: [
+        expect.objectContaining({ runId: "run-parent", sessionId: "session-parent" }),
+        expect.objectContaining({
+          runId: "run-child",
+          sessionId: "session-child",
+          parentRunId: "run-parent",
+        }),
+      ],
+    });
+  });
+
   it("does not expose general trajectory data through JSON output", async () => {
     const runtime = makeRuntime();
 

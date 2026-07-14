@@ -193,6 +193,20 @@ describe("normalizeUsage", () => {
     const usage = normalizeUsage(undefined);
     expect(usage).toBeUndefined();
   });
+
+  it("captures provider-billed and catalog-estimated cost at normalization time", () => {
+    expect(
+      normalizeUsage({
+        input: 10,
+        cost: { total: 0.0042, totalOrigin: "provider-billed" },
+      })?.cost,
+    ).toEqual({ usd: 0.0042, basis: "provider-billed" });
+    expect(normalizeUsage({ input: 10, cost: { total: 0.0031 } })?.cost).toEqual({
+      usd: 0.0031,
+      basis: "catalog-estimate",
+    });
+    expect(normalizeUsage({ input: 10, cost: { total: 0 } })?.cost).toBeUndefined();
+  });
 });
 
 describe("toOpenAiChatCompletionsUsage", () => {

@@ -308,8 +308,13 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     .command("tail")
     .description("Tail session trajectory progress or summarize audit runs")
     .option("--session-key <key>", "Session key to tail (default: active sessions or latest)")
-    .option("--tail <count>", "Number of existing trajectory events or audit runs to show", "80")
+    .option("--tail <count>", "Number of existing trajectory events or audit summaries", "80")
     .option("--audit-runs", "Summarize receipts, skills, and model usage by run", false)
+    .option(
+      "--audit-orchestrations",
+      "Sum observed usage across linked parent and child runs",
+      false,
+    )
     .option("--receipt-type <type>", "Only show audit receipts of this business type")
     .option("--regarding-system <system>", "Only show receipts for this external system")
     .option("--regarding-type <type>", "Only show receipts for this external record type")
@@ -336,6 +341,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
             store: (opts.store as string | undefined) ?? parentOpts?.store,
             agent: (opts.agent as string | undefined) ?? parentOpts?.agent,
             allAgents: Boolean(opts.allAgents || parentOpts?.allAgents),
+            auditOrchestrations: Boolean(opts.auditOrchestrations),
             auditRuns: Boolean(opts.auditRuns),
             follow: Boolean(opts.follow),
             json: Boolean(opts.json || parentOpts?.json),

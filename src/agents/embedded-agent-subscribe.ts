@@ -59,7 +59,13 @@ import { stripDowngradedToolCallText, THINKING_TAG_SCAN_RE } from "./embedded-ag
 import { mediaUrlsFromGeneratedAttachments } from "./generated-attachments.js";
 import type { AgentRunTimeoutPhase } from "./run-timeout-attribution.js";
 import type { AgentMessage } from "./runtime/index.js";
-import { hasNonzeroUsage, normalizeUsage, type UsageLike } from "./usage.js";
+import {
+  hasNonzeroUsage,
+  mergeUsageCostBasis,
+  normalizeUsage,
+  type UsageCostBasis,
+  type UsageLike,
+} from "./usage.js";
 
 const STREAM_STRIPPED_BLOCK_TAG_NAMES = [
   "final",
@@ -252,6 +258,8 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     reasoningTokens: 0,
     total: 0,
   };
+  let usageCostUsd = 0;
+  let usageCostBasis: UsageCostBasis | undefined;
   let compactionCount = 0;
 
   const assistantTexts = state.assistantTexts;
@@ -640,6 +648,10 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
       usage.total ??
       (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
     usageTotals.total += usageTotal;
+    if (usage.cost) {
+      usageCostUsd += usage.cost.usd;
+      usageCostBasis = mergeUsageCostBasis(usageCostBasis, usage.cost.basis);
+    }
     state.assistantUsageCommitted = true;
   };
   const recordAssistantUsage = (usageLike: unknown) => {
@@ -659,7 +671,8 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
       usageTotals.cacheRead > 0 ||
       usageTotals.cacheWrite > 0 ||
       usageTotals.reasoningTokens > 0 ||
-      usageTotals.total > 0;
+      usageTotals.total > 0 ||
+      usageCostBasis !== undefined;
     if (!hasUsage) {
       return undefined;
     }
@@ -672,6 +685,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
       cacheWrite: usageTotals.cacheWrite || undefined,
       ...(usageTotals.reasoningTokens > 0 ? { reasoningTokens: usageTotals.reasoningTokens } : {}),
       total: usageTotals.total || derivedTotal || undefined,
+      ...(usageCostBasis ? { cost: { usd: usageCostUsd, basis: usageCostBasis } } : {}),
     };
   };
   const incrementCompactionCount = () => {
