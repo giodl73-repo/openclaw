@@ -98,16 +98,23 @@ function createRequestBodySender(params: {
   requestByteLimit: number;
   maxChunkBytes: number;
 }): {
-  send: (credit: number) => Promise<void>;
+  send: (credit: number) => void;
   cancel: (reason?: unknown) => Promise<void>;
+  failure: Promise<never>;
 } {
   const reader = params.request.body?.getReader();
   let sequence = 0;
   let totalBytes = 0;
   let pending = new Uint8Array();
   let pendingOffset = 0;
+  let availableCredit = 0;
   let closed = false;
   let released = false;
+  let pumping = false;
+  let rejectFailure!: (error: unknown) => void;
+  const failure = new Promise<never>((_resolve, reject) => {
+    rejectFailure = reject;
+  });
 
   const release = () => {
     if (!reader || released) {
@@ -127,95 +134,105 @@ function createRequestBodySender(params: {
       release();
     }
   };
-  const send = async (credit: number) => {
-    if (closed) {
+  const pump = () => {
+    if (closed || pumping) {
       return;
     }
-    if (!reader) {
-      closed = true;
-      if (
-        !params.operation.send(
-          operationFrame(params.operation, {
-            type: "half-close",
-            stream: "request",
-          }),
-        )
-      ) {
-        throw dispatchFailure("overloaded", "not-started");
-      }
-      return;
-    }
-    let remainingCredit = credit;
-    while (remainingCredit > 0) {
-      if (pendingOffset >= pending.byteLength) {
-        const chunk = await reader.read();
-        if (closed) {
+    pumping = true;
+    void (async () => {
+      try {
+        if (!reader) {
+          closed = true;
+          if (
+            !params.operation.send(
+              operationFrame(params.operation, {
+                type: "half-close",
+                stream: "request",
+              }),
+            )
+          ) {
+            throw dispatchFailure("overloaded", "not-started");
+          }
           return;
         }
-        if (chunk.done) {
-          break;
+        while (!closed) {
+          if (pendingOffset >= pending.byteLength) {
+            const chunk = await reader.read();
+            if (closed) {
+              return;
+            }
+            if (chunk.done) {
+              closed = true;
+              release();
+              if (
+                !params.operation.send(
+                  operationFrame(params.operation, {
+                    type: "half-close",
+                    stream: "request",
+                  }),
+                )
+              ) {
+                throw dispatchFailure("overloaded", "not-started");
+              }
+              return;
+            }
+            pending = chunk.value;
+            pendingOffset = 0;
+            if (totalBytes >= params.requestByteLimit) {
+              throw dispatchFailure("protocol-violation", "not-started");
+            }
+          }
+          if (pendingOffset < pending.byteLength && totalBytes >= params.requestByteLimit) {
+            throw dispatchFailure("protocol-violation", "not-started");
+          }
+          if (availableCredit <= 0) {
+            return;
+          }
+          const payloadBytes = Math.min(
+            availableCredit,
+            params.maxChunkBytes,
+            pending.byteLength - pendingOffset,
+          );
+          const payload = pending.subarray(pendingOffset, pendingOffset + payloadBytes);
+          totalBytes += payload.byteLength;
+          if (totalBytes > params.requestByteLimit) {
+            throw dispatchFailure("protocol-violation", "not-started");
+          }
+          if (
+            !params.operation.send(
+              operationFrame(params.operation, {
+                type: "chunk",
+                stream: "request",
+                sequence,
+                payloadBase64: Buffer.from(payload).toString("base64"),
+              }),
+            )
+          ) {
+            throw dispatchFailure("overloaded", "not-started");
+          }
+          pendingOffset += payload.byteLength;
+          availableCredit -= payload.byteLength;
+          sequence += 1;
         }
-        pending = chunk.value;
-        pendingOffset = 0;
+      } catch (error) {
+        rejectFailure(error);
+      } finally {
+        pumping = false;
       }
-      const payloadBytes = Math.min(
-        remainingCredit,
-        params.maxChunkBytes,
-        pending.byteLength - pendingOffset,
-      );
-      const payload = pending.subarray(pendingOffset, pendingOffset + payloadBytes);
-      totalBytes += payload.byteLength;
-      if (totalBytes > params.requestByteLimit) {
-        throw dispatchFailure("protocol-violation", "not-started");
-      }
-      if (
-        !params.operation.send(
-          operationFrame(params.operation, {
-            type: "chunk",
-            stream: "request",
-            sequence,
-            payloadBase64: Buffer.from(payload).toString("base64"),
-          }),
-        )
-      ) {
-        throw dispatchFailure("overloaded", "not-started");
-      }
-      pendingOffset += payload.byteLength;
-      remainingCredit -= payload.byteLength;
-      sequence += 1;
-    }
-    if (pendingOffset < pending.byteLength) {
-      if (totalBytes >= params.requestByteLimit) {
-        throw dispatchFailure("protocol-violation", "not-started");
-      }
-      return;
-    }
-    const next = await reader.read();
+    })();
+  };
+  const send = (credit: number) => {
     if (closed) {
       return;
     }
-    if (!next.done) {
-      if (totalBytes >= params.requestByteLimit) {
-        throw dispatchFailure("protocol-violation", "not-started");
-      }
-      pending = next.value;
-      pendingOffset = 0;
+    availableCredit += credit;
+    if (!Number.isSafeInteger(availableCredit)) {
+      rejectFailure(dispatchFailure("protocol-violation", "not-started"));
       return;
     }
-    closed = true;
-    release();
-    if (
-      !params.operation.send(
-        operationFrame(params.operation, {
-          type: "half-close",
-          stream: "request",
-        }),
-      )
-    ) {
-      throw dispatchFailure("overloaded", "not-started");
-    }
+    pump();
   };
-  return { send, cancel };
+  return { send, cancel, failure };
 }
 
 function runOperation(params: {
@@ -283,7 +300,7 @@ function runOperation(params: {
       responseCreditRequested = true;
       sendResponseCredit();
       for (;;) {
-        const next = await reader.read();
+        const next = await Promise.race([reader.read(), requestBody.failure]);
         if (next.done) {
           const terminal = await params.operation.result;
           if (!terminal.ok) {
@@ -303,7 +320,7 @@ function runOperation(params: {
         }
         const frame = next.value;
         if (frame.type === "credit" && frame.stream === "request") {
-          await requestBody.send(frame.bytes);
+          requestBody.send(frame.bytes);
           continue;
         }
         if (frame.type === "response-open") {

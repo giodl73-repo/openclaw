@@ -29,7 +29,7 @@ import {
 const tempPaths: string[] = [];
 
 function registerCurrentBinding() {
-  registerHostIntegrationBundleV1({
+  const bundle = registerHostIntegrationBundleV1({
     manifest: {
       version: "host-integration-bundle/v1",
       id: "lobster/host",
@@ -64,7 +64,7 @@ function registerCurrentBinding() {
       owner: "provider-request",
       kind: "provider-request-dispatcher",
       id: "lobster/egress",
-      bundleGeneration: "lobster/host@1.0.0",
+      bundleGeneration: bundle.generation,
       ownerGeneration: "owner-4",
       state: "ready",
       reason: "Ready",
@@ -96,7 +96,9 @@ describe("host provider websocket admission", () => {
       onSend: (data) => sent.push(JSON.parse(data) as Record<string, unknown>),
     });
     const hostProviderRegistry = {
-      register: vi.fn(),
+      register: vi.fn(() => {
+        expect(sent.some((frame) => frame.id === "connect-1" && frame.ok === true)).toBe(true);
+      }),
       unregister: vi.fn(),
       receiveFrame: vi.fn(),
     };

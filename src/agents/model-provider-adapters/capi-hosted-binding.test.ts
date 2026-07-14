@@ -147,8 +147,11 @@ function prepareImplementations(params: {
   mode: "local" | "hosted";
   dispatch: CapiHostedBindingImplementationsV1["dispatcher"]["dispatcher"];
   dispatchBindingId?: string;
+  policy?: ProviderRequestTrafficPolicyRegistrationV1;
 }): CapiHostedBindingImplementationsV1 {
-  registerProviderRequestTrafficPolicyV1(policyRegistration(params.dispatchBindingId));
+  registerProviderRequestTrafficPolicyV1(
+    params.policy ?? policyRegistration(params.dispatchBindingId),
+  );
   const policy = getCurrentProviderRequestTrafficPolicyV1();
   if (!policy) {
     throw new Error("policy registration failed");
@@ -424,6 +427,72 @@ describe("CAPI hosted binding", () => {
         body: capiFixture.request.body,
       }),
     ).rejects.toBeInstanceOf(CapiHostedBindingError);
+  });
+
+  it("rejects a redirect that changes the prepared traffic-policy timeout", async () => {
+    const dispatch = vi.fn(async () => {
+      return new Response(null, {
+        status: 307,
+        headers: { location: "https://redirect.example.com/v1/messages" },
+      });
+    });
+    const policy = policyRegistration();
+    const implementations = prepareImplementations({
+      mode: "hosted",
+      dispatch: { dispatch },
+      policy: {
+        ...policy,
+        rules: [
+          {
+            ...policy.rules[0]!,
+            match: {
+              ...policy.rules[0]!.match,
+              origins: ["https://capi.example.com"],
+            },
+            outcome: {
+              action: "allow",
+              routeProfileId: "lobster/managed",
+              allowedOrigins: ["https://capi.example.com", "https://redirect.example.com"],
+              allowPrivateNetwork: false,
+              maximumTimeoutMs: 20_000,
+            },
+          },
+          {
+            id: "capi-redirect",
+            match: {
+              providers: ["microsoft-capi"],
+              capabilities: ["llm"],
+              transports: ["stream"],
+              endpointClasses: ["custom"],
+              origins: ["https://redirect.example.com"],
+            },
+            outcome: {
+              action: "allow",
+              routeProfileId: "lobster/managed",
+              allowedOrigins: ["https://redirect.example.com"],
+              allowPrivateNetwork: false,
+              maximumTimeoutMs: 10_000,
+            },
+          },
+        ],
+      },
+    });
+    const binding = prepareCapiHostedBindingV1({
+      selection: selection(),
+      adapterConfig: capiFixture.request.config,
+      bundle: bundle(),
+      implementations,
+    });
+
+    await expect(
+      binding.dispatch({
+        fence: fence(binding.bundleGeneration),
+        context: capiFixture.request.context,
+        method: capiFixture.request.method,
+        body: capiFixture.request.body,
+      }),
+    ).rejects.toMatchObject({ code: "traffic-policy-route-mismatch" });
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("captures config and dispatcher implementations when the binding is prepared", async () => {

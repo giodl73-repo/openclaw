@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   resolveHostIntegrationContributionFromSnapshotV1,
   type HostIntegrationBundleSnapshotV1,
@@ -385,7 +386,10 @@ export function prepareCapiHostedBindingV1(params: {
         if (
           redirected.policyGeneration !== decision.policyGeneration ||
           redirected.routeProfileId !== decision.routeProfileId ||
-          redirected.dispatchBindingId !== decision.dispatchBindingId
+          redirected.dispatchBindingId !== decision.dispatchBindingId ||
+          redirected.allowPrivateNetwork !== decision.allowPrivateNetwork ||
+          redirected.timeoutMs !== decision.timeoutMs ||
+          !isDeepStrictEqual(redirected.dispatcherPolicy, decision.dispatcherPolicy)
         ) {
           throw new CapiHostedBindingError(
             "traffic-policy-route-mismatch",
