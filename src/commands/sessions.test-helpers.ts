@@ -103,13 +103,24 @@ export function cleanupStore(store: string): void {
 /** Runs sessionsCommand with JSON output and parses the emitted payload. */
 export async function runSessionsJson<T>(
   run: (
-    opts: { json?: boolean; store?: string; active?: string; limit?: string | number },
+    opts: {
+      json?: boolean;
+      store?: string;
+      active?: string;
+      limit?: string | number;
+      regardingSystem?: string;
+      regardingType?: string;
+      regardingId?: string;
+    },
     runtime: RuntimeEnv,
   ) => Promise<void>,
   store: string,
   options?: {
     active?: string;
     limit?: string | number;
+    regardingSystem?: string;
+    regardingType?: string;
+    regardingId?: string;
   },
 ): Promise<T> {
   const { runtime, logs } = makeRuntime();
@@ -120,6 +131,9 @@ export async function runSessionsJson<T>(
         json: true,
         active: options?.active,
         limit: options?.limit,
+        regardingSystem: options?.regardingSystem,
+        regardingType: options?.regardingType,
+        regardingId: options?.regardingId,
       },
       runtime,
     );

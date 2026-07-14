@@ -20,6 +20,9 @@ type SessionsListCliOptions = {
   allAgents?: boolean;
   active?: string;
   limit?: string;
+  regardingSystem?: string;
+  regardingType?: string;
+  regardingId?: string;
 };
 
 function createModuleLoader<T>(load: () => Promise<T>): () => Promise<T> {
@@ -39,6 +42,9 @@ function addSessionsListOptions(command: Command): Command {
     .option("--agent <id>", "Agent id to inspect (default: configured default agent)")
     .option("--all-agents", "Aggregate sessions across all configured agents", false)
     .option("--active <minutes>", "Only show sessions updated within the past N minutes")
+    .option("--regarding-system <system>", "Only show sessions regarding this external system")
+    .option("--regarding-type <type>", "Only show sessions regarding this record type")
+    .option("--regarding-id <id>", "Only show sessions regarding this external record id")
     .option("--limit <count>", 'Max sessions to show (default: 100; use "all" for full output)');
 }
 
@@ -54,6 +60,9 @@ function mergeSessionsListOptions(
     allAgents: Boolean(opts.allAgents || parentOpts?.allAgents),
     active: opts.active ?? parentOpts?.active,
     limit: opts.limit ?? parentOpts?.limit,
+    regardingSystem: opts.regardingSystem ?? parentOpts?.regardingSystem,
+    regardingType: opts.regardingType ?? parentOpts?.regardingType,
+    regardingId: opts.regardingId ?? parentOpts?.regardingId,
   };
 }
 
@@ -68,6 +77,9 @@ async function runSessionsListCli(opts: SessionsListCliOptions): Promise<void> {
       allAgents: Boolean(opts.allAgents),
       active: opts.active,
       limit: opts.limit,
+      regardingSystem: opts.regardingSystem,
+      regardingType: opts.regardingType,
+      regardingId: opts.regardingId,
     },
     defaultRuntime,
   );
@@ -194,6 +206,10 @@ export function registerStatusHealthSessionsCommands(program: Command) {
           ["openclaw sessions --agent work", "List sessions for one agent."],
           ["openclaw sessions --all-agents", "Aggregate sessions across agents."],
           ["openclaw sessions --active 120", "Only last 2 hours."],
+          [
+            "openclaw sessions --regarding-type case --regarding-id case-42",
+            "Find the conversation for one business record.",
+          ],
           ["openclaw sessions --limit 25", "Show the newest 25 sessions."],
           ["openclaw sessions --json", "Machine-readable output."],
           ["openclaw sessions --store ./tmp/sessions.json", "Use a specific session store."],

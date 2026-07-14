@@ -21,6 +21,7 @@ openclaw sessions
 openclaw sessions --agent work
 openclaw sessions --all-agents
 openclaw sessions --active 120
+openclaw sessions --regarding-type case --regarding-id case-42
 openclaw sessions --limit 25
 openclaw sessions --store ./tmp/sessions.json
 openclaw sessions --json
@@ -28,15 +29,18 @@ openclaw sessions --json
 
 Flags:
 
-| Flag                 | Description                                                            |
-| -------------------- | ---------------------------------------------------------------------- |
-| `--agent <id>`       | One configured agent store (default: configured default agent).        |
-| `--all-agents`       | Aggregate all configured agent stores.                                 |
-| `--store <path>`     | Explicit store path (cannot combine with `--agent` or `--all-agents`). |
-| `--active <minutes>` | Only show sessions updated within the past N minutes.                  |
-| `--limit <n\|all>`   | Max rows to output (default `100`; `all` restores full output).        |
-| `--json`             | Machine-readable output.                                               |
-| `--verbose`          | Verbose logging.                                                       |
+| Flag                          | Description                                                            |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `--agent <id>`                | One configured agent store (default: configured default agent).        |
+| `--all-agents`                | Aggregate all configured agent stores.                                 |
+| `--store <path>`              | Explicit store path (cannot combine with `--agent` or `--all-agents`). |
+| `--active <minutes>`          | Only show sessions updated within the past N minutes.                  |
+| `--regarding-system <system>` | Only show sessions associated with this external system.               |
+| `--regarding-type <type>`     | Only show sessions associated with this record type.                   |
+| `--regarding-id <id>`         | Only show sessions associated with this external record ID.            |
+| `--limit <n\|all>`            | Max rows to output (default `100`; `all` restores full output).        |
+| `--json`                      | Machine-readable output.                                               |
+| `--verbose`                   | Verbose logging.                                                       |
 
 `openclaw sessions` and the Gateway `sessions.list` RPC are bounded by default
 so large long-lived stores cannot monopolize the CLI process or Gateway event
@@ -44,6 +48,13 @@ loop. The CLI returns the newest 100 sessions by default; pass `--limit <n>`
 for a smaller/larger window or `--limit all` when you intentionally need the
 full store. JSON responses include `totalCount`, `limitApplied`, and `hasMore`
 when callers need to show that more rows exist.
+
+Sessions with a primary business-record association include `regarding` in
+JSON output and show its human-facing key in terminal output when available.
+The three `--regarding-*` selectors are conjunctive and run before `--limit`,
+so you can reliably rediscover a conversation about one case, invoice, order,
+or other external record. OpenClaw stores only the opaque association; the
+external system remains the authority for the business record itself.
 
 RPC clients can pass `configuredAgentsOnly: true` to keep the broad combined
 discovery source but return only rows for agents currently present in config.

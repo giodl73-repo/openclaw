@@ -59,6 +59,10 @@ type SessionRow = SessionDisplayRow & {
   acpRuntime: boolean;
 };
 
+type SessionRegardingFilter = Partial<
+  Pick<NonNullable<SessionEntry["regarding"]>, "system" | "type" | "id">
+>;
+
 const AGENT_PAD = 10;
 const KIND_PAD = 11; // "spawn-child".length — longest kind label
 const RUNTIME_PAD = 18;
@@ -147,6 +151,22 @@ function parseSessionsLimit(value: string | number | undefined): number | undefi
     return parseStrictPositiveInteger(trimmed) ?? null;
   }
   return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function matchesSessionRegarding(
+  entry: SessionEntry,
+  filter: SessionRegardingFilter | undefined,
+): boolean {
+  if (!filter) {
+    return true;
+  }
+  const regarding = entry.regarding;
+  return Boolean(
+    regarding &&
+    (!filter.system || regarding.system === filter.system) &&
+    (!filter.type || regarding.type === filter.type) &&
+    (!filter.id || regarding.id === filter.id),
+  );
 }
 
 const colorByPct = (label: string, pct: number | null, rich: boolean) => {
@@ -318,6 +338,9 @@ export async function sessionsCommand(
     agent?: string;
     allAgents?: boolean;
     limit?: string | number;
+    regardingSystem?: string;
+    regardingType?: string;
+    regardingId?: string;
   },
   runtime: RuntimeEnv,
 ) {
@@ -360,9 +383,36 @@ export async function sessionsCommand(
     return;
   }
 
+  const regardingInputs = [
+    ["--regarding-system", opts.regardingSystem, normalizeOptionalString(opts.regardingSystem)],
+    ["--regarding-type", opts.regardingType, normalizeOptionalString(opts.regardingType)],
+    ["--regarding-id", opts.regardingId, normalizeOptionalString(opts.regardingId)],
+  ] as const;
+  for (const [name, input, normalized] of regardingInputs) {
+    if (input !== undefined && !normalized) {
+      runtime.error(`${name} must be a non-empty value.`);
+      runtime.exit(1);
+      return;
+    }
+  }
+  const regardingSystem = regardingInputs[0][2];
+  const regardingType = regardingInputs[1][2];
+  const regardingId = regardingInputs[2][2];
+  const regardingFilter: SessionRegardingFilter | undefined =
+    regardingSystem || regardingType || regardingId
+      ? {
+          ...(regardingSystem ? { system: regardingSystem } : {}),
+          ...(regardingType ? { type: regardingType } : {}),
+          ...(regardingId ? { id: regardingId } : {}),
+        }
+      : undefined;
+
   const allRows = targets.flatMap((target) => {
     return listSessionEntries({ agentId: target.agentId, storePath: target.storePath })
       .filter(({ entry }) => {
+        if (!matchesSessionRegarding(entry, regardingFilter)) {
+          return false;
+        }
         if (activeMinutes === undefined) {
           return true;
         }
@@ -442,6 +492,7 @@ export async function sessionsCommand(
       limitApplied: limit ?? null,
       hasMore,
       activeMinutes: activeMinutes ?? null,
+      regardingFilter: regardingFilter ?? null,
       sessions: await Promise.all(
         rows.map(async (row) => {
           const r = toJsonSessionRow(row);

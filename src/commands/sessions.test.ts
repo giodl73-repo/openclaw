@@ -288,6 +288,67 @@ describe("sessionsCommand", () => {
     expect(payload.sessions?.map((row) => row.key)).toEqual(["recent"]);
   });
 
+  it("filters sessions by primary business record before applying the limit", async () => {
+    const store = await writeStore(
+      {
+        unrelated: {
+          sessionId: "unrelated",
+          updatedAt: Date.now(),
+          regarding: { system: "dataverse", type: "case", id: "case-99", key: "CAS-99" },
+        },
+        matching: {
+          sessionId: "matching",
+          updatedAt: Date.now() - 60_000,
+          regarding: { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" },
+        },
+      },
+      "sessions-regarding-filter",
+    );
+
+    const payload = await runSessionsJson<{
+      count?: number;
+      totalCount?: number;
+      regardingFilter?: { system?: string; type?: string; id?: string } | null;
+      sessions?: Array<{
+        key: string;
+        regarding?: { system: string; type: string; id: string; key?: string };
+      }>;
+    }>(sessionsCommand, store, {
+      limit: "1",
+      regardingSystem: "dataverse",
+      regardingType: "case",
+      regardingId: "case-42",
+    });
+
+    expect(payload).toMatchObject({
+      count: 1,
+      totalCount: 1,
+      regardingFilter: { system: "dataverse", type: "case", id: "case-42" },
+      sessions: [
+        {
+          key: "matching",
+          regarding: { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" },
+        },
+      ],
+    });
+  });
+
+  it("shows the business-record key in terminal output", async () => {
+    const store = await writeStore({
+      support: {
+        sessionId: "support-session",
+        updatedAt: Date.now() - 60_000,
+        regarding: { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" },
+      },
+    });
+    const { runtime, logs } = makeRuntime();
+
+    await sessionsCommand({ store }, runtime);
+    cleanupStore(store);
+
+    expect(logs.find((line) => line.includes("support"))).toContain("regarding:CAS-42");
+  });
+
   it("exports runtime policy aliases for collapsed external direct sessions", async () => {
     const store = await writeStore(
       {
@@ -449,6 +510,20 @@ describe("sessionsCommand", () => {
     expect(errors).toStrictEqual([
       '--limit must be a positive integer or "all", for example --limit 25.',
     ]);
+
+    cleanupStore(store);
+  });
+
+  it("rejects an empty regarding selector", async () => {
+    const store = await writeStore({
+      demo: { sessionId: "demo", updatedAt: Date.now() },
+    });
+    const { runtime, errors } = makeRuntime();
+
+    await expect(sessionsCommand({ store, regardingType: "  " }, runtime)).rejects.toThrow(
+      "exit 1",
+    );
+    expect(errors).toStrictEqual(["--regarding-type must be a non-empty value."]);
 
     cleanupStore(store);
   });
