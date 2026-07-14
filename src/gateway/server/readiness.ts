@@ -43,6 +43,30 @@ type GatewayStartupStateDeps = {
 };
 
 const DEFAULT_READINESS_CACHE_TTL_MS = 1_000;
+export const DEFAULT_READINESS_EVALUATION_TIMEOUT_MS = 2_000;
+
+export async function withReadinessEvaluationTimeout<T>(
+  evaluation: Promise<T>,
+  timeoutMs = DEFAULT_READINESS_EVALUATION_TIMEOUT_MS,
+): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      evaluation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`readiness evaluation exceeded ${timeoutMs}ms`)),
+          Math.max(1, timeoutMs),
+        );
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
 
 /** Create a startup checker that excludes downstream channel health. */
 export function createStartupChecker(deps: GatewayStartupStateDeps): StartupChecker {

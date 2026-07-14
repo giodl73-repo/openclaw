@@ -11,6 +11,7 @@ import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { runtimeForLogger } from "../logging/subsystem.js";
 import { isGatewayDraining } from "../process/command-queue.js";
 import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
+import { createSelectedReadinessResolver } from "../readiness/selection.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
 import { openClawStateDatabaseCache } from "../state/openclaw-state-db-cache.js";
@@ -37,6 +38,7 @@ import {
   createStartupChecker,
   mergeReadinessResults,
   type ReadinessResult,
+  withReadinessEvaluationTimeout,
 } from "./server/readiness.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 
@@ -51,12 +53,17 @@ function buildGatewayPluginReadinessInput(
 ): PluginReadinessInput {
   const errors = registry.plugins
     .filter((plugin) => plugin.status === "error")
-    .map((plugin) => ({
-      id: plugin.id,
-      activated: plugin.activated === true,
-      ...(plugin.activationSource ? { activationSource: plugin.activationSource } : {}),
-      error: plugin.error ?? "unknown plugin load error",
-    }))
+    .map((plugin): PluginReadinessInput["errors"][number] => {
+      const error: PluginReadinessInput["errors"][number] = {
+        id: plugin.id,
+        activated: plugin.activated === true,
+        error: plugin.error ?? "unknown plugin load error",
+      };
+      if (plugin.activationSource) {
+        error.activationSource = plugin.activationSource;
+      }
+      return error;
+    })
     .toSorted((left, right) => left.id.localeCompare(right.id));
   return { errors };
 }
@@ -449,15 +456,25 @@ export async function prepareGatewayKernelState(params: {
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
-  const getReadiness = async (): Promise<ReadinessResult> => {
+  const resolveSelectedReadiness = createSelectedReadinessResolver();
+  const evaluateReadiness = async (): Promise<ReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
+    const config = getRuntimeConfig();
+    const additionalConditions = await resolveSelectedReadiness({
+      config,
+      registry: pluginRuntime.registry,
+      env: process.env,
+    });
     const runtimeReadiness = buildRuntimeReadiness({
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRuntime.registry),
+      additionalConditions,
     });
     return mergeReadinessResults(gatewayReadiness, runtimeReadiness);
   };
+  const getReadiness = (): Promise<ReadinessResult> =>
+    withReadinessEvaluationTimeout(evaluateReadiness());
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   } = {};
