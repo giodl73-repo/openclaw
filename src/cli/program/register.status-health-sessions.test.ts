@@ -478,6 +478,23 @@ describe("registerStatusHealthSessionsCommands", () => {
     });
   });
 
+  it("forwards the business-thread audit mode", async () => {
+    await runCli([
+      "sessions",
+      "tail",
+      "--audit-thread",
+      "--session-key",
+      "agent:main:email:thread:customer-1",
+      "--json",
+    ]);
+
+    expectCommandOptions(sessionsTailCommand, {
+      auditThread: true,
+      sessionKey: "agent:main:email:thread:customer-1",
+      json: true,
+    });
+  });
+
   it("runs sessions export-trajectory with owner-routable export options", async () => {
     await runCli([
       "sessions",

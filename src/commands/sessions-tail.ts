@@ -26,6 +26,10 @@ import {
   type TrajectoryAuditRunSummary,
 } from "../trajectory/audit-run.js";
 import {
+  summarizeTrajectoryAuditThread,
+  type TrajectoryAuditThreadSummary,
+} from "../trajectory/audit-thread.js";
+import {
   matchesTrajectoryAuditReceipt,
   type TrajectoryAuditReceiptFilter,
 } from "../trajectory/audit.js";
@@ -45,6 +49,7 @@ type SessionsTailOptions = {
   allAgents?: boolean;
   auditOrchestrations?: boolean;
   auditRuns?: boolean;
+  auditThread?: boolean;
   sessionKey?: string;
   follow?: boolean;
   json?: boolean;
@@ -59,6 +64,7 @@ type TailSelection = {
   agentId: string;
   key: string;
   entry: SessionEntry;
+  sessionId: string;
   storePath: string;
   source: TailTrajectorySource;
 };
@@ -432,6 +438,37 @@ function renderAuditOrchestrations(
   }
 }
 
+function formatAuditThreadSummary(summary: TrajectoryAuditThreadSummary): string {
+  const regarding = summary.regarding;
+  const regardingLabel = regarding
+    ? (regarding.key ?? `${regarding.system}/${regarding.type}/${regarding.id}`)
+    : undefined;
+  const outcomes = summary.outcomes.map((outcome) => `${outcome.type}:${outcome.count}`).join(",");
+  const parts = [
+    `session=${summary.sessionKey}`,
+    regardingLabel ? `regarding=${regardingLabel}` : undefined,
+    outcomes ? `outcomes=${outcomes}` : undefined,
+    `runs=${summary.runs.length}`,
+  ];
+  return parts.filter((part): part is string => Boolean(part)).join(" ");
+}
+
+function renderAuditThread(
+  selection: TailSelection,
+  events: TrajectoryEvent[],
+  runtime: RuntimeEnv,
+  json?: boolean,
+): void {
+  const summary = summarizeTrajectoryAuditThread({
+    agentId: selection.agentId,
+    sessionId: selection.sessionId,
+    sessionKey: selection.key,
+    regarding: selection.entry.regarding,
+    events,
+  });
+  runtime.log(json ? JSON.stringify(summary) : formatAuditThreadSummary(summary));
+}
+
 function fileStateFromStat(stat: fs.Stats): FollowFileState {
   return {
     dev: stat.dev,
@@ -508,6 +545,7 @@ async function buildTailSelection(params: {
         agentId: params.agentId,
         entry: params.entry,
         key: params.key,
+        sessionId,
         source: {
           agentId: marker.agentId,
           kind: "sqlite",
@@ -532,6 +570,7 @@ async function buildTailSelection(params: {
     agentId: params.agentId,
     entry: params.entry,
     key: params.key,
+    sessionId,
     source: {
       kind: "file",
       path: trajectoryPath,
@@ -726,8 +765,11 @@ export async function sessionsTailCommand(
     runtime.exit(1);
     return;
   }
-  if (opts.auditRuns && opts.auditOrchestrations) {
-    runtime.error("--audit-runs and --audit-orchestrations cannot be combined.");
+  const auditModeCount = [opts.auditRuns, opts.auditOrchestrations, opts.auditThread].filter(
+    Boolean,
+  ).length;
+  if (auditModeCount > 1) {
+    runtime.error("--audit-runs, --audit-orchestrations, and --audit-thread cannot be combined.");
     runtime.exit(1);
     return;
   }
@@ -739,6 +781,13 @@ export async function sessionsTailCommand(
   if (opts.auditOrchestrations && opts.follow) {
     runtime.error(
       "--audit-orchestrations does not support --follow; rerun the snapshot command as needed.",
+    );
+    runtime.exit(1);
+    return;
+  }
+  if (opts.auditThread && opts.follow) {
+    runtime.error(
+      "--audit-thread does not support --follow; rerun the snapshot command as needed.",
     );
     runtime.exit(1);
     return;
@@ -773,6 +822,18 @@ export async function sessionsTailCommand(
     }
   }
   const hasRegardingFilter = Boolean(regardingSystem || regardingType || regardingId);
+  if (opts.auditThread && !opts.sessionKey?.trim()) {
+    runtime.error("--audit-thread requires --session-key.");
+    runtime.exit(1);
+    return;
+  }
+  if (opts.auditThread && (receiptType || hasRegardingFilter)) {
+    runtime.error(
+      "--audit-thread reconstructs the selected session and cannot use receipt filters.",
+    );
+    runtime.exit(1);
+    return;
+  }
   if (opts.auditOrchestrations && (receiptType || hasRegardingFilter)) {
     runtime.error("--audit-orchestrations cannot use receipt or regarding filters.");
     runtime.exit(1);
@@ -782,6 +843,7 @@ export async function sessionsTailCommand(
     opts.json &&
     !opts.auditRuns &&
     !opts.auditOrchestrations &&
+    !opts.auditThread &&
     !receiptType &&
     !hasRegardingFilter
   ) {
@@ -855,6 +917,12 @@ export async function sessionsTailCommand(
       runtime,
       { json: opts.json, tailCount },
     );
+    return;
+  }
+  if (opts.auditThread) {
+    for (const selection of selected) {
+      renderAuditThread(selection, readTailSnapshot(selection).events, runtime, opts.json);
+    }
     return;
   }
   for (const selection of selected) {

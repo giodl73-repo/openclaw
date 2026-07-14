@@ -111,6 +111,35 @@ and tool result bodies are not printed. Tool calls show the tool name with
 `{...redacted...}`; tool results show status such as `ok`, `error`, or `done`;
 model completion lines show provider/model and terminal status.
 
+## Revisit a business thread
+
+Use a stored session as a lightweight business-work thread when a channel or
+integration has associated it with a case, invoice, order, or other record:
+
+```bash
+openclaw sessions --regarding-type case --regarding-id case-42 --json
+openclaw sessions tail \
+  --audit-thread \
+  --session-key "agent:main:email:thread:customer-1" \
+  --json
+```
+
+`--audit-thread` returns one `openclaw-audit-thread` JSONL record per matching
+session. Each record contains the current `regarding` association, counted
+outcome types, the ordered business events that changed the association or
+recorded typed evidence, and the existing run summaries with skill identity,
+model usage, cost, and invocation lineage.
+
+First use the `--regarding-*` list filters to find the durable session key, then
+pass that exact key to `--audit-thread`. Thread snapshots do not support
+`--follow` or receipt filters; rerun the command to refresh the complete
+retained history for that session.
+
+This view reconstructs retained OpenClaw facts. It is not a separate business
+ledger, and session-maintenance retention still determines how far back the
+local history is available. Use backup or export policies when the records
+must outlive the configured retention window.
+
 ## Export a trajectory bundle
 
 ```bash
