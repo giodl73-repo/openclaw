@@ -1,5 +1,6 @@
 import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import type { InputProvenance } from "../../sessions/input-provenance.js";
+import type { ExplicitSkillInvocation } from "../../skills/types.js";
 
 export type AgentRunRequest = {
   message: string;
@@ -39,6 +40,7 @@ export type AgentRunRequest = {
   internalRuntimeHandoffId?: string;
   execApprovalFollowupExpectedSessionId?: string;
   internalEvents?: AgentInternalEvent[];
+  explicitSkillInvocation?: ExplicitSkillInvocation;
   suppressPromptPersistence?: boolean;
   sessionEffects?: "visible" | "internal";
   idempotencyKey: string;

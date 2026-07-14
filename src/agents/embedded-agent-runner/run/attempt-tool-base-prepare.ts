@@ -237,6 +237,7 @@ export function prepareEmbeddedAttemptToolBase(params: {
               : undefined,
           sessionId: attempt.sessionId,
           runId: attempt.runId,
+          explicitSkillInvocation: attempt.explicitSkillInvocation,
           approvalReviewerDeviceId: attempt.approvalReviewerDeviceId,
           oneShotCliRun: attempt.oneShotCliRun,
           toolSearchCatalogRef,

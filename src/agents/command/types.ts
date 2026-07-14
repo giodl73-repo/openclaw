@@ -14,6 +14,7 @@ import type {
   UserTurnInput,
   UserTurnTranscriptRecorder,
 } from "../../sessions/user-turn-transcript.types.js";
+import type { ExplicitSkillInvocation } from "../../skills/types.js";
 import type { ExecElevatedDefaults } from "../bash-tools.exec-types.js";
 import type { BootstrapContextRunKind } from "../bootstrap-mode.js";
 import type { CliSessionBindingFacts } from "../cli-runner/types.js";
@@ -136,6 +137,8 @@ export type AgentCommandOpts = {
   /** Run kind hint for bootstrap context behavior. */
   bootstrapContextRunKind?: BootstrapContextRunKind;
   internalEvents?: AgentInternalEvent[];
+  /** Backend-owned receipt identity for a skill assigned to this run. */
+  explicitSkillInvocation?: ExplicitSkillInvocation;
   inputProvenance?: InputProvenance;
   /** Internal runs can execute against a session without updating visible status/model/usage. */
   sessionEffects?: "visible" | "internal";

@@ -49,6 +49,28 @@ export const AgentInternalEventSchema = closedObject({
   replyInstruction: Type.String(),
 });
 
+/** Backend-owned identity for a skill explicitly assigned to an agent run. */
+const SkillExecutionHintsSchema = closedObject({
+  outcomes: Type.Optional(Type.Array(NonEmptyString)),
+  usesSkills: Type.Optional(Type.Array(NonEmptyString)),
+  isolation: Type.Optional(
+    Type.Union([Type.Literal("shared"), Type.Literal("preferred"), Type.Literal("required")]),
+  ),
+});
+
+export const ExplicitSkillInvocationSchema = closedObject({
+  invocationId: NonEmptyString,
+  commandName: NonEmptyString,
+  skillName: NonEmptyString,
+  skillSource: Type.Optional(
+    Type.Union([Type.Literal("bundled"), Type.Literal("unknown"), Type.Literal("workspace")]),
+  ),
+  skillDigest: Type.Optional(NonEmptyString),
+  executionHints: Type.Optional(SkillExecutionHintsSchema),
+  parentInvocationId: Type.Optional(NonEmptyString),
+  parentRunId: Type.Optional(NonEmptyString),
+});
+
 /** Stream event emitted by the agent runtime over the gateway protocol. */
 export const AgentEventSchema = closedObject({
   runId: NonEmptyString,
@@ -210,6 +232,8 @@ export const AgentParamsSchema = closedObject({
   internalRuntimeHandoffId: Type.Optional(NonEmptyString),
   execApprovalFollowupExpectedSessionId: Type.Optional(NonEmptyString),
   internalEvents: Type.Optional(Type.Array(AgentInternalEventSchema)),
+  // Skill invocation identity is accepted only from backend gateway callers.
+  explicitSkillInvocation: Type.Optional(ExplicitSkillInvocationSchema),
   inputProvenance: Type.Optional(InputProvenanceSchema),
   suppressPromptPersistence: Type.Optional(Type.Boolean()),
   sessionEffects: Type.Optional(Type.Union([Type.Literal("visible"), Type.Literal("internal")])),
