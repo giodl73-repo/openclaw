@@ -103,7 +103,9 @@ describe("credential slot bindings", () => {
       resolvers: [createResolver(resolve)],
     });
     const fetchImpl = vi.fn(async () => new Response("ok"));
-    const dispatcher = createLocalOneHopFetchDispatcher(fetchImpl, bindings);
+    const dispatcher = createLocalOneHopFetchDispatcher(fetchImpl, {
+      credentialSlots: bindings,
+    });
     const init = { redirect: "manual" as const, headers: { Accept: "application/json" } };
 
     await dispatcher.dispatch({
@@ -130,7 +132,9 @@ describe("credential slot bindings", () => {
       resolvers: [createResolver(resolve)],
     });
     const fetchImpl = vi.fn(async () => new Response("ok"));
-    const dispatcher = createLocalOneHopFetchDispatcher(fetchImpl, bindings);
+    const dispatcher = createLocalOneHopFetchDispatcher(fetchImpl, {
+      credentialSlots: bindings,
+    });
     const url = "https://other.example.com/v1";
 
     await expect(
