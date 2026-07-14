@@ -428,6 +428,123 @@ describe("sessionsTailCommand", () => {
     );
   });
 
+  it("reconstructs a queryable business thread with outcomes, evidence, and run spend", async () => {
+    const runtime = makeRuntime();
+    await writeSessionEntry(sessionKey, {
+      status: "idle",
+      regarding: { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" },
+    });
+    await appendEvents([
+      makeEvent({
+        type: "session.regarding.changed",
+        ts: "2026-05-18T12:04:17.000Z",
+        data: {
+          action: "set",
+          current: { system: "dataverse", type: "case", id: "case-42", reference: "CAS-42" },
+        },
+      }),
+      makeEvent({
+        type: "skill.invocation.started",
+        ts: "2026-05-18T12:04:18.000Z",
+        runId: "run-1",
+        data: { invocationId: "inv-1", skillName: "customer-support" },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:19.000Z",
+        runId: "run-1",
+        data: {
+          type: "customer.verified",
+          regarding: { system: "dataverse", type: "case", id: "case-42" },
+        },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:20.000Z",
+        runId: "run-1",
+        data: {
+          type: "case.resolved",
+          regarding: { system: "dataverse", type: "case", id: "case-42" },
+          data: { resolutionCode: "SOLVED" },
+        },
+      }),
+      makeEvent({
+        type: "model.completed",
+        ts: "2026-05-18T12:04:21.000Z",
+        runId: "run-1",
+        provider: "openai",
+        modelId: "gpt-5.6-luna",
+        data: { usage: { input: 100, output: 20, total: 120 } },
+      }),
+    ]);
+
+    await sessionsTailCommand(
+      {
+        store: storePath,
+        auditThread: true,
+        sessionKey,
+        json: true,
+      },
+      runtime,
+    );
+
+    expect(runtime.log).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(String(vi.mocked(runtime.log).mock.calls[0]?.[0]));
+    expect(output).toMatchObject({
+      auditSchema: "openclaw-audit-thread",
+      sessionKey,
+      regarding: { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" },
+      outcomes: [
+        { type: "case.resolved", count: 1 },
+        { type: "customer.verified", count: 1 },
+      ],
+      businessEvents: [
+        expect.objectContaining({ type: "session.regarding.changed" }),
+        expect.objectContaining({
+          type: "audit.receipt",
+          data: expect.objectContaining({ type: "customer.verified" }),
+        }),
+        expect.objectContaining({
+          type: "audit.receipt",
+          data: expect.objectContaining({
+            type: "case.resolved",
+            data: { resolutionCode: "SOLVED" },
+          }),
+        }),
+      ],
+      runs: [
+        expect.objectContaining({
+          runId: "run-1",
+          models: [{ provider: "openai", modelId: "gpt-5.6-luna" }],
+          usage: { input: 100, output: 20, total: 120 },
+        }),
+      ],
+    });
+  });
+
+  it("requires an explicit session for a thread audit", async () => {
+    const runtime = makeRuntime();
+
+    await sessionsTailCommand({ store: storePath, auditThread: true, json: true }, runtime);
+
+    expect(runtime.error).toHaveBeenCalledWith("--audit-thread requires --session-key.");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("rejects follow mode for business-thread snapshots", async () => {
+    const runtime = makeRuntime();
+
+    await sessionsTailCommand(
+      { store: storePath, auditThread: true, sessionKey, follow: true },
+      runtime,
+    );
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      "--audit-thread does not support --follow; rerun the snapshot command as needed.",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+  });
+
   it("rejects following audit run summaries until incremental summaries are defined", async () => {
     const runtime = makeRuntime();
 

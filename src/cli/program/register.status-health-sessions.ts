@@ -311,6 +311,11 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     .option("--tail <count>", "Number of existing trajectory events or audit summaries", "80")
     .option("--audit-runs", "Summarize receipts, skills, and model usage by run", false)
     .option(
+      "--audit-thread",
+      "Reconstruct one business thread from its session and audit history",
+      false,
+    )
+    .option(
       "--audit-orchestrations",
       "Sum observed usage across linked parent and child runs",
       false,
@@ -343,6 +348,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
             allAgents: Boolean(opts.allAgents || parentOpts?.allAgents),
             auditOrchestrations: Boolean(opts.auditOrchestrations),
             auditRuns: Boolean(opts.auditRuns),
+            auditThread: Boolean(opts.auditThread),
             follow: Boolean(opts.follow),
             json: Boolean(opts.json || parentOpts?.json),
             receiptType: opts.receiptType as string | undefined,
