@@ -251,7 +251,7 @@ describe("CAPI model-provider adapter", () => {
     );
   });
 
-  it("defers a terminal CR until a split CRLF event boundary is complete", async () => {
+  it("completes a split CRLF boundary without prefixing the next event", async () => {
     const encoder = new TextEncoder();
     const prefix = encoder.encode('data: {"type":"message_start"}\r\n\r');
     const body = new ReadableStream<Uint8Array>({
@@ -268,6 +268,48 @@ describe("CAPI model-provider adapter", () => {
 
     await expect(responseText(adapted)).resolves.toBe(
       'event: message_start\r\ndata: {"type":"message_start"}\r\n\r\n',
+    );
+  });
+
+  it("emits a complete CR-only event without waiting for another chunk", async () => {
+    const encoder = new TextEncoder();
+    let sourceController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sourceController = controller;
+        controller.enqueue(encoder.encode('data: {"type":"message_start"}\r\r'));
+      },
+    });
+
+    const adapted = adaptCapiModelResponseV1(new Response(body, { status: 200 }), {
+      injectAnthropicSseEventTypes: true,
+    });
+    const reader = adapted.body!.getReader();
+    const first = await reader.read();
+
+    expect(new TextDecoder().decode(first.value)).toBe(
+      'event: message_start\ndata: {"type":"message_start"}\r\r',
+    );
+    sourceController?.close();
+    await reader.cancel();
+  });
+
+  it("drops the completed LF when a split done sentinel is removed", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("data: [DONE]\r\n\r"));
+        controller.enqueue(encoder.encode('\ndata: {"type":"message_stop"}\n\n'));
+        controller.close();
+      },
+    });
+
+    const adapted = adaptCapiModelResponseV1(new Response(body, { status: 200 }), {
+      injectAnthropicSseEventTypes: true,
+    });
+
+    await expect(responseText(adapted)).resolves.toBe(
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
     );
   });
 

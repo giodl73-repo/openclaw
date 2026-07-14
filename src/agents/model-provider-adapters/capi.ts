@@ -263,15 +263,17 @@ export function prepareCapiModelRequestV1(params: {
   };
 }
 
-function findSseBoundary(buffer: Uint8Array): number | undefined {
-  const lineEndingLength = (index: number): number | undefined => {
+type SseBoundary = {
+  end: number;
+  mayContinueWithLf: boolean;
+};
+
+function findSseBoundary(buffer: Uint8Array): SseBoundary | undefined {
+  const lineEndingLength = (index: number): number => {
     if (buffer[index] === 10) {
       return 1;
     }
     if (buffer[index] === 13) {
-      if (index + 1 >= buffer.byteLength) {
-        return undefined;
-      }
       return buffer[index + 1] === 10 ? 2 : 1;
     }
     return 0;
@@ -279,18 +281,16 @@ function findSseBoundary(buffer: Uint8Array): number | undefined {
 
   for (let index = 0; index < buffer.byteLength; index += 1) {
     const firstLength = lineEndingLength(index);
-    if (firstLength === undefined) {
-      return undefined;
-    }
     if (firstLength === 0) {
       continue;
     }
     const secondLength = lineEndingLength(index + firstLength);
-    if (secondLength === undefined) {
-      return undefined;
-    }
     if (secondLength > 0) {
-      return index + firstLength + secondLength;
+      const end = index + firstLength + secondLength;
+      return {
+        end,
+        mayContinueWithLf: end === buffer.byteLength && buffer[end - 1] === 13,
+      };
     }
   }
   return undefined;
@@ -338,22 +338,51 @@ function injectCapiSseEventTypes(body: ReadableStream<Uint8Array>): ReadableStre
   const reader = body.getReader();
   let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
   let oversizedEvent = false;
+  let pendingBoundaryLf: "emit" | "drop" | undefined;
 
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         for (;;) {
-          const boundary = findSseBoundary(buffer);
-          if (boundary !== undefined) {
-            if (oversizedEvent || boundary > CAPI_SSE_BUFFER_MAX_BYTES) {
-              controller.enqueue(buffer.slice(0, boundary));
-              buffer = buffer.slice(boundary);
-              oversizedEvent = false;
+          if (pendingBoundaryLf) {
+            const pendingAction = pendingBoundaryLf;
+            const chunk = await reader.read();
+            if (chunk.done) {
+              controller.close();
               return;
             }
-            const block = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary);
+            if (chunk.value.byteLength === 0) {
+              continue;
+            }
+            pendingBoundaryLf = undefined;
+            if (chunk.value[0] === 10) {
+              buffer = appendBytes(buffer, chunk.value.slice(1));
+              if (pendingAction === "emit") {
+                controller.enqueue(chunk.value.slice(0, 1));
+                return;
+              }
+              continue;
+            }
+            buffer = appendBytes(buffer, chunk.value);
+          }
+
+          const boundary = findSseBoundary(buffer);
+          if (boundary !== undefined) {
+            if (oversizedEvent || boundary.end > CAPI_SSE_BUFFER_MAX_BYTES) {
+              controller.enqueue(buffer.slice(0, boundary.end));
+              buffer = buffer.slice(boundary.end);
+              oversizedEvent = false;
+              pendingBoundaryLf = boundary.mayContinueWithLf ? "emit" : undefined;
+              return;
+            }
+            const block = buffer.slice(0, boundary.end);
+            buffer = buffer.slice(boundary.end);
             const transformed = transformSseBlock(block);
+            pendingBoundaryLf = boundary.mayContinueWithLf
+              ? transformed
+                ? "emit"
+                : "drop"
+              : undefined;
             if (transformed) {
               controller.enqueue(transformed);
               return;
