@@ -7,7 +7,7 @@ import { canonicalizePath } from "../../agents/utils/paths.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { loadEnabledClaudeBundleCommands } from "../../plugins/bundle-commands.js";
-import { resolveSkillOrchestrationDeclaration } from "../loading/frontmatter.js";
+import { resolveSkillExecutionHints } from "../loading/frontmatter.js";
 import { resolveSkillTelemetrySource } from "../loading/source.js";
 import {
   filterWorkspaceSkillEntriesWithOptions,
@@ -130,7 +130,7 @@ export function buildWorkspaceSkillCommandSpecs(
     }
     used.add(normalizeLowercaseStringOrEmpty(unique));
     const description = entry.skill.description?.trim() || rawName;
-    const orchestration = resolveSkillOrchestrationDeclaration(entry.frontmatter);
+    const executionHints = resolveSkillExecutionHints(entry.frontmatter);
     const dispatch = entry.disableCommandDispatch
       ? undefined
       : (() => {
@@ -181,7 +181,7 @@ export function buildWorkspaceSkillCommandSpecs(
       description,
       skillSource: resolveSkillTelemetrySource(entry.skill),
       ...(entry.skill.contentDigest ? { skillDigest: entry.skill.contentDigest } : {}),
-      ...(orchestration ? { orchestration } : {}),
+      ...(executionHints ? { executionHints } : {}),
       ...(dispatch ? { dispatch } : {}),
     });
   }

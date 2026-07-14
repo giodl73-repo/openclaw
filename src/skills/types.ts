@@ -38,15 +38,10 @@ export type SkillInvocationPolicy = {
   disableModelInvocation: boolean;
 };
 
-export type SkillOrchestrationDeclarationV1 = {
-  schemaVersion: 1;
-  receipts?: {
-    emits?: string[];
-  };
-  invokes?: string[];
-  execution?: {
-    isolation?: "shared" | "preferred" | "required";
-  };
+export type SkillExecutionHints = {
+  outcomes?: string[];
+  usesSkills?: string[];
+  isolation?: "shared" | "preferred" | "required";
 };
 
 type SkillCommandDispatchSpec = {
@@ -69,7 +64,7 @@ export type ExplicitSkillInvocation = {
   skillName: string;
   skillSource?: SkillTelemetrySource;
   skillDigest?: string;
-  orchestration?: SkillOrchestrationDeclarationV1;
+  executionHints?: SkillExecutionHints;
 };
 
 export type SkillUsagePath = {
@@ -91,8 +86,8 @@ export type SkillCommandSpec = {
   skillSource?: SkillTelemetrySource;
   /** Exact SHA-256 identity of the loaded SKILL.md content. */
   skillDigest?: string;
-  /** Portable declaration consumed by managed OpenClaw invocation. */
-  orchestration?: SkillOrchestrationDeclarationV1;
+  /** Portable author hints consumed by managed OpenClaw invocation. */
+  executionHints?: SkillExecutionHints;
   /** Localized descriptions for native command surfaces that support them. */
   descriptionLocalizations?: Record<string, string>;
   /** Optional deterministic dispatch behavior for this command. */

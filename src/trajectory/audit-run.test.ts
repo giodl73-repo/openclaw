@@ -41,9 +41,8 @@ describe("summarizeTrajectoryAuditRuns", () => {
           skillName: "customer-support",
           skillSource: "workspace",
           skillDigest: `sha256:${"a".repeat(64)}`,
-          orchestration: {
-            schemaVersion: 1,
-            receipts: { emits: ["case.updated"] },
+          executionHints: {
+            outcomes: ["case.updated"],
           },
         },
       }),
@@ -104,9 +103,8 @@ describe("summarizeTrajectoryAuditRuns", () => {
             skillName: "customer-support",
             skillSource: "workspace",
             skillDigest: `sha256:${"a".repeat(64)}`,
-            orchestration: {
-              schemaVersion: 1,
-              receipts: { emits: ["case.updated"] },
+            executionHints: {
+              outcomes: ["case.updated"],
             },
             status: "success",
           },

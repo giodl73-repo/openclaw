@@ -4,37 +4,37 @@ import {
   parseFrontmatter,
   resolveOpenClawMetadata,
   resolveSkillInvocationPolicy,
-  resolveSkillOrchestrationDeclaration,
+  resolveSkillExecutionHints,
 } from "./frontmatter.js";
 
-describe("resolveSkillOrchestrationDeclaration", () => {
-  it("parses the string-valued Agent Skills extension", () => {
+describe("resolveSkillExecutionHints", () => {
+  it("parses friendly string-valued Agent Skills metadata", () => {
     const frontmatter = parseFrontmatter(`---
 name: issue-refund
 description: Issue an approved refund.
 metadata:
-  openclaw.orchestration: >-
-    {"schemaVersion":1,"receipts":{"emits":["payment.refunded"]},"invokes":["verify-customer"],"execution":{"isolation":"required"}}
+  outcomes: "payment.refunded customer.notified"
+  uses-skills: "verify-customer check-refund-policy"
+  isolation: "required"
 ---
 `);
 
-    expect(resolveSkillOrchestrationDeclaration(frontmatter)).toEqual({
-      schemaVersion: 1,
-      receipts: { emits: ["payment.refunded"] },
-      invokes: ["verify-customer"],
-      execution: { isolation: "required" },
+    expect(resolveSkillExecutionHints(frontmatter)).toEqual({
+      outcomes: ["payment.refunded", "customer.notified"],
+      usesSkills: ["verify-customer", "check-refund-policy"],
+      isolation: "required",
     });
   });
 
-  it("ignores unknown versions and non-string extension values", () => {
+  it("ignores unknown, empty, and non-string hints", () => {
     expect(
-      resolveSkillOrchestrationDeclaration({
-        metadata: '{"openclaw.orchestration":"{schemaVersion:2}"}',
+      resolveSkillExecutionHints({
+        metadata: '{"outcomes":[],"uses-skills":{"name":"verify-customer"}}',
       }),
     ).toBeUndefined();
     expect(
-      resolveSkillOrchestrationDeclaration({
-        metadata: '{"openclaw.orchestration":{"schemaVersion":1}}',
+      resolveSkillExecutionHints({
+        metadata: '{"outcomes":"  ","isolation":"sometimes"}',
       }),
     ).toBeUndefined();
   });
