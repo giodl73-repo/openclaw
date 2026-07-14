@@ -16,6 +16,10 @@ import type { OpenClawConfig } from "../config/types.js";
 import { listGatewayAgentsBasic } from "../gateway/agent-list.js";
 import { resolveHeartbeatSummaryForAgent } from "../infra/heartbeat-summary.js";
 import { peekSystemEvents } from "../infra/system-events.js";
+import {
+  buildRuntimeReadiness,
+  buildUnobservedGatewayConditions,
+} from "../readiness/conditions.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
@@ -550,6 +554,11 @@ export async function getStatusSummary(
 
   const summary: StatusSummary = {
     runtimeVersion: resolveRuntimeServiceVersion(process.env),
+    readiness: buildRuntimeReadiness({
+      configLoaded: true,
+      gateway: "not-checked",
+      coreConditions: buildUnobservedGatewayConditions(),
+    }),
     linkChannel: linkContext
       ? {
           id: linkContext.plugin.id,

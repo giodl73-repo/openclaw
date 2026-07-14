@@ -44,6 +44,10 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { formatDurationHuman } from "../infra/format-time/format-duration.js";
 import { resolveHeartbeatSummaryForAgent } from "../infra/heartbeat-summary.js";
 import { getActivePluginRegistry } from "../plugins/runtime.js";
+import {
+  buildRuntimeReadiness,
+  buildUnobservedGatewayConditions,
+} from "../readiness/conditions.js";
 import { buildChannelAccountBindings, resolvePreferredAccountId } from "../routing/bindings.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
@@ -721,6 +725,12 @@ export async function getHealthSnapshot(params?: {
     ok: true,
     ts: Date.now(),
     durationMs: Date.now() - start,
+    readiness: buildRuntimeReadiness({
+      configLoaded: true,
+      gateway: "responding",
+      plugins: pluginHealth,
+      coreConditions: buildUnobservedGatewayConditions(),
+    }),
     ...(params?.eventLoop ? { eventLoop: params.eventLoop } : {}),
     ...(pluginHealth ? { plugins: pluginHealth } : {}),
     ...(contextEngineHealth ? { contextEngines: contextEngineHealth } : {}),
