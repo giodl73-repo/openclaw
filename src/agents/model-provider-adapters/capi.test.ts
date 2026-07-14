@@ -251,6 +251,26 @@ describe("CAPI model-provider adapter", () => {
     );
   });
 
+  it("defers a terminal CR until a split CRLF event boundary is complete", async () => {
+    const encoder = new TextEncoder();
+    const prefix = encoder.encode('data: {"type":"message_start"}\r\n\r');
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(prefix);
+        controller.enqueue(encoder.encode("\n"));
+        controller.close();
+      },
+    });
+
+    const adapted = adaptCapiModelResponseV1(new Response(body, { status: 200 }), {
+      injectAnthropicSseEventTypes: true,
+    });
+
+    await expect(responseText(adapted)).resolves.toBe(
+      'event: message_start\r\ndata: {"type":"message_start"}\r\n\r\n',
+    );
+  });
+
   it("resumes event injection after passing through an oversized event", async () => {
     const oversized = `data: ${"x".repeat(1024 * 1024)}`;
     const next = 'data: {"type":"message_start"}\n\n';

@@ -264,11 +264,14 @@ export function prepareCapiModelRequestV1(params: {
 }
 
 function findSseBoundary(buffer: Uint8Array): number | undefined {
-  const lineEndingLength = (index: number): number => {
+  const lineEndingLength = (index: number): number | undefined => {
     if (buffer[index] === 10) {
       return 1;
     }
     if (buffer[index] === 13) {
+      if (index + 1 >= buffer.byteLength) {
+        return undefined;
+      }
       return buffer[index + 1] === 10 ? 2 : 1;
     }
     return 0;
@@ -276,10 +279,16 @@ function findSseBoundary(buffer: Uint8Array): number | undefined {
 
   for (let index = 0; index < buffer.byteLength; index += 1) {
     const firstLength = lineEndingLength(index);
+    if (firstLength === undefined) {
+      return undefined;
+    }
     if (firstLength === 0) {
       continue;
     }
     const secondLength = lineEndingLength(index + firstLength);
+    if (secondLength === undefined) {
+      return undefined;
+    }
     if (secondLength > 0) {
       return index + firstLength + secondLength;
     }
