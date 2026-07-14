@@ -493,6 +493,7 @@ export class CoreAgentHarness<
           input: args as Record<string, unknown>,
           content: result.content,
           details: result.details,
+          audit: result.audit,
           isError,
         });
         return patch
@@ -500,6 +501,7 @@ export class CoreAgentHarness<
               content: patch.content,
               details: patch.details,
               isError: patch.isError,
+              audit: patch.audit,
               terminate: patch.terminate,
             }
           : undefined;

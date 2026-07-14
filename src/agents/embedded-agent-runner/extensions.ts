@@ -34,6 +34,7 @@ type AgentToolResultEvent = {
   input?: unknown;
   content?: AgentToolResult<unknown>["content"];
   details?: unknown;
+  audit?: AgentToolResult<unknown>["audit"];
   isError?: boolean;
 };
 
@@ -70,6 +71,7 @@ function buildAgentToolResultMiddlewareFactory(
       const current = {
         content,
         details: event.details,
+        audit: event.audit,
       } satisfies AgentToolResult<unknown>;
       const rawToolSend = snapshotToolSendReceipt(current.details);
       if (eventToolCallId && rawToolSend !== undefined) {
@@ -109,6 +111,7 @@ function buildAgentToolResultMiddlewareFactory(
       return {
         content: result.content,
         details: result.details,
+        audit: result.audit,
         ...(isError ? { isError: true } : {}),
         ...(clearsAcceptedSessionSpawnError ? { isError: false } : {}),
       };
