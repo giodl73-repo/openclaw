@@ -65,6 +65,10 @@ export type ExplicitSkillInvocation = {
   skillSource?: SkillTelemetrySource;
   skillDigest?: string;
   executionHints?: SkillExecutionHints;
+  /** Invocation that requested this child skill run. */
+  parentInvocationId?: string;
+  /** Agent run that requested this child skill run. */
+  parentRunId?: string;
 };
 
 export type SkillUsagePath = {
@@ -139,7 +143,13 @@ export const WORKSPACE_SKILLS_PROMPT_FORMAT_VERSION = 2;
 
 export type SkillSnapshot = {
   prompt: string;
-  skills: Array<{ name: string; primaryEnv?: string; requiredEnv?: string[] }>;
+  skills: Array<{
+    name: string;
+    primaryEnv?: string;
+    requiredEnv?: string[];
+    skillDigest?: string;
+    executionHints?: SkillExecutionHints;
+  }>;
   /** Normalized agent-level filter used to build this snapshot; undefined means unrestricted. */
   skillFilter?: string[];
   /** Effective node-exec eligibility used to select connected node-hosted skills. */

@@ -40,4 +40,45 @@ describe("finalizeEmbeddedAttempt", () => {
       status: "success",
     });
   });
+
+  it("records child skill lineage as orchestration", () => {
+    const recordEvent = vi.fn();
+    const result = {
+      assistantTexts: ["done"],
+      toolMetas: [],
+      messagingToolSentTexts: [],
+      messagingToolSentMediaUrls: [],
+      messagingToolSentTargets: [],
+      aborted: false,
+      externalAbort: false,
+      timedOut: false,
+    } as unknown as EmbeddedRunAttemptResult;
+
+    finalizeEmbeddedAttempt({
+      result,
+      trajectoryRecorder: { recordEvent, flush: async () => {} },
+      synthesizedPayloadCount: 0,
+      emptyAssistantReplyIsSilent: false,
+      hasTerminalOutput: true,
+      explicitSkillInvocation: {
+        invocationId: "skill-child",
+        commandName: "invoice-paid",
+        skillName: "invoice-paid",
+        parentInvocationId: "skill-parent",
+        parentRunId: "run-parent",
+      },
+    });
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      "skill.invocation.completed",
+      expect.objectContaining({
+        invocationId: "skill-child",
+        parentInvocationId: "skill-parent",
+        parentRunId: "run-parent",
+        activation: "orchestration",
+        caller: "skill",
+        status: "success",
+      }),
+    );
+  });
 });

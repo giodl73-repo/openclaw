@@ -1140,6 +1140,122 @@ describe("sessions_spawn tool", () => {
     expect(spawnContext.completionOwnerKey).toBe("agent:main:main");
   });
 
+  it("starts a validated child skill with trusted parent lineage", async () => {
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+      parentRunId: "run-parent",
+      parentSkillInvocation: {
+        invocationId: "skill-parent",
+        commandName: "support-case",
+        skillName: "support-case",
+        executionHints: { usesSkills: ["invoice-paid"] },
+      },
+      skillsSnapshot: {
+        prompt: "",
+        skills: [
+          {
+            name: "invoice-paid",
+            skillDigest: `sha256:${"a".repeat(64)}`,
+            executionHints: { isolation: "required" },
+          },
+        ],
+        resolvedSkills: [
+          {
+            name: "invoice-paid",
+            description: "Record a paid invoice.",
+            filePath: "/skills/invoice-paid/SKILL.md",
+            baseDir: "/skills/invoice-paid",
+            source: "workspace",
+            sourceInfo: {
+              source: "workspace",
+              path: "/skills/invoice-paid/SKILL.md",
+              scope: "project",
+              origin: "top-level",
+            },
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    await tool.execute("call-child-skill", {
+      task: "Record payment authorization AUTH-42.",
+      skill: "invoice-paid",
+    });
+
+    const spawnParams = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawnSubagentDirect");
+    expect(spawnParams.task).toContain("Use the invoice-paid skill");
+    expect(spawnParams.explicitSkillInvocation).toMatchObject({
+      invocationId: expect.stringMatching(/^skill_/),
+      commandName: "invoice-paid",
+      skillName: "invoice-paid",
+      skillSource: "workspace",
+      skillDigest: `sha256:${"a".repeat(64)}`,
+      executionHints: { isolation: "required" },
+      parentInvocationId: "skill-parent",
+      parentRunId: "run-parent",
+    });
+  });
+
+  it("rejects child skills not declared by the active parent skill", async () => {
+    const tool = createSessionsSpawnTool({
+      parentSkillInvocation: {
+        invocationId: "skill-parent",
+        commandName: "support-case",
+        skillName: "support-case",
+        executionHints: { usesSkills: ["verify-customer"] },
+      },
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "invoice-paid" }],
+        resolvedSkills: [
+          {
+            name: "invoice-paid",
+            description: "Record a paid invoice.",
+            filePath: "/skills/invoice-paid/SKILL.md",
+            baseDir: "/skills/invoice-paid",
+            source: "workspace",
+            sourceInfo: {
+              source: "workspace",
+              path: "/skills/invoice-paid/SKILL.md",
+              scope: "project",
+              origin: "top-level",
+            },
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    const result = await tool.execute("call-undeclared-child", {
+      task: "Record the payment.",
+      skill: "invoice-paid",
+    });
+
+    expectDetailFields(result.details, { status: "error" });
+    expect(requireRecord(result.details, "result details").error).toContain(
+      'Skill "invoice-paid" is not declared by parent skill "support-case"',
+    );
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects child skills outside the current run snapshot", async () => {
+    const tool = createSessionsSpawnTool({
+      skillsSnapshot: { prompt: "", skills: [], resolvedSkills: [] },
+    });
+
+    const result = await tool.execute("call-missing-skill", {
+      task: "Do work.",
+      skill: "missing-skill",
+    });
+
+    expectDetailFields(result.details, { status: "error" });
+    expect(requireRecord(result.details, "result details").error).toContain(
+      'Skill "missing-skill" is not available',
+    );
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
   it("uses completionOwnerKey for ACP registerSubagentRun requesterSessionKey", async () => {
     registerAcpBackendForTest();
     const tool = createSessionsSpawnTool({

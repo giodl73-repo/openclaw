@@ -104,8 +104,8 @@ export function finalizeEmbeddedAttempt(
   if (params.explicitSkillInvocation) {
     trajectoryRecorder?.recordEvent("skill.invocation.completed", {
       ...params.explicitSkillInvocation,
-      activation: "command",
-      caller: "inbound",
+      activation: params.explicitSkillInvocation.parentInvocationId ? "orchestration" : "command",
+      caller: params.explicitSkillInvocation.parentInvocationId ? "skill" : "inbound",
       status: terminal.status,
     });
   }
