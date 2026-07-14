@@ -43,6 +43,7 @@ import { setGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-meta
 import { getGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-state.js";
 import { getTotalQueueSize } from "../process/command-queue.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
+import { resolveHostingProfile } from "../hosting/profiles.js";
 import { createLazyPromise } from "../shared/lazy-runtime.js";
 import { withArtifactPreservingStateReads } from "../state/openclaw-state-db-readonly.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
@@ -187,6 +188,7 @@ export async function prepareGatewayServerBootstrap(input: {
       docsUrl: OPENCLAW_DATABASE_SCHEMA_DOCS_URL,
     });
   }
+  resolveHostingProfile({ env: process.env });
   const { bootstrapGatewayNetworkRuntime } = await startupTrace.measure(
     "runtime.network-imports",
     () => import("./server-network-runtime.js"),
