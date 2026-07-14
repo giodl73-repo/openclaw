@@ -97,15 +97,37 @@ function createRequestBodySender(params: {
   request: Request;
   requestByteLimit: number;
   maxChunkBytes: number;
-}): (credit: number) => Promise<void> {
+}): {
+  send: (credit: number) => Promise<void>;
+  cancel: (reason?: unknown) => Promise<void>;
+} {
   const reader = params.request.body?.getReader();
   let sequence = 0;
   let totalBytes = 0;
   let pending = new Uint8Array();
   let pendingOffset = 0;
   let closed = false;
+  let released = false;
 
-  return async (credit: number) => {
+  const release = () => {
+    if (!reader || released) {
+      return;
+    }
+    released = true;
+    reader.releaseLock();
+  };
+  const cancel = async (reason?: unknown) => {
+    if (!reader || released) {
+      return;
+    }
+    closed = true;
+    try {
+      await reader.cancel(reason);
+    } finally {
+      release();
+    }
+  };
+  const send = async (credit: number) => {
     if (closed) {
       return;
     }
@@ -127,6 +149,9 @@ function createRequestBodySender(params: {
     while (remainingCredit > 0) {
       if (pendingOffset >= pending.byteLength) {
         const chunk = await reader.read();
+        if (closed) {
+          return;
+        }
         if (chunk.done) {
           break;
         }
@@ -160,15 +185,25 @@ function createRequestBodySender(params: {
       sequence += 1;
     }
     if (pendingOffset < pending.byteLength) {
+      if (totalBytes >= params.requestByteLimit) {
+        throw dispatchFailure("protocol-violation", "not-started");
+      }
       return;
     }
     const next = await reader.read();
+    if (closed) {
+      return;
+    }
     if (!next.done) {
+      if (totalBytes >= params.requestByteLimit) {
+        throw dispatchFailure("protocol-violation", "not-started");
+      }
       pending = next.value;
       pendingOffset = 0;
       return;
     }
     closed = true;
+    release();
     if (
       !params.operation.send(
         operationFrame(params.operation, {
@@ -180,6 +215,7 @@ function createRequestBodySender(params: {
       throw dispatchFailure("overloaded", "not-started");
     }
   };
+  return { send, cancel };
 }
 
 function runOperation(params: {
@@ -194,7 +230,7 @@ function runOperation(params: {
 }): void {
   void (async () => {
     const reader = params.operation.frames.getReader();
-    const sendRequestBody = createRequestBodySender(params);
+    const requestBody = createRequestBodySender(params);
     let responseBody: ReadableStreamDefaultController<Uint8Array> | undefined;
     let responseOpened = false;
     let responseClosed = false;
@@ -234,6 +270,7 @@ function runOperation(params: {
       } else {
         params.rejectResponse(error);
       }
+      void requestBody.cancel(error);
       params.operation.send(
         operationFrame(params.operation, {
           type: "cancel",
@@ -266,7 +303,7 @@ function runOperation(params: {
         }
         const frame = next.value;
         if (frame.type === "credit" && frame.stream === "request") {
-          await sendRequestBody(frame.bytes);
+          await requestBody.send(frame.bytes);
           continue;
         }
         if (frame.type === "response-open") {
@@ -284,7 +321,8 @@ function runOperation(params: {
                   responseCreditRequested = true;
                   sendResponseCredit();
                 },
-                cancel(reason) {
+                async cancel(reason) {
+                  await requestBody.cancel(reason);
                   params.operation.send(
                     operationFrame(params.operation, {
                       type: "cancel",
@@ -346,6 +384,7 @@ function runOperation(params: {
       }
     } finally {
       params.signal?.removeEventListener("abort", abort);
+      await requestBody.cancel("host provider operation ended");
       reader.releaseLock();
     }
   })();

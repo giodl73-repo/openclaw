@@ -363,6 +363,78 @@ describe("host provider one-hop dispatcher", () => {
     );
   });
 
+  it("rejects immediately when buffered request data exceeds the declared limit", async () => {
+    const fake = fakeRegistry({
+      holdOpen: true,
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "lobster/egress",
+      routeProfile: "lobster/managed",
+      requestByteLimit: 4,
+      maxChunkBytes: 4,
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        url: "https://capi.example.com/v1/messages",
+        init: {
+          method: "POST",
+          redirect: "manual",
+          body: "12345",
+        },
+        networkGuard: networkGuard(),
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<HostProviderDispatchError>>({
+        failureCode: "protocol-violation",
+        certainty: "not-started",
+      }),
+    );
+  });
+
+  it("cancels and unlocks the request source when dispatch is aborted", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Buffer.from("request"));
+      },
+      cancel,
+    });
+    const fake = fakeRegistry({
+      holdOpen: true,
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "lobster/egress",
+      routeProfile: "lobster/managed",
+    });
+    const controller = new AbortController();
+    const init: RequestInit & { redirect: "manual"; duplex: "half" } = {
+      method: "POST",
+      redirect: "manual",
+      body,
+      duplex: "half",
+      signal: controller.signal,
+    };
+
+    const response = dispatcher.dispatch({
+      url: "https://capi.example.com/v1/messages",
+      init,
+      networkGuard: networkGuard(),
+    });
+    await Promise.resolve();
+    controller.abort("caller stopped");
+
+    await expect(response).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalled();
+    });
+    expect(body.locked).toBe(false);
+  });
+
   it("never sends more request bytes than the host has credited", async () => {
     const fake = fakeRegistry({
       requestCredits: [3, 2, 7],
