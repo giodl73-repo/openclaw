@@ -2192,6 +2192,7 @@ export function buildGatewaySessionRow(params: {
     kind: classifySessionKey(key, entry),
     label: entry?.label,
     category: entry?.category,
+    regarding: entry?.regarding,
     displayName,
     derivedTitle,
     lastMessagePreview,

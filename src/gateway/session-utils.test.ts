@@ -208,6 +208,18 @@ describe("gateway session utils", () => {
     expect(row.unread).toBe(expected);
   });
 
+  test("projects the session regarding record", () => {
+    const regarding = { system: "dynamics", type: "case", id: "7f15", key: "CAS-1042" };
+    const row = buildGatewaySessionRow({
+      cfg: createModelDefaultsConfig({ primary: "openai/gpt-5.4" }),
+      storePath: "",
+      store: {},
+      key: "main",
+      entry: { sessionId: "session-1", updatedAt: 1, regarding },
+    });
+    expect(row.regarding).toEqual(regarding);
+  });
+
   test("session lists apply a bounded default and expose truncation metadata", async () => {
     const cfg = createModelDefaultsConfig({ primary: "openai/gpt-5.4" });
     const store = Object.fromEntries(
