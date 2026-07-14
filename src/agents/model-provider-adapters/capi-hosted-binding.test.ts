@@ -495,6 +495,54 @@ describe("CAPI hosted binding", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects a traffic-policy-approved redirect that downgrades HTTPS", async () => {
+    const dispatch = vi.fn(async () => {
+      return new Response(null, {
+        status: 307,
+        headers: { location: "http://redirect.example.com/v1/messages" },
+      });
+    });
+    const policy = policyRegistration();
+    const implementations = prepareImplementations({
+      mode: "hosted",
+      dispatch: { dispatch },
+      policy: {
+        ...policy,
+        rules: [
+          {
+            ...policy.rules[0]!,
+            outcome: {
+              action: "allow",
+              routeProfileId: "lobster/managed",
+              allowedOrigins: ["https://capi.example.com", "http://redirect.example.com"],
+              allowPrivateNetwork: false,
+              maximumTimeoutMs: 20_000,
+            },
+          },
+        ],
+      },
+    });
+    const binding = prepareCapiHostedBindingV1({
+      selection: selection(),
+      adapterConfig: capiFixture.request.config,
+      bundle: bundle(),
+      implementations,
+    });
+
+    await expect(
+      binding.dispatch({
+        fence: fence(binding.bundleGeneration),
+        context: capiFixture.request.context,
+        method: capiFixture.request.method,
+        body: capiFixture.request.body,
+      }),
+    ).rejects.toMatchObject({
+      code: "traffic-policy-route-mismatch",
+      message: "CAPI redirects must preserve HTTPS",
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
   it("captures config and dispatcher implementations when the binding is prepared", async () => {
     const dispatch = vi.fn<
       CapiHostedBindingImplementationsV1["dispatcher"]["dispatcher"]["dispatch"]

@@ -268,6 +268,82 @@ describe("host provider one-hop dispatcher", () => {
     expect(new Set(responseCredits)).toEqual(new Set([4]));
   });
 
+  it.each([204, 205, 304])(
+    "returns status %i without constructing a response body",
+    async (status) => {
+      const fake = fakeRegistry({
+        responseFrames: (operation) => [
+          withBase(operation, { type: "dispatch-started" }),
+          withBase(operation, {
+            type: "response-open",
+            status,
+            statusText: "No Body",
+            headers: {},
+          }),
+          withBase(operation, { type: "half-close", stream: "response" }),
+          withBase(operation, {
+            type: "terminal",
+            outcome: "completed",
+            certainty: "completed",
+          }),
+        ],
+      });
+      const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+        registry: fake.registry,
+        bindingId: "lobster/egress",
+        routeProfile: "lobster/managed",
+      });
+
+      const response = await dispatcher.dispatch({
+        url: "https://capi.example.com/v1/messages",
+        init: { method: "POST", redirect: "manual" },
+        networkGuard: networkGuard(),
+      });
+
+      expect(response.status).toBe(status);
+      expect(response.body).toBeNull();
+      await expect(response.text()).resolves.toBe("");
+    },
+  );
+
+  it("rejects response chunks after a bodyless response status", async () => {
+    const fake = fakeRegistry({
+      responseFrames: (operation) => [
+        withBase(operation, { type: "dispatch-started" }),
+        withBase(operation, {
+          type: "response-open",
+          status: 204,
+          statusText: "No Content",
+          headers: {},
+        }),
+        withBase(operation, {
+          type: "chunk",
+          stream: "response",
+          sequence: 0,
+          payloadBase64: Buffer.from("unexpected").toString("base64"),
+        }),
+      ],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "lobster/egress",
+      routeProfile: "lobster/managed",
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        url: "https://capi.example.com/v1/messages",
+        init: { method: "POST", redirect: "manual" },
+        networkGuard: networkGuard(),
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<HostProviderDispatchError>>({
+        failureCode: "protocol-violation",
+        certainty: "response-started",
+      }),
+    );
+  });
+
   it("preserves dispatch certainty when the host fails before response headers", async () => {
     const fake = fakeRegistry({
       responseFrames: (operation) => [

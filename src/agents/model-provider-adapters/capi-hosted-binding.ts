@@ -377,6 +377,12 @@ export function prepareCapiHostedBindingV1(params: {
         );
       }
       const validateUrl = (url: URL) => {
+        if (url.protocol !== "https:") {
+          throw new CapiHostedBindingError(
+            "traffic-policy-route-mismatch",
+            "CAPI redirects must preserve HTTPS",
+          );
+        }
         const redirected = allowDecision({
           policy: trafficPolicy,
           provider: providerId,

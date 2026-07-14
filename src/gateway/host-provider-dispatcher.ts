@@ -251,6 +251,7 @@ function runOperation(params: {
     let responseBody: ReadableStreamDefaultController<Uint8Array> | undefined;
     let responseOpened = false;
     let responseClosed = false;
+    let pendingBodylessResponse: Response | undefined;
     let responseSequence = 0;
     let responseBytes = 0;
     let responseCreditOutstanding = 0;
@@ -315,6 +316,9 @@ function runOperation(params: {
           if (!responseOpened || !responseClosed) {
             throw dispatchFailure("protocol-violation", terminal.terminal.certainty);
           }
+          if (pendingBodylessResponse) {
+            params.resolveResponse(pendingBodylessResponse);
+          }
           responseBody?.close();
           return;
         }
@@ -328,36 +332,47 @@ function runOperation(params: {
             throw dispatchFailure("protocol-violation", "response-started");
           }
           responseOpened = true;
-          params.resolveResponse(
-            new Response(
-              new ReadableStream<Uint8Array>({
-                start(controller) {
-                  responseBody = controller;
-                },
-                pull() {
-                  responseCreditRequested = true;
-                  sendResponseCredit();
-                },
-                async cancel(reason) {
-                  await requestBody.cancel(reason);
-                  params.operation.send(
-                    operationFrame(params.operation, {
-                      type: "cancel",
-                      reason: typeof reason === "string" && reason ? reason : "response cancelled",
-                    }),
-                  );
-                },
-              }),
-              {
-                status: frame.status,
-                statusText: frame.statusText,
-                headers: frame.headers,
-              },
-            ),
+          const bodyForbidden =
+            frame.status === 204 || frame.status === 205 || frame.status === 304;
+          const response = new Response(
+            bodyForbidden
+              ? null
+              : new ReadableStream<Uint8Array>({
+                  start(controller) {
+                    responseBody = controller;
+                  },
+                  pull() {
+                    responseCreditRequested = true;
+                    sendResponseCredit();
+                  },
+                  async cancel(reason) {
+                    await requestBody.cancel(reason);
+                    params.operation.send(
+                      operationFrame(params.operation, {
+                        type: "cancel",
+                        reason:
+                          typeof reason === "string" && reason ? reason : "response cancelled",
+                      }),
+                    );
+                  },
+                }),
+            {
+              status: frame.status,
+              statusText: frame.statusText,
+              headers: frame.headers,
+            },
           );
+          if (bodyForbidden) {
+            pendingBodylessResponse = response;
+          } else {
+            params.resolveResponse(response);
+          }
           continue;
         }
         if (frame.type === "chunk" && frame.stream === "response") {
+          if (pendingBodylessResponse) {
+            throw dispatchFailure("protocol-violation", "response-started");
+          }
           if (!responseOpened || responseClosed || frame.sequence !== responseSequence) {
             throw dispatchFailure("protocol-violation", "response-started");
           }
