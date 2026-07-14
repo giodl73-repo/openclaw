@@ -38,6 +38,17 @@ export type SkillInvocationPolicy = {
   disableModelInvocation: boolean;
 };
 
+export type SkillOrchestrationDeclarationV1 = {
+  schemaVersion: 1;
+  receipts?: {
+    emits?: string[];
+  };
+  invokes?: string[];
+  execution?: {
+    isolation?: "shared" | "preferred" | "required";
+  };
+};
+
 type SkillCommandDispatchSpec = {
   kind: "tool";
   /** Name of the tool to invoke (AnyAgentTool.name). */
@@ -50,6 +61,16 @@ type SkillCommandDispatchSpec = {
 };
 
 export type SkillTelemetrySource = "bundled" | "unknown" | "workspace";
+
+/** Trusted identity for one explicit, user-requested skill invocation. */
+export type ExplicitSkillInvocation = {
+  invocationId: string;
+  commandName: string;
+  skillName: string;
+  skillSource?: SkillTelemetrySource;
+  skillDigest?: string;
+  orchestration?: SkillOrchestrationDeclarationV1;
+};
 
 export type SkillUsagePath = {
   /** Path visible to the tool runtime when it reads SKILL.md. */
@@ -68,6 +89,10 @@ export type SkillCommandSpec = {
   description: string;
   /** Bounded source label used for diagnostics. */
   skillSource?: SkillTelemetrySource;
+  /** Exact SHA-256 identity of the loaded SKILL.md content. */
+  skillDigest?: string;
+  /** Portable declaration consumed by managed OpenClaw invocation. */
+  orchestration?: SkillOrchestrationDeclarationV1;
   /** Localized descriptions for native command surfaces that support them. */
   descriptionLocalizations?: Record<string, string>;
   /** Optional deterministic dispatch behavior for this command. */

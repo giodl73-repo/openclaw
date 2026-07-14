@@ -17,6 +17,7 @@ import {
   listReservedChatSlashCommandNames,
   resolveSkillCommandInvocation,
 } from "../../skills/discovery/chat-commands.js";
+import { createExplicitSkillInvocation } from "../../skills/invocation.js";
 import type { SkillCommandSpec } from "../../skills/types.js";
 import { markCommandReplyForDelivery } from "../reply-payload.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
@@ -449,10 +450,19 @@ export async function handleInlineActions(params: {
         ]
           .filter((entry): entry is string => Boolean(entry))
           .join("\n\n");
+    const explicitSkillInvocation = createExplicitSkillInvocation({
+      commandName: skillInvocation.command.name,
+      skillName: skillInvocation.command.skillName,
+      skillSource: skillInvocation.command.skillSource,
+      skillDigest: skillInvocation.command.skillDigest,
+      orchestration: skillInvocation.command.orchestration,
+    });
     ctx.Body = rewrittenBody;
     ctx.BodyForAgent = rewrittenBody;
+    ctx.ExplicitSkillInvocation = explicitSkillInvocation;
     sessionCtx.Body = rewrittenBody;
     sessionCtx.BodyForAgent = rewrittenBody;
+    sessionCtx.ExplicitSkillInvocation = explicitSkillInvocation;
     sessionCtx.BodyStripped = rewrittenBody;
     cleanedBody = rewrittenBody;
   }

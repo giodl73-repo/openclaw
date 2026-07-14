@@ -11,7 +11,7 @@ import { addIgnoreRules, toPosixPath, type IgnoreMatcher } from "../../shared/ig
 import { expandTildePath } from "../../shared/tilde-path.js";
 import { getArchivedSkillFiles } from "../workshop/curator.js";
 import { formatSkillsForPrompt as formatSkillContractForPrompt } from "./skill-contract.js";
-import { computeSkillPromptVersion } from "./skill-version.js";
+import { computeSkillContentDigest, computeSkillPromptVersion } from "./skill-version.js";
 
 /** Max name length per spec */
 const MAX_NAME_LENGTH = 64;
@@ -32,6 +32,7 @@ export interface Skill {
   filePath: string;
   baseDir: string;
   promptVersion?: string;
+  contentDigest?: string;
   source: string;
   sourceInfo: SourceInfo;
   disableModelInvocation: boolean;
@@ -273,6 +274,7 @@ function loadSkillFromFile(
         filePath,
         baseDir: skillDir,
         promptVersion: computeSkillPromptVersion(rawContent),
+        contentDigest: computeSkillContentDigest(rawContent),
         source,
         sourceInfo: createSkillSourceInfo(filePath, skillDir, source),
         disableModelInvocation: frontmatter["disable-model-invocation"] === true,
