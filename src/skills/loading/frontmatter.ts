@@ -1,5 +1,7 @@
 // Frontmatter helpers parse skill metadata from SKILL.md files.
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
+import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
+import JSON5 from "json5";
 import { parseFrontmatterBlock } from "../../../packages/markdown-core/src/frontmatter.js";
 import { validateRegistryNpmSpec } from "../../infra/npm-registry-spec.js";
 import {
@@ -19,6 +21,7 @@ import type {
   SkillEntry,
   SkillInstallSpec,
   SkillInvocationPolicy,
+  SkillOrchestrationDeclarationV1,
 } from "../types.js";
 import type { Skill } from "./skill-contract.js";
 
@@ -216,6 +219,67 @@ export function resolveSkillInvocationPolicy(
       getFrontmatterString(frontmatter, "disable-model-invocation"),
       false,
     ),
+  };
+}
+
+function parseMetadataMap(
+  frontmatter: ParsedSkillFrontmatter,
+): Record<string, unknown> | undefined {
+  const raw = getFrontmatterString(frontmatter, "metadata");
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON5.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Parses the portable, string-valued Agent Skills orchestration extension. */
+export function resolveSkillOrchestrationDeclaration(
+  frontmatter: ParsedSkillFrontmatter,
+): SkillOrchestrationDeclarationV1 | undefined {
+  const extension = parseMetadataMap(frontmatter)?.["openclaw.orchestration"];
+  if (typeof extension !== "string") {
+    return undefined;
+  }
+  let raw: unknown;
+  try {
+    raw = JSON5.parse(extension);
+  } catch {
+    return undefined;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const value = raw as Record<string, unknown>;
+  if (value.schemaVersion !== 1) {
+    return undefined;
+  }
+  const receiptsRaw =
+    value.receipts && typeof value.receipts === "object" && !Array.isArray(value.receipts)
+      ? (value.receipts as Record<string, unknown>)
+      : undefined;
+  const emits = normalizeTrimmedStringList(receiptsRaw?.emits);
+  const invokes = normalizeTrimmedStringList(value.invokes);
+  const executionRaw =
+    value.execution && typeof value.execution === "object" && !Array.isArray(value.execution)
+      ? (value.execution as Record<string, unknown>)
+      : undefined;
+  const isolation = executionRaw?.isolation;
+  const normalizedIsolation =
+    isolation === "shared" || isolation === "preferred" || isolation === "required"
+      ? isolation
+      : undefined;
+  return {
+    schemaVersion: 1,
+    ...(emits.length > 0 ? { receipts: { emits } } : {}),
+    ...(invokes.length > 0 ? { invokes } : {}),
+    ...(normalizedIsolation ? { execution: { isolation: normalizedIsolation } } : {}),
   };
 }
 

@@ -2414,6 +2414,7 @@ async function runAgentTurnWithFallbackInternal(
                     sandboxSessionKey: params.runtimePolicySessionKey,
                     prompt: params.commandBody,
                     transcriptPrompt: params.transcriptCommandBody,
+                    explicitSkillInvocation: params.sessionCtx.ExplicitSkillInvocation,
                     userTurnTranscriptRecorder,
                     currentInboundEventKind: params.followupRun.currentInboundEventKind,
                     currentInboundContext: params.followupRun.currentInboundContext,

@@ -20,6 +20,10 @@ import { readRegularFileSync } from "../infra/regular-file.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
+  summarizeTrajectoryAuditRuns,
+  type TrajectoryAuditRunSummary,
+} from "../trajectory/audit-run.js";
+import {
   resolveTrajectoryFilePath,
   TRAJECTORY_RUNTIME_FILE_MAX_BYTES,
 } from "../trajectory/paths.js";
@@ -34,6 +38,7 @@ type SessionsTailOptions = {
   store?: string;
   agent?: string;
   allAgents?: boolean;
+  auditRuns?: boolean;
   sessionKey?: string;
   follow?: boolean;
   json?: boolean;
@@ -367,6 +372,32 @@ function renderEvents(
   return cursor;
 }
 
+function formatAuditRunSummary(summary: TrajectoryAuditRunSummary): string {
+  const receiptTypes = summary.receipts
+    .map((receipt) => toOptionalString(receipt.type))
+    .filter((type): type is string => Boolean(type));
+  const skillNames = summary.skills.map((skill) => skill.skillName);
+  const parts = [
+    `run=${summary.runId}`,
+    summary.status ? `status=${summary.status}` : undefined,
+    summary.usage?.total !== undefined ? `tokens=${summary.usage.total}` : undefined,
+    receiptTypes.length > 0 ? `receipts=${receiptTypes.join(",")}` : undefined,
+    skillNames.length > 0 ? `skills=${skillNames.join(",")}` : undefined,
+  ];
+  return parts.filter((part): part is string => Boolean(part)).join(" ");
+}
+
+function renderAuditRuns(
+  events: TrajectoryEvent[],
+  runtime: RuntimeEnv,
+  options: { json?: boolean; receiptType?: string; tailCount: number },
+): void {
+  const summaries = summarizeTrajectoryAuditRuns(events, options.receiptType);
+  for (const summary of options.tailCount > 0 ? summaries.slice(-options.tailCount) : []) {
+    runtime.log(options.json ? JSON.stringify(summary) : formatAuditRunSummary(summary));
+  }
+}
+
 function fileStateFromStat(stat: fs.Stats): FollowFileState {
   return {
     dev: stat.dev,
@@ -661,8 +692,19 @@ export async function sessionsTailCommand(
     runtime.exit(1);
     return;
   }
+  if (opts.auditRuns && opts.follow) {
+    runtime.error("--audit-runs does not support --follow; rerun the snapshot command as needed.");
+    runtime.exit(1);
+    return;
+  }
 
   const renderOptions: TailRenderOptions = { json: opts.json };
+  const receiptType = opts.receiptType?.trim();
+  if (opts.auditRuns && opts.receiptType !== undefined && !receiptType) {
+    runtime.error("--receipt-type must be a non-empty business type.");
+    runtime.exit(1);
+    return;
+  }
 
   const cfg = getRuntimeConfig();
   const targets = resolveSessionStoreTargetsOrExit({
@@ -678,7 +720,10 @@ export async function sessionsTailCommand(
     return;
   }
 
-  if (handleSessionsTailReceiptQuery({ cfg, targets, options: opts, tailCount, runtime })) {
+  if (
+    !opts.auditRuns &&
+    handleSessionsTailReceiptQuery({ cfg, targets, options: opts, tailCount, runtime })
+  ) {
     return;
   }
 
@@ -710,6 +755,14 @@ export async function sessionsTailCommand(
   for (const selection of selected) {
     const snapshot = readTailSnapshot(selection);
     followSnapshots.set(selection, snapshot);
+    if (opts.auditRuns) {
+      renderAuditRuns(snapshot.events, runtime, {
+        json: opts.json,
+        receiptType,
+        tailCount,
+      });
+      continue;
+    }
     renderEvents(tailCount > 0 ? snapshot.events.slice(-tailCount) : [], runtime, renderOptions);
   }
 

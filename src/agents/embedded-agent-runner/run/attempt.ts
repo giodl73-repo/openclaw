@@ -881,6 +881,13 @@ export async function runEmbeddedAttempt(
         toolCount: effectiveTools.length,
         clientToolCount: clientToolDefs.length,
       });
+      if (params.explicitSkillInvocation) {
+        trajectoryRecorder?.recordEvent("skill.invocation.started", {
+          ...params.explicitSkillInvocation,
+          activation: "command",
+          caller: "inbound",
+        });
+      }
       const trajectoryFastMode = typeof params.fastMode === "boolean" ? params.fastMode : undefined;
       trajectoryRecorder?.recordEvent(
         "trace.metadata",

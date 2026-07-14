@@ -20,7 +20,7 @@ import type { PluginHookChannelContext } from "../../../plugins/hook-types.js";
 import type { CommandQueueEnqueueFn } from "../../../process/command-queue.types.js";
 import type { InputProvenance } from "../../../sessions/input-provenance.js";
 import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.types.js";
-import type { SkillSnapshot } from "../../../skills/types.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../../../skills/types.js";
 import type {
   SkillProposalOrigin,
   SkillWorkshopProposalMutationBudget,
@@ -176,6 +176,8 @@ export type RunEmbeddedAgentParams = {
    */
   config?: OpenClawConfig;
   skillsSnapshot?: SkillSnapshot;
+  /** Explicit user skill command associated with this run, when present. */
+  explicitSkillInvocation?: ExplicitSkillInvocation;
   prompt: string;
   /** User-visible prompt body to submit and persist; runtime context travels separately. */
   transcriptPrompt?: string;
