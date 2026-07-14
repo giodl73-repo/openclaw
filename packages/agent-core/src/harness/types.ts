@@ -10,6 +10,7 @@ import type {
 } from "../../../llm-core/src/index.js";
 import type { AgentEvent, AgentMessage, AgentTool, QueueMode, ThinkingLevel } from "../index.js";
 import type { AgentCoreCompletionRuntimeDeps, AgentCoreRuntimeDeps } from "../runtime-deps.js";
+import type { AgentToolAuditRecord } from "../types.js";
 import type { Session } from "./session/session.js";
 
 export { err, ok } from "@openclaw/normalization-core/result";
@@ -562,6 +563,7 @@ export interface ToolResultEvent {
   input: Record<string, unknown>;
   content: Array<TextContent | ImageContent>;
   details: unknown;
+  audit?: AgentToolAuditRecord[];
   isError: boolean;
 }
 
@@ -677,6 +679,7 @@ export interface ToolResultPatch {
   content?: Array<TextContent | ImageContent>;
   details?: unknown;
   isError?: boolean;
+  audit?: AgentToolAuditRecord[];
   terminate?: boolean;
 }
 

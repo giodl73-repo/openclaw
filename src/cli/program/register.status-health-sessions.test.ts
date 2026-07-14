@@ -424,6 +424,9 @@ describe("registerStatusHealthSessionsCommands", () => {
       "agent:main:telegram:direct:owner",
       "--tail",
       "5",
+      "--receipt-type",
+      "payment.authorized",
+      "--json",
       "--follow",
     ]);
 
@@ -433,6 +436,8 @@ describe("registerStatusHealthSessionsCommands", () => {
       agent: "work",
       allAgents: false,
       follow: true,
+      json: true,
+      receiptType: "payment.authorized",
       tail: "5",
     });
   });

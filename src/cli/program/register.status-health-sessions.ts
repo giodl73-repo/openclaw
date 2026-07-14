@@ -293,6 +293,8 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     .description("Tail human-readable session trajectory progress")
     .option("--session-key <key>", "Session key to tail (default: active sessions or latest)")
     .option("--tail <count>", "Number of existing trajectory events to show", "80")
+    .option("--receipt-type <type>", "Only show audit receipts of this business type")
+    .option("--json", "Output matching trajectory events as JSONL", false)
     .option("--follow", "Continue following for new trajectory events", false)
     .option("--store <path>", "Path to session store (default: resolved from config)")
     .option("--agent <id>", "Agent id to inspect (default: configured default agent)")
@@ -303,6 +305,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
             store?: string;
             agent?: string;
             allAgents?: boolean;
+            json?: boolean;
           }
         | undefined;
       await runCommandWithRuntime(defaultRuntime, async () => {
@@ -314,6 +317,8 @@ export function registerStatusHealthSessionsCommands(program: Command) {
             agent: (opts.agent as string | undefined) ?? parentOpts?.agent,
             allAgents: Boolean(opts.allAgents || parentOpts?.allAgents),
             follow: Boolean(opts.follow),
+            json: Boolean(opts.json || parentOpts?.json),
+            receiptType: opts.receiptType as string | undefined,
             tail: opts.tail as string | undefined,
           },
           defaultRuntime,
