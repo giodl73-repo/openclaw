@@ -211,8 +211,9 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS",
       // +4: registerMcpServerConnectionResolver context/result/resolver/registration types (#106229).
       // +2: materializeRequesterScopedMcpToolsForHarnessRun (agent-harness-runtime + compat mirror).
-      // +1: matchesNoProxy exposes canonical Undici-compatible bypass selection to plugins.
-      10695,
+    // +1: matchesNoProxy exposes canonical Undici-compatible bypass selection to plugins.
+    // +3: readiness criterion, result, and registration types.
+    10698,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(

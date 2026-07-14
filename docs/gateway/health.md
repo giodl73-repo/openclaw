@@ -48,6 +48,28 @@ health commands above for live connectivity checks.
 
 External uptime monitoring services should use the dedicated `/health` endpoint, not `/v1/chat/completions`.
 
+## Selected readiness criteria
+
+An operator can add registered criteria to the Gateway's lifecycle readiness
+conditions without selecting a hosting profile:
+
+```json5
+{
+  gateway: {
+    readiness: {
+      requiredCriteria: ["openclaw.workspace-writable", "plugin.storage.backend"],
+      advisoryCriteria: ["plugin.metrics.exporter"],
+    },
+  },
+}
+```
+
+A plugin criterion is advisory when registered. Listing it in
+`requiredCriteria` makes `False`, `Unknown`, timeout, plugin absence, and
+registration absence block `/ready` and `/readyz`. Listing it in
+`advisoryCriteria` includes failures in diagnostics without blocking readiness.
+A criterion cannot appear in both lists.
+
 - **DO use:** `GET /health` - instant response, no session created, no LLM call, returns `{"ok":true,"status":"live"}`
 - **DON'T use:** `/v1/chat/completions` for health checks - each request creates a full agent session with skill snapshot, context assembly, and LLM calls
 
