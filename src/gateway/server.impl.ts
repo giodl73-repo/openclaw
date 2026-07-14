@@ -39,6 +39,11 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isSecretRef } from "../config/types.secrets.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
 import {
+  buildHostingProfileConditions,
+  requiredCriteriaForHostingProfile,
+  resolveHostingProfile,
+} from "../hosting/profiles.js";
+import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
 } from "../infra/diagnostic-events.js";
@@ -1138,16 +1143,27 @@ export async function startGatewayServer(
   const resolveSelectedReadiness = createSelectedReadinessResolver();
   const evaluateRuntimeReadiness = async () => {
     const config = getRuntimeConfig();
+    const profile = resolveHostingProfile({ config, env: process.env });
+    const auth = getResolvedAuth();
+    const profileConditions = buildHostingProfileConditions(profile, {
+      bind: opts.bind ?? config.gateway?.bind ?? "loopback",
+      bindHost,
+      port,
+      authMode: auth.mode,
+      trustedProxyUserHeader: auth.trustedProxy?.userHeader,
+      trustedProxyCount: config.gateway?.trustedProxies?.length ?? 0,
+    });
     const additionalConditions = await resolveSelectedReadiness({
       config,
       registry: pluginRegistry,
       env: process.env,
+      additionalRequiredCriteria: requiredCriteriaForHostingProfile(profile),
     });
     return buildRuntimeReadiness({
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRegistry),
-      additionalConditions,
+      additionalConditions: [...profileConditions, ...additionalConditions],
     });
   };
   const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
