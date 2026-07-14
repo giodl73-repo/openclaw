@@ -1065,6 +1065,7 @@ async function finalizeExecutedToolCall(
         result = {
           content: afterResult.content ?? result.content,
           details: afterResult.details ?? result.details,
+          audit: afterResult.audit ?? result.audit,
           terminate: afterResult.terminate ?? result.terminate,
         };
         isError = afterResult.isError ?? isError;

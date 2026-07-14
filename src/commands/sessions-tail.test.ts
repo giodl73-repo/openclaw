@@ -210,6 +210,66 @@ describe("sessionsTailCommand", () => {
     expect(output).toContain("tool.result");
   });
 
+  it("filters receipts by business type and emits their sanitized data as JSONL", async () => {
+    const runtime = makeRuntime();
+    await writeSessionEntry();
+    await appendEvents([
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:18.000Z",
+        data: {
+          type: "inventory.sent",
+          subject: { type: "shipment", id: "ship-1" },
+        },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:21.000Z",
+        data: {
+          type: "payment.authorized",
+          subject: { type: "invoice", id: "inv-123" },
+          data: { authorizationCode: "auth-456" },
+        },
+      }),
+      makeEvent({
+        type: "tool.result",
+        ts: "2026-05-18T12:04:22.000Z",
+        data: { name: "payments.authorize", success: true },
+      }),
+    ]);
+
+    await sessionsTailCommand(
+      {
+        store: storePath,
+        sessionKey,
+        receiptType: "payment.authorized",
+        json: true,
+        tail: "1",
+      },
+      runtime,
+    );
+
+    expect(runtime.log).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(String(vi.mocked(runtime.log).mock.calls[0]?.[0]));
+    expect(output.data).toEqual({
+      type: "payment.authorized",
+      subject: { type: "invoice", id: "inv-123" },
+      data: { authorizationCode: "auth-456" },
+    });
+  });
+
+  it("does not expose general trajectory data through JSON output", async () => {
+    const runtime = makeRuntime();
+
+    await sessionsTailCommand({ store: storePath, sessionKey, json: true }, runtime);
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      "--json requires --receipt-type so only sanitized audit receipts are emitted.",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(runtime.log).not.toHaveBeenCalled();
+  });
+
   it("rejects tail counts that exceed JavaScript safe integer precision", async () => {
     const runtime = makeRuntime();
 
