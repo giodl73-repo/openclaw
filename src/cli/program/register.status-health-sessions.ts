@@ -294,6 +294,9 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     .option("--session-key <key>", "Session key to tail (default: active sessions or latest)")
     .option("--tail <count>", "Number of existing trajectory events to show", "80")
     .option("--receipt-type <type>", "Only show audit receipts of this business type")
+    .option("--regarding-system <system>", "Only show receipts for this external system")
+    .option("--regarding-type <type>", "Only show receipts for this external record type")
+    .option("--regarding-id <id>", "Only show receipts for this external record id")
     .option("--json", "Output matching trajectory events as JSONL", false)
     .option("--follow", "Continue following for new trajectory events", false)
     .option("--store <path>", "Path to session store (default: resolved from config)")
@@ -319,6 +322,9 @@ export function registerStatusHealthSessionsCommands(program: Command) {
             follow: Boolean(opts.follow),
             json: Boolean(opts.json || parentOpts?.json),
             receiptType: opts.receiptType as string | undefined,
+            regardingSystem: opts.regardingSystem as string | undefined,
+            regardingType: opts.regardingType as string | undefined,
+            regardingId: opts.regardingId as string | undefined,
             tail: opts.tail as string | undefined,
           },
           defaultRuntime,

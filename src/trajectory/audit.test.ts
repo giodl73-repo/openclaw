@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectToolAuditReceipts,
   isTrajectoryAuditReceipt,
+  matchesTrajectoryAuditReceipt,
   snapshotAuditReceiptRegarding,
 } from "./audit.js";
 import type { TrajectoryEvent } from "./types.js";
@@ -88,6 +89,7 @@ describe("isTrajectoryAuditReceipt", () => {
     data: {
       type: "payment.authorized",
       data: { authorizationCode: "auth-456" },
+      regarding: { system: "dynamics", type: "case", id: "case-42", reference: "CAS-42" },
     },
   };
 
@@ -98,6 +100,25 @@ describe("isTrajectoryAuditReceipt", () => {
   it("filters receipts by exact business type", () => {
     expect(isTrajectoryAuditReceipt(receiptEvent, "payment.authorized")).toBe(true);
     expect(isTrajectoryAuditReceipt(receiptEvent, "inventory.sent")).toBe(false);
+  });
+
+  it("filters receipts by exact snapshotted regarding identity", () => {
+    expect(
+      matchesTrajectoryAuditReceipt(receiptEvent, {
+        regarding: { system: "dynamics", type: "case", id: "case-42" },
+      }),
+    ).toBe(true);
+    expect(
+      matchesTrajectoryAuditReceipt(receiptEvent, {
+        regarding: { type: "invoice" },
+      }),
+    ).toBe(false);
+    expect(
+      matchesTrajectoryAuditReceipt(receiptEvent, {
+        type: "inventory.sent",
+        regarding: { id: "case-42" },
+      }),
+    ).toBe(false);
   });
 
   it("rejects non-receipt and untyped events", () => {

@@ -19,7 +19,10 @@ import { parseStrictNonNegativeInteger } from "../infra/parse-finite-number.js";
 import { readRegularFileSync } from "../infra/regular-file.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { isTrajectoryAuditReceipt } from "../trajectory/audit.js";
+import {
+  matchesTrajectoryAuditReceipt,
+  type TrajectoryAuditReceiptFilter,
+} from "../trajectory/audit.js";
 import {
   resolveTrajectoryFilePath,
   TRAJECTORY_RUNTIME_FILE_MAX_BYTES,
@@ -38,6 +41,9 @@ type SessionsTailOptions = {
   follow?: boolean;
   json?: boolean;
   receiptType?: string;
+  regardingId?: string;
+  regardingSystem?: string;
+  regardingType?: string;
   tail?: string | number;
 };
 
@@ -351,7 +357,10 @@ function readTailSnapshot(selection: TailSelection): TrajectorySnapshot {
     : readTrajectorySnapshot(selection.source.path);
 }
 
-type TailRenderOptions = Pick<SessionsTailOptions, "json" | "receiptType">;
+type TailRenderOptions = {
+  json?: boolean;
+  receiptFilter?: TrajectoryAuditReceiptFilter;
+};
 
 function renderEvents(
   events: TrajectoryEvent[],
@@ -361,7 +370,7 @@ function renderEvents(
   let cursor: TrajectoryCursor | null = null;
   for (const event of events) {
     cursor = maxCursor(cursor, event);
-    if (options.receiptType && !isTrajectoryAuditReceipt(event, options.receiptType)) {
+    if (options.receiptFilter && !matchesTrajectoryAuditReceipt(event, options.receiptFilter)) {
       continue;
     }
     runtime.log(options.json ? JSON.stringify(event) : formatProgressLine(event));
@@ -670,12 +679,45 @@ export async function sessionsTailCommand(
     runtime.exit(1);
     return;
   }
-  if (opts.json && !receiptType) {
-    runtime.error("--json requires --receipt-type so only sanitized audit receipts are emitted.");
+  const regardingSystem = opts.regardingSystem?.trim();
+  const regardingType = opts.regardingType?.trim();
+  const regardingId = opts.regardingId?.trim();
+  const regardingInputs = [
+    ["--regarding-system", opts.regardingSystem, regardingSystem],
+    ["--regarding-type", opts.regardingType, regardingType],
+    ["--regarding-id", opts.regardingId, regardingId],
+  ] as const;
+  for (const [name, input, normalized] of regardingInputs) {
+    if (input !== undefined && !normalized) {
+      runtime.error(`${name} must be a non-empty value.`);
+      runtime.exit(1);
+      return;
+    }
+  }
+  const hasRegardingFilter = Boolean(regardingSystem || regardingType || regardingId);
+  if (opts.json && !receiptType && !hasRegardingFilter) {
+    runtime.error(
+      "--json requires --receipt-type or a --regarding-* filter so only sanitized audit receipts are emitted.",
+    );
     runtime.exit(1);
     return;
   }
-  const renderOptions: TailRenderOptions = { json: opts.json, receiptType };
+  const receiptFilter: TrajectoryAuditReceiptFilter | undefined =
+    receiptType || hasRegardingFilter
+      ? {
+          ...(receiptType ? { type: receiptType } : {}),
+          ...(hasRegardingFilter
+            ? {
+                regarding: {
+                  ...(regardingSystem ? { system: regardingSystem } : {}),
+                  ...(regardingType ? { type: regardingType } : {}),
+                  ...(regardingId ? { id: regardingId } : {}),
+                },
+              }
+            : {}),
+        }
+      : undefined;
+  const renderOptions: TailRenderOptions = { json: opts.json, receiptFilter };
 
   const cfg = getRuntimeConfig();
   const targets = resolveSessionStoreTargetsOrExit({
@@ -719,8 +761,8 @@ export async function sessionsTailCommand(
   for (const selection of selected) {
     const snapshot = readTailSnapshot(selection);
     followSnapshots.set(selection, snapshot);
-    const outputEvents = receiptType
-      ? snapshot.events.filter((event) => isTrajectoryAuditReceipt(event, receiptType))
+    const outputEvents = receiptFilter
+      ? snapshot.events.filter((event) => matchesTrajectoryAuditReceipt(event, receiptFilter))
       : snapshot.events;
     renderEvents(tailCount > 0 ? outputEvents.slice(-tailCount) : [], runtime, renderOptions);
   }

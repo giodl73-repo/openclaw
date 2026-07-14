@@ -258,13 +258,69 @@ describe("sessionsTailCommand", () => {
     });
   });
 
+  it("filters receipts by snapshotted regarding identity before applying the tail limit", async () => {
+    const runtime = makeRuntime();
+    await writeSessionEntry();
+    await appendEvents([
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:18.000Z",
+        data: {
+          type: "inventory.sent",
+          regarding: { system: "dynamics", type: "case", id: "case-42" },
+        },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:20.000Z",
+        data: {
+          type: "payment.authorized",
+          regarding: { system: "dynamics", type: "case", id: "case-99" },
+        },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:21.000Z",
+        data: {
+          type: "invoice.paid",
+          regarding: {
+            system: "dynamics",
+            type: "case",
+            id: "case-42",
+            reference: "CAS-42",
+          },
+        },
+      }),
+    ]);
+
+    await sessionsTailCommand(
+      {
+        store: storePath,
+        sessionKey,
+        regardingSystem: "dynamics",
+        regardingType: "case",
+        regardingId: "case-42",
+        json: true,
+        tail: "1",
+      },
+      runtime,
+    );
+
+    expect(runtime.log).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(String(vi.mocked(runtime.log).mock.calls[0]?.[0]));
+    expect(output.data).toMatchObject({
+      type: "invoice.paid",
+      regarding: { system: "dynamics", type: "case", id: "case-42", reference: "CAS-42" },
+    });
+  });
+
   it("does not expose general trajectory data through JSON output", async () => {
     const runtime = makeRuntime();
 
     await sessionsTailCommand({ store: storePath, sessionKey, json: true }, runtime);
 
     expect(runtime.error).toHaveBeenCalledWith(
-      "--json requires --receipt-type so only sanitized audit receipts are emitted.",
+      "--json requires --receipt-type or a --regarding-* filter so only sanitized audit receipts are emitted.",
     );
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(runtime.log).not.toHaveBeenCalled();

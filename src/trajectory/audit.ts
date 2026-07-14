@@ -19,6 +19,11 @@ export type TrajectoryAuditRegarding = Omit<SessionRegarding, "key"> & {
   reference?: string;
 };
 
+export type TrajectoryAuditReceiptFilter = {
+  type?: string;
+  regarding?: Partial<Pick<TrajectoryAuditRegarding, "system" | "type" | "id">>;
+};
+
 export function snapshotAuditReceiptRegarding(
   receipt: TrajectoryAuditReceipt,
   regarding: SessionRegarding | undefined,
@@ -70,6 +75,14 @@ function normalizeAuditRecord(value: unknown): AgentToolAuditRecord | undefined 
 
 /** Returns whether a trajectory event is a receipt, optionally of an exact business type. */
 export function isTrajectoryAuditReceipt(event: TrajectoryEvent, receiptType?: string): boolean {
+  return matchesTrajectoryAuditReceipt(event, { type: receiptType });
+}
+
+/** Matches a receipt by producer-defined event type and snapshotted business context. */
+export function matchesTrajectoryAuditReceipt(
+  event: TrajectoryEvent,
+  filter: TrajectoryAuditReceiptFilter = {},
+): boolean {
   if (event.type !== "audit.receipt") {
     return false;
   }
@@ -77,8 +90,26 @@ export function isTrajectoryAuditReceipt(event: TrajectoryEvent, receiptType?: s
   if (!eventReceiptType) {
     return false;
   }
-  const expectedType = receiptType?.trim();
-  return !expectedType || eventReceiptType === expectedType;
+  const expectedType = filter.type?.trim();
+  if (expectedType && eventReceiptType !== expectedType) {
+    return false;
+  }
+  const expectedRegarding = filter.regarding;
+  const expectedSystem = expectedRegarding?.system?.trim();
+  const expectedRegardingType = expectedRegarding?.type?.trim();
+  const expectedId = expectedRegarding?.id?.trim();
+  if (!expectedSystem && !expectedRegardingType && !expectedId) {
+    return true;
+  }
+  const regarding = event.data?.regarding;
+  if (!isRecord(regarding)) {
+    return false;
+  }
+  return (
+    (!expectedSystem || regarding.system === expectedSystem) &&
+    (!expectedRegardingType || regarding.type === expectedRegardingType) &&
+    (!expectedId || regarding.id === expectedId)
+  );
 }
 
 /**
