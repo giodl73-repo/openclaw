@@ -522,6 +522,21 @@ describe("mergeReadinessResults", () => {
       "PluginsLoaded",
     ]);
   });
+
+  it("preserves runtime activation identity", () => {
+    const activation = { runtimeId: "tenant-42/scout", incarnationId: "pod-7f9c" };
+    const result = mergeReadinessResults(
+      failingSnapshot([]),
+      buildRuntimeReadiness({
+        configLoaded: true,
+        gateway: "responding",
+        plugins: { errors: [] },
+        activation,
+      }),
+    );
+
+    expect(result.activation).toEqual(activation);
+  });
 });
 
 describe("withReadinessEvaluationTimeout", () => {
