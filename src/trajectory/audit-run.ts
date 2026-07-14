@@ -12,6 +12,7 @@ const USAGE_FIELDS = [
 ] as const;
 
 type AuditRunUsageField = (typeof USAGE_FIELDS)[number];
+type AuditRunUsage = Partial<Record<AuditRunUsageField, number>>;
 
 export type TrajectoryAuditRunSummary = {
   auditSchema: "openclaw-audit-run";
@@ -23,7 +24,7 @@ export type TrajectoryAuditRunSummary = {
   lastEventAt: string;
   status?: string;
   models: Array<{ provider?: string; modelId?: string }>;
-  usage?: Partial<Record<AuditRunUsageField, number>>;
+  usage?: AuditRunUsage;
   skillInvocations: Array<{
     invocationId: string;
     parentInvocationId?: string;
@@ -43,6 +44,20 @@ export type TrajectoryAuditRunSummary = {
     toolCallId?: string;
   }>;
   receipts: Array<Record<string, unknown>>;
+};
+
+export type TrajectoryAuditOrchestrationSummary = {
+  auditSchema: "openclaw-audit-orchestration";
+  schemaVersion: 1;
+  accountingScope: "observed-runs";
+  rootRunId: string;
+  usage?: AuditRunUsage;
+  runs: Array<{
+    runId: string;
+    sessionId: string;
+    parentRunId?: string;
+    usage?: AuditRunUsage;
+  }>;
 };
 
 function readSkillInvocations(
@@ -220,4 +235,73 @@ export function summarizeTrajectoryAuditRuns(
       },
     ];
   });
+}
+
+function readParentRunId(summary: TrajectoryAuditRunSummary): string | undefined {
+  return summary.skillInvocations.find((invocation) => invocation.parentRunId)?.parentRunId;
+}
+
+function sumUsage(summaries: TrajectoryAuditRunSummary[]): AuditRunUsage | undefined {
+  const totals: AuditRunUsage = {};
+  for (const summary of summaries) {
+    for (const field of USAGE_FIELDS) {
+      const value = summary.usage?.[field];
+      if (value !== undefined) {
+        totals[field] = (totals[field] ?? 0) + value;
+      }
+    }
+  }
+  return Object.keys(totals).length > 0 ? totals : undefined;
+}
+
+/** Groups linked parent/child runs and sums each observed run once. */
+export function summarizeTrajectoryAuditOrchestrations(
+  summaries: TrajectoryAuditRunSummary[],
+): TrajectoryAuditOrchestrationSummary[] {
+  const summariesByRunId = new Map(summaries.map((summary) => [summary.runId, summary]));
+  const childrenByRunId = new Map<string, TrajectoryAuditRunSummary[]>();
+  for (const summary of summaries) {
+    const parentRunId = readParentRunId(summary);
+    if (!parentRunId || !summariesByRunId.has(parentRunId)) {
+      continue;
+    }
+    const children = childrenByRunId.get(parentRunId) ?? [];
+    children.push(summary);
+    childrenByRunId.set(parentRunId, children);
+  }
+
+  return summaries
+    .filter((summary) => !readParentRunId(summary) && childrenByRunId.has(summary.runId))
+    .map((root) => {
+      const members = [root];
+      for (const member of members) {
+        members.push(...(childrenByRunId.get(member.runId) ?? []));
+      }
+
+      const usage = sumUsage(members);
+      const result: TrajectoryAuditOrchestrationSummary = {
+        auditSchema: "openclaw-audit-orchestration" as const,
+        schemaVersion: 1 as const,
+        accountingScope: "observed-runs" as const,
+        rootRunId: root.runId,
+        runs: members.map((member) => {
+          const parentRunId = readParentRunId(member);
+          const run: TrajectoryAuditOrchestrationSummary["runs"][number] = {
+            runId: member.runId,
+            sessionId: member.sessionId,
+          };
+          if (parentRunId) {
+            run.parentRunId = parentRunId;
+          }
+          if (member.usage) {
+            run.usage = member.usage;
+          }
+          return run;
+        }),
+      };
+      if (usage) {
+        result.usage = usage;
+      }
+      return result;
+    });
 }

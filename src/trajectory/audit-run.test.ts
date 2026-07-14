@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { summarizeTrajectoryAuditRuns } from "./audit-run.js";
+import {
+  summarizeTrajectoryAuditOrchestrations,
+  summarizeTrajectoryAuditRuns,
+} from "./audit-run.js";
 import type { TrajectoryEvent } from "./types.js";
 
 function event(params: {
   type: string;
   seq: number;
   runId?: string;
+  sessionId?: string;
   data?: Record<string, unknown>;
   provider?: string;
   modelId?: string;
@@ -18,7 +22,7 @@ function event(params: {
     type: params.type,
     ts: `2026-07-14T12:00:${String(params.seq).padStart(2, "0")}.000Z`,
     seq: params.seq,
-    sessionId: "session-1",
+    sessionId: params.sessionId ?? "session-1",
     sessionKey: "agent:main:email:thread:customer-1",
     runId: params.runId,
     provider: params.provider,
@@ -228,6 +232,85 @@ describe("summarizeTrajectoryAuditRuns", () => {
           },
         ],
       }),
+    ]);
+  });
+
+  it("sums observed parent and child runs once while preserving per-run usage", () => {
+    const runSummaries = summarizeTrajectoryAuditRuns([
+      event({
+        type: "skill.invocation.started",
+        seq: 1,
+        runId: "run-parent",
+        sessionId: "session-parent",
+        data: { invocationId: "skill-parent", skillName: "customer-support" },
+      }),
+      event({
+        type: "model.completed",
+        seq: 2,
+        runId: "run-parent",
+        sessionId: "session-parent",
+        data: { usage: { input: 20, output: 5, total: 25 } },
+      }),
+      event({
+        type: "skill.invocation.started",
+        seq: 3,
+        runId: "run-child",
+        sessionId: "session-child",
+        data: {
+          invocationId: "skill-child",
+          parentInvocationId: "skill-parent",
+          parentRunId: "run-parent",
+          skillName: "issue-triage",
+        },
+      }),
+      event({
+        type: "model.completed",
+        seq: 4,
+        runId: "run-child",
+        sessionId: "session-child",
+        data: { usage: { input: 40, output: 10, total: 50 } },
+      }),
+      event({
+        type: "skill.invocation.started",
+        seq: 5,
+        runId: "run-orphan",
+        sessionId: "session-orphan",
+        data: {
+          invocationId: "skill-orphan",
+          parentInvocationId: "skill-missing",
+          parentRunId: "run-missing",
+        },
+      }),
+      event({
+        type: "model.completed",
+        seq: 6,
+        runId: "run-orphan",
+        sessionId: "session-orphan",
+        data: { usage: { input: 100, total: 100 } },
+      }),
+    ]);
+
+    expect(summarizeTrajectoryAuditOrchestrations(runSummaries)).toEqual([
+      {
+        auditSchema: "openclaw-audit-orchestration",
+        schemaVersion: 1,
+        accountingScope: "observed-runs",
+        rootRunId: "run-parent",
+        usage: { input: 60, output: 15, total: 75 },
+        runs: [
+          {
+            runId: "run-parent",
+            sessionId: "session-parent",
+            usage: { input: 20, output: 5, total: 25 },
+          },
+          {
+            runId: "run-child",
+            sessionId: "session-child",
+            parentRunId: "run-parent",
+            usage: { input: 40, output: 10, total: 50 },
+          },
+        ],
+      },
     ]);
   });
 

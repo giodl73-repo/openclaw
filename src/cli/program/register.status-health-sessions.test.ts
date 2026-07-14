@@ -460,6 +460,15 @@ describe("registerStatusHealthSessionsCommands", () => {
     });
   });
 
+  it("forwards the audit orchestration summary mode", async () => {
+    await runCli(["sessions", "tail", "--audit-orchestrations", "--json"]);
+
+    expectCommandOptions(sessionsTailCommand, {
+      auditOrchestrations: true,
+      json: true,
+    });
+  });
+
   it("runs sessions export-trajectory with owner-routable export options", async () => {
     await runCli([
       "sessions",
