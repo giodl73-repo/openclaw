@@ -93,6 +93,35 @@ describe("CAPI model-provider adapter", () => {
     expect(new TextDecoder().decode(prepared.body)).toBe(fixture.request.body);
   });
 
+  it("forwards only owner-approved semantic headers", () => {
+    const prepared = prepareCapiModelRequestV1({
+      config: fixture.request.config,
+      context: fixture.request.context,
+      method: fixture.request.method,
+      headers: {
+        accept: "application/json",
+        "anthropic-beta": "prompt-caching-2024-07-31",
+        "anthropic-version": "2023-06-01",
+        authorization: "******",
+        "content-type": "application/json",
+        "x-api-key": "******",
+        "x-untrusted-forwarded-header": "do-not-forward",
+      },
+      body: fixture.request.body,
+      credentialSlots: [credentialSlot()],
+    });
+
+    expect(Object.fromEntries(prepared.headers)).toMatchObject({
+      accept: "application/json",
+      "anthropic-beta": "prompt-caching-2024-07-31",
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    });
+    expect(prepared.headers.get("authorization")).toBeNull();
+    expect(prepared.headers.get("x-api-key")).toBeNull();
+    expect(prepared.headers.get("x-untrusted-forwarded-header")).toBeNull();
+  });
+
   it("fails before dispatch when the bearer slot is missing or incompatible", () => {
     expect(() => prepare({ credentialSlots: [] })).toThrowError(
       expect.objectContaining({ code: "missing-credential-slot" }),

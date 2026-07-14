@@ -14,6 +14,12 @@ const SAFE_MODEL_ID_RE = /^[A-Za-z0-9._-]+$/;
 const UUID_RE =
   /^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 const SAFE_SSE_EVENT_TYPE_RE = /^[A-Za-z0-9_.-]+$/;
+const CAPI_PASSTHROUGH_HEADERS = [
+  "accept",
+  "anthropic-beta",
+  "anthropic-version",
+  "content-type",
+] as const;
 
 export type CapiModelAdapterFailureCode =
   | "invalid-config"
@@ -183,6 +189,8 @@ function buildSourceHeader(config: CapiModelAdapterConfigV1): string {
   });
 }
 
+// This owner contract remains inactive until the next package supplies its first runtime binding.
+// Keeping it internal avoids creating a premature plugin SDK or package export.
 export function prepareCapiModelRequestV1(params: {
   config: CapiModelAdapterConfigV1;
   context: CapiModelRequestContextV1;
@@ -226,7 +234,14 @@ export function prepareCapiModelRequestV1(params: {
   url.searchParams.append("customer_id", params.context.tenantId);
   assertCredentialSlot(params.credentialSlots, url.origin);
 
-  const headers = new Headers(params.headers);
+  const sourceHeaders = new Headers(params.headers);
+  const headers = new Headers();
+  for (const name of CAPI_PASSTHROUGH_HEADERS) {
+    const value = sourceHeaders.get(name);
+    if (value !== null) {
+      headers.set(name, value);
+    }
+  }
   headers.set("x-ms-source", buildSourceHeader(params.config));
   setHeaderIfValid(headers, "x-ms-client-principal-id", params.context.userId);
   setHeaderIfValid(headers, "x-ms-client-tenant-id", params.context.tenantId);
