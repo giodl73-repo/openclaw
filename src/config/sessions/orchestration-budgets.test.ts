@@ -76,6 +76,7 @@ describe("session orchestration budgets", () => {
     const first = await chargeSessionOrchestrationBudget({
       ownerSessionKey,
       storePath,
+      rootRunId: "run-root",
       tokens: 60,
       now: 20,
     });
@@ -85,6 +86,7 @@ describe("session orchestration budgets", () => {
     const exhausted = await chargeSessionOrchestrationBudget({
       ownerSessionKey,
       storePath,
+      rootRunId: "run-root",
       tokens: 50,
       now: 30,
     });
@@ -94,6 +96,7 @@ describe("session orchestration budgets", () => {
     const later = await chargeSessionOrchestrationBudget({
       ownerSessionKey,
       storePath,
+      rootRunId: "run-root",
       tokens: 10,
       now: 40,
     });
@@ -112,7 +115,13 @@ describe("session orchestration budgets", () => {
 
     await Promise.all(
       [10, 20, 30, 40].map((tokens) =>
-        chargeSessionOrchestrationBudget({ ownerSessionKey, storePath, tokens, now: 20 }),
+        chargeSessionOrchestrationBudget({
+          ownerSessionKey,
+          storePath,
+          rootRunId: "run-root",
+          tokens,
+          now: 20,
+        }),
       ),
     );
 
@@ -130,7 +139,33 @@ describe("session orchestration budgets", () => {
       }),
     ).rejects.toThrow("token limit must be a positive safe integer");
     await expect(
-      chargeSessionOrchestrationBudget({ ownerSessionKey, storePath, tokens: 1 }),
+      chargeSessionOrchestrationBudget({
+        ownerSessionKey,
+        storePath,
+        rootRunId: "run-root",
+        tokens: 1,
+      }),
     ).rejects.toThrow("orchestration budget not found");
+  });
+
+  it("rejects a stale root run reference without charging the owner", async () => {
+    await seedOwner();
+    await createSessionOrchestrationBudget({
+      ownerSessionKey,
+      storePath,
+      rootRunId: "run-root",
+      tokenLimit: 100,
+      now: 10,
+    });
+
+    await expect(
+      chargeSessionOrchestrationBudget({
+        ownerSessionKey,
+        storePath,
+        rootRunId: "run-stale",
+        tokens: 25,
+      }),
+    ).rejects.toThrow("orchestration budget root run mismatch");
+    expect(getSessionOrchestrationBudget({ ownerSessionKey, storePath })?.tokensUsed).toBe(0);
   });
 });

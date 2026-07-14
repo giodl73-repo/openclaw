@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createUsageAccumulator,
   mergeUsageIntoAccumulator,
+  resolveNormalizedUsageTokenTotal,
   toLastCallUsage,
   toNormalizedUsage,
 } from "./usage-accumulator.js";
@@ -57,6 +58,28 @@ const emptyAccumulatorCases = [
 ];
 
 describe("usage-accumulator", () => {
+  describe("resolveNormalizedUsageTokenTotal", () => {
+    it("prefers the provider aggregate when present", () => {
+      expect(resolveNormalizedUsageTokenTotal(FIRST_USAGE)).toBe(85_150);
+    });
+
+    it("falls back to the normalized billable buckets", () => {
+      expect(
+        resolveNormalizedUsageTokenTotal({
+          input: 100,
+          output: 50,
+          cacheRead: 80_000,
+          cacheWrite: 5_000,
+        }),
+      ).toBe(85_150);
+    });
+
+    it("returns undefined when no tokens were observed", () => {
+      expect(resolveNormalizedUsageTokenTotal(undefined)).toBeUndefined();
+      expect(resolveNormalizedUsageTokenTotal({ total: 0 })).toBeUndefined();
+    });
+  });
+
   describe("mergeUsageIntoAccumulator", () => {
     it("accumulates usage across multiple API calls", () => {
       const acc = createAccumulatorWithUsage(FIRST_USAGE, SECOND_USAGE, FINAL_USAGE);

@@ -81,8 +81,12 @@ export function getSessionOrchestrationBudget(
 
 /** Atomically charges normalized observed usage to the root session's shared counter. */
 export async function chargeSessionOrchestrationBudget(
-  scope: OrchestrationBudgetScope & { tokens: number; now?: number },
+  scope: OrchestrationBudgetScope & { rootRunId: string; tokens: number; now?: number },
 ): Promise<OrchestrationBudgetCharge> {
+  const rootRunId = scope.rootRunId.trim();
+  if (!rootRunId) {
+    throw new Error("root run id required");
+  }
   const chargedTokens = requirePositiveInteger(scope.tokens, "token charge");
   const now = scope.now ?? Date.now();
   let charged: SessionOrchestrationBudget | undefined;
@@ -95,6 +99,9 @@ export async function chargeSessionOrchestrationBudget(
       const budget = current.orchestrationBudget;
       if (!budget) {
         throw new Error("orchestration budget not found");
+      }
+      if (budget.rootRunId !== rootRunId) {
+        throw new Error("orchestration budget root run mismatch");
       }
       const tokensUsed = budget.tokensUsed + chargedTokens;
       if (!Number.isSafeInteger(tokensUsed)) {

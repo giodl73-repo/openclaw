@@ -56,13 +56,22 @@ const hasUsageValues = (usage: MaybeUsage): usage is NormalizedUsage => {
   );
 };
 
+/** Resolves the token total OpenClaw uses for billing and orchestration accounting. */
+export const resolveNormalizedUsageTokenTotal = (usage: MaybeUsage): number | undefined => {
+  if (!hasUsageValues(usage)) {
+    return undefined;
+  }
+  const total =
+    usage.total ??
+    (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+  return total > 0 ? total : undefined;
+};
+
 export const mergeUsageIntoAccumulator = (target: UsageAccumulator, usage: MaybeUsage) => {
   if (!hasUsageValues(usage)) {
     return;
   }
-  const callTotal =
-    usage.total ??
-    (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+  const callTotal = resolveNormalizedUsageTokenTotal(usage) ?? 0;
   target.input += usage.input ?? 0;
   target.output += usage.output ?? 0;
   target.cacheRead += usage.cacheRead ?? 0;

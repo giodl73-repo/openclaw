@@ -194,6 +194,7 @@ export const mockedResolveModelAsync = vi.fn(
 export const mockedPrepareProviderRuntimeAuth = vi.fn(async () => undefined);
 export const mockedRunEmbeddedAttempt =
   vi.fn<(params: unknown) => Promise<EmbeddedRunAttemptResult>>();
+export const mockedChargeOrchestrationBudgetUsage = vi.fn(async (_params: unknown) => undefined);
 export const mockedBuildEmbeddedRunPayloads = vi.fn<
   (
     ...args: Parameters<typeof buildEmbeddedRunPayloads>
@@ -447,6 +448,8 @@ export function resetRunOverflowCompactionHarnessMocks(): void {
   mockedPrepareProviderRuntimeAuth.mockReset();
   mockedPrepareProviderRuntimeAuth.mockResolvedValue(undefined);
   mockedRunEmbeddedAttempt.mockReset();
+  mockedChargeOrchestrationBudgetUsage.mockReset();
+  mockedChargeOrchestrationBudgetUsage.mockResolvedValue(undefined);
   mockedBuildEmbeddedRunPayloads.mockReset();
   mockedBuildEmbeddedRunPayloads.mockReturnValue([]);
   mockedRunContextEngineMaintenance.mockReset();
@@ -838,6 +841,10 @@ export async function loadRunOverflowCompactionHarness(): Promise<{
 
   vi.doMock("./run/attempt.js", () => ({
     runEmbeddedAttempt: mockedRunEmbeddedAttempt,
+  }));
+
+  vi.doMock("./run/orchestration-budget-accounting.js", () => ({
+    chargeOrchestrationBudgetUsage: mockedChargeOrchestrationBudgetUsage,
   }));
 
   vi.doMock("./tool-result-truncation.js", () => ({
