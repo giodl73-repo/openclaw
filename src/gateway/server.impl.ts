@@ -73,6 +73,7 @@ import {
 import { getTotalQueueSize, isGatewayDraining } from "../process/command-queue.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
 import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
+import { createSelectedReadinessResolver } from "../readiness/selection.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
   clearSecretsRuntimeSnapshot,
@@ -153,6 +154,7 @@ import {
   createReadinessChecker,
   mergeReadinessResults,
   type ReadinessResult,
+  withReadinessEvaluationTimeout,
 } from "./server/readiness.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
@@ -1134,15 +1136,25 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
-  const getReadiness = async (): Promise<ReadinessResult> => {
+  const resolveSelectedReadiness = createSelectedReadinessResolver();
+  const evaluateReadiness = async (): Promise<ReadinessResult> => {
     const gatewayReadiness = await getGatewayReadiness();
+    const config = getRuntimeConfig();
+    const additionalConditions = await resolveSelectedReadiness({
+      config,
+      registry: pluginRegistry,
+      env: process.env,
+    });
     const runtimeReadiness = buildRuntimeReadiness({
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRegistry),
+      additionalConditions,
     });
     return mergeReadinessResults(gatewayReadiness, runtimeReadiness);
   };
+  const getReadiness = (): Promise<ReadinessResult> =>
+    withReadinessEvaluationTimeout(evaluateReadiness());
   log.info("starting HTTP server...");
   let currentPluginRegistryGatewayContext: GatewayRequestContext | undefined;
   const watchNodeRequestHandler: {
