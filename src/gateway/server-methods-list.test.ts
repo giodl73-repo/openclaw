@@ -70,6 +70,10 @@ describe("listGatewayMethods", () => {
     expect(listGatewayMethods()).toContain("node.skills.update");
   });
 
+  it("advertises canonical readiness", () => {
+    expect(listGatewayMethods()).toContain("ready");
+  });
+
   it("advertises unified approval lookup, history, and resolution", () => {
     expect(listGatewayMethods()).toContain("approval.get");
     expect(listGatewayMethods()).toContain("approval.history");

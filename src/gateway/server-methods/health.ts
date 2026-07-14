@@ -1,7 +1,9 @@
 // Health gateway methods return cached or refreshed status summaries while
 // detecting stale channel runtime state against live gateway snapshots.
+import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
+import type { CanonicalReadinessResult } from "../../readiness/conditions.js";
 import { getStatusSummary } from "../../status/summary.js";
 import type { GatewayHotReloadStatus } from "../config-reload-status.types.js";
 import { buildContextEngineHealthSummary } from "../health/context-engine.js";
@@ -14,6 +16,17 @@ import { respondUnavailableOnThrow } from "./response.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 
 const ADMIN_SCOPE = "operator.admin";
+
+async function withLiveReadiness<T extends { readiness?: CanonicalReadinessResult }>(
+  summary: T,
+  context: Parameters<GatewayRequestHandlers[string]>[0]["context"],
+): Promise<T> {
+  if (!context.getReadiness) {
+    return summary;
+  }
+  return { ...summary, readiness: await context.getReadiness() };
+}
+
 const requestRefreshStartedAt = new WeakMap<
   GatewayRequestContext["refreshHealthSnapshot"],
   number
@@ -134,6 +147,15 @@ function mergeCachedHealthRuntimeState(params: {
 
 /** Gateway handlers for health snapshots and status summaries. */
 export const healthHandlers: GatewayRequestHandlers = {
+  ready: async ({ respond, context }) => {
+    if (!context.getReadiness) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "readiness unavailable"));
+      return;
+    }
+    await respondUnavailableOnThrow(respond, async () => {
+      respond(true, await context.getReadiness(), undefined);
+    });
+  },
   health: async ({ respond, context, params, client }) => {
     const { getHealthCache, refreshHealthSnapshot, logHealth } = context;
     const wantsProbe = params?.probe === true;
@@ -161,11 +183,14 @@ export const healthHandlers: GatewayRequestHandlers = {
     ) {
       respond(
         true,
-        mergeCachedHealthRuntimeState({
-          cached,
-          eventLoop: context.getEventLoopHealth?.(),
-          configReloadHotReloadStatus: context.getConfigReloaderHotReloadStatus?.(),
-        }),
+        await withLiveReadiness(
+          mergeCachedHealthRuntimeState({
+            cached,
+            eventLoop: context.getEventLoopHealth?.(),
+            configReloadHotReloadStatus: context.getConfigReloaderHotReloadStatus?.(),
+          }),
+          context,
+        ),
         undefined,
         { cached: true },
       );
@@ -178,17 +203,20 @@ export const healthHandlers: GatewayRequestHandlers = {
     }
     await respondUnavailableOnThrow(respond, async () => {
       const snap = await refreshHealthSnapshot({ probe: wantsProbe, includeSensitive });
-      respond(true, snap, undefined);
+      respond(true, await withLiveReadiness(snap, context), undefined);
     });
   },
   status: async ({ respond, client, params, context }) => {
     const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
     const hostDesktopStatus = await context.hostDesktopService?.status();
-    const status = await getStatusSummary({
-      includeSensitive: scopes.includes(ADMIN_SCOPE),
-      includeChannelSummary: params.includeChannelSummary !== false,
-      ...(hostDesktopStatus ? { hostDesktopStatus } : {}),
-    });
+    const status = await withLiveReadiness(
+      await getStatusSummary({
+        includeSensitive: scopes.includes(ADMIN_SCOPE),
+        includeChannelSummary: params.includeChannelSummary !== false,
+        ...(hostDesktopStatus ? { hostDesktopStatus } : {}),
+      }),
+      context,
+    );
     if (context.getEventLoopHealth) {
       status.eventLoop = context.getEventLoopHealth();
     }
