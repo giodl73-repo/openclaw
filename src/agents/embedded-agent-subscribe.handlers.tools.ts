@@ -1248,6 +1248,7 @@ export async function handleToolExecutionEnd(
   const isToolError = observerIsError && !approvalUnavailable;
   try {
     ctx.params.onAgentToolResult?.({
+      toolCallId,
       toolName,
       result: sanitizedResult,
       isError: observerIsError,
