@@ -30,6 +30,7 @@ import {
   createTrajectoryRuntimeRecorder,
   toTrajectoryToolDefinitions,
 } from "../../../trajectory/runtime.js";
+import { attachSkillUsageTrajectoryRecorder } from "../../../trajectory/skill-usage.js";
 import { createBundleLspToolRuntime } from "../../agent-bundle-lsp-runtime.js";
 import { materializeBundleMcpToolsForRun } from "../../agent-bundle-mcp-tools.js";
 import { resolveAgentDir, resolveSessionAgentIds } from "../../agent-scope.js";
@@ -515,6 +516,7 @@ export async function runEmbeddedAttempt(
     let session: AgentSession | undefined;
     let removeToolResultContextGuard: (() => void) | undefined;
     let trajectoryRecorder: ReturnType<typeof createTrajectoryRuntimeRecorder> | null = null;
+    let disposeSkillUsageTrajectoryRecorder: (() => Promise<void>) | undefined;
     let trajectoryEndRecorded = false;
     let buildAbortSettlePromise: () => Promise<void> | null = () => null;
     let cleanupYieldAborted = false;
@@ -869,6 +871,12 @@ export async function runEmbeddedAttempt(
             modelApi: params.model.api,
             workspaceDir: params.workspaceDir,
           });
+      disposeSkillUsageTrajectoryRecorder = trajectoryRecorder
+        ? attachSkillUsageTrajectoryRecorder({
+            recorder: trajectoryRecorder,
+            runId: params.runId,
+          })
+        : undefined;
       trajectoryRecorder?.recordEvent("session.started", {
         trigger: params.trigger,
         sessionFile: params.sessionFile,
@@ -1753,6 +1761,8 @@ export async function runEmbeddedAttempt(
       }
 
       const beforeAgentFinalizeRevisionReason = getBeforeAgentFinalizeRevisionReason();
+      await disposeSkillUsageTrajectoryRecorder?.();
+      disposeSkillUsageTrajectoryRecorder = undefined;
       const finalizedResult = completeEmbeddedAttemptResult({
         attempt: params,
         subscription,
@@ -1798,6 +1808,8 @@ export async function runEmbeddedAttempt(
       trajectoryEndRecorded = true;
       return finalizedResult;
     } finally {
+      await disposeSkillUsageTrajectoryRecorder?.();
+      disposeSkillUsageTrajectoryRecorder = undefined;
       await cleanupEmbeddedAttemptSessionPhase({
         attempt: params,
         session,
