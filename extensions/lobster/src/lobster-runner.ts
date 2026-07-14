@@ -2,6 +2,11 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
+import {
+  createOpenClawLobsterRegistry,
+  type EmbeddedOpenClawInvoke,
+  type LobsterCommandRegistry,
+} from "./lobster-openclaw-registry.js";
 
 export type LobsterEnvelope =
   | {
@@ -31,6 +36,7 @@ export type LobsterRunnerParams = {
   cwd: string;
   timeoutMs: number;
   maxStdoutBytes: number;
+  taskFlowId?: string;
 };
 
 export type LobsterRunner = {
@@ -76,6 +82,7 @@ type EmbeddedToolEnvelope = {
 };
 
 type EmbeddedToolRuntime = {
+  createDefaultRegistry?: () => LobsterCommandRegistry;
   runToolRequest: (params: {
     pipeline?: string;
     filePath?: string;
@@ -233,8 +240,12 @@ function parseWorkflowArgs(argsJson: string) {
 function createEmbeddedToolContext(
   params: LobsterRunnerParams,
   signal?: AbortSignal,
+  registry?: LobsterCommandRegistry,
 ): EmbeddedToolContext {
-  const env = { ...process.env } as Record<string, string | undefined>;
+  const env = {
+    ...process.env,
+    ...(params.taskFlowId ? { OPENCLAW_TASK_FLOW_ID: params.taskFlowId } : {}),
+  } as Record<string, string | undefined>;
   return {
     cwd: params.cwd,
     env,
@@ -243,6 +254,7 @@ function createEmbeddedToolContext(
     stdout: createLimitedSink(Math.max(1024, params.maxStdoutBytes), "stdout"),
     stderr: createLimitedSink(Math.max(1024, params.maxStdoutBytes), "stderr"),
     signal,
+    registry,
   };
 }
 
@@ -283,6 +295,7 @@ async function loadEmbeddedToolRuntimeFromPackage(): Promise<EmbeddedToolRuntime
 
 export function createEmbeddedLobsterRunner(options?: {
   loadRuntime?: LoadEmbeddedToolRuntime;
+  invokeOpenClawTool?: EmbeddedOpenClawInvoke;
 }): LobsterRunner {
   const loadRuntime = options?.loadRuntime ?? loadEmbeddedToolRuntimeFromPackage;
   let runtimePromise: Promise<EmbeddedToolRuntime> | undefined;
@@ -291,7 +304,18 @@ export function createEmbeddedLobsterRunner(options?: {
       runtimePromise ??= loadRuntime();
       const runtime = await runtimePromise;
       return await withTimeout(params.timeoutMs, async (signal) => {
-        const ctx = createEmbeddedToolContext(params, signal);
+        if (options?.invokeOpenClawTool && !runtime.createDefaultRegistry) {
+          throw new Error(
+            "Embedded openclaw.invoke requires a Lobster runtime with createDefaultRegistry",
+          );
+        }
+        const registry = options?.invokeOpenClawTool
+          ? createOpenClawLobsterRegistry(
+              runtime.createDefaultRegistry!(),
+              options.invokeOpenClawTool,
+            )
+          : undefined;
+        const ctx = createEmbeddedToolContext(params, signal, registry);
 
         if (params.action === "run") {
           const pipeline = params.pipeline?.trim() ?? "";

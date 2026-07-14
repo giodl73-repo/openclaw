@@ -10,6 +10,7 @@ import {
 import { jsonResult } from "openclaw/plugin-sdk/tool-results";
 import { Type } from "typebox";
 import type { OpenClawPluginApi } from "../runtime-api.js";
+import type { OpenClawPluginToolContext } from "../runtime-api.js";
 import {
   createEmbeddedLobsterRunner,
   resolveLobsterCwd,
@@ -39,7 +40,42 @@ type JsonLike =
 type LobsterToolOptions = {
   runner?: LobsterRunner;
   taskFlow?: BoundTaskFlow;
+  toolContext?: OpenClawPluginToolContext;
 };
+
+type ToolsInvokeResult =
+  | { ok: true; output: unknown }
+  | { ok: false; error?: { message?: string }; requiresApproval?: boolean };
+
+export function createEmbeddedOpenClawInvoke(
+  api: OpenClawPluginApi,
+  ctx: OpenClawPluginToolContext | undefined,
+) {
+  if (!ctx?.sessionKey || !api.runtime?.gateway) {
+    return undefined;
+  }
+  return async (params: {
+    tool: string;
+    action: string;
+    args: Record<string, unknown>;
+    sessionKey?: string;
+    idempotencyKey?: string;
+  }) => {
+    const result = await api.runtime.gateway.request<ToolsInvokeResult>("tools.invoke", {
+      name: params.tool,
+      action: params.action,
+      args: params.args,
+      sessionKey: params.sessionKey ?? ctx.sessionKey,
+      ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
+      ...(ctx.conversationReadOrigin ? { conversationReadOrigin: ctx.conversationReadOrigin } : {}),
+    });
+    if (!result.ok) {
+      const suffix = result.requiresApproval ? " (approval required)" : "";
+      throw new Error(`${result.error?.message ?? "OpenClaw tool invocation failed"}${suffix}`);
+    }
+    return result.output;
+  };
+}
 
 type ManagedFlowRunParams = {
   controllerId: string;
@@ -231,7 +267,12 @@ function resolveManagedFlowToolResult(result: ManagedLobsterFlowResult) {
 }
 
 export function createLobsterTool(api: OpenClawPluginApi, options?: LobsterToolOptions) {
-  const runner = options?.runner ?? createEmbeddedLobsterRunner();
+  const embeddedInvoke = createEmbeddedOpenClawInvoke(api, options?.toolContext);
+  const runner =
+    options?.runner ??
+    createEmbeddedLobsterRunner(
+      embeddedInvoke ? { invokeOpenClawTool: embeddedInvoke } : undefined,
+    );
   return {
     name: "lobster",
     label: "Lobster Workflow",

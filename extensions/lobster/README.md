@@ -42,7 +42,15 @@ Enable it in an agent allowlist:
 
 Some Lobster pipelines may include a `openclaw.invoke` step to call back into OpenClaw tools/plugins (for example: `gog` for Google Workspace, `gh` for GitHub, `message.send`, etc.).
 
-For this to work, the OpenClaw Gateway must expose the tool bridge endpoint and the target tool must be allowed by policy:
+In the embedded plugin, `openclaw.invoke` uses the trusted in-process Gateway bridge and automatically inherits the active session. No Gateway URL or bearer token is required. The target tool is still filtered by the active agent, channel, sender, subagent, and Gateway tool policies.
+
+Use `--step-id` to derive a stable TaskFlow-scoped idempotency key for a side-effecting step:
+
+```lobster
+openclaw.invoke --tool billing --action pay --step-id pay-invoice --args-json '{"invoice":"INV-1042"}'
+```
+
+Standalone Lobster still uses the HTTP bridge. For that mode, the OpenClaw Gateway must expose the tool endpoint and the target tool must be allowed by policy:
 
 - OpenClaw provides an HTTP endpoint: `POST /tools/invoke`.
 - The request is gated by **gateway auth** (e.g. `Authorization: Bearer …` when token auth is enabled).

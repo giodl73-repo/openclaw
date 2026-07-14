@@ -176,24 +176,21 @@ For a **structured LLM step** inside a workflow, enable the optional
 }
 ```
 
-### Important limitation: embedded Lobster vs `openclaw.invoke`
+### Embedded `openclaw.invoke`
 
 The bundled Lobster plugin runs workflows **in-process** inside the gateway.
-In that embedded mode, `openclaw.invoke` does **not** automatically inherit a
-gateway URL/auth context for nested OpenClaw CLI tool calls.
-
-That means this pattern is **not currently reliable in the embedded runner**:
+In that mode, `openclaw.invoke` uses the current OpenClaw session and existing
+tool-policy path directly; it does not need a gateway URL or bearer token.
 
 ```lobster
 openclaw.invoke --tool llm-task --action json --args-json '{ ... }'
 ```
 
-Use the example below only when running the **standalone Lobster CLI** in an
-environment where `openclaw.invoke` is already configured with the correct
-gateway/auth context.
+Add `--step-id` for side-effecting steps to derive a stable idempotency key from
+the current TaskFlow and step:
 
 ```lobster
-openclaw.invoke --tool llm-task --action json --args-json '{
+openclaw.invoke --tool llm-task --action json --step-id classify-email --args-json '{
   "prompt": "Given the input email, return intent and draft.",
   "thinking": "low",
   "input": { "subject": "Hello", "body": "Can you help?" },
@@ -209,11 +206,10 @@ openclaw.invoke --tool llm-task --action json --args-json '{
 }'
 ```
 
-If you are using the embedded Lobster plugin today, prefer either:
-
-- a direct `llm-task` tool call outside Lobster, or
-- non-`openclaw.invoke` steps inside the Lobster pipeline until a supported
-  embedded bridge is added.
+The invoked tool remains subject to the active agent, channel, sender,
+subagent, and Gateway policies. The bridge refuses recursive invocation of the
+`lobster` tool. Standalone Lobster continues to use the HTTP tool bridge and
+therefore still requires its Gateway URL and authentication context.
 
 See [LLM Task](/tools/llm-task) for details and configuration options.
 

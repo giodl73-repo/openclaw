@@ -2,7 +2,7 @@
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi, OpenClawPluginToolContext } from "../runtime-api.js";
-import { createLobsterTool } from "./lobster-tool.js";
+import { createEmbeddedOpenClawInvoke, createLobsterTool } from "./lobster-tool.js";
 import { createFakeTaskFlow } from "./taskflow-test-helpers.js";
 
 function fakeApi(overrides: Partial<OpenClawPluginApi> = {}): OpenClawPluginApi {
@@ -38,6 +38,36 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 }
 
 describe("lobster plugin tool", () => {
+  it("binds embedded OpenClaw invocation to the active session", async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true, output: { sent: true } });
+    const api = fakeApi({
+      runtime: {
+        version: "test",
+        gateway: { request },
+      } as unknown as OpenClawPluginApi["runtime"],
+    });
+    const invoke = createEmbeddedOpenClawInvoke(
+      api,
+      fakeCtx({ sessionKey: "agent:main:email:42" }),
+    );
+
+    await expect(
+      invoke?.({
+        tool: "message",
+        action: "send",
+        args: { to: "customer@example.com" },
+        idempotencyKey: "lobster:flow-1:notify",
+      }),
+    ).resolves.toEqual({ sent: true });
+    expect(request).toHaveBeenCalledWith("tools.invoke", {
+      name: "message",
+      action: "send",
+      args: { to: "customer@example.com" },
+      sessionKey: "agent:main:email:42",
+      idempotencyKey: "lobster:flow-1:notify",
+    });
+  });
+
   it("returns the Lobster envelope in details", async () => {
     const runner = {
       run: vi.fn().mockResolvedValue({
@@ -397,6 +427,7 @@ describe("lobster plugin tool", () => {
     expect(runner.run).toHaveBeenCalledWith({
       action: "run",
       pipeline: "noop",
+      taskFlowId: "flow-1",
       cwd: process.cwd(),
       timeoutMs: 20_000,
       maxStdoutBytes: 512_000,
@@ -467,6 +498,7 @@ describe("lobster plugin tool", () => {
       action: "resume",
       approvalId: "approval-1",
       approve: true,
+      taskFlowId: "flow-1",
       cwd: process.cwd(),
       timeoutMs: 20_000,
       maxStdoutBytes: 512_000,
