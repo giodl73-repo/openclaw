@@ -485,6 +485,46 @@ describe("gateway sessions patch", () => {
     );
   });
 
+  test("sets, replaces, and clears a session regarding record", async () => {
+    const store = mainStoreEntry({});
+    const set = expectPatchOk(
+      await runPatch({
+        store,
+        patch: {
+          key: MAIN_SESSION_KEY,
+          regarding: {
+            system: "  dynamics  ",
+            type: "  case  ",
+            id: "  7f15  ",
+            key: "  CAS-1042  ",
+          },
+        },
+      }),
+    );
+    expect(set.regarding).toEqual({
+      system: "dynamics",
+      type: "case",
+      id: "7f15",
+      key: "CAS-1042",
+    });
+
+    const replaced = expectPatchOk(
+      await runPatch({
+        store,
+        patch: {
+          key: MAIN_SESSION_KEY,
+          regarding: { system: "erp", type: "invoice", id: "inv-9" },
+        },
+      }),
+    );
+    expect(replaced.regarding).toEqual({ system: "erp", type: "invoice", id: "inv-9" });
+
+    const cleared = expectPatchOk(
+      await runPatch({ store, patch: { key: MAIN_SESSION_KEY, regarding: null } }),
+    );
+    expect(cleared.regarding).toBeUndefined();
+  });
+
   test("clears fastMode when patch sets null", async () => {
     const store = mainStoreEntry({ fastMode: true });
     const entry = expectPatchOk(

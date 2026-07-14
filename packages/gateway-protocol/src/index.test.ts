@@ -19,6 +19,7 @@ import {
   validateNodePresenceActivityPayload,
   validateNodePresenceAlivePayload,
   validateSessionsSearchParams,
+  validateSessionsPatchParams,
   validateSessionsUsageParams,
   validateTasksCancelParams,
   validateTasksListParams,
@@ -270,6 +271,22 @@ describe("lazy protocol validators", () => {
     expect(validateSessionsSearchParams({ query: "deployment failure", limit: 26 })).toBe(false);
     expect(validateSessionsSearchParams({ query: "" })).toBe(false);
     expect(validateSessionsSearchParams({ query: "x".repeat(4097) })).toBe(false);
+  });
+
+  it("validates session regarding patches", () => {
+    expect(
+      validateSessionsPatchParams({
+        key: "agent:main:main",
+        regarding: { system: "dynamics", type: "case", id: "7f15", key: "CAS-1042" },
+      }),
+    ).toBe(true);
+    expect(validateSessionsPatchParams({ key: "agent:main:main", regarding: null })).toBe(true);
+    expect(
+      validateSessionsPatchParams({
+        key: "agent:main:main",
+        regarding: { system: "dynamics", type: "case" },
+      }),
+    ).toBe(false);
   });
 
   it("validates chat sends that suppress command interpretation", () => {

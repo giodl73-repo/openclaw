@@ -426,6 +426,12 @@ describe("registerStatusHealthSessionsCommands", () => {
       "5",
       "--receipt-type",
       "payment.authorized",
+      "--regarding-system",
+      "dynamics",
+      "--regarding-type",
+      "case",
+      "--regarding-id",
+      "case-42",
       "--json",
       "--follow",
     ]);
@@ -438,6 +444,9 @@ describe("registerStatusHealthSessionsCommands", () => {
       follow: true,
       json: true,
       receiptType: "payment.authorized",
+      regardingSystem: "dynamics",
+      regardingType: "case",
+      regardingId: "case-42",
       tail: "5",
     });
   });

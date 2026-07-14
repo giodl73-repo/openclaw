@@ -75,6 +75,7 @@ import {
   trimSessionTranscriptForManualCompact,
 } from "../../config/sessions/session-accessor.js";
 import { searchSessionTranscripts } from "../../config/sessions/session-transcript-search.js";
+import type { SessionRegarding } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { disableCronJobsBoundToSession } from "../../cron/job-session-bindings.js";
 import {
@@ -103,6 +104,7 @@ import {
   recordSessionCompacted,
 } from "../../sessions/session-state-events.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
+import { resolveControlPlaneActor } from "../control-plane-audit.js";
 import { canReviewOperatorApproval } from "../operator-approval-authorization.js";
 import { ADMIN_SCOPE, APPROVALS_SCOPE } from "../operator-scopes.js";
 import { resolveSessionKeyForRun } from "../server-session-key.js";
@@ -124,6 +126,7 @@ import {
   renameSessionGroup,
 } from "../session-groups.js";
 import { triggerSessionPatchHook } from "../session-patch-hooks.js";
+import { recordSessionRegardingTransition } from "../session-regarding-trajectory.js";
 import {
   resolveSessionStoreAgentId,
   resolveSessionStoreKey,
@@ -2707,6 +2710,13 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       patchModelCatalog = catalog;
       return catalog;
     };
+    const parsed = parseAgentSessionKey(target.canonicalKey ?? key);
+    const agentId = normalizeAgentId(
+      target.canonicalKey === "global"
+        ? target.agentId
+        : (parsed?.agentId ?? resolveDefaultAgentId(cfg)),
+    );
+    let previousRegarding: SessionRegarding | undefined;
     const applyPatch = async () => {
       const currentLifecycleEntry = loadSessionEntry(key, { agentId: requestedAgentId }).entry;
       // A reset queued ahead of archive can rotate the row before this mutation starts.
@@ -2759,7 +2769,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           return null;
         }
       }
-      return await applySessionPatchProjection({
+      const projection = await applySessionPatchProjection({
         agentId: target.agentId,
         storePath,
         resolveTarget: ({ entries }) => {
@@ -2775,6 +2785,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           return { primaryKey, candidateKeys: migratedTarget.storeKeys };
         },
         project: async ({ primaryKey, existingEntry, entries }) => {
+          previousRegarding = existingEntry?.regarding ? { ...existingEntry.regarding } : undefined;
           const projected = await projectSessionsPatchEntry({
             cfg,
             entries,
@@ -2805,6 +2816,24 @@ export const sessionsHandlers: GatewayRequestHandlers = {
             : projected;
         },
       });
+      if (projection.ok && "regarding" in p) {
+        try {
+          await recordSessionRegardingTransition({
+            actor: client ? resolveControlPlaneActor(client).actor : "system",
+            agentId,
+            previous: previousRegarding,
+            regarding: projection.entry.regarding,
+            sessionId: projection.entry.sessionId,
+            sessionKey: target.canonicalKey ?? key,
+            storePath,
+          });
+        } catch (error) {
+          log.warn(
+            `sessions.patch: failed to record regarding transition for ${target.canonicalKey ?? key}: ${formatErrorMessage(error)}`,
+          );
+        }
+      }
+      return projection;
     };
     const applied = await runExclusiveSessionLifecycleMutation({
       scope: storePath,
@@ -2861,12 +2890,6 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       ensureSessionGroupRegistered(p.category);
     }
 
-    const parsed = parseAgentSessionKey(target.canonicalKey ?? key);
-    const agentId = normalizeAgentId(
-      target.canonicalKey === "global"
-        ? target.agentId
-        : (parsed?.agentId ?? resolveDefaultAgentId(cfg)),
-    );
     const resolved = resolveSessionModelRef(cfg, applied.entry, agentId);
     const resolvedDisplayModel = resolveSessionDisplayModelIdentityRef({
       cfg,

@@ -60,6 +60,8 @@ export type GatewaySessionRow = {
   label?: string;
   /** User-defined organization bucket; unrelated to chat-group kind/groupChannel. */
   category?: string;
+  /** Primary business record associated with this session. */
+  regarding?: SessionEntry["regarding"];
   displayName?: string;
   derivedTitle?: string;
   lastMessagePreview?: string;
