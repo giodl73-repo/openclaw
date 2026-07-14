@@ -910,6 +910,7 @@ export function runAgentAttempt(params: {
     modelSelectionLocked: !isRawModelRun && params.sessionEntry?.modelSelectionLocked === true,
     agentHarnessRuntimeOverride: embeddedAgentHarnessOverride,
     skillsSnapshot: params.skillsSnapshot,
+    explicitSkillInvocation: params.opts.explicitSkillInvocation,
     prompt: effectivePrompt,
     transcriptPrompt: params.transcriptBody,
     // CLI-origin retries cannot rely on transcript replay: orphan-user repair

@@ -891,8 +891,10 @@ export async function runEmbeddedAttempt(
       if (params.explicitSkillInvocation) {
         trajectoryRecorder?.recordEvent("skill.invocation.started", {
           ...params.explicitSkillInvocation,
-          activation: "command",
-          caller: "inbound",
+          activation: params.explicitSkillInvocation.parentInvocationId
+            ? "orchestration"
+            : "command",
+          caller: params.explicitSkillInvocation.parentInvocationId ? "skill" : "inbound",
         });
       }
       const trajectoryFastMode = typeof params.fastMode === "boolean" ? params.fastMode : undefined;

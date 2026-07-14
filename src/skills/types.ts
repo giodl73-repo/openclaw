@@ -57,6 +57,10 @@ export type ExplicitSkillInvocation = {
   commandName: string;
   skillName: string;
   skillSource?: SkillTelemetrySource;
+  /** Invocation that requested this child skill run. */
+  parentInvocationId?: string;
+  /** Agent run that requested this child skill run. */
+  parentRunId?: string;
 };
 
 export type SkillUsagePath = {

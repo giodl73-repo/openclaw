@@ -14,6 +14,9 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import { createExplicitSkillInvocation } from "../../skills/invocation.js";
+import { resolveSkillTelemetrySource } from "../../skills/loading/source.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../../skills/types.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import {
@@ -166,6 +169,11 @@ function createSessionsSpawnToolSchema(params: {
   const spawnModes = params.threadAvailable ? SUBAGENT_SPAWN_MODES : (["run"] as const);
   const schema = {
     task: Type.String(),
+    skill: Type.Optional(
+      Type.String({
+        description: "Available skill to run in the spawned subagent.",
+      }),
+    ),
     taskName: Type.Optional(
       Type.String({
         description:
@@ -259,6 +267,12 @@ export function createSessionsSpawnTool(
     config?: OpenClawConfig;
     /** Explicit agent ID override for cron/hook sessions where session key parsing may not work. */
     requesterAgentIdOverride?: string;
+    /** Skills available to this run; used to validate child skill requests. */
+    skillsSnapshot?: SkillSnapshot;
+    /** Trusted invocation identity for the currently running parent skill. */
+    parentSkillInvocation?: ExplicitSkillInvocation;
+    /** Trusted identifier for the currently running parent agent run. */
+    parentRunId?: string;
   } & SpawnedToolContext,
 ): AnyAgentTool {
   const acpAvailable = isAcpRuntimeSpawnAvailable({
@@ -296,6 +310,31 @@ export function createSessionsSpawnTool(
         );
       }
       const task = readStringParam(params, "task", { required: true });
+      const requestedSkillName = readStringParam(params, "skill");
+      const availableSkillNames = new Set(
+        (opts?.skillsSnapshot?.skills ?? []).map((skill) => skill.name.trim()),
+      );
+      const matchingSkills = requestedSkillName
+        ? (opts?.skillsSnapshot?.resolvedSkills ?? []).filter(
+            (skill) =>
+              skill.name.trim() === requestedSkillName &&
+              availableSkillNames.has(skill.name.trim()) &&
+              !skill.disableModelInvocation,
+          )
+        : [];
+      if (requestedSkillName && matchingSkills.length !== 1) {
+        return jsonResult({
+          status: "error",
+          error:
+            matchingSkills.length === 0
+              ? `Skill "${requestedSkillName}" is not available in this run.`
+              : `Skill "${requestedSkillName}" is ambiguous in this run.`,
+        });
+      }
+      const requestedSkill = matchingSkills[0];
+      const childTask = requestedSkill
+        ? `Use the ${requestedSkill.name} skill to complete this task:\n\n${task}`
+        : task;
       const taskNameResult = normalizeSubagentTaskName(params.taskName);
       if (taskNameResult.error) {
         return jsonResult({
@@ -325,6 +364,13 @@ export function createSessionsSpawnTool(
         return jsonResult({
           status: "error",
           error: resolveAcpUnavailableMessage(opts),
+          ...roleContext,
+        });
+      }
+      if (runtime === "acp" && requestedSkill) {
+        return jsonResult({
+          status: "error",
+          error: 'Skill invocation receipts currently require runtime="subagent".',
           ...roleContext,
         });
       }
@@ -469,7 +515,16 @@ export function createSessionsSpawnTool(
 
       const result = await spawnSubagentDirect(
         {
-          task,
+          task: childTask,
+          explicitSkillInvocation: requestedSkill
+            ? createExplicitSkillInvocation({
+                commandName: requestedSkill.name,
+                skillName: requestedSkill.name,
+                skillSource: resolveSkillTelemetrySource(requestedSkill),
+                parentInvocationId: opts?.parentSkillInvocation?.invocationId,
+                parentRunId: opts?.parentSkillInvocation ? opts.parentRunId : undefined,
+              })
+            : undefined,
           taskName,
           label: label || undefined,
           agentId: requestedAgentId,
