@@ -1053,6 +1053,72 @@ describe("agentLoop tool termination", () => {
     expect(events.at(-1)).toMatchObject({ type: "agent_end" });
   });
 
+  it("preserves typed audit records through afterToolCall patches", async () => {
+    let turn = 0;
+    const streamFn: StreamFn = () => {
+      turn += 1;
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        const message =
+          turn === 1
+            ? makeAssistantMessage([
+                { type: "toolCall", id: "call-payment", name: "pay", arguments: {} },
+              ])
+            : makeAssistantMessage([{ type: "text", text: "done" }]);
+        stream.push({
+          type: "done",
+          reason: message.stopReason === "toolUse" ? "toolUse" : "stop",
+          message,
+        });
+        stream.end();
+      });
+      return stream;
+    };
+    const tool: AgentTool = {
+      ...makeTool("pay", []),
+      execute: async () => ({
+        content: [{ type: "text", text: "authorized" }],
+        details: { ok: true },
+        audit: [
+          {
+            type: "payment.authorized",
+            version: 1,
+            subject: { type: "invoice", id: "inv-123" },
+            data: { authorizationCode: "auth-456" },
+          },
+        ],
+      }),
+    };
+
+    const events = await collectEvents(
+      agentLoop(
+        [{ role: "user", content: "pay", timestamp: 1 }],
+        { systemPrompt: "", messages: [], tools: [tool] },
+        {
+          ...config,
+          afterToolCall: async () => ({ details: { recorded: true } }),
+        },
+        undefined,
+        streamFn,
+      ),
+    );
+
+    const completed = events.find(
+      (event): event is Extract<AgentEvent, { type: "tool_execution_end" }> =>
+        event.type === "tool_execution_end",
+    );
+    expect(completed?.result).toMatchObject({
+      details: { recorded: true },
+      audit: [
+        {
+          type: "payment.authorized",
+          subject: { type: "invoice", id: "inv-123" },
+          data: { authorizationCode: "auth-456" },
+        },
+      ],
+    });
+  });
+
   it("marks policy-blocked tool calls as not executed", async () => {
     const executed: string[] = [];
     let turn = 0;

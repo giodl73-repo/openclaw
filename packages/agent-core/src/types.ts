@@ -81,6 +81,7 @@ export interface AfterToolCallResult {
   content?: (TextContent | ImageContent)[];
   details?: unknown;
   isError?: boolean;
+  audit?: AgentToolAuditRecord[];
   /**
    * Hint that the agent should stop after the current tool batch.
    * Early termination only happens when every finalized tool result in the batch sets this to true.
@@ -437,12 +438,32 @@ export interface AgentToolProgress {
   id?: string;
 }
 
+/** A domain event asserted by a completed tool call for later audit correlation. */
+export interface AgentToolAuditRecord {
+  /** Namespaced event type used as the primary filter key, for example `payment.authorized`. */
+  type: string;
+  /** Optional schema version owned by the tool or plugin that defines the event type. */
+  version?: number;
+  /** Optional business object that the event concerns. */
+  subject?: {
+    type: string;
+    id: string;
+  };
+  /** Type-specific receipt data, such as a provider authorization code. */
+  data?: Record<string, unknown>;
+}
+
 /** Final or partial result produced by a tool. */
 export interface AgentToolResult<T> {
   /** Text or image content returned to the model. */
   content: (TextContent | ImageContent)[];
   /** Arbitrary structured details for logs or UI rendering. */
   details: T;
+  /**
+   * Typed domain events asserted by this tool result.
+   * The runtime supplies execution identity, timestamps, and correlation when recording them.
+   */
+  audit?: AgentToolAuditRecord[];
   /** Optional public progress hint for partial tool updates; never model content. */
   progress?: AgentToolProgress;
   /**
