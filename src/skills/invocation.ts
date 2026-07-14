@@ -1,5 +1,9 @@
 import { generateSecureToken } from "../infra/secure-random.js";
-import type { ExplicitSkillInvocation, SkillTelemetrySource } from "./types.js";
+import type {
+  ExplicitSkillInvocation,
+  SkillOrchestrationBudgetRef,
+  SkillTelemetrySource,
+} from "./types.js";
 
 /** Creates the shared identity recorded by prompt-backed and direct skill runs. */
 export type CreateExplicitSkillInvocationParams = {
@@ -8,6 +12,7 @@ export type CreateExplicitSkillInvocationParams = {
   skillSource?: SkillTelemetrySource;
   parentInvocationId?: string;
   parentRunId?: string;
+  orchestrationBudget?: SkillOrchestrationBudgetRef;
 };
 
 export function createExplicitSkillInvocation(
@@ -26,5 +31,6 @@ export function createExplicitSkillInvocation(
     skillName: params.skillName,
     ...(params.skillSource ? { skillSource: params.skillSource } : {}),
     ...parentLineage,
+    ...(params.orchestrationBudget ? { orchestrationBudget: params.orchestrationBudget } : {}),
   };
 }

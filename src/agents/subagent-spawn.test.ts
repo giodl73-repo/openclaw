@@ -16,6 +16,7 @@ const hoisted = vi.hoisted(() => ({
   updateSessionStoreMock: vi.fn(),
   registerSubagentRunMock: vi.fn(),
   emitSessionLifecycleEventMock: vi.fn(),
+  createSessionOrchestrationBudgetMock: vi.fn(),
   dispatchGatewayMethodInProcessMock: vi.fn(),
   hasInProcessGatewayContextMock: vi.fn(),
   resolveAgentConfigMock: vi.fn(),
@@ -75,6 +76,7 @@ describe("spawnSubagentDirect seam flow", () => {
       updateSessionStoreMock: hoisted.updateSessionStoreMock,
       registerSubagentRunMock: hoisted.registerSubagentRunMock,
       emitSessionLifecycleEventMock: hoisted.emitSessionLifecycleEventMock,
+      createSessionOrchestrationBudgetMock: hoisted.createSessionOrchestrationBudgetMock,
       resolveAgentConfig: hoisted.resolveAgentConfigMock,
       resolveSubagentSpawnModelSelection: () => "openai/gpt-5.4",
       resolveSandboxRuntimeStatus: () => ({ sandboxed: false }),
@@ -89,6 +91,7 @@ describe("spawnSubagentDirect seam flow", () => {
     hoisted.updateSessionStoreMock.mockReset();
     hoisted.registerSubagentRunMock.mockReset();
     hoisted.emitSessionLifecycleEventMock.mockReset();
+    hoisted.createSessionOrchestrationBudgetMock.mockReset().mockResolvedValue(undefined);
     hoisted.dispatchGatewayMethodInProcessMock.mockReset();
     hoisted.hasInProcessGatewayContextMock.mockReset().mockReturnValue(false);
     hoisted.resolveAgentConfigMock.mockReset();
@@ -1085,6 +1088,65 @@ describe("spawnSubagentDirect seam flow", () => {
       parentRunId: "run-parent",
     });
     expect(result.skillInvocationId).toBe("skill-child");
+  });
+
+  it("creates a root session budget before starting a budgeted child skill", async () => {
+    const result = await spawnSubagentDirect(
+      {
+        task: "Record the invoice payment.",
+        orchestrationTokenBudget: 5_000,
+        explicitSkillInvocation: {
+          invocationId: "skill-child",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+        },
+      },
+      { agentSessionKey: "agent:main:main" },
+    );
+
+    expect(result.status).toBe("accepted");
+    expect(hoisted.createSessionOrchestrationBudgetMock).toHaveBeenCalledOnce();
+    const budgetCreate = requireRecord(
+      hoisted.createSessionOrchestrationBudgetMock.mock.calls[0]?.[0],
+    );
+    expect(budgetCreate.tokenLimit).toBe(5_000);
+    expect(budgetCreate.ownerSessionKey).toMatch(/^agent:main:subagent:/);
+    expect(budgetCreate.rootRunId).toEqual(expect.any(String));
+
+    const agentParams = requireRecord(gatewayRequest("agent").params);
+    expect(agentParams.idempotencyKey).toBe(budgetCreate.rootRunId);
+    expect(agentParams.explicitSkillInvocation).toMatchObject({
+      invocationId: "skill-child",
+      orchestrationBudget: {
+        ownerSessionKey: budgetCreate.ownerSessionKey,
+        rootRunId: budgetCreate.rootRunId,
+      },
+    });
+  });
+
+  it("does not start the child when its orchestration budget cannot be persisted", async () => {
+    hoisted.createSessionOrchestrationBudgetMock.mockRejectedValueOnce(new Error("store locked"));
+
+    const result = await spawnSubagentDirect(
+      {
+        task: "Record the invoice payment.",
+        orchestrationTokenBudget: 5_000,
+        explicitSkillInvocation: {
+          invocationId: "skill-child",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+        },
+      },
+      { agentSessionKey: "agent:main:main" },
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: "Failed to create orchestration budget: store locked",
+    });
+    expect(gatewayRequestRecords()).not.toContainEqual(
+      expect.objectContaining({ method: "agent" }),
+    );
   });
 
   it("returns an error when the initial child session patch is rejected", async () => {

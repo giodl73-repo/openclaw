@@ -222,6 +222,17 @@ export type SessionGoal = {
   budgetLimitedAt?: number;
 };
 
+/** Shared token counter owned by the root session of one skill orchestration. */
+export type SessionOrchestrationBudget = {
+  schemaVersion: 1;
+  rootRunId: string;
+  tokenLimit: number;
+  tokensUsed: number;
+  createdAt: number;
+  updatedAt: number;
+  exhaustedAt?: number;
+};
+
 export type PendingSkillSuggestion = {
   skillName: string;
   detectedAt: number;
@@ -314,6 +325,8 @@ export type SessionEntry = SessionRestartRecoveryState &
     quotaSuspension?: QuotaSuspension;
     /** Core-owned durable goal state for this thread/session. */
     goal?: SessionGoal;
+    /** Core-owned token budget shared by this root skill run and its descendants. */
+    orchestrationBudget?: SessionOrchestrationBudget;
     /** Durable one-shot Skill Workshop suggestion for the next interactive turn. */
     pendingSkillSuggestion?: PendingSkillSuggestion;
     /** Recent durable-instruction fingerprints already processed by Skill Workshop capture. */
