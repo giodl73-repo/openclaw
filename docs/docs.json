@@ -1127,6 +1127,7 @@
                   "channels/telegram",
                   "channels/whatsapp",
                   "channels/signal",
+                  "channels/m365mail",
                   "channels/msteams",
                   "channels/googlechat",
                   "channels/imessage",

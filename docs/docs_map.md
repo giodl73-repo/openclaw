@@ -533,6 +533,22 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Channel notes
   - H2: Related
 
+## channels/m365mail.md
+
+- Route: /channels/m365mail
+- Headings:
+  - H2: Requirements
+  - H2: Enable the channel
+  - H2: Restrict inbound senders
+  - H2: Configure the hosted environment
+  - H2: Mailbox identity and replies
+  - H2: Troubleshooting
+  - H3: The channel reports a missing mailbox identity
+  - H3: An inbound sender is rejected
+  - H3: A reply fails before reaching Graph
+  - H3: Graph accepted the request but delivery is unclear
+  - H2: Related
+
 ## channels/matrix-migration.md
 
 - Route: /channels/matrix-migration
@@ -3234,6 +3250,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Commitments
   - H2: Browser
   - H2: UI
+  - H2: Hosting
   - H2: Gateway
   - H3: OpenAI-compatible endpoints
   - H3: Multi-instance isolation
@@ -3357,6 +3374,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Deep diagnostics
   - H2: Health monitor config
   - H2: Uptime monitoring
+  - H2: Custom readiness profiles
   - H3: Monitoring service setup examples
   - H2: When something fails
   - H2: Dedicated "health" command

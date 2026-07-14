@@ -1,0 +1,26 @@
+{
+  "id": "m365mail",
+  "name": "Microsoft 365 Email",
+  "description": "Microsoft Graph email channel plugin for OpenClaw.",
+  "activation": {
+    "onStartup": false
+  },
+  "channels": ["m365mail"],
+  "channelEnvVars": {
+    "m365mail": [
+      "M365MAIL_AUTH",
+      "M365MAIL_ALLOW_CROSS_TENANT",
+      "M365MAIL_GRAPH_BASE_URL",
+      "M365MAIL_WEBHOOK_PATH",
+      "M365MAIL_ALLOWED_SENDERS",
+      "M365MAIL_RATE_LIMIT",
+      "OPENCLAW_M365MAIL_AGENT_ID",
+      "OPENCLAW_BOT_NAME"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

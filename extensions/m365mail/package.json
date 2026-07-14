@@ -1,0 +1,47 @@
+{
+  "name": "@openclaw/m365mail",
+  "version": "2026.6.11",
+  "description": "Microsoft 365 email channel plugin for OpenClaw",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/openclaw"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*",
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.6.11"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "channel": {
+      "id": "m365mail",
+      "label": "Microsoft 365 Email",
+      "selectionLabel": "Microsoft 365 Email (Graph)",
+      "docsPath": "/channels/m365mail",
+      "docsLabel": "m365mail",
+      "blurb": "Let your agent receive and reply to Microsoft 365 email under its own identity.",
+      "order": 95
+    },
+    "compat": {
+      "pluginApi": ">=2026.6.11"
+    },
+    "build": {
+      "openclawVersion": "2026.6.11"
+    },
+    "release": {
+      "publishToClawHub": false,
+      "publishToNpm": false
+    }
+  }
+}

@@ -119,6 +119,7 @@
     "!dist/extensions/matrix/**",
     "!dist/extensions/moonshot/**",
     "!dist/extensions/msteams/**",
+    "!dist/extensions/m365mail/**",
     "!dist/extensions/nextcloud-talk/**",
     "!dist/extensions/nostr/**",
     "!dist/extensions/parallel/**",

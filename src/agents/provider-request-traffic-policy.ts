@@ -16,7 +16,8 @@ export type ProviderRequestTrafficPolicyCapabilityV1 = "channel" | "llm";
 export type ProviderRequestTrafficPolicyTransportV1 = "request-response" | "stream";
 export type ProviderRequestTrafficPolicyEndpointClassV1 =
   | ProviderEndpointClass
-  | "bot-framework-connector";
+  | "bot-framework-connector"
+  | "microsoft-graph-mail";
 
 export type ProviderRequestTrafficPolicyMatchV1 = {
   providers?: readonly string[];
