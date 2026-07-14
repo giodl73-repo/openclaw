@@ -303,6 +303,12 @@ export function createOperationRegistrars(state: PluginRegistryState) {
     record: PluginRecord,
     manifest: HostIntegrationBundleManifestV1,
   ): (() => void) => {
+    const current = getCurrentHostIntegrationBundleSnapshotV1();
+    if (current) {
+      throw new Error(
+        `host integration bundle already registered: ${current.id}@${current.bundleVersion}`,
+      );
+    }
     const snapshot = registerHostIntegrationBundleV1({
       manifest,
       availableContributions: manifest.contributions.map(
