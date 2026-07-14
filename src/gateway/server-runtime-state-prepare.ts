@@ -7,6 +7,7 @@ import { getRuntimeConfig } from "../config/io.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { loadGatewayTlsServerRuntime } from "../infra/tls/gateway.js";
+import { createNodeModeReadinessEvidenceResolver } from "../hosting/node-mode.js";
 import {
   buildHostingProfileConditions,
   requiredCriteriaForHostingProfile,
@@ -40,6 +41,7 @@ import { resolveGatewayAuth } from "./auth.js";
 import { createDesktopSessionRegistry } from "./desktop/session-registry.js";
 import { isLoopbackHost } from "./net.js";
 import { createNodeReapprovalCoordinator } from "./node-reapproval-coordinator.js";
+import type { NodeSession } from "./node-registry.js";
 import { resolveGatewayPluginConfig } from "./runtime-plugin-config.js";
 import { createGatewayConnectionState } from "./server-connection-state.js";
 import { createGatewayControlUiRootLifecycle } from "./server-control-ui-root.js";
