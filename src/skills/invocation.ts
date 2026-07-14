@@ -1,7 +1,7 @@
 import { generateSecureToken } from "../infra/secure-random.js";
 import type {
   ExplicitSkillInvocation,
-  SkillOrchestrationDeclarationV1,
+  SkillExecutionHints,
   SkillTelemetrySource,
 } from "./types.js";
 
@@ -11,7 +11,7 @@ export type CreateExplicitSkillInvocationParams = {
   skillName: string;
   skillSource?: SkillTelemetrySource;
   skillDigest?: string;
-  orchestration?: SkillOrchestrationDeclarationV1;
+  executionHints?: SkillExecutionHints;
 };
 
 export function createExplicitSkillInvocation(
@@ -23,6 +23,6 @@ export function createExplicitSkillInvocation(
     skillName: params.skillName,
     ...(params.skillSource ? { skillSource: params.skillSource } : {}),
     ...(params.skillDigest ? { skillDigest: params.skillDigest } : {}),
-    ...(params.orchestration ? { orchestration: params.orchestration } : {}),
+    ...(params.executionHints ? { executionHints: params.executionHints } : {}),
   };
 }

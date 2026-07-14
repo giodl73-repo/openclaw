@@ -64,20 +64,20 @@ describe("buildWorkspaceSkillCommandSpecs", () => {
     expect(specs[0]?.skillFile).toBe(entry.skill.filePath);
   });
 
-  it("carries exact identity and orchestration intent into explicit commands", () => {
+  it("carries exact identity and execution hints into explicit commands", () => {
     const entry = createFixtureSkillEntry("issue-refund");
     entry.skill.contentDigest = `sha256:${"a".repeat(64)}`;
     entry.frontmatter.metadata =
-      '{"openclaw.orchestration":"{schemaVersion:1,receipts:{emits:[\\"payment.refunded\\"]},execution:{isolation:\\"required\\"}}"}';
+      '{"outcomes":"payment.refunded","uses-skills":"verify-customer","isolation":"required"}';
 
     const specs = buildWorkspaceSkillCommandSpecs("/workspace", { entries: [entry] });
 
     expect(specs[0]).toMatchObject({
       skillDigest: `sha256:${"a".repeat(64)}`,
-      orchestration: {
-        schemaVersion: 1,
-        receipts: { emits: ["payment.refunded"] },
-        execution: { isolation: "required" },
+      executionHints: {
+        outcomes: ["payment.refunded"],
+        usesSkills: ["verify-customer"],
+        isolation: "required",
       },
     });
   });
