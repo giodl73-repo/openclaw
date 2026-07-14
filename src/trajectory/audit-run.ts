@@ -30,7 +30,7 @@ export type TrajectoryAuditRunSummary = {
     skillName?: string;
     skillSource?: string;
     skillDigest?: string;
-    orchestration?: Record<string, unknown>;
+    executionHints?: Record<string, unknown>;
     status?: string;
   }>;
   skills: Array<{
@@ -60,8 +60,8 @@ function readSkillInvocations(
     const skillName = toOptionalString(event.data?.skillName);
     const skillSource = toOptionalString(event.data?.skillSource);
     const skillDigest = toOptionalString(event.data?.skillDigest);
-    const orchestration = isRecord(event.data?.orchestration)
-      ? event.data.orchestration
+    const executionHints = isRecord(event.data?.executionHints)
+      ? event.data.executionHints
       : undefined;
     const status = toOptionalString(event.data?.status);
     invocations.set(invocationId, {
@@ -70,7 +70,7 @@ function readSkillInvocations(
       ...(skillName ? { skillName } : {}),
       ...(skillSource ? { skillSource } : {}),
       ...(skillDigest ? { skillDigest } : {}),
-      ...(orchestration ? { orchestration } : {}),
+      ...(executionHints ? { executionHints } : {}),
       ...(status ? { status } : {}),
     });
   }

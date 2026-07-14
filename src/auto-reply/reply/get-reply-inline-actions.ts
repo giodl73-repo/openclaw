@@ -455,7 +455,7 @@ export async function handleInlineActions(params: {
       skillName: skillInvocation.command.skillName,
       skillSource: skillInvocation.command.skillSource,
       skillDigest: skillInvocation.command.skillDigest,
-      orchestration: skillInvocation.command.orchestration,
+      executionHints: skillInvocation.command.executionHints,
     });
     ctx.Body = rewrittenBody;
     ctx.BodyForAgent = rewrittenBody;

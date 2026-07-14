@@ -8,7 +8,7 @@ describe("createExplicitSkillInvocation", () => {
       skillName: "customer-support",
       skillSource: "workspace",
       skillDigest: `sha256:${"a".repeat(64)}`,
-      orchestration: { schemaVersion: 1, invokes: ["verify-customer"] },
+      executionHints: { outcomes: ["case.resolved"], usesSkills: ["verify-customer"] },
     });
 
     expect(invocation).toMatchObject({
@@ -17,7 +17,7 @@ describe("createExplicitSkillInvocation", () => {
       skillName: "customer-support",
       skillSource: "workspace",
       skillDigest: `sha256:${"a".repeat(64)}`,
-      orchestration: { schemaVersion: 1, invokes: ["verify-customer"] },
+      executionHints: { outcomes: ["case.resolved"], usesSkills: ["verify-customer"] },
     });
   });
 });
