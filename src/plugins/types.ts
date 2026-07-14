@@ -2466,6 +2466,24 @@ export type OpenClawPluginService = {
   stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 };
 
+export type OpenClawPluginReadinessResult = {
+  status: "True" | "False" | "Unknown";
+  reason: string;
+  message: string;
+};
+
+export type OpenClawPluginReadinessCriterion = {
+  /** Stable identifier local to this plugin. Core publishes it as plugin.<plugin-id>.<id>. */
+  id: string;
+  /** Human-readable purpose shown when enumerating the active provider catalog. */
+  description: string;
+  check: (ctx: {
+    config: OpenClawConfig;
+    pluginConfig?: Record<string, unknown>;
+    signal: AbortSignal;
+  }) => OpenClawPluginReadinessResult | Promise<OpenClawPluginReadinessResult>;
+};
+
 export type OpenClawPluginChannelRegistration = {
   plugin: ChannelPlugin;
 };
@@ -2814,6 +2832,8 @@ export type OpenClawPluginApi = {
   registerNodeHostCommand: (command: OpenClawPluginNodeHostCommand) => void;
   registerNodeInvokePolicy: (policy: OpenClawPluginNodeInvokePolicy) => void;
   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;
+  /** Register an advisory readiness criterion that an operator may require. */
+  registerReadinessCriterion: (criterion: OpenClawPluginReadinessCriterion) => void;
   /**
    * Publish one atomic host-integration bundle while the owning plugin service
    * is active. The returned disposer clears only that exact published snapshot.

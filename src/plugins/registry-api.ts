@@ -88,6 +88,7 @@ export function createPluginApiFactory(
     registerNodeInvokePolicy,
     registerSecurityAuditCollector,
     registerHostIntegrationBundle,
+    registerReadinessCriterion,
     registerInteractiveHandler,
     registerConversationBindingResolvedHandler,
     registerCommand,
@@ -251,6 +252,8 @@ export function createPluginApiFactory(
                   disposePolicy();
                 };
               },
+              registerReadinessCriterion: (criterion) =>
+                registerReadinessCriterion(record, criterion, params.pluginConfig),
               registerInteractiveHandler: (registration) =>
                 registerInteractiveHandler(record, registration),
               onConversationBindingResolved: (handler) =>

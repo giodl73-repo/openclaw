@@ -1196,6 +1196,23 @@ export const OpenClawSchema = z
             allow: z.array(z.string()).optional(),
           })
           .optional(),
+        readiness: z
+          .strictObject({
+            requiredCriteria: z.array(z.string().trim().min(1).max(160)).max(64).optional(),
+            advisoryCriteria: z.array(z.string().trim().min(1).max(160)).max(64).optional(),
+          })
+          .superRefine((value, ctx) => {
+            const required = new Set(value.requiredCriteria ?? []);
+            const duplicate = (value.advisoryCriteria ?? []).find((id) => required.has(id));
+            if (duplicate) {
+              ctx.addIssue({
+                code: "custom",
+                path: ["advisoryCriteria"],
+                message: "criterion cannot be both required and advisory: " + duplicate,
+              });
+            }
+          })
+          .optional(),
         handshakeTimeoutMs: z.number().int().min(1).optional(),
         channelHealthCheckMinutes: z.number().int().min(0).optional(),
         channelStaleEventThresholdMinutes: z.number().int().min(1).optional(),

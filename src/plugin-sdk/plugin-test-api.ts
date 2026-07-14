@@ -39,6 +39,7 @@ export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPlugi
     registerSecurityAuditCollector() {},
     registerHostIntegrationBundle: () => () => {},
     registerProviderRequestTrafficPolicy: () => () => {},
+    registerReadinessCriterion() {},
     registerConfigMigration() {},
     registerMigrationProvider() {},
     registerAutoEnableProbe() {},
