@@ -43,6 +43,8 @@ import type { TypingController } from "./typing.js";
 
 type SkillCommandsRuntime = typeof import("../../skills/discovery/chat-commands.runtime.js");
 type SkillToolDispatchRuntime = typeof import("../../skills/runtime/tool-dispatch.js");
+type DirectSkillInvocationAuditRuntime =
+  typeof import("../../trajectory/direct-skill-invocation.js");
 type AbortCutoffRuntime = typeof import("./abort-cutoff.runtime.js");
 type CommandsRuntime = typeof import("./commands.runtime.js");
 
@@ -56,6 +58,10 @@ const skillCommandsRuntimeLoader = createLazyImportLoader<SkillCommandsRuntime>(
 const skillToolDispatchRuntimeLoader = createLazyImportLoader<SkillToolDispatchRuntime>(
   () => import("../../skills/runtime/tool-dispatch.js"),
 );
+const directSkillInvocationAuditRuntimeLoader =
+  createLazyImportLoader<DirectSkillInvocationAuditRuntime>(
+    () => import("../../trajectory/direct-skill-invocation.js"),
+  );
 const abortCutoffRuntimeLoader = createLazyImportLoader<AbortCutoffRuntime>(
   () => import("./abort-cutoff.runtime.js"),
 );
@@ -358,6 +364,47 @@ export async function handleInlineActions(params: {
     const dispatch = skillInvocation.command.dispatch;
     if (dispatch?.kind === "tool") {
       const rawArgs = (skillInvocation.args ?? "").trim();
+      const runId = `skill_run_${generateSecureToken(16)}`;
+      const toolCallId = `cmd_${generateSecureToken(8)}`;
+      const invocation = {
+        invocationId: `skill_${generateSecureToken(8)}`,
+        commandName: skillInvocation.command.name,
+        skillName: skillInvocation.command.skillName,
+        ...(skillInvocation.command.skillSource
+          ? { skillSource: skillInvocation.command.skillSource }
+          : {}),
+      };
+      let audit: ReturnType<DirectSkillInvocationAuditRuntime["createDirectSkillInvocationAudit"]> =
+        null;
+      if (targetSessionEntry?.sessionId && storePath) {
+        try {
+          audit = (
+            await directSkillInvocationAuditRuntimeLoader.load()
+          ).createDirectSkillInvocationAudit({
+            agentId,
+            config: cfg,
+            invocation,
+            regarding: targetSessionEntry.regarding,
+            runId,
+            sessionId: targetSessionEntry.sessionId,
+            sessionKey,
+            storePath,
+            toolCallId,
+            toolName: dispatch.toolName,
+          });
+        } catch (error) {
+          logVerbose(`Failed to start direct skill invocation audit: ${formatErrorMessage(error)}`);
+        }
+      }
+      const completeAudit = async (status: "blocked" | "error" | "success") => {
+        try {
+          await audit?.complete(status);
+        } catch (error) {
+          logVerbose(
+            `Failed to complete direct skill invocation audit: ${formatErrorMessage(error)}`,
+          );
+        }
+      };
       const { resolveSkillDispatchTools } = await loadSkillToolDispatchRuntime();
       const authorizedTools = resolveSkillDispatchTools({
         message: {
@@ -382,6 +429,7 @@ export async function handleInlineActions(params: {
         workspaceDir,
         provider,
         model,
+        runId,
         senderId: command.senderId,
         currentChannelId: command.channelId,
         groupId: extractExplicitGroupId(ctx.From),
@@ -400,6 +448,7 @@ export async function handleInlineActions(params: {
 
       const tool = authorizedTools.find((candidate) => candidate.name === dispatch.toolName);
       if (!tool) {
+        await completeAudit("blocked");
         typing.cleanup();
         return {
           kind: "reply",
@@ -409,7 +458,7 @@ export async function handleInlineActions(params: {
         };
       }
 
-      const toolCallId = `cmd_${generateSecureToken(8)}`;
+      audit?.recordUse();
       try {
         const toolArgs: Parameters<NonNullable<typeof tool.execute>>[1] = {
           command: rawArgs,
@@ -418,17 +467,26 @@ export async function handleInlineActions(params: {
         };
         const result = await tool.execute(toolCallId, toolArgs, opts?.abortSignal);
         const blockedReason = extractBlockedToolReason(result);
+        const isError =
+          Boolean(blockedReason) ||
+          (typeof result === "object" && result !== null && "isError" in result
+            ? result.isError === true
+            : false);
+        audit?.recordResult(result, isError);
         if (blockedReason) {
+          await completeAudit("blocked");
           typing.cleanup();
           return {
             kind: "reply",
             reply: markCommandReplyForDelivery({ text: `❌ Tool call blocked: ${blockedReason}` }),
           };
         }
+        await completeAudit(isError ? "error" : "success");
         const text = extractTextFromToolResult(result) ?? "✅ Done.";
         typing.cleanup();
         return { kind: "reply", reply: markCommandReplyForDelivery({ text }) };
       } catch (err) {
+        await completeAudit("error");
         const message = formatErrorMessage(err);
         typing.cleanup();
         return {

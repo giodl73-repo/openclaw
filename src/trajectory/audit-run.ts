@@ -30,6 +30,8 @@ export type TrajectoryAuditRunSummary = {
     skillName?: string;
     skillSource?: string;
     status?: string;
+    toolName?: string;
+    toolCallId?: string;
   }>;
   skills: Array<{
     skillName: string;
@@ -58,12 +60,16 @@ function readSkillInvocations(
     const skillName = toOptionalString(event.data?.skillName);
     const skillSource = toOptionalString(event.data?.skillSource);
     const status = toOptionalString(event.data?.status);
+    const toolName = toOptionalString(event.data?.toolName);
+    const toolCallId = toOptionalString(event.data?.toolCallId);
     invocations.set(invocationId, {
       ...current,
       ...(commandName ? { commandName } : {}),
       ...(skillName ? { skillName } : {}),
       ...(skillSource ? { skillSource } : {}),
       ...(status ? { status } : {}),
+      ...(toolName ? { toolName } : {}),
+      ...(toolCallId ? { toolCallId } : {}),
     });
   }
   return [...invocations.values()];
@@ -143,7 +149,7 @@ function readSkills(events: TrajectoryEvent[]): TrajectoryAuditRunSummary["skill
 
 function readStatus(events: TrajectoryEvent[]): string | undefined {
   return events.reduce<string | undefined>((status, event) => {
-    return event.type === "session.ended"
+    return event.type === "session.ended" || event.type === "skill.invocation.completed"
       ? (toOptionalString(event.data?.status) ?? status)
       : status;
   }, undefined);

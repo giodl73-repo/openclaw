@@ -67,6 +67,7 @@ export function resolveSkillDispatchTools(params: {
   workspaceDir: string;
   provider: string;
   model: string;
+  runId?: string;
   senderId?: string;
   currentChannelId?: string;
   skillCommand?: Pick<SkillCommandSpec, "name" | "skillFile" | "skillName" | "skillSource"> & {
@@ -198,6 +199,7 @@ export function resolveSkillDispatchTools(params: {
     requesterAgentIdOverride: params.agentId,
     requesterSenderId: params.senderId,
     sessionId: params.sessionEntry?.sessionId,
+    runId: params.runId,
     currentChannelId: params.currentChannelId,
     ...(beforeToolCallHookContext ? { beforeToolCallHookContext } : {}),
     modelProvider: params.provider,
