@@ -251,6 +251,44 @@ describe("buildGuardedModelFetch", () => {
     expect(withTrustedEnvProxyGuardedFetchModeMock).not.toHaveBeenCalled();
   });
 
+  it("fails closed when traffic policy selects an unavailable hosted dispatcher", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: false,
+      policy: { endpointClass: "custom" },
+    });
+    registerProviderRequestTrafficPolicyV1({
+      version: "provider-request-traffic-policy/v1",
+      id: "lobster/enterprise-egress",
+      generation: "policy-1",
+      required: true,
+      provenance: { source: "test", revision: "1" },
+      routeProfiles: [
+        {
+          id: "lobster/hosted",
+          dispatcherPolicy: { mode: "direct" },
+          dispatchBindingId: "lobster/egress",
+        },
+      ],
+      rules: [
+        {
+          id: "openai",
+          match: { providers: ["openai"], endpointClasses: ["custom"] },
+          outcome: {
+            action: "allow",
+            routeProfileId: "lobster/hosted",
+            allowedOrigins: ["https://api.openai.com"],
+            allowPrivateNetwork: false,
+          },
+        },
+      ],
+    });
+
+    await expect(
+      buildGuardedModelFetch(sentinelModel())("https://api.openai.com/v1/responses"),
+    ).rejects.toThrow("selected unavailable dispatcher lobster/egress");
+    expect(fetchWithSsrFGuardMock).not.toHaveBeenCalled();
+  });
+
   it("swaps sentinels in Request-form headers", async () => {
     const sentinel = mintSecretSentinel("request-form-secret", { label: "request-form" });
     const request = new Request("https://api.openai.com/v1/responses", {

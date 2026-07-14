@@ -206,6 +206,41 @@ describe("host provider registry", () => {
     });
   });
 
+  it("queues a maximum-size default request chunk after envelope encoding", async () => {
+    const providerSocket = socket();
+    const value = registry();
+    value.register(client("conn-max-chunk", providerSocket));
+    const operation = value.openOperation({
+      ...openInput("operation-max-chunk"),
+      requestByteLimit: 10 * 1024 * 1024,
+      responseByteLimit: 48 * 1024 * 1024,
+      maxFrameBytes: 2 * 1024 * 1024,
+      maxChunkBytes: 1024 * 1024,
+    });
+    await nextTurn();
+    value.receiveFrame(
+      "conn-max-chunk",
+      frame(operation.open, {
+        type: "credit",
+        stream: "request",
+        bytes: 1024 * 1024,
+      }),
+    );
+
+    expect(
+      operation.send(
+        frame(operation.open, {
+          type: "chunk",
+          stream: "request",
+          sequence: 0,
+          payloadBase64: Buffer.alloc(1024 * 1024).toString("base64"),
+        }),
+      ),
+    ).toBe(true);
+    await nextTurn();
+    expect(providerSocket.send).toHaveBeenCalledTimes(2);
+  });
+
   it("settles old operations without replay when a session is superseded", async () => {
     const firstSocket = socket();
     const value = registry();

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createAbortError } from "../infra/abort-signal.js";
 import type {
   OneHopFetchDispatcher,
   OneHopFetchRequest,
@@ -187,6 +188,7 @@ function runOperation(params: {
   requestByteLimit: number;
   responseByteLimit: number;
   maxChunkBytes: number;
+  signal?: AbortSignal;
   resolveResponse: (response: Response) => void;
   rejectResponse: (error: unknown) => void;
 }): void {
@@ -198,7 +200,51 @@ function runOperation(params: {
     let responseClosed = false;
     let responseSequence = 0;
     let responseBytes = 0;
+    let responseCreditOutstanding = 0;
+    let responseCreditRequested = false;
+    let aborted = false;
+    const sendResponseCredit = () => {
+      if (responseClosed || responseCreditOutstanding > 0 || !responseCreditRequested) {
+        return;
+      }
+      if (
+        !params.operation.send(
+          operationFrame(params.operation, {
+            type: "credit",
+            stream: "response",
+            bytes: params.maxChunkBytes,
+          }),
+        )
+      ) {
+        throw dispatchFailure("overloaded", responseOpened ? "response-started" : "not-started");
+      }
+      responseCreditOutstanding = params.maxChunkBytes;
+      responseCreditRequested = false;
+    };
+    const abort = () => {
+      if (aborted) {
+        return;
+      }
+      aborted = true;
+      const error = createAbortError("Host provider dispatch aborted", {
+        cause: params.signal?.reason,
+      });
+      if (responseOpened && responseBody) {
+        responseBody.error(error);
+      } else {
+        params.rejectResponse(error);
+      }
+      params.operation.send(
+        operationFrame(params.operation, {
+          type: "cancel",
+          reason: "request aborted",
+        }),
+      );
+    };
+    params.signal?.addEventListener("abort", abort, { once: true });
     try {
+      responseCreditRequested = true;
+      sendResponseCredit();
       for (;;) {
         const next = await reader.read();
         if (next.done) {
@@ -234,6 +280,10 @@ function runOperation(params: {
                 start(controller) {
                   responseBody = controller;
                 },
+                pull() {
+                  responseCreditRequested = true;
+                  sendResponseCredit();
+                },
                 cancel(reason) {
                   params.operation.send(
                     operationFrame(params.operation, {
@@ -261,11 +311,16 @@ function runOperation(params: {
           if (responseBytes > params.responseByteLimit) {
             throw dispatchFailure("response-limit-exceeded", "response-started");
           }
+          if (payload.byteLength > responseCreditOutstanding) {
+            throw dispatchFailure("protocol-violation", "response-started");
+          }
+          responseCreditOutstanding -= payload.byteLength;
           responseSequence += 1;
           if (!responseBody) {
             throw dispatchFailure("protocol-violation", "response-started");
           }
           responseBody.enqueue(payload);
+          sendResponseCredit();
           continue;
         }
         if (frame.type === "half-close" && frame.stream === "response") {
@@ -276,18 +331,21 @@ function runOperation(params: {
         }
       }
     } catch (error) {
-      if (responseOpened && responseBody) {
-        responseBody.error(error);
-      } else {
-        params.rejectResponse(error);
+      if (!aborted) {
+        if (responseOpened && responseBody) {
+          responseBody.error(error);
+        } else {
+          params.rejectResponse(error);
+        }
+        params.operation.send(
+          operationFrame(params.operation, {
+            type: "cancel",
+            reason: "OpenClaw stopped the hosted dispatch",
+          }),
+        );
       }
-      params.operation.send(
-        operationFrame(params.operation, {
-          type: "cancel",
-          reason: "OpenClaw stopped the hosted dispatch",
-        }),
-      );
     } finally {
+      params.signal?.removeEventListener("abort", abort);
       reader.releaseLock();
     }
   })();
@@ -328,6 +386,11 @@ export function createHostProviderOneHopFetchDispatcherV1(
 
   return {
     dispatch: async (request: OneHopFetchRequest) => {
+      if (request.init.signal?.aborted) {
+        throw createAbortError("Host provider dispatch aborted", {
+          cause: request.init.signal.reason,
+        });
+      }
       const prepared = new Request(request.url, request.init);
       const operation = options.registry.openOperation({
         operationId: randomUUID(),
@@ -349,17 +412,6 @@ export function createHostProviderOneHopFetchDispatcherV1(
           auditCorrelation: options.createAuditCorrelation?.() ?? randomUUID(),
         },
       });
-      if (
-        !operation.send(
-          operationFrame(operation, {
-            type: "credit",
-            stream: "response",
-            bytes: responseByteLimit,
-          }),
-        )
-      ) {
-        throw dispatchFailure("overloaded", "not-started");
-      }
 
       const response = new Promise<Response>((resolveResponse, rejectResponse) => {
         runOperation({
@@ -368,28 +420,12 @@ export function createHostProviderOneHopFetchDispatcherV1(
           requestByteLimit,
           responseByteLimit,
           maxChunkBytes,
+          signal: request.init.signal ?? undefined,
           resolveResponse,
           rejectResponse,
         });
       });
-      const abort = () => {
-        operation.send(
-          operationFrame(operation, {
-            type: "cancel",
-            reason: "request aborted",
-          }),
-        );
-      };
-      request.init.signal?.addEventListener("abort", abort, { once: true });
-      void operation.result.finally(() => {
-        request.init.signal?.removeEventListener("abort", abort);
-      });
-      try {
-        return await response;
-      } catch (error) {
-        request.init.signal?.removeEventListener("abort", abort);
-        throw error;
-      }
+      return await response;
     },
   };
 }

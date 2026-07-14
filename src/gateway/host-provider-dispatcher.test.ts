@@ -72,6 +72,7 @@ function withBase(
 
 function fakeRegistry(params: {
   requestCredits?: number[];
+  holdOpen?: boolean;
   responseFrames: (
     operation: HostProviderOperation,
     requestBody: Uint8Array,
@@ -80,8 +81,11 @@ function fakeRegistry(params: {
   let opened: HostProviderOperationOpenInput | undefined;
   let requestBody = Buffer.alloc(0);
   let requestCredit = 0;
+  const sentFrames: ReverseProviderDispatchFrameV1[] = [];
   const openOperation = vi.fn((input: HostProviderOperationOpenInput): HostProviderOperation => {
     opened = input;
+    let responseCredit = 0;
+    let pendingResponseFrames: ReverseProviderDispatchFrameV1[] | undefined;
     let controller!: ReadableStreamDefaultController<ReverseProviderDispatchFrameV1>;
     const frames = new ReadableStream<ReverseProviderDispatchFrameV1>({
       start(next) {
@@ -92,6 +96,53 @@ function fakeRegistry(params: {
     const result = new Promise<ReverseProviderDispatchTraceResult>((resolve) => {
       resolveResult = resolve;
     });
+    const flushResponse = () => {
+      if (!pendingResponseFrames) {
+        return;
+      }
+      const terminal = pendingResponseFrames.at(-1);
+      while (pendingResponseFrames.length > 0) {
+        const responseFrame = pendingResponseFrames[0]!;
+        if (responseFrame.type === "chunk" && responseFrame.stream === "response") {
+          const bytes = Buffer.from(responseFrame.payloadBase64, "base64").byteLength;
+          if (bytes > responseCredit) {
+            return;
+          }
+          responseCredit -= bytes;
+        }
+        controller.enqueue(responseFrame);
+        pendingResponseFrames.shift();
+      }
+      if (params.holdOpen) {
+        return;
+      }
+      pendingResponseFrames = undefined;
+      controller.close();
+      resolveResult(
+        terminal?.type === "terminal" && terminal.outcome === "completed"
+          ? {
+              ok: true,
+              terminal: {
+                outcome: "completed",
+                certainty: "completed",
+              },
+              cancelled: false,
+              ignoredFrames: 0,
+            }
+          : {
+              ok: true,
+              terminal: {
+                outcome: "failed",
+                certainty:
+                  terminal?.type === "terminal" ? terminal.certainty : "started-unconfirmed",
+                failureCode:
+                  terminal?.type === "terminal" ? terminal.failureCode : "protocol-violation",
+              },
+              cancelled: false,
+              ignoredFrames: 0,
+            },
+      );
+    };
     const operation = {
       open: {
         ...input,
@@ -104,6 +155,11 @@ function fakeRegistry(params: {
       frames,
       result,
       send(frame: ReverseProviderDispatchFrameV1) {
+        sentFrames.push(frame);
+        if (frame.type === "credit" && frame.stream === "response") {
+          responseCredit += frame.bytes;
+          flushResponse();
+        }
         if (frame.type === "chunk" && frame.stream === "request") {
           if (Buffer.from(frame.payloadBase64, "base64").byteLength > requestCredit) {
             return false;
@@ -112,36 +168,8 @@ function fakeRegistry(params: {
           requestBody = Buffer.concat([requestBody, Buffer.from(frame.payloadBase64, "base64")]);
         }
         if (frame.type === "half-close" && frame.stream === "request") {
-          const responseFrames = params.responseFrames(operation, requestBody);
-          for (const responseFrame of responseFrames) {
-            controller.enqueue(responseFrame);
-          }
-          const terminal = responseFrames.at(-1);
-          controller.close();
-          resolveResult(
-            terminal?.type === "terminal" && terminal.outcome === "completed"
-              ? {
-                  ok: true,
-                  terminal: {
-                    outcome: "completed",
-                    certainty: "completed",
-                  },
-                  cancelled: false,
-                  ignoredFrames: 0,
-                }
-              : {
-                  ok: true,
-                  terminal: {
-                    outcome: "failed",
-                    certainty:
-                      terminal?.type === "terminal" ? terminal.certainty : "started-unconfirmed",
-                    failureCode:
-                      terminal?.type === "terminal" ? terminal.failureCode : "protocol-violation",
-                  },
-                  cancelled: false,
-                  ignoredFrames: 0,
-                },
-          );
+          pendingResponseFrames = params.responseFrames(operation, requestBody);
+          flushResponse();
         }
         return true;
       },
@@ -169,6 +197,7 @@ function fakeRegistry(params: {
     get requestBody() {
       return requestBody;
     },
+    sentFrames,
   };
 }
 
@@ -187,7 +216,13 @@ describe("host provider one-hop dispatcher", () => {
           type: "chunk",
           stream: "response",
           sequence: 0,
-          payloadBase64: Buffer.from("redirect").toString("base64"),
+          payloadBase64: Buffer.from("redi").toString("base64"),
+        }),
+        withBase(operation, {
+          type: "chunk",
+          stream: "response",
+          sequence: 1,
+          payloadBase64: Buffer.from("rect").toString("base64"),
         }),
         withBase(operation, { type: "half-close", stream: "response" }),
         withBase(operation, {
@@ -226,6 +261,11 @@ describe("host provider one-hop dispatcher", () => {
       routeProfile: "lobster/managed",
       auditCorrelation: "audit-1",
     });
+    const responseCredits = fake.sentFrames
+      .filter((frame) => frame.type === "credit" && frame.stream === "response")
+      .map((frame) => frame.bytes);
+    expect(responseCredits.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(responseCredits)).toEqual(new Set([4]));
   });
 
   it("preserves dispatch certainty when the host fails before response headers", async () => {
@@ -261,6 +301,64 @@ describe("host provider one-hop dispatcher", () => {
       expect.objectContaining<Partial<HostProviderDispatchError>>({
         failureCode: "connection-lost",
         certainty: "started-unconfirmed",
+      }),
+    );
+  });
+
+  it("rejects a pre-aborted request before opening a host operation", async () => {
+    const fake = fakeRegistry({
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "lobster/egress",
+      routeProfile: "lobster/managed",
+    });
+    const controller = new AbortController();
+    controller.abort("caller stopped");
+
+    await expect(
+      dispatcher.dispatch({
+        url: "https://capi.example.com/v1/messages",
+        init: {
+          method: "POST",
+          redirect: "manual",
+          signal: controller.signal,
+        },
+        networkGuard: networkGuard(),
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fake.openOperation).not.toHaveBeenCalled();
+  });
+
+  it("rejects promptly and cancels the host operation when the caller aborts", async () => {
+    const fake = fakeRegistry({
+      holdOpen: true,
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "lobster/egress",
+      routeProfile: "lobster/managed",
+    });
+    const controller = new AbortController();
+
+    const response = dispatcher.dispatch({
+      url: "https://capi.example.com/v1/messages",
+      init: {
+        method: "POST",
+        redirect: "manual",
+        signal: controller.signal,
+      },
+      networkGuard: networkGuard(),
+    });
+    controller.abort("caller stopped");
+
+    await expect(response).rejects.toMatchObject({ name: "AbortError" });
+    expect(fake.sentFrames).toContainEqual(
+      expect.objectContaining({
+        type: "cancel",
+        reason: "request aborted",
       }),
     );
   });
