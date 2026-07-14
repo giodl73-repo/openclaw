@@ -299,7 +299,7 @@ export function prepareCapiHostedBindingV1(params: {
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(providerId)) {
     throw new CapiHostedBindingError("invalid-selection", "CAPI provider ID is invalid");
   }
-  const bundleGeneration = `${params.bundle.id}@${params.bundle.bundleVersion}`;
+  const bundleGeneration = params.bundle.generation;
   const adapterConfig = Object.freeze({ ...params.adapterConfig });
   const credentialReadiness = params.implementations.credentialSlot.bindings.readiness();
   const dispatcherTarget = params.implementations.dispatcher.dispatcher;
@@ -405,6 +405,7 @@ export function prepareCapiHostedBindingV1(params: {
         credentialSlotRefs: prepared.credentialSlotRefs,
         dispatcherPolicy: decision.dispatcherPolicy,
         timeoutMs: decision.timeoutMs,
+        ...(signal ? { signal } : {}),
         allowCrossOriginUnsafeRedirectReplay: false,
         validateUrl,
         policy: decision.allowPrivateNetwork ? { allowPrivateNetwork: true } : undefined,

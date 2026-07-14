@@ -7,6 +7,12 @@ import {
   type ReverseProviderDispatchTraceResult,
 } from "./reverse-provider-dispatch.js";
 
+type ExpectedSession = {
+  incarnationId: string;
+  ownerGeneration: string;
+  hostBundleGeneration: string;
+};
+
 function encodedFrameBytes(value: unknown): number {
   const encoded = JSON.stringify(value);
   if (encoded === undefined) {
@@ -20,254 +26,262 @@ function failure(
   frameIndex: number,
   certainty: ReverseProviderDispatchCertainty,
   message: string,
-): ReverseProviderDispatchTraceResult {
+): Extract<ReverseProviderDispatchTraceResult, { ok: false }> {
   return { ok: false, code, frameIndex, certainty, message };
 }
 
-export function evaluateReverseProviderDispatchTraceV1(params: {
-  frames: readonly unknown[];
-  disconnected?: boolean;
-  expectedSession?: {
-    incarnationId: string;
-    ownerGeneration: string;
-    hostBundleGeneration: string;
-  };
-}): ReverseProviderDispatchTraceResult {
-  let open: ReverseProviderDispatchOperationOpenV1 | undefined;
-  let requestCredit = 0;
-  let responseCredit = 0;
-  let requestBytes = 0;
-  let responseBytes = 0;
-  let requestSequence = 0;
-  let responseSequence = 0;
-  let requestClosed = false;
-  let responseOpened = false;
-  let responseClosed = false;
-  let dispatchStarted = false;
-  let cancelled = false;
-  let ignoredFrames = 0;
-  let terminal: Extract<ReverseProviderDispatchFrameV1, { type: "terminal" }> | undefined;
-  let certainty: ReverseProviderDispatchCertainty = "not-started";
+export class ReverseProviderDispatchTraceEvaluatorV1 {
+  private open: ReverseProviderDispatchOperationOpenV1 | undefined;
+  private requestCredit = 0;
+  private responseCredit = 0;
+  private requestBytes = 0;
+  private responseBytes = 0;
+  private requestSequence = 0;
+  private responseSequence = 0;
+  private requestClosed = false;
+  private responseOpened = false;
+  private responseClosed = false;
+  private dispatchStarted = false;
+  private cancelled = false;
+  private ignoredFrames = 0;
+  private terminal: Extract<ReverseProviderDispatchFrameV1, { type: "terminal" }> | undefined;
+  private certainty: ReverseProviderDispatchCertainty = "not-started";
+  private frameCount = 0;
+  private failed: Extract<ReverseProviderDispatchTraceResult, { ok: false }> | undefined;
 
-  for (const [frameIndex, value] of params.frames.entries()) {
-    if (terminal) {
-      ignoredFrames += 1;
-      continue;
+  constructor(private readonly expectedSession?: ExpectedSession) {}
+
+  append(value: unknown): ReverseProviderDispatchTraceResult {
+    if (this.failed) {
+      return this.failed;
+    }
+    const frameIndex = this.frameCount;
+    this.frameCount += 1;
+    if (this.terminal) {
+      this.ignoredFrames += 1;
+      return this.terminalResult();
     }
     let frame: ReverseProviderDispatchFrameV1;
     try {
       frame = assertReverseProviderDispatchFrameV1(value);
     } catch (error) {
-      return failure(
+      return this.fail(
         "protocol-violation",
         frameIndex,
-        certainty,
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (!open) {
+    if (!this.open) {
       if (frame.type !== "operation-open") {
-        return failure(
-          "protocol-violation",
-          frameIndex,
-          certainty,
-          "first frame must open operation",
-        );
+        return this.fail("protocol-violation", frameIndex, "first frame must open operation");
       }
       if (
-        params.expectedSession &&
-        (frame.incarnationId !== params.expectedSession.incarnationId ||
-          frame.ownerGeneration !== params.expectedSession.ownerGeneration ||
-          frame.hostBundleGeneration !== params.expectedSession.hostBundleGeneration)
+        this.expectedSession &&
+        (frame.incarnationId !== this.expectedSession.incarnationId ||
+          frame.ownerGeneration !== this.expectedSession.ownerGeneration ||
+          frame.hostBundleGeneration !== this.expectedSession.hostBundleGeneration)
       ) {
-        return failure(
+        return this.fail(
           "stale-generation",
           frameIndex,
-          certainty,
           "operation-open does not match the admitted session",
         );
       }
-      open = frame;
-      continue;
+      this.open = frame;
+      return this.incompleteResult();
     }
     if (
-      frame.operationId !== open.operationId ||
-      frame.incarnationId !== open.incarnationId ||
-      frame.ownerGeneration !== open.ownerGeneration ||
-      frame.hostBundleGeneration !== open.hostBundleGeneration
+      frame.operationId !== this.open.operationId ||
+      frame.incarnationId !== this.open.incarnationId ||
+      frame.ownerGeneration !== this.open.ownerGeneration ||
+      frame.hostBundleGeneration !== this.open.hostBundleGeneration
     ) {
-      ignoredFrames += 1;
-      continue;
+      this.ignoredFrames += 1;
+      return this.incompleteResult();
     }
-    if (encodedFrameBytes(frame) > open.maxFrameBytes) {
-      return failure("protocol-violation", frameIndex, certainty, "frame exceeds maxFrameBytes");
+    if (encodedFrameBytes(frame) > this.open.maxFrameBytes) {
+      return this.fail("protocol-violation", frameIndex, "frame exceeds maxFrameBytes");
     }
     if (frame.type === "operation-open") {
-      return failure("protocol-violation", frameIndex, certainty, "operation is already open");
+      return this.fail("protocol-violation", frameIndex, "operation is already open");
     }
-    if (cancelled && frame.type !== "terminal") {
-      ignoredFrames += 1;
-      continue;
+    if (this.cancelled && frame.type !== "terminal") {
+      this.ignoredFrames += 1;
+      return this.incompleteResult();
     }
     if (frame.type === "credit") {
       if (frame.stream === "request") {
-        requestCredit += frame.bytes;
-        if (!Number.isSafeInteger(requestCredit) || requestCredit > open.requestByteLimit) {
-          return failure(
-            "protocol-violation",
-            frameIndex,
-            certainty,
-            "request credit exceeds byte limit",
-          );
+        this.requestCredit += frame.bytes;
+        if (
+          !Number.isSafeInteger(this.requestCredit) ||
+          this.requestCredit > this.open.requestByteLimit
+        ) {
+          return this.fail("protocol-violation", frameIndex, "request credit exceeds byte limit");
         }
       } else {
-        responseCredit += frame.bytes;
-        if (!Number.isSafeInteger(responseCredit) || responseCredit > open.responseByteLimit) {
-          return failure(
-            "protocol-violation",
-            frameIndex,
-            certainty,
-            "response credit exceeds byte limit",
-          );
+        this.responseCredit += frame.bytes;
+        if (
+          !Number.isSafeInteger(this.responseCredit) ||
+          this.responseCredit > this.open.responseByteLimit
+        ) {
+          return this.fail("protocol-violation", frameIndex, "response credit exceeds byte limit");
         }
       }
-      continue;
+      return this.incompleteResult();
     }
     if (frame.type === "chunk") {
       const bytes = measureReverseProviderDispatchChunkBytesV1(frame.payloadBase64);
-      if (bytes === 0 || bytes > open.maxChunkBytes) {
-        return failure("protocol-violation", frameIndex, certainty, "chunk size is invalid");
+      if (bytes === 0 || bytes > this.open.maxChunkBytes) {
+        return this.fail("protocol-violation", frameIndex, "chunk size is invalid");
       }
       if (frame.stream === "request") {
-        if (requestClosed || frame.sequence !== requestSequence || bytes > requestCredit) {
-          return failure(
+        if (
+          this.requestClosed ||
+          frame.sequence !== this.requestSequence ||
+          bytes > this.requestCredit
+        ) {
+          return this.fail(
             "protocol-violation",
             frameIndex,
-            certainty,
             "request chunk violates stream state or credit",
           );
         }
-        requestSequence += 1;
-        requestCredit -= bytes;
-        requestBytes += bytes;
-        if (requestBytes > open.requestByteLimit) {
-          return failure(
-            "protocol-violation",
-            frameIndex,
-            certainty,
-            "request byte limit exceeded",
-          );
+        this.requestSequence += 1;
+        this.requestCredit -= bytes;
+        this.requestBytes += bytes;
+        if (this.requestBytes > this.open.requestByteLimit) {
+          return this.fail("protocol-violation", frameIndex, "request byte limit exceeded");
         }
       } else {
         if (
-          !responseOpened ||
-          responseClosed ||
-          frame.sequence !== responseSequence ||
-          bytes > responseCredit
+          !this.responseOpened ||
+          this.responseClosed ||
+          frame.sequence !== this.responseSequence ||
+          bytes > this.responseCredit
         ) {
-          return failure(
+          return this.fail(
             "protocol-violation",
             frameIndex,
-            certainty,
             "response chunk violates stream state or credit",
           );
         }
-        responseSequence += 1;
-        responseCredit -= bytes;
-        responseBytes += bytes;
-        certainty = "response-started";
-        if (responseBytes > open.responseByteLimit) {
-          return failure(
-            "protocol-violation",
-            frameIndex,
-            certainty,
-            "response byte limit exceeded",
-          );
+        this.responseSequence += 1;
+        this.responseCredit -= bytes;
+        this.responseBytes += bytes;
+        this.certainty = "response-started";
+        if (this.responseBytes > this.open.responseByteLimit) {
+          return this.fail("protocol-violation", frameIndex, "response byte limit exceeded");
         }
       }
-      continue;
+      return this.incompleteResult();
     }
     if (frame.type === "half-close") {
       if (frame.stream === "request") {
-        if (requestClosed) {
-          return failure(
-            "protocol-violation",
-            frameIndex,
-            certainty,
-            "request stream already closed",
-          );
+        if (this.requestClosed) {
+          return this.fail("protocol-violation", frameIndex, "request stream already closed");
         }
-        requestClosed = true;
+        this.requestClosed = true;
       } else {
-        if (!responseOpened || responseClosed) {
-          return failure(
-            "protocol-violation",
-            frameIndex,
-            certainty,
-            "response stream is not open",
-          );
+        if (!this.responseOpened || this.responseClosed) {
+          return this.fail("protocol-violation", frameIndex, "response stream is not open");
         }
-        responseClosed = true;
+        this.responseClosed = true;
       }
-      continue;
+      return this.incompleteResult();
     }
     if (frame.type === "dispatch-started") {
-      if (dispatchStarted) {
-        return failure("protocol-violation", frameIndex, certainty, "dispatch already started");
+      if (this.dispatchStarted) {
+        return this.fail("protocol-violation", frameIndex, "dispatch already started");
       }
-      dispatchStarted = true;
-      certainty = "started-unconfirmed";
-      continue;
+      this.dispatchStarted = true;
+      this.certainty = "started-unconfirmed";
+      return this.incompleteResult();
     }
     if (frame.type === "response-open") {
-      if (!dispatchStarted || responseOpened) {
-        return failure(
-          "protocol-violation",
-          frameIndex,
-          certainty,
-          "response cannot open in current state",
-        );
+      if (!this.dispatchStarted || this.responseOpened) {
+        return this.fail("protocol-violation", frameIndex, "response cannot open in current state");
       }
-      responseOpened = true;
-      certainty = "response-started";
-      continue;
+      this.responseOpened = true;
+      this.certainty = "response-started";
+      return this.incompleteResult();
     }
     if (frame.type === "cancel") {
-      if (cancelled) {
-        return failure("protocol-violation", frameIndex, certainty, "operation already cancelled");
+      if (this.cancelled) {
+        return this.fail("protocol-violation", frameIndex, "operation already cancelled");
       }
-      cancelled = true;
-      continue;
+      this.cancelled = true;
+      return this.incompleteResult();
     }
-    terminal = frame;
-    if (frame.outcome === "completed" && (!requestClosed || !responseOpened || !responseClosed)) {
-      return failure(
+    this.terminal = frame;
+    if (
+      frame.outcome === "completed" &&
+      (!this.requestClosed || !this.responseOpened || !this.responseClosed)
+    ) {
+      return this.fail(
         "protocol-violation",
         frameIndex,
-        certainty,
         "completed outcome requires both streams to be half-closed",
       );
     }
     if (frame.outcome === "failed" && frame.certainty === "completed") {
-      return failure(
-        "protocol-violation",
-        frameIndex,
-        certainty,
-        "failed outcome cannot be completed",
-      );
+      return this.fail("protocol-violation", frameIndex, "failed outcome cannot be completed");
     }
-    if (frame.outcome === "failed" && frame.certainty !== certainty) {
-      return failure(
+    if (frame.outcome === "failed" && frame.certainty !== this.certainty) {
+      return this.fail(
         "protocol-violation",
         frameIndex,
-        certainty,
         "failed outcome certainty does not match observed dispatch state",
       );
     }
-    certainty = frame.certainty;
+    this.certainty = frame.certainty;
+    return this.terminalResult();
   }
 
-  if (terminal) {
+  finalize(params: { disconnected?: boolean } = {}): ReverseProviderDispatchTraceResult {
+    if (this.failed) {
+      return this.failed;
+    }
+    if (this.terminal) {
+      return this.terminalResult();
+    }
+    if (params.disconnected && this.open) {
+      return {
+        ok: true,
+        terminal: {
+          outcome: "failed",
+          certainty: this.certainty,
+          failureCode: "connection-lost",
+        },
+        cancelled: this.cancelled,
+        ignoredFrames: this.ignoredFrames,
+      };
+    }
+    return this.incompleteResult();
+  }
+
+  private fail(
+    code: Extract<ReverseProviderDispatchTraceResult, { ok: false }>["code"],
+    frameIndex: number,
+    message: string,
+  ): Extract<ReverseProviderDispatchTraceResult, { ok: false }> {
+    this.failed = failure(code, frameIndex, this.certainty, message);
+    return this.failed;
+  }
+
+  private incompleteResult(): Extract<ReverseProviderDispatchTraceResult, { ok: false }> {
+    return failure(
+      "incomplete-trace",
+      this.frameCount,
+      this.certainty,
+      "trace ended without terminal outcome or disconnect",
+    );
+  }
+
+  private terminalResult(): Extract<ReverseProviderDispatchTraceResult, { ok: true }> {
+    const terminal = this.terminal;
+    if (!terminal) {
+      throw new Error("terminal result requested before terminal frame");
+    }
     return {
       ok: true,
       terminal: {
@@ -275,26 +289,33 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
         certainty: terminal.certainty,
         ...(terminal.failureCode ? { failureCode: terminal.failureCode } : {}),
       },
-      cancelled,
-      ignoredFrames,
+      cancelled: this.cancelled,
+      ignoredFrames: this.ignoredFrames,
     };
   }
-  if (params.disconnected && open) {
-    return {
-      ok: true,
-      terminal: {
-        outcome: "failed",
-        certainty,
-        failureCode: "connection-lost",
-      },
-      cancelled,
-      ignoredFrames,
-    };
+}
+
+export function createReverseProviderDispatchTraceEvaluatorV1(
+  params: {
+    expectedSession?: ExpectedSession;
+  } = {},
+): ReverseProviderDispatchTraceEvaluatorV1 {
+  return new ReverseProviderDispatchTraceEvaluatorV1(params.expectedSession);
+}
+
+export function evaluateReverseProviderDispatchTraceV1(params: {
+  frames: readonly unknown[];
+  disconnected?: boolean;
+  expectedSession?: ExpectedSession;
+}): ReverseProviderDispatchTraceResult {
+  const evaluator = createReverseProviderDispatchTraceEvaluatorV1({
+    expectedSession: params.expectedSession,
+  });
+  for (const frame of params.frames) {
+    const result = evaluator.append(frame);
+    if (!result.ok && result.code !== "incomplete-trace") {
+      return result;
+    }
   }
-  return failure(
-    "incomplete-trace",
-    params.frames.length,
-    certainty,
-    "trace ended without terminal outcome or disconnect",
-  );
+  return evaluator.finalize({ disconnected: params.disconnected });
 }

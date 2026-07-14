@@ -13,8 +13,8 @@ import {
   issueHostProviderCredentialV1,
 } from "./host-provider-credentials.js";
 
-function registerBinding(ownerGeneration = "owner-4") {
-  registerHostIntegrationBundleV1({
+function registerBundle() {
+  return registerHostIntegrationBundleV1({
     manifest: {
       version: "host-integration-bundle/v1",
       id: "lobster/host",
@@ -44,26 +44,33 @@ function registerBinding(ownerGeneration = "owner-4") {
       },
     ],
   });
+}
+
+function registerBinding(ownerGeneration = "owner-4"): string {
+  const bundle = registerBundle();
   publishHostIntegrationOwnerEvidenceV1([
     {
       owner: "provider-request",
       kind: "provider-request-dispatcher",
       id: "lobster/egress",
-      bundleGeneration: "lobster/host@1.0.0",
+      bundleGeneration: bundle.generation,
       ownerGeneration,
       state: "ready",
       reason: "Ready",
       message: "ready",
     },
   ]);
+  return bundle.generation;
 }
+
+let bundleGeneration: string;
 
 beforeEach(() => {
   resetHostProviderTokenStateForTest({
     secret: Buffer.alloc(32, 7),
     audience: "gateway-process-1",
   });
-  registerBinding();
+  bundleGeneration = registerBinding();
 });
 
 afterEach(() => {
@@ -88,7 +95,7 @@ describe("host provider credential issuer", () => {
         interfaceVersion: "provider-request-dispatcher/v1",
         carrierVersion: "reverse-provider-dispatch/v1",
         ownerGeneration: "owner-4",
-        hostBundleGeneration: "lobster/host@1.0.0",
+        hostBundleGeneration: bundleGeneration,
       },
       credentialId: expect.any(String),
       issuedAtMs: 1_000,
@@ -100,6 +107,18 @@ describe("host provider credential issuer", () => {
 
   it("refuses issuance when the dispatcher owner is not currently ready", () => {
     clearCurrentHostIntegrationOwnerEvidenceV1();
+
+    expect(() =>
+      issueHostProviderCredentialV1({
+        bindingId: "lobster/egress",
+        publicKey: "peer-public-key",
+      }),
+    ).toThrow("binding is not ready");
+  });
+
+  it("rejects owner evidence from an earlier same-version bundle incarnation", () => {
+    const nextBundle = registerBundle();
+    expect(nextBundle.generation).not.toBe(bundleGeneration);
 
     expect(() =>
       issueHostProviderCredentialV1({

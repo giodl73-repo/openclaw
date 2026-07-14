@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import { createReverseProviderDispatchTraceEvaluatorV1 } from "../infra/net/reverse-provider-dispatch-trace.js";
 import type { ReverseProviderDispatchFrameV1 } from "../infra/net/reverse-provider-dispatch.js";
 import {
   HostProviderRegistry,
@@ -151,6 +152,37 @@ afterEach(() => {
 });
 
 describe("host provider registry", () => {
+  it("appends each operation frame to its trace evaluator exactly once", () => {
+    const appendedFrames: unknown[] = [];
+    const value = new HostProviderRegistry(
+      () => true,
+      () => {
+        const evaluator = createReverseProviderDispatchTraceEvaluatorV1();
+        const append = evaluator.append.bind(evaluator);
+        vi.spyOn(evaluator, "append").mockImplementation((nextFrame) => {
+          appendedFrames.push(nextFrame);
+          return append(nextFrame);
+        });
+        return evaluator;
+      },
+    );
+    registries.push(value);
+    value.register(client("conn-incremental"));
+    const operation = value.openOperation(openInput("operation-incremental"));
+    const dispatchStarted = frame(operation.open, { type: "dispatch-started" });
+    const responseOpen = frame(operation.open, {
+      type: "response-open",
+      status: 200,
+      statusText: "OK",
+      headers: {},
+    });
+
+    value.receiveFrame("conn-incremental", dispatchStarted);
+    value.receiveFrame("conn-incremental", responseOpen);
+
+    expect(appendedFrames).toEqual([operation.open, dispatchStarted, responseOpen]);
+  });
+
   it("delivers one frame per turn and completes a synthetic carrier operation", async () => {
     const providerSocket = socket();
     const value = registry();

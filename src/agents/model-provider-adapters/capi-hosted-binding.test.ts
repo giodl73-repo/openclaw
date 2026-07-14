@@ -222,10 +222,10 @@ function bundle() {
   return prepareHostIntegrationBundleSnapshotV1(fixture);
 }
 
-function fence() {
+function fence(bundleGeneration: string) {
   return {
     configGeneration: "config-4",
-    bundleGeneration: "lobster/host@1.0.0",
+    bundleGeneration,
     ownerGeneration: "capi-owner-9",
   };
 }
@@ -300,15 +300,16 @@ describe("CAPI hosted binding", () => {
         mode,
         dispatch: localDispatcher,
       });
+      const bundleSnapshot = bundle();
       const binding = prepareCapiHostedBindingV1({
         selection: selection(),
         adapterConfig: capiFixture.request.config,
-        bundle: bundle(),
+        bundle: bundleSnapshot,
         implementations,
       });
 
       const result = await binding.dispatch({
-        fence: fence(),
+        fence: fence(binding.bundleGeneration),
         context: capiFixture.request.context,
         method: capiFixture.request.method,
         body: capiFixture.request.body,
@@ -316,10 +317,11 @@ describe("CAPI hosted binding", () => {
 
       await expect(result.response.text()).resolves.toBe(capiFixture.sse.expected);
       expect(binding.mode).toBe(mode);
+      expect(binding.bundleGeneration).toBe(bundleSnapshot.generation);
       expect(binding.ownerEvidence).toMatchObject({
         state: "ready",
         ownerGeneration: "capi-owner-9",
-        bundleGeneration: "lobster/host@1.0.0",
+        bundleGeneration: binding.bundleGeneration,
       });
       expect(Object.isFrozen(binding)).toBe(true);
       await result.release();
@@ -344,7 +346,7 @@ describe("CAPI hosted binding", () => {
 
     await expect(
       binding.dispatch({
-        fence: { ...fence(), [field]: "stale" },
+        fence: { ...fence(binding.bundleGeneration), [field]: "stale" },
         context: capiFixture.request.context,
         method: capiFixture.request.method,
         body: capiFixture.request.body,
@@ -416,7 +418,7 @@ describe("CAPI hosted binding", () => {
 
     await expect(
       binding.dispatch({
-        fence: fence(),
+        fence: fence(binding.bundleGeneration),
         context: capiFixture.request.context,
         method: capiFixture.request.method,
         body: capiFixture.request.body,
@@ -444,7 +446,7 @@ describe("CAPI hosted binding", () => {
     dispatcher.dispatch = vi.fn(async () => new Response("mutated"));
 
     const result = await binding.dispatch({
-      fence: fence(),
+      fence: fence(binding.bundleGeneration),
       context: capiFixture.request.context,
       method: capiFixture.request.method,
       body: capiFixture.request.body,

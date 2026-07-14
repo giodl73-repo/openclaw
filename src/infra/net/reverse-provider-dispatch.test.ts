@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import fixtures from "../../../test/fixtures/reverse-provider-dispatch-v1.json" with { type: "json" };
-import { evaluateReverseProviderDispatchTraceV1 } from "./reverse-provider-dispatch-trace.js";
+import {
+  createReverseProviderDispatchTraceEvaluatorV1,
+  evaluateReverseProviderDispatchTraceV1,
+} from "./reverse-provider-dispatch-trace.js";
 import { assertReverseProviderDispatchFrameV1 } from "./reverse-provider-dispatch.js";
 
 type FixtureCase = {
@@ -38,6 +41,33 @@ describe("reverse provider dispatch v1 fixtures", () => {
       expect(result).toMatchObject(fixture.expected);
     });
   }
+
+  it("keeps incremental and batch evaluation equivalent for every fixture prefix", () => {
+    const expectedSession = {
+      incarnationId: String(operation.base.incarnationId),
+      ownerGeneration: String(operation.base.ownerGeneration),
+      hostBundleGeneration: String(operation.base.hostBundleGeneration),
+    };
+    for (const fixture of fixtures.cases as FixtureCase[]) {
+      const frames = materializeFrames(fixture);
+      for (let length = 0; length <= frames.length; length += 1) {
+        const prefix = frames.slice(0, length);
+        for (const disconnected of [false, true]) {
+          const evaluator = createReverseProviderDispatchTraceEvaluatorV1({ expectedSession });
+          for (const frame of prefix) {
+            evaluator.append(frame);
+          }
+          expect(evaluator.finalize({ disconnected }), `${fixture.id} prefix ${length}`).toEqual(
+            evaluateReverseProviderDispatchTraceV1({
+              frames: prefix,
+              disconnected,
+              expectedSession,
+            }),
+          );
+        }
+      }
+    }
+  });
 
   it("rejects unknown frame fields and non-canonical chunks", () => {
     expect(() =>
