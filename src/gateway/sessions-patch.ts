@@ -431,6 +431,27 @@ export async function projectSessionsPatchEntry(params: {
     }
   }
 
+  if ("regarding" in patch) {
+    const raw = patch.regarding;
+    if (raw === null) {
+      delete next.regarding;
+    } else if (raw !== undefined) {
+      const system = normalizeOptionalString(raw.system);
+      const type = normalizeOptionalString(raw.type);
+      const id = normalizeOptionalString(raw.id);
+      const key = normalizeOptionalString(raw.key);
+      if (!system || !type || !id) {
+        return invalid("invalid regarding: system, type, and id are required");
+      }
+      next.regarding = {
+        system,
+        type,
+        id,
+        ...(key ? { key } : {}),
+      };
+    }
+  }
+
   if ("archived" in patch) {
     if (patch.archived === true) {
       // Archived sessions leave the active quick-access set in the same write.

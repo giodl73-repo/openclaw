@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { collectToolAuditReceipts, isTrajectoryAuditReceipt } from "./audit.js";
+import {
+  collectToolAuditReceipts,
+  isTrajectoryAuditReceipt,
+  matchesTrajectoryAuditReceipt,
+  snapshotAuditReceiptRegarding,
+} from "./audit.js";
 import type { TrajectoryEvent } from "./types.js";
 
 describe("collectToolAuditReceipts", () => {
@@ -84,6 +89,7 @@ describe("isTrajectoryAuditReceipt", () => {
     data: {
       type: "payment.authorized",
       data: { authorizationCode: "auth-456" },
+      regarding: { system: "dynamics", type: "case", id: "case-42", reference: "CAS-42" },
     },
   };
 
@@ -96,6 +102,25 @@ describe("isTrajectoryAuditReceipt", () => {
     expect(isTrajectoryAuditReceipt(receiptEvent, "inventory.sent")).toBe(false);
   });
 
+  it("filters receipts by exact snapshotted regarding identity", () => {
+    expect(
+      matchesTrajectoryAuditReceipt(receiptEvent, {
+        regarding: { system: "dynamics", type: "case", id: "case-42" },
+      }),
+    ).toBe(true);
+    expect(
+      matchesTrajectoryAuditReceipt(receiptEvent, {
+        regarding: { type: "invoice" },
+      }),
+    ).toBe(false);
+    expect(
+      matchesTrajectoryAuditReceipt(receiptEvent, {
+        type: "inventory.sent",
+        regarding: { id: "case-42" },
+      }),
+    ).toBe(false);
+  });
+
   it("rejects non-receipt and untyped events", () => {
     expect(isTrajectoryAuditReceipt({ ...receiptEvent, type: "tool.result" })).toBe(false);
     expect(
@@ -104,5 +129,34 @@ describe("isTrajectoryAuditReceipt", () => {
         data: { data: { authorizationCode: "auth-456" } },
       }),
     ).toBe(false);
+  });
+});
+
+describe("snapshotAuditReceiptRegarding", () => {
+  it("adds a receipt-safe snapshot without changing the source receipt", () => {
+    const receipt = collectToolAuditReceipts({
+      toolCallId: "call-1",
+      toolName: "payments.authorize",
+      isError: false,
+      result: { audit: [{ type: "payment.authorized" }] },
+    })[0]!;
+
+    expect(
+      snapshotAuditReceiptRegarding(receipt, {
+        system: "dynamics",
+        type: "case",
+        id: "case-42",
+        key: "CAS-42",
+      }),
+    ).toEqual({
+      ...receipt,
+      regarding: {
+        system: "dynamics",
+        type: "case",
+        id: "case-42",
+        reference: "CAS-42",
+      },
+    });
+    expect(receipt).not.toHaveProperty("regarding");
   });
 });

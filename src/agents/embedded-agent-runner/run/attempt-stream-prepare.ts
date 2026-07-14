@@ -14,10 +14,7 @@ import {
   buildAgentHookContextIdentityFields,
 } from "../../../plugins/hook-agent-context.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
-import {
-  collectToolAuditReceipts,
-  type TrajectoryAuditReceipt,
-} from "../../../trajectory/audit.js";
+import type { TrajectoryAuditReceipt } from "../../../trajectory/audit.js";
 import { recordStructuredReplayTrustForToolCall } from "../../agent-tools.before-tool-call.js";
 import { subscribeEmbeddedAgentSession } from "../../embedded-agent-subscribe.js";
 import { runAgentHarnessBeforeAgentFinalizeHook } from "../../harness/lifecycle-hook-helpers.js";
@@ -39,6 +36,7 @@ import {
   type EmbeddedAgentQueueHandle,
   setActiveEmbeddedRun,
 } from "../runs.js";
+import { collectAttemptToolAuditReceipts } from "./attempt-audit-receipts.js";
 import type { EmbeddedAttemptClientToolCallSlot } from "./attempt-result.js";
 import {
   requiresCompletionRequiredAsyncTaskWait,
@@ -228,7 +226,11 @@ export function prepareEmbeddedAttemptStream(input: {
       hasDeliveredMessageToolOnlySourceReply: input.hasDeliveredSourceReply,
       onDeliveredMessageToolOnlySourceReply: input.markSourceReplyDelivered,
       onAgentToolResult: (event) => {
-        for (const receipt of collectToolAuditReceipts(event)) {
+        for (const receipt of collectAttemptToolAuditReceipts({
+          agentId: input.hookAgentId,
+          attempt,
+          event,
+        })) {
           input.onToolAuditReceipt(receipt);
         }
         attempt.onAgentToolResult?.(event);

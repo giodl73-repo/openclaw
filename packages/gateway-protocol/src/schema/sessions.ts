@@ -388,12 +388,22 @@ export const SessionsAbortParamsSchema = closedObject({
 });
 
 /** Mutable per-session preferences and routing metadata. */
+export const SessionRegardingSchema = closedObject({
+  system: NonEmptyString,
+  type: NonEmptyString,
+  id: NonEmptyString,
+  key: Type.Optional(NonEmptyString),
+});
+export type SessionRegarding = Static<typeof SessionRegardingSchema>;
+
 export const SessionsPatchParamsSchema = closedObject({
   key: NonEmptyString,
   agentId: Type.Optional(NonEmptyString),
   label: Type.Optional(Type.Union([SessionLabelString, Type.Null()])),
   /** User-defined organization bucket ("category", not chat-group); null clears it. */
   category: Type.Optional(Type.Union([SessionLabelString, Type.Null()])),
+  /** Primary business record associated with this session; null clears it. */
+  regarding: Type.Optional(Type.Union([SessionRegardingSchema, Type.Null()])),
   archived: Type.Optional(Type.Boolean()),
   pinned: Type.Optional(Type.Boolean()),
   unread: Type.Optional(

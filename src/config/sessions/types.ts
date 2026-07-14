@@ -35,6 +35,14 @@ export type SessionOrigin = {
   threadId?: string | number;
 };
 
+/** One primary business record associated with a session. */
+export type SessionRegarding = {
+  system: string;
+  type: string;
+  id: string;
+  key?: string;
+};
+
 export type { AcpSessionRuntimeOptions, SessionAcpIdentity, SessionAcpMeta };
 
 export type CliSessionReseedReceipt = {
@@ -469,6 +477,8 @@ export type SessionEntry = SessionRestartRecoveryState &
     label?: string;
     /** User-defined organization bucket for session lists; unrelated to chat groupId/groupChannel. */
     category?: string;
+    /** Primary business record this conversation is about. */
+    regarding?: SessionRegarding;
     displayName?: string;
     channel?: string;
     groupId?: string;

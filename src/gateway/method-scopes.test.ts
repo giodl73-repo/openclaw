@@ -217,6 +217,7 @@ describe("method scope resolution", () => {
         key: "agent:main:ios-1",
         agentId: "main",
         category: "Travel",
+        regarding: { system: "dynamics", type: "case", id: "7f15" },
         unread: true,
       }),
     ).toEqual(["operator.write"]);
