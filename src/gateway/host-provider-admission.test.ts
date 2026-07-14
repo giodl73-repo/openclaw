@@ -24,9 +24,10 @@ const DECLARATION: HostProviderDeclaration = {
   ownerGeneration: "owner-4",
   hostBundleGeneration: "lobster/host@1.0.0",
 };
+let bundleGeneration: string;
 
 function registerCurrentBinding() {
-  registerHostIntegrationBundleV1({
+  const bundle = registerHostIntegrationBundleV1({
     manifest: {
       version: "host-integration-bundle/v1",
       id: "lobster/host",
@@ -61,13 +62,14 @@ function registerCurrentBinding() {
       owner: "provider-request",
       kind: "provider-request-dispatcher",
       id: DECLARATION.bindingId,
-      bundleGeneration: DECLARATION.hostBundleGeneration,
+      bundleGeneration: bundle.generation,
       ownerGeneration: DECLARATION.ownerGeneration,
       state: "ready",
       reason: "Ready",
       message: "ready",
     },
   ]);
+  bundleGeneration = bundle.generation;
 }
 
 function connect(overrides: Partial<ConnectParams> = {}): ConnectParams {
@@ -118,7 +120,10 @@ describe("host provider admission", () => {
     ).toEqual({
       ok: true,
       admission: {
-        declaration: DECLARATION,
+        declaration: {
+          ...DECLARATION,
+          hostBundleGeneration: bundleGeneration,
+        },
         credentialId: expect.any(String),
         peerKeyFingerprint: expect.any(String),
       },
@@ -132,7 +137,7 @@ describe("host provider admission", () => {
         owner: "provider-request",
         kind: "provider-request-dispatcher",
         id: DECLARATION.bindingId,
-        bundleGeneration: DECLARATION.hostBundleGeneration,
+        bundleGeneration,
         ownerGeneration: "owner-5",
         state: "ready",
         reason: "Ready",
