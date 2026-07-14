@@ -16,7 +16,7 @@ afterEach(() => {
 
 describe("status json host integration inventory", () => {
   it("projects a registered bundle without probing its owners", () => {
-    registerHostIntegrationBundleV1({
+    const bundle = registerHostIntegrationBundleV1({
       manifest: {
         version: "host-integration-bundle/v1",
         id: "lobster/capi",
@@ -51,7 +51,7 @@ describe("status json host integration inventory", () => {
         owner: "model-provider",
         kind: "model-provider-adapter",
         id: "lobster/capi",
-        bundleGeneration: "lobster/capi@1.0.0",
+        bundleGeneration: bundle.generation,
         state: "ready",
         reason: "CapiReady",
         message: "CAPI binding is ready.",
@@ -89,7 +89,7 @@ describe("status json host integration inventory", () => {
         {
           id: "lobster/capi",
           reason: "CapiReady",
-          generations: { bundle: "lobster/capi@1.0.0", owner: "owner-1" },
+          generations: { bundle: bundle.generation, owner: "owner-1" },
         },
       ],
     });

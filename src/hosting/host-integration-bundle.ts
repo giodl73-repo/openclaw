@@ -46,6 +46,7 @@ export type HostIntegrationBundleSnapshotV1 = {
   version: typeof HOST_INTEGRATION_BUNDLE_VERSION;
   id: string;
   bundleVersion: string;
+  generation: string;
   inventory: readonly HostIntegrationBundleInventoryEntryV1[];
 };
 
@@ -300,17 +301,23 @@ function freezeInventoryEntry(
   });
 }
 
-export function prepareHostIntegrationBundleSnapshotV1(params: {
-  manifest: HostIntegrationBundleManifestV1;
-  availableContributions: readonly AvailableHostIntegrationContributionV1[];
-}): HostIntegrationBundleSnapshotV1 {
+function buildHostIntegrationBundleSnapshotV1(
+  params: {
+    manifest: HostIntegrationBundleManifestV1;
+    availableContributions: readonly AvailableHostIntegrationContributionV1[];
+  },
+  options: {
+    allowRequiredFailures: boolean;
+    registrationIncarnation?: number;
+  },
+): HostIntegrationBundleSnapshotV1 {
   const manifest = normalizeManifest(params.manifest);
   const available = normalizeAvailableContributions(params.availableContributions);
   const inventory = manifest.contributions
     .map((contribution): HostIntegrationBundleInventoryEntryV1 => {
       const resolved = available.get(contributionKey(contribution));
       if (!resolved) {
-        if (contribution.required) {
+        if (contribution.required && !options.allowRequiredFailures) {
           throw new HostIntegrationBundleError(
             "missing-required-contribution",
             `Required host integration contribution "${contribution.id}" is unavailable`,
@@ -320,7 +327,7 @@ export function prepareHostIntegrationBundleSnapshotV1(params: {
         return freezeInventoryEntry({ ...contribution, status: "missing" });
       }
       if (resolved.version !== contribution.version) {
-        if (contribution.required) {
+        if (contribution.required && !options.allowRequiredFailures) {
           throw new HostIntegrationBundleError(
             "incompatible-required-contribution",
             `Required host integration contribution "${contribution.id}" expected ${contribution.version} but resolved ${resolved.version}`,
@@ -347,11 +354,44 @@ export function prepareHostIntegrationBundleSnapshotV1(params: {
     version: HOST_INTEGRATION_BUNDLE_VERSION,
     id: manifest.id,
     bundleVersion: manifest.bundleVersion,
+    generation: `${manifest.id}@${manifest.bundleVersion}#${
+      options.registrationIncarnation ?? "prepared"
+    }`,
     inventory: Object.freeze(inventory),
   });
 }
 
+export function prepareHostIntegrationBundleSnapshotV1(params: {
+  manifest: HostIntegrationBundleManifestV1;
+  availableContributions: readonly AvailableHostIntegrationContributionV1[];
+}): HostIntegrationBundleSnapshotV1 {
+  return buildHostIntegrationBundleSnapshotV1(params, { allowRequiredFailures: false });
+}
+
 let currentSnapshot: HostIntegrationBundleSnapshotV1 | undefined;
+let currentStatusSnapshot: HostIntegrationBundleSnapshotV1 | undefined;
+let registrationIncarnation = 0;
+
+function requiredRegistrationError(
+  snapshot: HostIntegrationBundleSnapshotV1,
+): HostIntegrationBundleError | undefined {
+  const failure = snapshot.inventory.find((entry) => entry.required && entry.status !== "resolved");
+  if (!failure) {
+    return undefined;
+  }
+  if (failure.status === "missing") {
+    return new HostIntegrationBundleError(
+      "missing-required-contribution",
+      `Required host integration contribution "${failure.id}" is unavailable`,
+      failure.id,
+    );
+  }
+  return new HostIntegrationBundleError(
+    "incompatible-required-contribution",
+    `Required host integration contribution "${failure.id}" expected ${failure.version} but resolved ${failure.resolvedVersion}`,
+    failure.id,
+  );
+}
 
 // Host packages register explicitly after discovery; an empty slot fails closed instead of
 // inventing a partial startup bundle or activating owner implementations.
@@ -359,7 +399,16 @@ export function registerHostIntegrationBundleV1(params: {
   manifest: HostIntegrationBundleManifestV1;
   availableContributions: readonly AvailableHostIntegrationContributionV1[];
 }): HostIntegrationBundleSnapshotV1 {
-  const nextSnapshot = prepareHostIntegrationBundleSnapshotV1(params);
+  registrationIncarnation += 1;
+  const nextSnapshot = buildHostIntegrationBundleSnapshotV1(params, {
+    allowRequiredFailures: true,
+    registrationIncarnation,
+  });
+  currentStatusSnapshot = nextSnapshot;
+  const registrationError = requiredRegistrationError(nextSnapshot);
+  if (registrationError) {
+    throw registrationError;
+  }
   currentSnapshot = nextSnapshot;
   return nextSnapshot;
 }
@@ -370,8 +419,15 @@ export function getCurrentHostIntegrationBundleSnapshotV1():
   return currentSnapshot;
 }
 
+export function getCurrentHostIntegrationBundleStatusSnapshotV1():
+  | HostIntegrationBundleSnapshotV1
+  | undefined {
+  return currentStatusSnapshot;
+}
+
 export function clearCurrentHostIntegrationBundleSnapshotV1(): void {
   currentSnapshot = undefined;
+  currentStatusSnapshot = undefined;
 }
 
 export function resolveHostIntegrationContributionV1(
