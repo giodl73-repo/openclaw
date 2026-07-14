@@ -12,6 +12,9 @@ const USAGE_FIELDS = [
 ] as const;
 
 type AuditRunUsageField = (typeof USAGE_FIELDS)[number];
+type AuditRunUsage = Partial<Record<AuditRunUsageField, number>>;
+type AuditCostBasis = "provider-billed" | "catalog-estimate" | "mixed";
+type AuditRunCost = { usd: number; basis: AuditCostBasis };
 
 export type TrajectoryAuditRunSummary = {
   auditSchema: "openclaw-audit-run";
@@ -23,7 +26,8 @@ export type TrajectoryAuditRunSummary = {
   lastEventAt: string;
   status?: string;
   models: Array<{ provider?: string; modelId?: string }>;
-  usage?: Partial<Record<AuditRunUsageField, number>>;
+  usage?: AuditRunUsage;
+  cost?: AuditRunCost;
   skillInvocations: Array<{
     invocationId: string;
     parentInvocationId?: string;
@@ -43,6 +47,22 @@ export type TrajectoryAuditRunSummary = {
     toolCallId?: string;
   }>;
   receipts: Array<Record<string, unknown>>;
+};
+
+export type TrajectoryAuditOrchestrationSummary = {
+  auditSchema: "openclaw-audit-orchestration";
+  schemaVersion: 1;
+  accountingScope: "observed-runs";
+  rootRunId: string;
+  usage?: AuditRunUsage;
+  cost?: AuditRunCost;
+  runs: Array<{
+    runId: string;
+    sessionId: string;
+    parentRunId?: string;
+    usage?: AuditRunUsage;
+    cost?: AuditRunCost;
+  }>;
 };
 
 function readSkillInvocations(
@@ -107,6 +127,39 @@ function readUsage(events: TrajectoryEvent[]): TrajectoryAuditRunSummary["usage"
     }
   }
   return Object.keys(totals).length > 0 ? totals : undefined;
+}
+
+function mergeCostBasis(current: AuditCostBasis | undefined, next: AuditCostBasis): AuditCostBasis {
+  return !current || current === next ? next : "mixed";
+}
+
+function readCost(events: TrajectoryEvent[]): AuditRunCost | undefined {
+  let usd = 0;
+  let basis: AuditCostBasis | undefined;
+  for (const event of events) {
+    if (event.type !== "model.completed" || !isRecord(event.data?.usage)) {
+      continue;
+    }
+    const cost = event.data.usage.cost;
+    if (!isRecord(cost)) {
+      continue;
+    }
+    const eventUsd = cost.usd;
+    const eventBasis = cost.basis;
+    if (
+      typeof eventUsd !== "number" ||
+      !Number.isFinite(eventUsd) ||
+      eventUsd < 0 ||
+      (eventBasis !== "provider-billed" &&
+        eventBasis !== "catalog-estimate" &&
+        eventBasis !== "mixed")
+    ) {
+      continue;
+    }
+    usd += eventUsd;
+    basis = mergeCostBasis(basis, eventBasis);
+  }
+  return basis ? { usd, basis } : undefined;
 }
 
 function readModels(events: TrajectoryEvent[]): TrajectoryAuditRunSummary["models"] {
@@ -193,6 +246,7 @@ export function summarizeTrajectoryAuditRuns(
     const skills = readSkills(run.events);
     const skillInvocations = readSkillInvocations(run.events);
     const usage = readUsage(run.events);
+    const cost = readCost(run.events);
     const hasModelCompletion = run.events.some((event) => event.type === "model.completed");
     if (
       receiptEvents.length === 0 &&
@@ -216,10 +270,100 @@ export function summarizeTrajectoryAuditRuns(
         ...(status ? { status } : {}),
         models: readModels(run.events),
         ...(usage ? { usage } : {}),
+        ...(cost ? { cost } : {}),
         skillInvocations,
         skills,
         receipts: receiptEvents.flatMap((event) => (event.data ? [event.data] : [])),
       },
     ];
   });
+}
+
+function readParentRunId(summary: TrajectoryAuditRunSummary): string | undefined {
+  return summary.skillInvocations.find((invocation) => invocation.parentRunId)?.parentRunId;
+}
+
+function sumUsage(summaries: TrajectoryAuditRunSummary[]): AuditRunUsage | undefined {
+  const totals: AuditRunUsage = {};
+  for (const summary of summaries) {
+    for (const field of USAGE_FIELDS) {
+      const value = summary.usage?.[field];
+      if (value !== undefined) {
+        totals[field] = (totals[field] ?? 0) + value;
+      }
+    }
+  }
+  return Object.keys(totals).length > 0 ? totals : undefined;
+}
+
+function sumCost(summaries: TrajectoryAuditRunSummary[]): AuditRunCost | undefined {
+  let usd = 0;
+  let basis: AuditCostBasis | undefined;
+  for (const summary of summaries) {
+    if (!summary.cost) {
+      continue;
+    }
+    usd += summary.cost.usd;
+    basis = mergeCostBasis(basis, summary.cost.basis);
+  }
+  return basis ? { usd, basis } : undefined;
+}
+
+/** Groups linked parent/child runs and sums each observed run once. */
+export function summarizeTrajectoryAuditOrchestrations(
+  summaries: TrajectoryAuditRunSummary[],
+): TrajectoryAuditOrchestrationSummary[] {
+  const summariesByRunId = new Map(summaries.map((summary) => [summary.runId, summary]));
+  const childrenByRunId = new Map<string, TrajectoryAuditRunSummary[]>();
+  for (const summary of summaries) {
+    const parentRunId = readParentRunId(summary);
+    if (!parentRunId || !summariesByRunId.has(parentRunId)) {
+      continue;
+    }
+    const children = childrenByRunId.get(parentRunId) ?? [];
+    children.push(summary);
+    childrenByRunId.set(parentRunId, children);
+  }
+
+  return summaries
+    .filter((summary) => !readParentRunId(summary) && childrenByRunId.has(summary.runId))
+    .map((root) => {
+      const members = [root];
+      for (const member of members) {
+        members.push(...(childrenByRunId.get(member.runId) ?? []));
+      }
+
+      const usage = sumUsage(members);
+      const cost = sumCost(members);
+      const result: TrajectoryAuditOrchestrationSummary = {
+        auditSchema: "openclaw-audit-orchestration" as const,
+        schemaVersion: 1 as const,
+        accountingScope: "observed-runs" as const,
+        rootRunId: root.runId,
+        runs: members.map((member) => {
+          const parentRunId = readParentRunId(member);
+          const run: TrajectoryAuditOrchestrationSummary["runs"][number] = {
+            runId: member.runId,
+            sessionId: member.sessionId,
+          };
+          if (parentRunId) {
+            run.parentRunId = parentRunId;
+          }
+          if (member.usage) {
+            run.usage = member.usage;
+          }
+          if (member.cost) {
+            run.cost = member.cost;
+          }
+          return run;
+        }),
+      };
+      if (usage) {
+        result.usage = usage;
+      }
+      if (cost) {
+        result.cost = cost;
+      }
+      return result;
+    });
 }

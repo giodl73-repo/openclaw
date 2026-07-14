@@ -20,7 +20,9 @@ import { readRegularFileSync } from "../infra/regular-file.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
+  summarizeTrajectoryAuditOrchestrations,
   summarizeTrajectoryAuditRuns,
+  type TrajectoryAuditOrchestrationSummary,
   type TrajectoryAuditRunSummary,
 } from "../trajectory/audit-run.js";
 import {
@@ -41,6 +43,7 @@ type SessionsTailOptions = {
   store?: string;
   agent?: string;
   allAgents?: boolean;
+  auditOrchestrations?: boolean;
   auditRuns?: boolean;
   sessionKey?: string;
   follow?: boolean;
@@ -409,6 +412,26 @@ function renderAuditRuns(
   }
 }
 
+function formatAuditOrchestrationSummary(summary: TrajectoryAuditOrchestrationSummary): string {
+  const parts = [
+    `root=${summary.rootRunId}`,
+    `runs=${summary.runs.length}`,
+    summary.usage?.total !== undefined ? `tokens=${summary.usage.total}` : undefined,
+  ];
+  return parts.filter((part): part is string => Boolean(part)).join(" ");
+}
+
+function renderAuditOrchestrations(
+  events: TrajectoryEvent[],
+  runtime: RuntimeEnv,
+  options: { json?: boolean; tailCount: number },
+): void {
+  const summaries = summarizeTrajectoryAuditOrchestrations(summarizeTrajectoryAuditRuns(events));
+  for (const summary of options.tailCount > 0 ? summaries.slice(-options.tailCount) : []) {
+    runtime.log(options.json ? JSON.stringify(summary) : formatAuditOrchestrationSummary(summary));
+  }
+}
+
 function fileStateFromStat(stat: fs.Stats): FollowFileState {
   return {
     dev: stat.dev,
@@ -703,8 +726,27 @@ export async function sessionsTailCommand(
     runtime.exit(1);
     return;
   }
+  if (opts.auditRuns && opts.auditOrchestrations) {
+    runtime.error("--audit-runs and --audit-orchestrations cannot be combined.");
+    runtime.exit(1);
+    return;
+  }
   if (opts.auditRuns && opts.follow) {
     runtime.error("--audit-runs does not support --follow; rerun the snapshot command as needed.");
+    runtime.exit(1);
+    return;
+  }
+  if (opts.auditOrchestrations && opts.follow) {
+    runtime.error(
+      "--audit-orchestrations does not support --follow; rerun the snapshot command as needed.",
+    );
+    runtime.exit(1);
+    return;
+  }
+  if (opts.auditOrchestrations && opts.sessionKey?.trim()) {
+    runtime.error(
+      "--audit-orchestrations scans session trajectories and cannot use --session-key.",
+    );
     runtime.exit(1);
     return;
   }
@@ -731,7 +773,18 @@ export async function sessionsTailCommand(
     }
   }
   const hasRegardingFilter = Boolean(regardingSystem || regardingType || regardingId);
-  if (opts.json && !opts.auditRuns && !receiptType && !hasRegardingFilter) {
+  if (opts.auditOrchestrations && (receiptType || hasRegardingFilter)) {
+    runtime.error("--audit-orchestrations cannot use receipt or regarding filters.");
+    runtime.exit(1);
+    return;
+  }
+  if (
+    opts.json &&
+    !opts.auditRuns &&
+    !opts.auditOrchestrations &&
+    !receiptType &&
+    !hasRegardingFilter
+  ) {
     runtime.error(
       "--json requires --receipt-type or a --regarding-* filter so only sanitized audit receipts are emitted.",
     );
@@ -786,7 +839,9 @@ export async function sessionsTailCommand(
       }
     }
   }
-  const selected = selectSessionsToTail(selections, opts.sessionKey);
+  const selected = opts.auditOrchestrations
+    ? selections
+    : selectSessionsToTail(selections, opts.sessionKey);
   if (selected.length === 0) {
     const suffix = opts.sessionKey ? ` for ${opts.sessionKey}` : "";
     runtime.log(`No sessions found${suffix}.`);
@@ -794,6 +849,14 @@ export async function sessionsTailCommand(
   }
 
   const followSnapshots = new Map<TailSelection, TrajectorySnapshot>();
+  if (opts.auditOrchestrations) {
+    renderAuditOrchestrations(
+      selected.flatMap((selection) => readTailSnapshot(selection).events),
+      runtime,
+      { json: opts.json, tailCount },
+    );
+    return;
+  }
   for (const selection of selected) {
     const snapshot = readTailSnapshot(selection);
     followSnapshots.set(selection, snapshot);

@@ -314,6 +314,36 @@ describe("subscribeEmbeddedAgentSession", () => {
     });
   });
 
+  it("sums captured cost and marks mixed billing provenance", () => {
+    const { emit, subscription } = createSubscribedSessionHarness({ runId: "run" });
+    for (const usage of [
+      {
+        ...makeZeroUsageSnapshot(),
+        input: 10,
+        totalTokens: 10,
+        cost: { ...makeZeroUsageSnapshot().cost, total: 0.004, totalOrigin: "provider-billed" },
+      },
+      {
+        ...makeZeroUsageSnapshot(),
+        output: 5,
+        totalTokens: 5,
+        cost: { ...makeZeroUsageSnapshot().cost, total: 0.003 },
+      },
+    ] as const) {
+      emit({ type: "message_start", message: { role: "assistant" } });
+      emit({ type: "message_end", message: { role: "assistant", usage } });
+    }
+
+    expect(subscription.getUsageTotals()).toEqual({
+      input: 10,
+      output: 5,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+      total: 15,
+      cost: { usd: 0.007, basis: "mixed" },
+    });
+  });
+
   it.each(THINKING_TAG_CASES)(
     "streams <%s> reasoning via onReasoningStream without leaking into final text",
     async ({ open, close }) => {

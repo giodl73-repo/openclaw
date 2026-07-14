@@ -62,7 +62,22 @@ export type NormalizedUsage = {
   contextUsage?: ContextUsage;
   reasoningTokens?: number;
   total?: number;
+  cost?: NormalizedUsageCost;
 };
+
+export type UsageCostBasis = "provider-billed" | "catalog-estimate" | "mixed";
+
+export type NormalizedUsageCost = {
+  usd: number;
+  basis: UsageCostBasis;
+};
+
+export function mergeUsageCostBasis(
+  current: UsageCostBasis | undefined,
+  next: UsageCostBasis,
+): UsageCostBasis {
+  return !current || current === next ? next : "mixed";
+}
 
 /** OpenAI chat-completions compatible usage shape. */
 export type OpenAiChatCompletionsUsage = {
@@ -110,7 +125,8 @@ export function hasNonzeroUsage(usage?: NormalizedUsage | null): usage is Normal
       usage.reasoningTokens,
       usage.total,
     ].some((v) => typeof v === "number" && Number.isFinite(v) && v > 0) ||
-    usage.contextUsage?.state === "unavailable"
+    usage.contextUsage?.state === "unavailable" ||
+    usage.cost !== undefined
   );
 }
 
@@ -204,6 +220,19 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
       raw.output_tokens_details?.reasoning_tokens,
   );
   const total = normalizeTokenCount(raw.total ?? raw.totalTokens ?? raw.total_tokens);
+  const rawCostTotal = asFiniteNumber(raw.cost?.total);
+  const cost =
+    rawCostTotal !== undefined &&
+    rawCostTotal >= 0 &&
+    (rawCostTotal > 0 || raw.cost?.totalOrigin === "provider-billed")
+      ? {
+          usd: rawCostTotal,
+          basis:
+            raw.cost?.totalOrigin === "provider-billed"
+              ? ("provider-billed" as const)
+              : ("catalog-estimate" as const),
+        }
+      : undefined;
 
   if (
     input === undefined &&
@@ -212,7 +241,8 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
     cacheWrite === undefined &&
     contextUsage === undefined &&
     reasoningTokens === undefined &&
-    total === undefined
+    total === undefined &&
+    cost === undefined
   ) {
     return undefined;
   }
@@ -225,6 +255,7 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
     ...(contextUsage ? { contextUsage } : {}),
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     total,
+    ...(cost ? { cost } : {}),
   };
 }
 
