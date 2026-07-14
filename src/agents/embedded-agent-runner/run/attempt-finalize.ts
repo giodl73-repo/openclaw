@@ -1,4 +1,5 @@
 import { formatErrorMessage } from "../../../infra/errors.js";
+import type { ExplicitSkillInvocation } from "../../../skills/types.js";
 import { buildTrajectoryArtifacts } from "../../../trajectory/metadata.js";
 import {
   resolveAttemptTrajectoryTerminal,
@@ -14,6 +15,7 @@ type FinalizeEmbeddedAttemptParams = {
   emptyAssistantReplyIsSilent: boolean;
   hasTerminalOutput: boolean;
   silentExpected?: boolean;
+  explicitSkillInvocation?: ExplicitSkillInvocation;
 };
 
 /** Classifies the completed attempt and records its terminal trajectory artifacts. */
@@ -99,6 +101,14 @@ export function finalizeEmbeddedAttempt(
       lastToolError: result.lastToolError,
     }),
   );
+  if (params.explicitSkillInvocation) {
+    trajectoryRecorder?.recordEvent("skill.invocation.completed", {
+      ...params.explicitSkillInvocation,
+      activation: "command",
+      caller: "inbound",
+      status: terminal.status,
+    });
+  }
   trajectoryRecorder?.recordEvent("session.ended", {
     status: terminal.status,
     aborted: result.aborted,

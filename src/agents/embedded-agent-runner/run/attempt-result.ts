@@ -414,5 +414,6 @@ export function completeEmbeddedAttemptResult(
     emptyAssistantReplyIsSilent,
     hasTerminalOutput,
     silentExpected: attempt.silentExpected,
+    explicitSkillInvocation: attempt.explicitSkillInvocation,
   });
 }

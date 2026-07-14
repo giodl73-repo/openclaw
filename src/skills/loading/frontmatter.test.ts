@@ -4,7 +4,41 @@ import {
   parseFrontmatter,
   resolveOpenClawMetadata,
   resolveSkillInvocationPolicy,
+  resolveSkillOrchestrationDeclaration,
 } from "./frontmatter.js";
+
+describe("resolveSkillOrchestrationDeclaration", () => {
+  it("parses the string-valued Agent Skills extension", () => {
+    const frontmatter = parseFrontmatter(`---
+name: issue-refund
+description: Issue an approved refund.
+metadata:
+  openclaw.orchestration: >-
+    {"schemaVersion":1,"receipts":{"emits":["payment.refunded"]},"invokes":["verify-customer"],"execution":{"isolation":"required"}}
+---
+`);
+
+    expect(resolveSkillOrchestrationDeclaration(frontmatter)).toEqual({
+      schemaVersion: 1,
+      receipts: { emits: ["payment.refunded"] },
+      invokes: ["verify-customer"],
+      execution: { isolation: "required" },
+    });
+  });
+
+  it("ignores unknown versions and non-string extension values", () => {
+    expect(
+      resolveSkillOrchestrationDeclaration({
+        metadata: '{"openclaw.orchestration":"{schemaVersion:2}"}',
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveSkillOrchestrationDeclaration({
+        metadata: '{"openclaw.orchestration":{"schemaVersion":1}}',
+      }),
+    ).toBeUndefined();
+  });
+});
 
 describe("resolveSkillInvocationPolicy", () => {
   it("defaults to enabled behaviors", () => {
