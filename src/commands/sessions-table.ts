@@ -28,6 +28,7 @@ export type SessionDisplayRow = {
   lastInteractionAt?: number;
   label?: string;
   status?: SessionEntry["status"];
+  regarding?: SessionEntry["regarding"];
   systemSent?: boolean;
   abortedLastRun?: boolean;
   thinkingLevel?: string;
@@ -74,6 +75,7 @@ export function toSessionDisplayRow(key: string, entry: SessionEntry): SessionDi
     lastInteractionAt: entry?.lastInteractionAt,
     label: entry?.label,
     status: entry?.status,
+    regarding: entry?.regarding,
     systemSent: entry?.systemSent,
     abortedLastRun: entry?.abortedLastRun,
     thinkingLevel: entry?.thinkingLevel,
@@ -146,6 +148,7 @@ export function formatSessionFlagsCell(
     | "abortedLastRun"
     | "sessionId"
     | "runtimePolicySessionKey"
+    | "regarding"
   >,
   rich: boolean,
 ): string {
@@ -160,6 +163,9 @@ export function formatSessionFlagsCell(
     row.systemSent ? "system" : null,
     row.abortedLastRun ? "aborted" : null,
     row.runtimePolicySessionKey ? `policy:${row.runtimePolicySessionKey}` : null,
+    row.regarding
+      ? `regarding:${row.regarding.key ?? `${row.regarding.system}/${row.regarding.type}/${row.regarding.id}`}`
+      : null,
     row.sessionId ? `id:${row.sessionId}` : null,
   ].filter(Boolean);
   const label = flags.join(" ");

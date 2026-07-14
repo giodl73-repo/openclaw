@@ -226,6 +226,12 @@ describe("registerStatusHealthSessionsCommands", () => {
       "/tmp/sessions.json",
       "--active",
       "120",
+      "--regarding-system",
+      "dataverse",
+      "--regarding-type",
+      "case",
+      "--regarding-id",
+      "case-42",
       "--limit",
       "25",
     ]);
@@ -235,6 +241,9 @@ describe("registerStatusHealthSessionsCommands", () => {
       json: true,
       store: "/tmp/sessions.json",
       active: "120",
+      regardingSystem: "dataverse",
+      regardingType: "case",
+      regardingId: "case-42",
       limit: "25",
     });
   });
