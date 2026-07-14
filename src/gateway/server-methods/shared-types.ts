@@ -17,6 +17,7 @@ import type {
 } from "../../infra/plugin-approvals.js";
 import type { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { RuntimePluginToolGrant } from "../../plugins/runtime/tool-grant.js";
+import type { CanonicalReadinessResult } from "../../readiness/conditions.js";
 import type { WizardSession } from "../../wizard/session.js";
 import type { AgentRuntimeIdentity } from "../agent-runtime-identity-token.js";
 import type { ChatAbortControllerEntry } from "../chat-abort.js";
@@ -116,6 +117,7 @@ export type GatewayRequestContext = {
     readOnly?: boolean;
   }) => Promise<ModelCatalogSnapshot>;
   getHealthCache: () => HealthSummary | null;
+  getReadiness?: () => Promise<CanonicalReadinessResult>;
   refreshHealthSnapshot: (opts?: {
     probe?: boolean;
     includeSensitive?: boolean;

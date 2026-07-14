@@ -1764,6 +1764,7 @@
                       "cli/logs",
                       "cli/migrate",
                       "cli/onboard",
+                      "cli/ready",
                       "cli/reset",
                       "cli/secrets",
                       "cli/security",
