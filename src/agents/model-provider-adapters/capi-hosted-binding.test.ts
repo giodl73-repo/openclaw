@@ -286,10 +286,13 @@ describe("CAPI hosted binding", () => {
                   },
                   credentialSlotRefs: ["lobster/capi-token"],
                 }),
-              prepareImplementations({
-                mode: "hosted",
-                dispatch: { dispatch },
-              }).credentialSlot.bindings,
+              {
+                hasPreparedDispatcher: true,
+                credentialSlots: prepareImplementations({
+                  mode: "hosted",
+                  dispatch: { dispatch },
+                }).credentialSlot.bindings,
+              },
             )
           : { dispatch };
       clearCurrentProviderRequestTrafficPolicyV1();

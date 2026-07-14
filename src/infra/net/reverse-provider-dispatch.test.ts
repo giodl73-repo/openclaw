@@ -88,7 +88,7 @@ describe("reverse provider dispatch v1 fixtures", () => {
           },
         },
       }),
-    ).toThrow("network guard route must be an object");
+    ).toThrow("Unsupported network guard route shape");
     expect(() =>
       assertReverseProviderDispatchFrameV1({
         ...operation.base,
@@ -111,7 +111,7 @@ describe("reverse provider dispatch v1 fixtures", () => {
           },
         },
       }),
-    ).toThrow("enforcement does not match resolution mode");
+    ).toThrow("Network guard DNS rebinding enforcement is inconsistent");
     expect(() =>
       assertReverseProviderDispatchFrameV1({
         ...operation.base,
@@ -128,7 +128,7 @@ describe("reverse provider dispatch v1 fixtures", () => {
           },
         },
       }),
-    ).toThrow("TLS posture does not match target protocol");
+    ).toThrow("Network guard route TLS posture is inconsistent with the target");
   });
 
   it("rejects terminal certainty that contradicts observed dispatch state", () => {

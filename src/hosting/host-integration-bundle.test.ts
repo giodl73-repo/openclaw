@@ -161,6 +161,11 @@ describe("host integration bundle registration", () => {
           required: true,
           status: "missing",
         }),
+        expect.objectContaining({
+          id: "lobster/egress",
+          required: true,
+          status: "resolved",
+        }),
       ],
     });
   });
@@ -253,6 +258,11 @@ describe("host integration bundle registration", () => {
           status: "incompatible",
         }),
         expect.anything(),
+        expect.objectContaining({
+          id: "lobster/egress",
+          required: true,
+          status: "resolved",
+        }),
       ],
     });
   });
