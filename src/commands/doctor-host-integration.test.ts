@@ -96,6 +96,37 @@ describe("host integration Doctor findings", () => {
     ]);
   });
 
+  it("reports a failed required registration without replacing the effective bundle", () => {
+    expect(() =>
+      registerHostIntegrationBundleV1({
+        manifest: {
+          version: "host-integration-bundle/v1",
+          id: "lobster/capi",
+          bundleVersion: "1.0.0",
+          contributions: [
+            {
+              owner: "model-provider",
+              kind: "model-provider-adapter",
+              id: "lobster/capi",
+              version: "capi-model-adapter/v1",
+              required: true,
+              readinessCriteria: ["CapiReady"],
+            },
+          ],
+        },
+        availableContributions: [],
+      }),
+    ).toThrowError(expect.objectContaining({ code: "missing-required-contribution" }));
+
+    expect(collectHostIntegrationHealthFindings()).toMatchObject([
+      {
+        severity: "error",
+        target: "lobster/capi",
+        requirement: "ContributionMissing",
+      },
+    ]);
+  });
+
   it("emits no success finding for a ready binding", () => {
     expect(
       hostIntegrationStatusToHealthFindings(

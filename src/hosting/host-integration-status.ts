@@ -131,7 +131,7 @@ export function buildHostIntegrationStatusInventoryV1(params: {
   bundle: HostIntegrationBundleSnapshotV1;
   ownerEvidence?: readonly HostIntegrationOwnerEvidenceV1[];
 }): HostIntegrationStatusInventoryV1 {
-  const bundleGeneration = `${params.bundle.id}@${params.bundle.bundleVersion}`;
+  const bundleGeneration = params.bundle.generation;
   const evidenceByContribution = new Map(
     (params.ownerEvidence ?? []).map((evidence) => [contributionKey(evidence), evidence]),
   );

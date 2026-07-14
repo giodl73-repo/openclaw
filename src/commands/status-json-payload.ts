@@ -1,7 +1,7 @@
 // Builds the stable JSON payload for `openclaw status --json`.
 // Optional deep fields are included only when their upstream probes actually ran.
 
-import { getCurrentHostIntegrationBundleSnapshotV1 } from "../hosting/host-integration-bundle.js";
+import { getCurrentHostIntegrationBundleStatusSnapshotV1 } from "../hosting/host-integration-bundle.js";
 import {
   buildHostIntegrationStatusInventoryV1,
   getCurrentHostIntegrationOwnerEvidenceV1,
@@ -31,7 +31,7 @@ export function buildStatusJsonPayload(params: {
     updateConfigChannel: params.surface.cfg.update?.channel ?? undefined,
     update: params.surface.update,
   });
-  const hostIntegrationBundle = getCurrentHostIntegrationBundleSnapshotV1();
+  const hostIntegrationBundle = getCurrentHostIntegrationBundleStatusSnapshotV1();
   return {
     ...params.summary,
     os: params.osSummary,

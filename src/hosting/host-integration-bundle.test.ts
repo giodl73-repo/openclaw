@@ -11,6 +11,7 @@ import {
   HostIntegrationBundleError,
   clearCurrentHostIntegrationBundleSnapshotV1,
   getCurrentHostIntegrationBundleSnapshotV1,
+  getCurrentHostIntegrationBundleStatusSnapshotV1,
   prepareHostIntegrationBundleSnapshotV1,
   registerHostIntegrationBundleV1,
   resolveHostIntegrationContributionV1,
@@ -53,6 +54,7 @@ describe("host integration bundle registration", () => {
       version: HOST_INTEGRATION_BUNDLE_VERSION,
       id: "lobster/host",
       bundleVersion: "1.0.0",
+      generation: expect.stringMatching(/^lobster\/host@1\.0\.0#\d+$/),
       inventory: [
         {
           owner: "model-provider",
@@ -114,6 +116,31 @@ describe("host integration bundle registration", () => {
       }),
     );
     expect(getCurrentHostIntegrationBundleSnapshotV1()).toBe(first);
+    const failedAttempt = getCurrentHostIntegrationBundleStatusSnapshotV1();
+    expect(failedAttempt?.generation).not.toBe(first.generation);
+    expect(failedAttempt).toMatchObject({
+      inventory: [
+        expect.anything(),
+        expect.objectContaining({
+          id: CAPI_BEARER_SLOT_ID,
+          required: true,
+          status: "missing",
+        }),
+      ],
+    });
+  });
+
+  it("assigns a distinct generation to same-version registrations", () => {
+    const first = registerHostIntegrationBundleV1({
+      manifest: cloneManifest(),
+      availableContributions: cloneAvailable(),
+    });
+    const second = registerHostIntegrationBundleV1({
+      manifest: cloneManifest(),
+      availableContributions: cloneAvailable(),
+    });
+
+    expect(second.generation).not.toBe(first.generation);
   });
 
   it("rejects duplicate declarations and ambiguous available contributions", () => {
@@ -183,6 +210,16 @@ describe("host integration bundle registration", () => {
       }),
     );
     expect(getCurrentHostIntegrationBundleSnapshotV1()).toBeUndefined();
+    expect(getCurrentHostIntegrationBundleStatusSnapshotV1()).toMatchObject({
+      inventory: [
+        expect.objectContaining({
+          id: CAPI_MODEL_ADAPTER_ID,
+          required: true,
+          status: "incompatible",
+        }),
+        expect.anything(),
+      ],
+    });
   });
 
   it("keeps optional failures visible without blocking the complete snapshot", () => {

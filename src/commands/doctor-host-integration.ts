@@ -1,5 +1,5 @@
 import type { HealthFinding, HealthFindingSeverity } from "../flows/health-checks.js";
-import { getCurrentHostIntegrationBundleSnapshotV1 } from "../hosting/host-integration-bundle.js";
+import { getCurrentHostIntegrationBundleStatusSnapshotV1 } from "../hosting/host-integration-bundle.js";
 import {
   buildHostIntegrationStatusInventoryV1,
   getCurrentHostIntegrationOwnerEvidenceV1,
@@ -97,7 +97,7 @@ export function hostIntegrationStatusToHealthFindings(
 
 /** Reads only the published bundle and owner snapshots; it never probes or activates bindings. */
 export function collectHostIntegrationHealthFindings(): HealthFinding[] {
-  const bundle = getCurrentHostIntegrationBundleSnapshotV1();
+  const bundle = getCurrentHostIntegrationBundleStatusSnapshotV1();
   if (!bundle) {
     return [];
   }
