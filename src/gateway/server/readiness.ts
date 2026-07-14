@@ -1,6 +1,7 @@
 // Gateway readiness checker for channel health and startup sidecar state.
 import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
+import type { ReadinessCondition, CanonicalReadinessResult } from "../../readiness/conditions.js";
 import {
   DEFAULT_CHANNEL_CONNECT_GRACE_MS,
   DEFAULT_CHANNEL_STALE_EVENT_THRESHOLD_MS,
@@ -12,16 +13,19 @@ import type { ChannelManager } from "../server-channels.js";
 import type { GatewayEventLoopHealth } from "./event-loop-health.js";
 
 /** Snapshot returned by the gateway readiness probe. */
-type ReadinessResult = {
+export type ReadinessResult = {
   ready: boolean;
   failing: string[];
   suppressed?: string[];
   uptimeMs: number;
   eventLoop?: GatewayEventLoopHealth;
+  conditions?: ReadinessCondition[];
+  failures?: string[];
+  advisories?: string[];
 };
 
 /** Function form used by HTTP readiness endpoints and tests. */
-export type ReadinessChecker = () => ReadinessResult;
+export type ReadinessChecker = () => ReadinessResult | Promise<ReadinessResult>;
 
 export type StartupResult =
   | { ok: true; status: "started"; uptimeMs: number }
@@ -57,6 +61,108 @@ export function createStartupChecker(deps: GatewayStartupStateDeps): StartupChec
     }
     return { ok: true, status: "started", uptimeMs };
   };
+}
+
+function buildCoreCondition(params: {
+  type: ReadinessCondition["type"];
+  status: ReadinessCondition["status"];
+  requirement?: ReadinessCondition["requirement"];
+  reason: string;
+  message: string;
+}): ReadinessCondition {
+  return {
+    type: params.type,
+    status: params.status,
+    requirement: params.requirement ?? "required",
+    reason: params.reason,
+    message: params.message,
+  };
+}
+
+function buildStartupCondition(pending: boolean, pendingReason?: string): ReadinessCondition {
+  return buildCoreCondition({
+    type: "GatewayStartupComplete",
+    status: pending ? "False" : "True",
+    reason: pending ? "GatewayStartupPending" : "GatewayStartupComplete",
+    message: pending
+      ? `Gateway startup dependencies are still pending${pendingReason ? `: ${pendingReason}` : ""}.`
+      : "Gateway startup dependencies are complete.",
+  });
+}
+
+function buildSuppressedChannelCondition(suppressed: string[]): ReadinessCondition | undefined {
+  if (suppressed.length === 0) {
+    return undefined;
+  }
+  return buildCoreCondition({
+    type: "ChannelRuntimeSuppressed",
+    status: "False",
+    requirement: "advisory",
+    reason: "ChannelRuntimeSuppressed",
+    message: `Channel runtime failures are suppressed: ${suppressed.join(", ")}.`,
+  });
+}
+
+function buildAcceptingWorkCondition(draining: boolean): ReadinessCondition {
+  return buildCoreCondition({
+    type: "GatewayAcceptingWork",
+    status: draining ? "False" : "True",
+    reason: draining ? "GatewayDraining" : "GatewayAcceptingWork",
+    message: draining
+      ? "Gateway is draining and is not accepting new work."
+      : "Gateway is accepting new work.",
+  });
+}
+
+function buildChannelCondition(params: {
+  checked: boolean;
+  failing: string[];
+}): ReadinessCondition {
+  if (!params.checked) {
+    return buildCoreCondition({
+      type: "ChannelRuntimeReady",
+      status: "Unknown",
+      reason: "ChannelRuntimeNotChecked",
+      message: "Channel runtime health was not evaluated on this readiness pass.",
+    });
+  }
+  if (params.failing.length > 0) {
+    return buildCoreCondition({
+      type: "ChannelRuntimeReady",
+      status: "False",
+      reason: "ChannelRuntimeUnavailable",
+      message: `Selected channels are not ready: ${params.failing.join(", ")}.`,
+    });
+  }
+  return buildCoreCondition({
+    type: "ChannelRuntimeReady",
+    status: "True",
+    reason: "ChannelRuntimeReady",
+    message: "Selected channel runtimes are ready.",
+  });
+}
+
+function buildEventLoopCondition(
+  eventLoop: GatewayEventLoopHealth | undefined,
+): ReadinessCondition {
+  if (!eventLoop) {
+    return buildCoreCondition({
+      type: "EventLoopHealthy",
+      status: "Unknown",
+      requirement: "advisory",
+      reason: "EventLoopStatusUnavailable",
+      message: "Event-loop health is not available yet.",
+    });
+  }
+  return buildCoreCondition({
+    type: "EventLoopHealthy",
+    status: eventLoop.degraded ? "False" : "True",
+    requirement: "advisory",
+    reason: eventLoop.degraded ? "EventLoopDegraded" : "EventLoopHealthy",
+    message: eventLoop.degraded
+      ? `Event-loop health is degraded: ${eventLoop.reasons.join(", ")}.`
+      : "Event-loop health is within its healthy thresholds.",
+  });
 }
 
 function shouldIgnoreReadinessFailure(
@@ -103,15 +209,40 @@ export function createReadinessChecker(
     const startup = getStartup();
     const uptimeMs = startup.uptimeMs;
     const now = startedAt + uptimeMs;
+    const startupPending = startup.status === "starting";
+    const gatewayDraining = startup.status === "draining";
+    const lifecycleConditions = [
+      buildStartupCondition(
+        startupPending,
+        startupPending ? startup.pendingReason : undefined,
+      ),
+      buildAcceptingWorkCondition(gatewayDraining),
+    ];
     if (startup.status === "starting") {
       return withEventLoopHealth(
-        { ready: false, failing: [startup.pendingReason], uptimeMs },
+        {
+          ready: false,
+          failing: [startup.pendingReason],
+          uptimeMs,
+          conditions: [
+            ...lifecycleConditions,
+            buildChannelCondition({ checked: false, failing: [] }),
+          ],
+        },
         deps.getEventLoopHealth,
       );
     }
     if (startup.status === "draining") {
       return withEventLoopHealth(
-        { ready: false, failing: ["gateway-draining"], uptimeMs },
+        {
+          ready: false,
+          failing: ["gateway-draining"],
+          uptimeMs,
+          conditions: [
+            ...lifecycleConditions,
+            buildChannelCondition({ checked: false, failing: [] }),
+          ],
+        },
         deps.getEventLoopHealth,
       );
     }
@@ -129,7 +260,18 @@ export function createReadinessChecker(
       );
     }
     if (deps.shouldSkipChannelReadiness?.()) {
-      return withEventLoopHealth({ ready: true, failing: [], uptimeMs }, deps.getEventLoopHealth);
+      return withEventLoopHealth(
+        {
+          ready: true,
+          failing: [],
+          uptimeMs,
+          conditions: [
+            ...lifecycleConditions,
+            buildChannelCondition({ checked: true, failing: [] }),
+          ],
+        },
+        deps.getEventLoopHealth,
+      );
     }
 
     const snapshot = channelManager.getRuntimeSnapshot();
@@ -171,10 +313,16 @@ export function createReadinessChecker(
     }
 
     cachedAt = now;
+    const suppressedCondition = buildSuppressedChannelCondition(suppressed);
     cachedState = {
       ready: failing.length === 0,
       failing,
       ...(suppressed.length > 0 ? { suppressed } : {}),
+      conditions: [
+        ...lifecycleConditions,
+        buildChannelCondition({ checked: true, failing }),
+        ...(suppressedCondition ? [suppressedCondition] : []),
+      ],
     };
     return withEventLoopHealth({ ...cachedState, uptimeMs }, deps.getEventLoopHealth);
   };
@@ -185,5 +333,41 @@ function withEventLoopHealth(
   getEventLoopHealth?: () => GatewayEventLoopHealth | undefined,
 ): ReadinessResult {
   const eventLoop = getEventLoopHealth?.();
-  return eventLoop ? { ...result, eventLoop } : result;
+  return {
+    ...result,
+    ...(eventLoop ? { eventLoop } : {}),
+    conditions: [
+      ...(result.conditions ?? []).filter((condition) => condition.type !== "EventLoopHealthy"),
+      buildEventLoopCondition(eventLoop),
+    ],
+  };
+}
+
+export function mergeReadinessResults(
+  gateway: ReadinessResult,
+  runtime: CanonicalReadinessResult,
+): ReadinessResult {
+  const conditions = [...(gateway.conditions ?? []), ...runtime.conditions];
+  const failures = Array.from(
+    new Set(
+      conditions
+        .filter((condition) => condition.requirement === "required" && condition.status !== "True")
+        .map((condition) => condition.reason),
+    ),
+  );
+  const advisories = Array.from(
+    new Set(
+      conditions
+        .filter((condition) => condition.requirement === "advisory" && condition.status !== "True")
+        .map((condition) => condition.reason),
+    ),
+  );
+  return {
+    ...gateway,
+    ready: failures.length === 0,
+    failing: Array.from(new Set([...gateway.failing, ...runtime.failures])),
+    conditions,
+    failures,
+    advisories,
+  };
 }

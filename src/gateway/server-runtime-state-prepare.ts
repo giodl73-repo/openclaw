@@ -10,6 +10,7 @@ import { loadGatewayTlsServerRuntime } from "../infra/tls/gateway.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { runtimeForLogger } from "../logging/subsystem.js";
 import { isGatewayDraining } from "../process/command-queue.js";
+import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
 import { openClawStateDatabaseCache } from "../state/openclaw-state-db-cache.js";
@@ -31,7 +32,12 @@ import { createGatewayTransportBridge } from "./server-transport-bridge.js";
 import { createWizardSessionTracker } from "./server-wizard-sessions.js";
 import { createGatewayEventLoopHealthMonitor } from "./server/event-loop-health.js";
 import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
-import { createReadinessChecker, createStartupChecker } from "./server/readiness.js";
+import {
+  createReadinessChecker,
+  createStartupChecker,
+  mergeReadinessResults,
+  type ReadinessResult,
+} from "./server/readiness.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 
 type GatewayBootstrap = Awaited<ReturnType<typeof prepareGatewayServerBootstrap>>;
@@ -39,6 +45,21 @@ type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
 type ChannelRuntime = ReturnType<
   (typeof import("../plugins/runtime/runtime-channel.js"))["createRuntimeChannel"]
 >;
+
+function buildGatewayPluginReadinessInput(
+  registry: GatewayBootstrap["pluginBootstrap"]["pluginRegistry"],
+): PluginReadinessInput {
+  const errors = registry.plugins
+    .filter((plugin) => plugin.status === "error")
+    .map((plugin) => ({
+      id: plugin.id,
+      activated: plugin.activated === true,
+      ...(plugin.activationSource ? { activationSource: plugin.activationSource } : {}),
+      error: plugin.error ?? "unknown plugin load error",
+    }))
+    .toSorted((left, right) => left.id.localeCompare(right.id));
+  return { errors };
+}
 
 export async function prepareGatewayKernelState(params: {
   bootstrap: GatewayBootstrap;
@@ -418,7 +439,7 @@ export async function prepareGatewayKernelState(params: {
     getGatewayDraining: () => lifecycle.closePreludeStarted || isGatewayDraining(),
   };
   const getStartup = createStartupChecker(startupCheckerDeps);
-  const getReadiness = createReadinessChecker({
+  const getGatewayReadiness = createReadinessChecker({
     channelManager,
     ...startupCheckerDeps,
     getEventLoopHealth: readinessEventLoopHealth.snapshot,
@@ -428,6 +449,15 @@ export async function prepareGatewayKernelState(params: {
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
+  const getReadiness = async (): Promise<ReadinessResult> => {
+    const gatewayReadiness = await getGatewayReadiness();
+    const runtimeReadiness = buildRuntimeReadiness({
+      configLoaded: true,
+      gateway: "responding",
+      plugins: buildGatewayPluginReadinessInput(pluginRuntime.registry),
+    });
+    return mergeReadinessResults(gatewayReadiness, runtimeReadiness);
+  };
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   } = {};

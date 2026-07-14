@@ -94,6 +94,20 @@ describe("status-json-payload", () => {
           issues: [{ path: "gateway.port", message: "invalid" }],
         },
         secretDiagnostics: ["diag"],
+        readiness: {
+          ready: true,
+          conditions: [
+            {
+              type: "PluginsLoaded",
+              status: "False",
+              requirement: "advisory",
+              reason: "PluginLoadFailures",
+              message: "One selected plugin failed to load.",
+            },
+          ],
+          failures: [],
+          advisories: ["PluginLoadFailures"],
+        },
         securityAudit: { summary: { critical: 1 } },
         health: { ok: true },
         usage: { providers: [] },
@@ -110,6 +124,12 @@ describe("status-json-payload", () => {
     ).toEqual({
       ok: true,
       os: { platform: "linux" },
+      readiness: {
+        ready: true,
+        failures: [],
+        advisories: ["PluginLoadFailures"],
+        conditions: expect.any(Array),
+      },
       update: {
         root: "/tmp/openclaw",
         installKind: "git",
@@ -199,5 +219,15 @@ describe("status-json-payload", () => {
 
     expect(payload).not.toHaveProperty("configDiagnostics");
     expect(payload).not.toHaveProperty("securityAudit");
+    expect(payload.readiness).toMatchObject({
+      ready: false,
+      failures: [
+        "GatewayStartupNotChecked",
+        "GatewayAdmissionNotChecked",
+        "ChannelRuntimeNotChecked",
+        "GatewayUnavailable",
+      ],
+      advisories: ["EventLoopStatusUnavailable", "PluginStatusUnavailable"],
+    });
   });
 });
