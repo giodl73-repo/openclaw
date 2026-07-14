@@ -8,6 +8,7 @@ import { resolveDefaultModelForAgent } from "../agents/model-selection.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../agents/openai-routing.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
+import type { CanonicalReadinessResult } from "../readiness/conditions.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import {
   buildCodexSyntheticUsageAuth,
@@ -152,6 +153,24 @@ export async function resolveStatusGatewayHealth(params: {
   });
 }
 
+/** Reads the canonical live readiness result when the Gateway is reachable. */
+export async function resolveStatusGatewayReadiness(params: {
+  config: OpenClawConfig;
+  timeoutMs?: number;
+  gatewayReachable: boolean;
+}) {
+  if (!params.gatewayReachable) {
+    return undefined;
+  }
+  const { callGateway } = await loadGatewayCallModule();
+  return await callGateway<CanonicalReadinessResult>({
+    method: "ready",
+    params: {},
+    timeoutMs: params.timeoutMs,
+    config: params.config,
+  }).catch(() => undefined);
+}
+
 /** Calls gateway health but converts unreachable/failing probes into an error object. */
 export async function resolveStatusGatewayHealthSafe(params: {
   config: OpenClawConfig;
@@ -247,6 +266,7 @@ async function resolveStatusRuntimeDetails(params: {
   timeoutMs?: number;
   usage?: boolean;
   deep?: boolean;
+  includeReadiness?: boolean;
   gatewayReachable: boolean;
   suppressHealthErrors?: boolean;
   resolveUsage?: (input: StatusUsageSummaryOptions) => Promise<StatusUsageSummary>;
@@ -275,6 +295,14 @@ async function resolveStatusRuntimeDetails(params: {
           timeoutMs: params.timeoutMs,
         })
     : undefined;
+  const readiness = params.includeReadiness
+    ? (health && "readiness" in health ? health.readiness : undefined) ??
+      (await resolveStatusGatewayReadiness({
+        config: params.config,
+        timeoutMs: params.timeoutMs,
+        gatewayReachable: params.gatewayReachable,
+      }))
+    : undefined;
   // Last heartbeat is a deep-only gateway call; fast status should not spend network time here.
   const lastHeartbeat = params.deep
     ? await resolveStatusLastHeartbeat({
@@ -286,6 +314,7 @@ async function resolveStatusRuntimeDetails(params: {
   const [gatewayService, nodeService] = await resolveStatusServiceSummaries(params.timeoutMs);
   const result = {
     usage,
+    readiness,
     health,
     lastHeartbeat,
     gatewayService,
@@ -293,6 +322,7 @@ async function resolveStatusRuntimeDetails(params: {
   };
   return result satisfies {
     usage?: StatusUsageSummary;
+    readiness?: CanonicalReadinessResult;
     health?: StatusGatewayHealthResult;
     lastHeartbeat: StatusLastHeartbeat;
     gatewayService: StatusGatewayServiceSummary;
@@ -307,6 +337,7 @@ export async function resolveStatusRuntimeSnapshot(params: {
   timeoutMs?: number;
   usage?: boolean;
   deep?: boolean;
+  includeReadiness?: boolean;
   gatewayReachable: boolean;
   includeSecurityAudit?: boolean;
   suppressHealthErrors?: boolean;
@@ -333,6 +364,7 @@ export async function resolveStatusRuntimeSnapshot(params: {
     timeoutMs: params.timeoutMs,
     usage: params.usage,
     deep: params.deep,
+    includeReadiness: params.includeReadiness,
     gatewayReachable: params.gatewayReachable,
     suppressHealthErrors: params.suppressHealthErrors,
     resolveUsage: params.resolveUsage,
@@ -344,6 +376,7 @@ export async function resolveStatusRuntimeSnapshot(params: {
   } satisfies {
     securityAudit?: StatusSecurityAudit;
     usage?: StatusUsageSummary;
+    readiness?: CanonicalReadinessResult;
     health?: StatusGatewayHealthResult;
     lastHeartbeat: StatusLastHeartbeat;
     gatewayService: StatusGatewayServiceSummary;
