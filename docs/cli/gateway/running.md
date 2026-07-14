@@ -15,6 +15,7 @@ Starting the Gateway process and reading its configured token. Part of the [`ope
 ```bash
 openclaw gateway
 openclaw gateway run   # equivalent, explicit form
+openclaw gateway run --hosting-profile container
 ```
 
 <AccordionGroup>
