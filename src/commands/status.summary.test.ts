@@ -305,6 +305,26 @@ describe("getStatusSummary", () => {
       statusSummaryMocks.listSessionEntriesCore.mockReturnValue(toSessionEntrySummaries(store)),
   });
 
+  it("includes runtimeVersion in the status payload", async () => {
+    const summary = await getStatusSummary();
+
+    expect(summary.runtimeVersion).toBe("2026.3.8");
+    expect(summary.readiness).toMatchObject({
+      ready: false,
+      failures: [
+        "GatewayStartupNotChecked",
+        "GatewayAdmissionNotChecked",
+        "ChannelRuntimeNotChecked",
+        "GatewayNotChecked",
+      ],
+      advisories: ["EventLoopStatusUnavailable", "PluginStatusUnavailable"],
+    });
+    expect(summary.heartbeat.defaultAgentId).toBe("main");
+    expect(summary.channelSummary).toEqual(["ok"]);
+    expect(summary.tasks.active).toBe(0);
+    expect(summary.taskAudit.warnings).toBe(1);
+  });
+
   it.each(["per-sender", "global"] as const)(
     "summarizes every configured agent's pending events without an ambient owner (%s)",
     async (scope) => {
