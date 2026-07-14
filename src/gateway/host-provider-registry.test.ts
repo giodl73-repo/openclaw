@@ -405,6 +405,32 @@ describe("host provider registry", () => {
     ).toThrow("frame direction is invalid");
   });
 
+  it("does not deliver a response-open frame rejected by trace validation", async () => {
+    const value = registry();
+    value.register(client("conn-invalid-response"));
+    const operation = value.openOperation(openInput("operation-invalid-response"));
+    const reader = operation.frames.getReader();
+
+    expect(
+      value.receiveFrame(
+        "conn-invalid-response",
+        frame(operation.open, {
+          type: "response-open",
+          status: 200,
+          statusText: "OK",
+          headers: {},
+        }),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        code: "protocol-violation",
+        certainty: "not-started",
+      }),
+    );
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
+  });
+
   it("preserves cancellation state when an active operation times out", async () => {
     vi.useFakeTimers();
     try {

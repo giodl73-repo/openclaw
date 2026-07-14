@@ -310,8 +310,11 @@ export class HostProviderRegistry {
       throw new Error(`host provider operation is not active: ${frame.operationId}`);
     }
     this.assertSessionFrame(session, frame);
-    operation.frameController.enqueue(frame);
-    return this.appendAndEvaluate(frame.operationId, frame);
+    const result = this.appendAndEvaluate(frame.operationId, frame);
+    if (!result.ok && result.code === "incomplete-trace") {
+      operation.frameController.enqueue(frame);
+    }
+    return result;
   }
 
   revokeAll(reason = "host provider access revoked"): void {
