@@ -8,7 +8,8 @@ export type BuiltInReadinessConditionType =
   | "ConfigLoaded"
   | "WorkspaceWritable"
   | "GatewayResponding"
-  | "PluginsLoaded";
+  | "PluginsLoaded"
+  | "RuntimeActivationIdentified";
 
 export type ReadinessConditionType = BuiltInReadinessConditionType | (string & {});
 
@@ -24,6 +25,10 @@ export type ReadinessCondition = {
 };
 
 export type CanonicalReadinessResult = {
+  activation?: {
+    runtimeId: string;
+    incarnationId: string;
+  };
   ready: boolean;
   conditions: ReadinessCondition[];
   failures: string[];
@@ -45,6 +50,7 @@ export type RuntimeReadinessInput = {
   plugins?: PluginReadinessInput;
   coreConditions?: ReadinessCondition[];
   additionalConditions?: ReadinessCondition[];
+  activation?: CanonicalReadinessResult["activation"];
 };
 
 export function buildUnobservedGatewayConditions(): ReadinessCondition[] {
@@ -152,6 +158,17 @@ export function buildRuntimeReadiness(input: RuntimeReadinessInput): CanonicalRe
         : "Runtime configuration was not loaded.",
     },
     ...(input.additionalConditions ?? []),
+    ...(input.activation
+      ? [
+          {
+            type: "RuntimeActivationIdentified",
+            status: "True" as const,
+            requirement: "required" as const,
+            reason: "RuntimeActivationIdentified",
+            message: "Runtime activation identity is available.",
+          },
+        ]
+      : []),
     buildGatewayCondition(input.gateway),
     buildPluginCondition(input.plugins),
   ];
@@ -162,6 +179,7 @@ export function buildRuntimeReadiness(input: RuntimeReadinessInput): CanonicalRe
     .filter((entry) => entry.requirement === "advisory" && entry.status !== "True")
     .map((entry) => entry.reason);
   return {
+    ...(input.activation ? { activation: input.activation } : {}),
     ready: failures.length === 0,
     conditions,
     failures,

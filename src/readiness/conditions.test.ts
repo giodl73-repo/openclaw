@@ -93,4 +93,23 @@ describe("buildRuntimeReadiness", () => {
       expect.objectContaining({ type: "plugin.storage.backend", requirement: "required" }),
     );
   });
+
+  it("attributes readiness to one logical runtime activation", () => {
+    const activation = { runtimeId: "tenant-42/scout", incarnationId: "pod-7f9c" };
+    const readiness = buildRuntimeReadiness({
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+      activation,
+    });
+
+    expect(readiness.activation).toEqual(activation);
+    expect(readiness.conditions).toContainEqual(
+      expect.objectContaining({
+        type: "RuntimeActivationIdentified",
+        status: "True",
+        requirement: "required",
+      }),
+    );
+  });
 });
