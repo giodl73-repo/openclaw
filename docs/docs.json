@@ -2766,6 +2766,7 @@
                       },
                       "cli/health",
                       "cli/logs",
+                      "cli/ready",
                       "cli/status"
                     ]
                   },
