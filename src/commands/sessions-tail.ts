@@ -20,6 +20,10 @@ import { readRegularFileSync } from "../infra/regular-file.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
+  summarizeTrajectoryAuditRuns,
+  type TrajectoryAuditRunSummary,
+} from "../trajectory/audit-run.js";
+import {
   matchesTrajectoryAuditReceipt,
   type TrajectoryAuditReceiptFilter,
 } from "../trajectory/audit.js";
@@ -37,6 +41,7 @@ type SessionsTailOptions = {
   store?: string;
   agent?: string;
   allAgents?: boolean;
+  auditRuns?: boolean;
   sessionKey?: string;
   follow?: boolean;
   json?: boolean;
@@ -378,6 +383,32 @@ function renderEvents(
   return cursor;
 }
 
+function formatAuditRunSummary(summary: TrajectoryAuditRunSummary): string {
+  const receiptTypes = summary.receipts
+    .map((receipt) => toOptionalString(receipt.type))
+    .filter((type): type is string => Boolean(type));
+  const skillNames = summary.skills.map((skill) => skill.skillName);
+  const parts = [
+    `run=${summary.runId}`,
+    summary.status ? `status=${summary.status}` : undefined,
+    summary.usage?.total !== undefined ? `tokens=${summary.usage.total}` : undefined,
+    receiptTypes.length > 0 ? `receipts=${receiptTypes.join(",")}` : undefined,
+    skillNames.length > 0 ? `skills=${skillNames.join(",")}` : undefined,
+  ];
+  return parts.filter((part): part is string => Boolean(part)).join(" ");
+}
+
+function renderAuditRuns(
+  events: TrajectoryEvent[],
+  runtime: RuntimeEnv,
+  options: { json?: boolean; receiptFilter?: TrajectoryAuditReceiptFilter; tailCount: number },
+): void {
+  const summaries = summarizeTrajectoryAuditRuns(events, options.receiptFilter);
+  for (const summary of options.tailCount > 0 ? summaries.slice(-options.tailCount) : []) {
+    runtime.log(options.json ? JSON.stringify(summary) : formatAuditRunSummary(summary));
+  }
+}
+
 function fileStateFromStat(stat: fs.Stats): FollowFileState {
   return {
     dev: stat.dev,
@@ -672,6 +703,11 @@ export async function sessionsTailCommand(
     runtime.exit(1);
     return;
   }
+  if (opts.auditRuns && opts.follow) {
+    runtime.error("--audit-runs does not support --follow; rerun the snapshot command as needed.");
+    runtime.exit(1);
+    return;
+  }
 
   const receiptType = opts.receiptType?.trim();
   if (opts.receiptType !== undefined && !receiptType) {
@@ -695,7 +731,7 @@ export async function sessionsTailCommand(
     }
   }
   const hasRegardingFilter = Boolean(regardingSystem || regardingType || regardingId);
-  if (opts.json && !receiptType && !hasRegardingFilter) {
+  if (opts.json && !opts.auditRuns && !receiptType && !hasRegardingFilter) {
     runtime.error(
       "--json requires --receipt-type or a --regarding-* filter so only sanitized audit receipts are emitted.",
     );
@@ -761,6 +797,14 @@ export async function sessionsTailCommand(
   for (const selection of selected) {
     const snapshot = readTailSnapshot(selection);
     followSnapshots.set(selection, snapshot);
+    if (opts.auditRuns) {
+      renderAuditRuns(snapshot.events, runtime, {
+        json: opts.json,
+        receiptFilter,
+        tailCount,
+      });
+      continue;
+    }
     const outputEvents = receiptFilter
       ? snapshot.events.filter((event) => matchesTrajectoryAuditReceipt(event, receiptFilter))
       : snapshot.events;

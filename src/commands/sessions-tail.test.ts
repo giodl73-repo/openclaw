@@ -314,6 +314,97 @@ describe("sessionsTailCommand", () => {
     });
   });
 
+  it("renders run-level audit summaries after applying receipt filters", async () => {
+    const runtime = makeRuntime();
+    await writeSessionEntry();
+    await appendEvents([
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:18.000Z",
+        runId: "run-1",
+        data: {
+          type: "case.updated",
+          regarding: { system: "dynamics", type: "case", id: "case-42" },
+        },
+      }),
+      makeEvent({
+        type: "model.completed",
+        ts: "2026-05-18T12:04:19.000Z",
+        runId: "run-1",
+        provider: "openai",
+        modelId: "gpt-5.6-luna",
+        data: { usage: { input: 100, output: 20, total: 120 } },
+      }),
+      makeEvent({
+        type: "skill.used",
+        ts: "2026-05-18T12:04:20.000Z",
+        runId: "run-2",
+        data: { skillName: "customer-support", skillSource: "workspace", activation: "read" },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:21.000Z",
+        runId: "run-2",
+        data: {
+          type: "invoice.paid",
+          regarding: { system: "dynamics", type: "case", id: "case-42" },
+        },
+      }),
+      makeEvent({
+        type: "model.completed",
+        ts: "2026-05-18T12:04:22.000Z",
+        runId: "run-2",
+        provider: "openai",
+        modelId: "gpt-5.6-luna",
+        data: { usage: { input: 40, output: 5, total: 45 } },
+      }),
+    ]);
+
+    await sessionsTailCommand(
+      {
+        store: storePath,
+        sessionKey,
+        auditRuns: true,
+        regardingSystem: "dynamics",
+        regardingType: "case",
+        regardingId: "case-42",
+        json: true,
+        tail: "1",
+      },
+      runtime,
+    );
+
+    expect(runtime.log).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(String(vi.mocked(runtime.log).mock.calls[0]?.[0]));
+    expect(output).toMatchObject({
+      auditSchema: "openclaw-audit-run",
+      runId: "run-2",
+      models: [{ provider: "openai", modelId: "gpt-5.6-luna" }],
+      usage: { input: 40, output: 5, total: 45 },
+      skills: [{ skillName: "customer-support", skillSource: "workspace", activation: "read" }],
+      receipts: [
+        expect.objectContaining({
+          type: "invoice.paid",
+          regarding: { system: "dynamics", type: "case", id: "case-42" },
+        }),
+      ],
+    });
+  });
+
+  it("rejects following audit run summaries until incremental summaries are defined", async () => {
+    const runtime = makeRuntime();
+
+    await sessionsTailCommand(
+      { store: storePath, sessionKey, auditRuns: true, follow: true },
+      runtime,
+    );
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      "--audit-runs does not support --follow; rerun the snapshot command as needed.",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+  });
+
   it("does not expose general trajectory data through JSON output", async () => {
     const runtime = makeRuntime();
 
