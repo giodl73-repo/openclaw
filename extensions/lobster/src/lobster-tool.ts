@@ -58,14 +58,13 @@ export function createEmbeddedOpenClawInvoke(
     tool: string;
     action: string;
     args: Record<string, unknown>;
-    sessionKey?: string;
     idempotencyKey?: string;
   }) => {
     const result = await api.runtime.gateway.request<ToolsInvokeResult>("tools.invoke", {
       name: params.tool,
       action: params.action,
       args: params.args,
-      sessionKey: params.sessionKey ?? ctx.sessionKey,
+      sessionKey: ctx.sessionKey,
       ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
       ...(ctx.conversationReadOrigin ? { conversationReadOrigin: ctx.conversationReadOrigin } : {}),
     });

@@ -51,13 +51,12 @@ describe("embedded OpenClaw Lobster registry", () => {
       tool: "message",
       action: "send",
       args: { to: "customer@example.com" },
-      sessionKey: "agent:support:email:case-42",
       idempotencyKey: "lobster:flow-42:notify-customer",
     });
     expect(await collect(result?.output ?? input())).toEqual([{ sent: true }]);
   });
 
-  it("maps pipeline items without leaving the in-process bridge", async () => {
+  it("maps pipeline items with distinct stable idempotency keys", async () => {
     const invoke = vi.fn(async ({ args }: { args: Record<string, unknown> }) => ({
       id: args.invoice,
     }));
@@ -70,12 +69,42 @@ describe("embedded OpenClaw Lobster registry", () => {
         action: "pay",
         each: true,
         "item-key": "invoice",
+        "step-id": "pay-invoice",
       },
-      ctx: { env: { OPENCLAW_SESSION_KEY: "agent:finance:main" } },
+      ctx: {
+        env: {
+          OPENCLAW_SESSION_KEY: "agent:finance:main",
+          OPENCLAW_TASK_FLOW_ID: "flow-42",
+        },
+      },
     });
 
     expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ idempotencyKey: "lobster:flow-42:pay-invoice:0" }),
+    );
+    expect(invoke).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ idempotencyKey: "lobster:flow-42:pay-invoice:1" }),
+    );
     expect(await collect(result?.output ?? input())).toEqual([{ id: "INV-1" }, { id: "INV-2" }]);
+  });
+
+  it("rejects attempts to select another OpenClaw session", async () => {
+    const command = createOpenClawLobsterRegistry(baseRegistry(), vi.fn()).get("openclaw.invoke");
+
+    await expect(
+      command?.run({
+        input: input(),
+        args: {
+          tool: "billing",
+          action: "pay",
+          "session-key": "agent:finance:main",
+        },
+        ctx: { env: { OPENCLAW_SESSION_KEY: "agent:support:main" } },
+      }),
+    ).rejects.toThrow("always uses the current OpenClaw session");
   });
 
   it("prevents recursive Lobster invocation", async () => {

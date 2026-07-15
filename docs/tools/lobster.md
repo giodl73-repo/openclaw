@@ -182,6 +182,9 @@ The bundled Lobster plugin runs workflows **in-process** inside the gateway.
 In that mode, `openclaw.invoke` uses the current OpenClaw session and existing
 tool-policy path directly; it does not need a gateway URL or bearer token.
 
+The embedded command cannot override the active session. When `--each` is used,
+the bridge suffixes the step idempotency key with each input's stable index.
+
 ```lobster
 openclaw.invoke --tool llm-task --action json --args-json '{ ... }'
 ```

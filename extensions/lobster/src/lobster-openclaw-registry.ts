@@ -28,7 +28,6 @@ export type EmbeddedOpenClawInvoke = (params: {
   tool: string;
   action: string;
   args: JsonRecord;
-  sessionKey?: string;
   idempotencyKey?: string;
 }) => Promise<unknown>;
 
@@ -86,9 +85,9 @@ function createInvokeCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
       const each = args.each === true;
       const itemKey = readOptionalString(args.itemKey ?? args["item-key"]) ?? "item";
       const baseArgs = parseArgsJson(args["args-json"]);
-      const sessionKey =
-        readOptionalString(args.sessionKey ?? args["session-key"]) ??
-        readOptionalString(ctx.env.OPENCLAW_SESSION_KEY);
+      if (readOptionalString(args.sessionKey ?? args["session-key"])) {
+        throw new Error("embedded openclaw.invoke always uses the current OpenClaw session");
+      }
       const explicitIdempotencyKey = readOptionalString(
         args.idempotencyKey ?? args["idempotency-key"],
       );
@@ -97,8 +96,16 @@ function createInvokeCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
       const idempotencyKey =
         explicitIdempotencyKey ?? (flowId && stepId ? `lobster:${flowId}:${stepId}` : undefined);
 
-      const invokeOnce = async (toolArgs: JsonRecord) =>
-        await invoke({ tool, action, args: toolArgs, sessionKey, idempotencyKey });
+      const invokeOnce = async (toolArgs: JsonRecord, itemIndex?: number) =>
+        await invoke({
+          tool,
+          action,
+          args: toolArgs,
+          idempotencyKey:
+            idempotencyKey && itemIndex !== undefined
+              ? `${idempotencyKey}:${itemIndex}`
+              : idempotencyKey,
+        });
       if (!each) {
         for await (const item of input) {
           // Inline invocations do not implicitly forward pipeline input.
@@ -108,8 +115,10 @@ function createInvokeCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
       }
 
       const output: unknown[] = [];
+      let itemIndex = 0;
       for await (const item of input) {
-        const result = await invokeOnce({ ...baseArgs, [itemKey]: item });
+        const result = await invokeOnce({ ...baseArgs, [itemKey]: item }, itemIndex);
+        itemIndex += 1;
         if (Array.isArray(result)) {
           output.push(...result);
         } else {
