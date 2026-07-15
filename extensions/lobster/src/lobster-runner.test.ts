@@ -503,7 +503,7 @@ describe("createEmbeddedLobsterRunner", () => {
     ).resolves.toMatchObject({ ok: true, status: "ok" });
   });
 
-  it("runs two managed case skills in workflow order with TaskFlow step identities", async () => {
+  it("requires approval before resolving a verified customer case", async () => {
     const events: string[] = [];
     const invoke = vi
       .fn()
@@ -538,10 +538,34 @@ describe("createEmbeddedLobsterRunner", () => {
       waitForOpenClawRun: waitForRun,
     });
 
-    const envelope = await runner.run({
+    const pending = await runner.run({
       action: "run",
       pipeline: path.resolve("extensions/lobster/examples/support-case.lobster"),
       argsJson: '{"case_id":"CAS-42"}',
+      cwd: process.cwd(),
+      timeoutMs: 2000,
+      maxStdoutBytes: 4096,
+      taskFlowId: "flow-case-42",
+    });
+
+    expect(pending).toMatchObject({
+      ok: true,
+      status: "needs_approval",
+      requiresApproval: {
+        type: "approval_request",
+        prompt: "Resolve this verified customer case?",
+        items: [{ type: "customer.verified" }],
+      },
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+
+    if (!pending.ok || !pending.requiresApproval?.resumeToken) {
+      throw new Error("expected approval resume token");
+    }
+    const completed = await runner.run({
+      action: "resume",
+      token: pending.requiresApproval.resumeToken,
+      approve: true,
       cwd: process.cwd(),
       timeoutMs: 2000,
       maxStdoutBytes: 4096,
@@ -582,7 +606,48 @@ describe("createEmbeddedLobsterRunner", () => {
       "spawn:resolve",
       "complete:run-resolve",
     ]);
-    expect(envelope).toMatchObject({ ok: true, status: "ok" });
+    expect(completed).toMatchObject({ ok: true, status: "ok" });
+  });
+
+  it("does not resolve a verified customer case when approval is rejected", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: "accepted",
+      runId: "run-verify",
+      childSessionKey: "agent:main:subagent:verify",
+    });
+    const runner = createEmbeddedLobsterRunner({
+      invokeOpenClawTool: invoke,
+      waitForOpenClawRun: vi.fn().mockResolvedValue({
+        status: "ok",
+        audit: { receipts: [{ type: "customer.verified" }] },
+      }),
+    });
+
+    const pending = await runner.run({
+      action: "run",
+      pipeline: path.resolve("extensions/lobster/examples/support-case.lobster"),
+      argsJson: '{"case_id":"CAS-42"}',
+      cwd: process.cwd(),
+      timeoutMs: 2000,
+      maxStdoutBytes: 4096,
+      taskFlowId: "flow-case-42",
+    });
+    if (!pending.ok || !pending.requiresApproval?.resumeToken) {
+      throw new Error("expected approval resume token");
+    }
+
+    await expect(
+      runner.run({
+        action: "resume",
+        token: pending.requiresApproval.resumeToken,
+        approve: false,
+        cwd: process.cwd(),
+        timeoutMs: 2000,
+        maxStdoutBytes: 4096,
+        taskFlowId: "flow-case-42",
+      }),
+    ).resolves.toMatchObject({ ok: true, status: "cancelled" });
+    expect(invoke).toHaveBeenCalledOnce();
   });
 
   it("stops a managed case workflow when verification fails", async () => {

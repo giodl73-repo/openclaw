@@ -11,10 +11,15 @@ steps:
       --receipt-type customer.verified
       --wait-timeout-ms 60000
 
+  - id: approve_resolution
+    approval: Resolve this verified customer case?
+    stdin: $verify_customer.json.receipt
+    when: $verify_customer.json.receipt.type == "customer.verified"
+
   - id: resolve_case
     pipeline: >
       openclaw.skill --skill resolve-case
       --task "Resolve case ${case_id} after customer verification"
       --task-name resolve_case --step-id resolve-case
       --wait-timeout-ms 60000
-    when: $verify_customer.json.receipt.type == "customer.verified"
+    when: $approve_resolution.approved
