@@ -12,24 +12,24 @@ import {
 function bundle(status: "resolved" | "missing" | "incompatible" = "resolved") {
   return {
     version: "host-integration-bundle/v1",
-    id: "lobster/capi",
+    id: "example/host",
     bundleVersion: "1.2.3",
-    generation: "lobster/capi@1.2.3#1",
+    generation: "example/host@1.2.3#1",
     inventory: [
       {
         owner: "model-provider",
         kind: "model-provider-adapter",
-        id: "lobster/capi",
-        version: "capi-model-adapter/v1",
+        id: "example/provider-adapter",
+        version: "example-provider-adapter/v1",
         required: status !== "incompatible",
-        readinessCriteria: ["CapiReady"],
+        readinessCriteria: ["ProviderReady"],
         status,
         ...(status === "resolved"
           ? {
-              resolvedVersion: "capi-model-adapter/v1",
+              resolvedVersion: "example-provider-adapter/v1",
               provenance: {
-                pluginId: "lobster",
-                source: "/plugins/lobster",
+                pluginId: "example-host",
+                source: "/plugins/example-host",
                 origin: "workspace",
               },
             }
@@ -43,12 +43,12 @@ function evidence(state: Exclude<HostIntegrationBindingStateV1, "unresolved">) {
   return {
     owner: "model-provider",
     kind: "model-provider-adapter",
-    id: "lobster/capi",
-    bundleGeneration: "lobster/capi@1.2.3#1",
+    id: "example/provider-adapter",
+    bundleGeneration: "example/host@1.2.3#1",
     state,
     reason: `Owner${state}`,
     message: `Owner reported ${state}.`,
-    config: { source: "openclaw.json", path: "models.providers.capi" },
+    config: { source: "openclaw.json", path: "plugins.entries.example-host" },
     ownerGeneration: "owner-7",
     carrierGeneration: "carrier-3",
     carrierIncarnation: "process-2",
@@ -80,13 +80,13 @@ describe("host integration status inventory", () => {
         }),
       ).toMatchObject({
         state,
-        bundle: { generation: "lobster/capi@1.2.3#1" },
+        bundle: { generation: "example/host@1.2.3#1" },
         entries: [
           {
             state,
-            config: { source: "openclaw.json", path: "models.providers.capi" },
+            config: { source: "openclaw.json", path: "plugins.entries.example-host" },
             generations: {
-              bundle: "lobster/capi@1.2.3#1",
+              bundle: "example/host@1.2.3#1",
               owner: "owner-7",
               carrier: "carrier-3",
               carrierIncarnation: "process-2",
@@ -110,7 +110,7 @@ describe("host integration status inventory", () => {
     expect(
       buildHostIntegrationStatusInventoryV1({
         bundle: bundle(),
-        ownerEvidence: [{ ...evidence("ready"), bundleGeneration: "lobster/capi@1.2.3#0" }],
+        ownerEvidence: [{ ...evidence("ready"), bundleGeneration: "example/host@1.2.3#0" }],
       }),
     ).toMatchObject({
       state: "stale",
@@ -118,7 +118,7 @@ describe("host integration status inventory", () => {
         {
           state: "stale",
           reason: "OwnerEvidenceBundleGenerationMismatch",
-          generations: { bundle: "lobster/capi@1.2.3#1", owner: "owner-7" },
+          generations: { bundle: "example/host@1.2.3#1", owner: "owner-7" },
         },
       ],
     });

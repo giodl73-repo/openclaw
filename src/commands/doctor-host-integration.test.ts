@@ -5,6 +5,7 @@ import {
 } from "../hosting/host-integration-bundle.js";
 import {
   clearCurrentHostIntegrationOwnerEvidenceV1,
+  type HostIntegrationBindingStatusEntryV1,
   type HostIntegrationStatusInventoryV1,
 } from "../hosting/host-integration-status.js";
 import {
@@ -18,31 +19,36 @@ afterEach(() => {
   clearCurrentHostIntegrationOwnerEvidenceV1();
 });
 
+type ModelProviderStatusEntry = HostIntegrationBindingStatusEntryV1 & {
+  owner: "model-provider";
+  kind: "model-provider-adapter";
+};
+
 function inventory(
-  entry: Partial<HostIntegrationStatusInventoryV1["entries"][number]> = {},
+  entry: Partial<ModelProviderStatusEntry> = {},
 ): HostIntegrationStatusInventoryV1 {
   return {
     version: "host-integration-status/v1",
     bundle: {
-      id: "lobster/capi",
+      id: "example/host",
       version: "1.0.0",
-      generation: "lobster/capi@1.0.0",
+      generation: "example/host@1.0.0",
     },
     state: entry.state ?? "unresolved",
     entries: [
       {
         owner: "model-provider",
         kind: "model-provider-adapter",
-        id: "lobster/capi",
-        version: "capi-model-adapter/v1",
+        id: "example/provider-adapter",
+        version: "example-provider-adapter/v1",
         required: true,
-        readinessCriteria: ["CapiReady"],
+        readinessCriteria: ["ProviderReady"],
         status: "resolved",
-        resolvedVersion: "capi-model-adapter/v1",
+        resolvedVersion: "example-provider-adapter/v1",
         state: "unresolved",
         reason: "OwnerEvidenceUnavailable",
         message: "sensitive owner detail must not be copied",
-        generations: { bundle: "lobster/capi@1.0.0" },
+        generations: { bundle: "example/host@1.0.0" },
         ...entry,
       },
     ],
@@ -58,16 +64,16 @@ describe("host integration Doctor findings", () => {
     registerHostIntegrationBundleV1({
       manifest: {
         version: "host-integration-bundle/v1",
-        id: "lobster/capi",
+        id: "example/host",
         bundleVersion: "1.0.0",
         contributions: [
           {
             owner: "model-provider",
             kind: "model-provider-adapter",
-            id: "lobster/capi",
-            version: "capi-model-adapter/v1",
+            id: "example/provider-adapter",
+            version: "example-provider-adapter/v1",
             required: true,
-            readinessCriteria: ["CapiReady"],
+            readinessCriteria: ["ProviderReady"],
           },
         ],
       },
@@ -75,11 +81,11 @@ describe("host integration Doctor findings", () => {
         {
           owner: "model-provider",
           kind: "model-provider-adapter",
-          id: "lobster/capi",
-          version: "capi-model-adapter/v1",
+          id: "example/provider-adapter",
+          version: "example-provider-adapter/v1",
           provenance: {
-            pluginId: "lobster",
-            source: "/plugins/lobster",
+            pluginId: "example-host",
+            source: "/plugins/example-host",
             origin: "workspace",
           },
         },
@@ -90,7 +96,7 @@ describe("host integration Doctor findings", () => {
       {
         checkId: HOST_INTEGRATION_BINDINGS_CHECK_ID,
         severity: "warning",
-        target: "lobster/capi",
+        target: "example/provider-adapter",
         requirement: "OwnerEvidenceUnavailable",
       },
     ]);
@@ -101,16 +107,16 @@ describe("host integration Doctor findings", () => {
       registerHostIntegrationBundleV1({
         manifest: {
           version: "host-integration-bundle/v1",
-          id: "lobster/capi",
+          id: "example/host",
           bundleVersion: "1.0.0",
           contributions: [
             {
               owner: "model-provider",
               kind: "model-provider-adapter",
-              id: "lobster/capi",
-              version: "capi-model-adapter/v1",
+              id: "example/provider-adapter",
+              version: "example-provider-adapter/v1",
               required: true,
-              readinessCriteria: ["CapiReady"],
+              readinessCriteria: ["ProviderReady"],
             },
           ],
         },
@@ -121,7 +127,7 @@ describe("host integration Doctor findings", () => {
     expect(collectHostIntegrationHealthFindings()).toMatchObject([
       {
         severity: "error",
-        target: "lobster/capi",
+        target: "example/provider-adapter",
         requirement: "ContributionMissing",
       },
     ]);
@@ -130,7 +136,7 @@ describe("host integration Doctor findings", () => {
   it("emits no success finding for a ready binding", () => {
     expect(
       hostIntegrationStatusToHealthFindings(
-        inventory({ state: "ready", reason: "CapiReady", message: "ready" }),
+        inventory({ state: "ready", reason: "ProviderReady", message: "ready" }),
       ),
     ).toEqual([]);
   });
@@ -141,11 +147,11 @@ describe("host integration Doctor findings", () => {
         checkId: HOST_INTEGRATION_BINDINGS_CHECK_ID,
         severity: "warning",
         message:
-          "Host integration lobster/capi is unresolved for model-provider/model-provider-adapter in bundle lobster/capi@1.0.0 (OwnerEvidenceUnavailable).",
-        target: "lobster/capi",
+          "Host integration example/provider-adapter is unresolved for model-provider/model-provider-adapter in bundle example/host@1.0.0 (OwnerEvidenceUnavailable).",
+        target: "example/provider-adapter",
         requirement: "OwnerEvidenceUnavailable",
         fixHint:
-          "Reload owner model-provider and verify it publishes status for bundle lobster/capi@1.0.0.",
+          "Reload owner model-provider and verify it publishes status for bundle example/host@1.0.0.",
       },
     ]);
   });
@@ -165,7 +171,7 @@ describe("host integration Doctor findings", () => {
         severity: "error",
         requirement: "ContributionMissing",
         fixHint:
-          "Enable a host package that registers lobster/capi with contract capi-model-adapter/v1, then restart OpenClaw.",
+          "Enable a host package that registers example/provider-adapter with contract example-provider-adapter/v1, then restart OpenClaw.",
       },
     ]);
   });
@@ -189,9 +195,9 @@ describe("host integration Doctor findings", () => {
           state: "stale",
           reason: "OwnerEvidenceBundleGenerationMismatch",
           message: "old generation carried a bearer token",
-          config: { source: "openclaw.json", path: "models.providers.capi" },
+          config: { source: "openclaw.json", path: "plugins.entries.example-host" },
           generations: {
-            bundle: "lobster/capi@1.0.0",
+            bundle: "example/host@1.0.0",
             owner: "owner-2",
             carrier: "carrier-1",
             carrierIncarnation: "process-9",
@@ -202,10 +208,10 @@ describe("host integration Doctor findings", () => {
       expect.objectContaining({
         severity: "warning",
         source: "openclaw.json",
-        path: "models.providers.capi",
+        path: "plugins.entries.example-host",
         requirement: "OwnerEvidenceBundleGenerationMismatch",
         fixHint:
-          "Reload owner model-provider and its carrier so they publish status for bundle lobster/capi@1.0.0.",
+          "Reload owner model-provider and its carrier so they publish status for bundle example/host@1.0.0.",
       }),
     ]);
   });
@@ -217,7 +223,7 @@ describe("host integration Doctor findings", () => {
           state: "unavailable",
           reason: "CredentialSlotUnavailable",
           message: "secret value should remain hidden",
-          config: { source: "openclaw.json", path: "models.providers.capi" },
+          config: { source: "openclaw.json", path: "plugins.entries.example-host" },
           reloadDisposition: "restart-required",
         }),
       ),
@@ -225,8 +231,8 @@ describe("host integration Doctor findings", () => {
       {
         severity: "error",
         requirement: "CredentialSlotUnavailable",
-        path: "models.providers.capi",
-        fixHint: "Correct models.providers.capi, then restart OpenClaw.",
+        path: "plugins.entries.example-host",
+        fixHint: "Correct plugins.entries.example-host, then restart OpenClaw.",
       },
     ]);
   });
@@ -243,7 +249,7 @@ describe("host integration Doctor findings", () => {
     ).toMatchObject([
       {
         message:
-          "Host integration lobster/capi is degraded for model-provider/model-provider-adapter in bundle lobster/capi@1.0.0 (OwnerReportedDegraded).",
+          "Host integration example/provider-adapter is degraded for model-provider/model-provider-adapter in bundle example/host@1.0.0 (OwnerReportedDegraded).",
         requirement: "OwnerReportedDegraded",
       },
     ]);

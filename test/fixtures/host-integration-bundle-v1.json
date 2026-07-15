@@ -1,24 +1,24 @@
 {
   "manifest": {
     "version": "host-integration-bundle/v1",
-    "id": "lobster/host",
+    "id": "example/host",
     "bundleVersion": "1.0.0",
     "contributions": [
       {
         "owner": "model-provider",
         "kind": "model-provider-adapter",
-        "id": "lobster/capi",
-        "version": "capi-model-provider-adapter/v1",
+        "id": "example/provider-adapter",
+        "version": "example-provider-adapter/v1",
         "required": true,
-        "readinessCriteria": ["model.provider.capi"]
+        "readinessCriteria": ["example.provider.ready"]
       },
       {
         "owner": "provider-request",
         "kind": "credential-slot-resolver",
-        "id": "lobster/capi-token",
+        "id": "example/provider-token",
         "version": "credential-slot-resolver/v1",
         "required": true,
-        "readinessCriteria": ["provider.request.credentials.capi"]
+        "readinessCriteria": ["example.provider.credentials"]
       }
     ]
   },
@@ -26,22 +26,22 @@
     {
       "owner": "model-provider",
       "kind": "model-provider-adapter",
-      "id": "lobster/capi",
-      "version": "capi-model-provider-adapter/v1",
+      "id": "example/provider-adapter",
+      "version": "example-provider-adapter/v1",
       "provenance": {
-        "pluginId": "lobster-host",
-        "source": "/plugins/lobster-host/openclaw.plugin.json",
+        "pluginId": "example-host",
+        "source": "/plugins/example-host/openclaw.plugin.json",
         "origin": "config"
       }
     },
     {
       "owner": "provider-request",
       "kind": "credential-slot-resolver",
-      "id": "lobster/capi-token",
+      "id": "example/provider-token",
       "version": "credential-slot-resolver/v1",
       "provenance": {
-        "pluginId": "lobster-host",
-        "source": "/plugins/lobster-host/openclaw.plugin.json",
+        "pluginId": "example-host",
+        "source": "/plugins/example-host/openclaw.plugin.json",
         "origin": "config"
       }
     }

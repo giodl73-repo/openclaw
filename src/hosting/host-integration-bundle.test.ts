@@ -1,10 +1,5 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  CAPI_BEARER_SLOT_ID,
-  CAPI_MODEL_ADAPTER_ID,
-  CAPI_MODEL_ADAPTER_VERSION,
-} from "../agents/model-provider-adapters/capi.js";
 import { CREDENTIAL_SLOT_RESOLVER_VERSION } from "../infra/net/credential-slot.js";
 import {
   HOST_INTEGRATION_BUNDLE_VERSION,
@@ -23,6 +18,10 @@ type Fixture = {
   manifest: HostIntegrationBundleManifestV1;
   availableContributions: AvailableHostIntegrationContributionV1[];
 };
+
+const PROVIDER_ADAPTER_ID = "example/provider-adapter";
+const PROVIDER_ADAPTER_VERSION = "example-provider-adapter/v1";
+const PROVIDER_TOKEN_SLOT_ID = "example/provider-token";
 
 const fixture = JSON.parse(
   readFileSync(
@@ -52,37 +51,37 @@ describe("host integration bundle registration", () => {
 
     expect(snapshot).toEqual({
       version: HOST_INTEGRATION_BUNDLE_VERSION,
-      id: "lobster/host",
+      id: "example/host",
       bundleVersion: "1.0.0",
-      generation: expect.stringMatching(/^lobster\/host@1\.0\.0#\d+$/),
+      generation: expect.stringMatching(/^example\/host@1\.0\.0#\d+$/),
       inventory: [
         {
           owner: "model-provider",
           kind: "model-provider-adapter",
-          id: CAPI_MODEL_ADAPTER_ID,
-          version: CAPI_MODEL_ADAPTER_VERSION,
+          id: PROVIDER_ADAPTER_ID,
+          version: PROVIDER_ADAPTER_VERSION,
           required: true,
-          readinessCriteria: ["model.provider.capi"],
+          readinessCriteria: ["example.provider.ready"],
           status: "resolved",
-          resolvedVersion: CAPI_MODEL_ADAPTER_VERSION,
+          resolvedVersion: PROVIDER_ADAPTER_VERSION,
           provenance: {
-            pluginId: "lobster-host",
-            source: "/plugins/lobster-host/openclaw.plugin.json",
+            pluginId: "example-host",
+            source: "/plugins/example-host/openclaw.plugin.json",
             origin: "config",
           },
         },
         {
           owner: "provider-request",
           kind: "credential-slot-resolver",
-          id: CAPI_BEARER_SLOT_ID,
+          id: PROVIDER_TOKEN_SLOT_ID,
           version: CREDENTIAL_SLOT_RESOLVER_VERSION,
           required: true,
-          readinessCriteria: ["provider.request.credentials.capi"],
+          readinessCriteria: ["example.provider.credentials"],
           status: "resolved",
           resolvedVersion: CREDENTIAL_SLOT_RESOLVER_VERSION,
           provenance: {
-            pluginId: "lobster-host",
-            source: "/plugins/lobster-host/openclaw.plugin.json",
+            pluginId: "example-host",
+            source: "/plugins/example-host/openclaw.plugin.json",
             origin: "config",
           },
         },
@@ -101,7 +100,7 @@ describe("host integration bundle registration", () => {
       availableContributions: cloneAvailable(),
     });
     const missingResolver = cloneAvailable().filter(
-      (contribution) => contribution.id !== CAPI_BEARER_SLOT_ID,
+      (contribution) => contribution.id !== PROVIDER_TOKEN_SLOT_ID,
     );
 
     expect(() =>
@@ -112,7 +111,7 @@ describe("host integration bundle registration", () => {
     ).toThrowError(
       expect.objectContaining({
         code: "missing-required-contribution",
-        contributionId: CAPI_BEARER_SLOT_ID,
+        contributionId: PROVIDER_TOKEN_SLOT_ID,
       }),
     );
     expect(getCurrentHostIntegrationBundleSnapshotV1()).toBe(first);
@@ -122,7 +121,7 @@ describe("host integration bundle registration", () => {
       inventory: [
         expect.anything(),
         expect.objectContaining({
-          id: CAPI_BEARER_SLOT_ID,
+          id: PROVIDER_TOKEN_SLOT_ID,
           required: true,
           status: "missing",
         }),
@@ -157,7 +156,7 @@ describe("host integration bundle registration", () => {
     crossOwnerDuplicate.contributions.push({
       owner: "provider-request",
       kind: "credential-slot-resolver",
-      id: CAPI_MODEL_ADAPTER_ID,
+      id: PROVIDER_ADAPTER_ID,
       version: CREDENTIAL_SLOT_RESOLVER_VERSION,
       required: false,
       readinessCriteria: [],
@@ -182,7 +181,7 @@ describe("host integration bundle registration", () => {
     crossOwnerAvailable.push({
       owner: "provider-request",
       kind: "credential-slot-resolver",
-      id: CAPI_MODEL_ADAPTER_ID,
+      id: PROVIDER_ADAPTER_ID,
       version: CREDENTIAL_SLOT_RESOLVER_VERSION,
       provenance: structuredClone(crossOwnerAvailable[0]!.provenance),
     });
@@ -196,7 +195,7 @@ describe("host integration bundle registration", () => {
 
   it("rejects an incompatible required contribution before publication", () => {
     const incompatible = cloneAvailable();
-    incompatible[0] = { ...incompatible[0]!, version: "capi-model-provider-adapter/v2" };
+    incompatible[0] = { ...incompatible[0]!, version: "example-provider-adapter/v2" };
 
     expect(() =>
       registerHostIntegrationBundleV1({
@@ -206,14 +205,14 @@ describe("host integration bundle registration", () => {
     ).toThrowError(
       expect.objectContaining({
         code: "incompatible-required-contribution",
-        contributionId: CAPI_MODEL_ADAPTER_ID,
+        contributionId: PROVIDER_ADAPTER_ID,
       }),
     );
     expect(getCurrentHostIntegrationBundleSnapshotV1()).toBeUndefined();
     expect(getCurrentHostIntegrationBundleStatusSnapshotV1()).toMatchObject({
       inventory: [
         expect.objectContaining({
-          id: CAPI_MODEL_ADAPTER_ID,
+          id: PROVIDER_ADAPTER_ID,
           required: true,
           status: "incompatible",
         }),
@@ -228,13 +227,13 @@ describe("host integration bundle registration", () => {
     const snapshot = prepareHostIntegrationBundleSnapshotV1({
       manifest,
       availableContributions: cloneAvailable().filter(
-        (contribution) => contribution.id !== CAPI_BEARER_SLOT_ID,
+        (contribution) => contribution.id !== PROVIDER_TOKEN_SLOT_ID,
       ),
     });
 
     expect(snapshot.inventory[1]).toEqual(
       expect.objectContaining({
-        id: CAPI_BEARER_SLOT_ID,
+        id: PROVIDER_TOKEN_SLOT_ID,
         required: false,
         status: "missing",
       }),
@@ -251,24 +250,24 @@ describe("host integration bundle registration", () => {
       resolveHostIntegrationContributionV1({
         owner: "model-provider",
         kind: "model-provider-adapter",
-        id: CAPI_MODEL_ADAPTER_ID,
-        version: CAPI_MODEL_ADAPTER_VERSION,
+        id: PROVIDER_ADAPTER_ID,
+        version: PROVIDER_ADAPTER_VERSION,
       }),
     ).toEqual(expect.objectContaining({ status: "resolved" }));
     expect(() =>
       resolveHostIntegrationContributionV1({
         owner: "model-provider",
         kind: "model-provider-adapter",
-        id: CAPI_MODEL_ADAPTER_ID,
-        version: "capi-model-provider-adapter/v2",
+        id: PROVIDER_ADAPTER_ID,
+        version: "example-provider-adapter/v2",
       }),
     ).toThrowError(expect.objectContaining({ code: "incompatible-contribution" }));
     expect(() =>
       resolveHostIntegrationContributionV1({
         owner: "model-provider",
         kind: "model-provider-adapter",
-        id: "lobster/missing",
-        version: CAPI_MODEL_ADAPTER_VERSION,
+        id: "example/missing",
+        version: PROVIDER_ADAPTER_VERSION,
       }),
     ).toThrowError(expect.objectContaining({ code: "unknown-contribution" }));
   });
@@ -292,7 +291,7 @@ describe("host integration bundle registration", () => {
 
     expect(() =>
       prepareHostIntegrationBundleSnapshotV1({
-        manifest: { ...cloneManifest(), id: "lobster-host" },
+        manifest: { ...cloneManifest(), id: "example-host" },
         availableContributions: cloneAvailable(),
       }),
     ).toThrowError(expect.objectContaining({ code: "invalid-manifest" }));

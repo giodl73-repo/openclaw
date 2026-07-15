@@ -12,6 +12,12 @@ import {
   sanitizeCommandDescriptorDescription,
 } from "../cli/program/command-descriptor-utils.js";
 import {
+  clearCurrentHostIntegrationBundleSnapshotV1,
+  getCurrentHostIntegrationBundleSnapshotV1,
+  registerHostIntegrationBundleV1,
+  type HostIntegrationBundleManifestV1,
+} from "../hosting/host-integration-bundle.js";
+import {
   NODE_EXEC_APPROVALS_COMMANDS,
   NODE_SYSTEM_NOTIFY_COMMAND,
   NODE_SYSTEM_RUN_COMMANDS,
@@ -292,6 +298,28 @@ export function createOperationRegistrars(state: PluginRegistryState) {
     });
   };
 
+  const registerHostIntegrationBundle = (
+    record: PluginRecord,
+    manifest: HostIntegrationBundleManifestV1,
+  ): (() => void) => {
+    const snapshot = registerHostIntegrationBundleV1({
+      manifest,
+      availableContributions: manifest.contributions.map((contribution) => ({
+        ...contribution,
+        provenance: {
+          pluginId: record.id,
+          source: record.source,
+          origin: record.origin,
+        },
+      })),
+    });
+    return () => {
+      if (getCurrentHostIntegrationBundleSnapshotV1() === snapshot) {
+        clearCurrentHostIntegrationBundleSnapshotV1();
+      }
+    };
+  };
+
   const registerService = (record: PluginRecord, service: OpenClawPluginService) => {
     const id = service.id.trim();
     if (!id) {
@@ -451,6 +479,7 @@ export function createOperationRegistrars(state: PluginRegistryState) {
     registerNodeHostCommand,
     registerNodeInvokePolicy,
     registerSecurityAuditCollector,
+    registerHostIntegrationBundle,
     registerService,
     registerGatewayDiscoveryService,
     registerCommand,

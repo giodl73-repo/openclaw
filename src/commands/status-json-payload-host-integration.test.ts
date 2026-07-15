@@ -19,16 +19,16 @@ describe("status json host integration inventory", () => {
     const bundle = registerHostIntegrationBundleV1({
       manifest: {
         version: "host-integration-bundle/v1",
-        id: "lobster/capi",
+        id: "example/host",
         bundleVersion: "1.0.0",
         contributions: [
           {
             owner: "model-provider",
             kind: "model-provider-adapter",
-            id: "lobster/capi",
-            version: "capi-model-adapter/v1",
+            id: "example/provider-adapter",
+            version: "example-provider-adapter/v1",
             required: true,
-            readinessCriteria: ["CapiReady"],
+            readinessCriteria: ["ProviderReady"],
           },
         ],
       },
@@ -36,11 +36,11 @@ describe("status json host integration inventory", () => {
         {
           owner: "model-provider",
           kind: "model-provider-adapter",
-          id: "lobster/capi",
-          version: "capi-model-adapter/v1",
+          id: "example/provider-adapter",
+          version: "example-provider-adapter/v1",
           provenance: {
-            pluginId: "lobster",
-            source: "/plugins/lobster",
+            pluginId: "example-host",
+            source: "/plugins/example-host",
             origin: "workspace",
           },
         },
@@ -50,11 +50,11 @@ describe("status json host integration inventory", () => {
       {
         owner: "model-provider",
         kind: "model-provider-adapter",
-        id: "lobster/capi",
+        id: "example/provider-adapter",
         bundleGeneration: bundle.generation,
         state: "ready",
-        reason: "CapiReady",
-        message: "CAPI binding is ready.",
+        reason: "ProviderReady",
+        message: "Provider binding is ready.",
         ownerGeneration: "owner-1",
       },
     ]);
@@ -87,8 +87,8 @@ describe("status json host integration inventory", () => {
       state: "ready",
       entries: [
         {
-          id: "lobster/capi",
-          reason: "CapiReady",
+          id: "example/provider-adapter",
+          reason: "ProviderReady",
           generations: { bundle: bundle.generation, owner: "owner-1" },
         },
       ],

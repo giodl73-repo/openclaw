@@ -13,8 +13,8 @@ import {
 } from "./network-guard-profile.js";
 import { createLocalOneHopFetchDispatcher } from "./one-hop-fetch-dispatcher.js";
 
-const SLOT_ID = "lobster/capi-token";
-const RESOLVER_ID = "local/capi-token";
+const SLOT_ID = "example/provider-token";
+const RESOLVER_ID = "example/provider-token-resolver";
 const ORIGIN = "https://api.example.com";
 
 function createDefinition(
@@ -102,7 +102,9 @@ describe("credential slot bindings", () => {
       definitions: [createDefinition()],
       resolvers: [createResolver(resolve)],
     });
-    const fetchImpl = vi.fn(async () => new Response("ok"));
+    const fetchImpl = vi.fn(
+      async (_url: string, _init: RequestInit & { redirect: "manual" }) => new Response("ok"),
+    );
     const dispatcher = createLocalOneHopFetchDispatcher(fetchImpl, {
       credentialSlots: bindings,
     });
@@ -187,15 +189,15 @@ describe("credential slot bindings", () => {
         definitions: [
           createDefinition(),
           createDefinition({
-            slotId: "lobster/alternate-token",
-            resolverId: "local/alternate-token",
+            slotId: "example/alternate-token",
+            resolverId: "example/alternate-token-resolver",
           }),
         ],
         resolvers: [
           createResolver(),
           createResolver(undefined, {
-            slotId: "lobster/alternate-token",
-            resolverId: "local/alternate-token",
+            slotId: "example/alternate-token",
+            resolverId: "example/alternate-token-resolver",
           }),
         ],
       }),
