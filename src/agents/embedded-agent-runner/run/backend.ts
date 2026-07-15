@@ -18,11 +18,7 @@ export async function runEmbeddedAttemptWithBackend(
     return await runAgentHarnessAttempt({
       ...params,
       onAgentToolResult: (event) => {
-        for (const receipt of collectAttemptToolAuditReceipts({
-          agentId: params.agentId,
-          attempt: params,
-          event,
-        })) {
+        for (const receipt of collectAttemptToolAuditReceipts({ event })) {
           params.trajectoryRecorder?.recordEvent("audit.receipt", { ...receipt });
         }
         onAgentToolResult?.(event);

@@ -49,11 +49,7 @@ describe("runEmbeddedAttemptWithBackend", () => {
 
     await expect(runEmbeddedAttemptWithBackend(params)).resolves.toBe(result);
 
-    expect(mocks.collectAttemptToolAuditReceipts).toHaveBeenCalledWith({
-      agentId: "support",
-      attempt: params,
-      event,
-    });
+    expect(mocks.collectAttemptToolAuditReceipts).toHaveBeenCalledWith({ event });
     expect(recordEvent).toHaveBeenCalledWith("audit.receipt", { ...receipt });
     expect(flush).toHaveBeenCalledOnce();
     expect(onAgentToolResult).toHaveBeenCalledWith(event);
