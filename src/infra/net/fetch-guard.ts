@@ -70,6 +70,8 @@ export type GuardedFetchMode = (typeof GUARDED_FETCH_MODE)[keyof typeof GUARDED_
 export type GuardedFetchOptions = {
   url: string;
   fetchImpl?: FetchLike;
+  oneHopDispatcher?: OneHopFetchDispatcher;
+  credentialSlotRefs?: string[];
   init?: RequestInit;
   capture?:
     | false
@@ -563,7 +565,10 @@ async function fetchWithSsrFGuardInternal(
         dispatcherPolicy,
         usesTrustedExplicitProxyMode ? false : params.pinDns,
       );
-      await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy, signal);
+      const usesExternalOneHopDispatcher = params.oneHopDispatcher !== undefined;
+      if (!usesExternalOneHopDispatcher) {
+        await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy, signal);
+      }
       const isStrictManagedProxyActive =
         mode === GUARDED_FETCH_MODE.STRICT && isManagedProxyActive();
       const shouldCheckManagedProxyBypass =
@@ -597,7 +602,15 @@ async function fetchWithSsrFGuardInternal(
         assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
       }
 
-      if (canUseTrustedEnvProxy) {
+      if (usesExternalOneHopDispatcher) {
+        if (!dispatcherPolicy || dispatcherPolicy.mode === "direct") {
+          throw new Error("External one-hop dispatch requires a host-owned proxy route");
+        }
+        routeMode =
+          dispatcherPolicy.mode === "explicit-proxy" ? "explicit-proxy" : "environment-proxy";
+        resolutionMode = "proxy";
+        assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
+      } else if (canUseTrustedEnvProxy) {
         routeMode = "environment-proxy";
         resolutionMode = "proxy";
         dispatcher = createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
@@ -680,13 +693,18 @@ async function fetchWithSsrFGuardInternal(
           ? await fetchWithRuntimeDispatcher(url, localInit)
           : await defaultFetch(url, localInit);
       };
-      const oneHopDispatcher: OneHopFetchDispatcher = createLocalOneHopFetchDispatcher(localFetch, {
-        hasPreparedDispatcher: Boolean(dispatcher),
-      });
+      const oneHopDispatcher: OneHopFetchDispatcher =
+        params.oneHopDispatcher ??
+        createLocalOneHopFetchDispatcher(localFetch, {
+          hasPreparedDispatcher: Boolean(dispatcher),
+        });
       const response = await oneHopDispatcher.dispatch({
         url: parsedUrl.toString(),
         init,
         networkGuard,
+        ...(params.credentialSlotRefs?.length
+          ? { credentialSlotRefs: params.credentialSlotRefs }
+          : {}),
       });
       const capturedByGlobalFetchPatch =
         !shouldUseRuntimeFetch &&

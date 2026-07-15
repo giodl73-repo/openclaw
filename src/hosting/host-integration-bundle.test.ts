@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  WEBIQ_ADAPTER_ID,
+  WEBIQ_ADAPTER_VERSION,
+} from "../agents/web-search-provider-adapters/webiq.js";
 import { CREDENTIAL_SLOT_RESOLVER_VERSION } from "../infra/net/credential-slot.js";
 import { subscribeHostIntegrationAuthorityChanges } from "./host-integration-authority-events.js";
 import {
@@ -315,6 +319,47 @@ describe("host integration bundle registration", () => {
         version: PROVIDER_ADAPTER_VERSION,
       }),
     ).toThrowError(expect.objectContaining({ code: "unknown-contribution" }));
+  });
+
+  it("accepts and resolves the typed WebIQ web-search owner contribution", () => {
+    const contribution = {
+      owner: "web-search-provider" as const,
+      kind: "web-search-provider-adapter" as const,
+      id: WEBIQ_ADAPTER_ID,
+      version: WEBIQ_ADAPTER_VERSION,
+    };
+    registerHostIntegrationBundleV1({
+      manifest: {
+        version: HOST_INTEGRATION_BUNDLE_VERSION,
+        id: "example/host",
+        bundleVersion: "1.1.0",
+        contributions: [
+          {
+            ...contribution,
+            required: true,
+            readinessCriteria: ["web-search.provider.webiq"],
+          },
+        ],
+      },
+      availableContributions: [
+        {
+          ...contribution,
+          provenance: {
+            pluginId: "example-host",
+            source: "/plugins/example-host/openclaw.plugin.json",
+            origin: "config",
+          },
+        },
+      ],
+    });
+
+    expect(resolveHostIntegrationContributionV1(contribution)).toEqual(
+      expect.objectContaining({
+        owner: "web-search-provider",
+        kind: "web-search-provider-adapter",
+        status: "resolved",
+      }),
+    );
   });
 
   it("fails closed on malformed bundle identity and unsupported runtime kinds", () => {
