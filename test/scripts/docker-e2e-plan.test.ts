@@ -573,9 +573,14 @@ await import('./scripts/check-docker-e2e-boundaries.mts');`,
 
   it("checks workspace readiness by emitted condition type", () => {
     const client = readFileSync("scripts/e2e/hosting-profiles-client.mjs", "utf8");
+    const script = readFileSync("scripts/e2e/hosting-profiles-docker.sh", "utf8");
 
     expect(client).toContain('condition("WorkspaceWritable")');
     expect(client).not.toContain('condition("openclaw.workspace-writable")');
+    expect(script).toContain(
+      'local runtime_args=(--tmpfs "/tmp/hosting-profile-workspace:rw,size=8m")',
+    );
+    expect(script).toContain('-e "OPENCLAW_WORKSPACE_DIR=/tmp/hosting-profile-workspace"');
   });
 
   it("plans package-backed installer, Compose, and package artifact proofs", () => {
