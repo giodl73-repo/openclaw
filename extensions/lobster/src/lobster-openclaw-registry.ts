@@ -167,11 +167,17 @@ function createSkillCommand(
       sideEffects: ["spawns_managed_skill"],
     },
     help: () =>
-      "openclaw.skill --skill <name> --task <task> [--receipt-type <type>] [--token-budget <tokens>] [--wait-timeout-ms <ms>] [--model <model>] [--task-name <name>] [--step-id <id>]",
+      "openclaw.skill --skill <name> --task <task> [--input-name <name>] [--receipt-type <type>] [--token-budget <tokens>] [--wait-timeout-ms <ms>] [--model <model>] [--task-name <name>] [--step-id <id>]",
     async run({ input, args, ctx }) {
+      const inputName = readOptionalString(args.inputName ?? args["input-name"]);
+      let inputCount = 0;
+      let selectedInput: unknown;
       for await (const item of input) {
-        // Skill steps are explicit and do not implicitly consume pipeline input.
-        void item;
+        if (!inputName) {
+          continue;
+        }
+        inputCount += 1;
+        selectedInput = item;
       }
       const skill = readOptionalString(args.skill);
       const task = readOptionalString(args.task);
@@ -186,6 +192,9 @@ function createSkillCommand(
         "openclaw.skill --token-budget",
       );
       const model = readOptionalString(args.model);
+      if (inputName && inputCount !== 1) {
+        throw new Error("openclaw.skill --input-name requires exactly one pipeline input item");
+      }
       const receiptType = readOptionalString(args.receiptType ?? args["receipt-type"]);
       const taskName = readOptionalString(args.taskName ?? args["task-name"]);
       const waitTimeoutMs =
@@ -203,6 +212,18 @@ function createSkillCommand(
           ...(tokenBudget ? { tokenBudget } : {}),
           ...(model ? { model } : {}),
           ...(taskName ? { taskName } : {}),
+          ...(inputName
+            ? {
+                attachments: [
+                  {
+                    name: "workflow-input.json",
+                    content: JSON.stringify({ [inputName]: selectedInput }),
+                    encoding: "utf8",
+                    mimeType: "application/json",
+                  },
+                ],
+              }
+            : {}),
         },
         idempotencyKey: resolveStepIdempotencyKey(args, ctx),
       });

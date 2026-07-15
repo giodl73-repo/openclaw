@@ -195,6 +195,62 @@ describe("embedded OpenClaw Lobster registry", () => {
     ).rejects.toThrow("always uses the current OpenClaw session");
   });
 
+  it("attaches one explicitly named workflow input to a managed skill", async () => {
+    const invoke = vi.fn().mockResolvedValue({ status: "accepted", runId: "run-child" });
+    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke, completedRunWaiter()).get(
+      "openclaw.skill",
+    );
+
+    await command?.run({
+      input: input("RET-42"),
+      args: {
+        skill: "resolve-case",
+        task: "Resolve the return using workflow-input.json",
+        "input-name": "authorizationCode",
+      },
+      ctx: { env: {} },
+    });
+
+    expect(invoke).toHaveBeenCalledWith({
+      tool: "sessions_spawn",
+      args: {
+        task: "Resolve the return using workflow-input.json",
+        skill: "resolve-case",
+        runtime: "subagent",
+        mode: "run",
+        attachments: [
+          {
+            name: "workflow-input.json",
+            content: '{"authorizationCode":"RET-42"}',
+            encoding: "utf8",
+            mimeType: "application/json",
+          },
+        ],
+      },
+      idempotencyKey: undefined,
+    });
+  });
+
+  it("requires exactly one selected input item", async () => {
+    const invoke = vi.fn();
+    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke, completedRunWaiter()).get(
+      "openclaw.skill",
+    );
+
+    await expect(
+      command?.run({
+        input: input(),
+        args: {
+          skill: "resolve-case",
+          task: "Resolve the return",
+          "input-name": "authorizationCode",
+        },
+        ctx: { env: {} },
+      }),
+    ).rejects.toThrow("--input-name requires exactly one pipeline input item");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("validates managed skill budgets before invoking OpenClaw", async () => {
     const invoke = vi.fn();
     const command = createOpenClawLobsterRegistry(baseRegistry(), invoke, completedRunWaiter()).get(

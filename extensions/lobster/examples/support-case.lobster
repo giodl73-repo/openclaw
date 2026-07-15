@@ -19,7 +19,9 @@ steps:
   - id: resolve_case
     pipeline: >
       openclaw.skill --skill resolve-case
-      --task "Resolve case ${case_id} after customer verification"
+      --task "Resolve case ${case_id} using the authorization code in workflow-input.json"
+      --input-name authorizationCode
       --task-name resolve_case --step-id resolve-case
       --wait-timeout-ms 60000
+    stdin: $verify_customer.json.receipt.data.authorizationCode
     when: $approve_resolution.approved

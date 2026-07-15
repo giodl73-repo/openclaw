@@ -529,7 +529,9 @@ describe("createEmbeddedLobsterRunner", () => {
         status: "ok" as const,
         audit: {
           receipts:
-            runId === "run-verify" ? [{ type: "customer.verified" }] : [{ type: "case.resolved" }],
+            runId === "run-verify"
+              ? [{ type: "customer.verified", data: { authorizationCode: "RET-42" } }]
+              : [{ type: "case.resolved" }],
         },
       };
     });
@@ -590,11 +592,19 @@ describe("createEmbeddedLobsterRunner", () => {
         {
           tool: "sessions_spawn",
           args: {
-            task: "Resolve case CAS-42 after customer verification",
+            task: "Resolve case CAS-42 using the authorization code in workflow-input.json",
             skill: "resolve-case",
             runtime: "subagent",
             mode: "run",
             taskName: "resolve_case",
+            attachments: [
+              {
+                name: "workflow-input.json",
+                content: '{"authorizationCode":"RET-42"}',
+                encoding: "utf8",
+                mimeType: "application/json",
+              },
+            ],
           },
           idempotencyKey: "lobster:flow-case-42:resolve-case",
         },
