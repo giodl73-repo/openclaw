@@ -321,6 +321,7 @@ describe("createCodexDynamicToolBridge", () => {
     });
     expect(heartbeatExecute).not.toHaveBeenCalled();
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: HEARTBEAT_RESPONSE_TOOL_NAME,
       result: {
         content: [
@@ -2409,6 +2410,7 @@ describe("createCodexDynamicToolBridge", () => {
 
     expect(result).toMatchObject({ success: false });
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "exec",
       result: textToolResult("Approval is unavailable.", { status: "approval-unavailable" }),
       isError: true,
@@ -2445,6 +2447,7 @@ describe("createCodexDynamicToolBridge", () => {
 
     expect(result).toMatchObject({ success: true });
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "lobster",
       result: cancelledResult,
       isError: false,
@@ -2482,6 +2485,7 @@ describe("createCodexDynamicToolBridge", () => {
 
     expect(onAgentToolResult).toHaveBeenCalledOnce();
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "memory_lookup_custom",
       result: {
         content: [{ type: "text", text: "OPENROUTER_API_KEY=sk-or-…6789" }],
@@ -2518,6 +2522,7 @@ describe("createCodexDynamicToolBridge", () => {
     );
 
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "memory_lookup_custom",
       result: {
         content: [{ type: "text", text: "backend unavailable" }],
@@ -3243,6 +3248,7 @@ describe("createCodexDynamicToolBridge", () => {
     expect(result.diagnosticTerminalType).toBe("error");
     expect(result.diagnosticTerminalReason).toBe("timed_out");
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-timeout",
       toolName: "exec",
       result: {
         content: [{ type: "text", text: "tool deadline elapsed" }],
@@ -3438,6 +3444,7 @@ describe("createCodexDynamicToolBridge", () => {
       expect(result.diagnosticTerminalType).toBe(status === "blocked" ? "blocked" : "error");
       expect(result.diagnosticTerminalReason).toBe(status === "blocked" ? undefined : status);
       expect(onAgentToolResult).toHaveBeenCalledWith({
+        toolCallId: `call-raw-${status}`,
         toolName: "exec",
         result: {
           content: [{ type: "text", text: "compacted failure" }],
