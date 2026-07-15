@@ -38,6 +38,16 @@ import type { GatewayAuthConfig } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isSecretRef } from "../config/types.secrets.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
+import { createNodeModeReadinessEvidenceResolver } from "../hosting/node-mode.js";
+import {
+  buildHostingProfileConditions,
+  requiredCriteriaForHostingProfile,
+  resolveHostingProfile,
+} from "../hosting/profiles.js";
+import {
+  resolveRuntimeActivationIdentity,
+  type RuntimeActivationIdentity,
+} from "../hosting/runtime-activation.js";
 import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
@@ -103,6 +113,7 @@ import {
 import { isLoopbackHost } from "./net.js";
 import { disposeNodeConnectionNotifications } from "./node-connection-notifications.js";
 import { createNodeReapprovalCoordinator } from "./node-reapproval-coordinator.js";
+import type { NodeSession } from "./node-registry.js";
 import {
   mergeActivationSectionsIntoRuntimeConfig,
   resolveGatewayReloadPluginActivationCandidate,
@@ -536,6 +547,8 @@ export type GatewayServer = {
 };
 
 export type GatewayServerOptions = {
+  /** Runtime identity reported through readiness and status. */
+  runtimeActivationIdentity?: RuntimeActivationIdentity;
   /**
    * Bind address policy for the Gateway WebSocket/HTTP server.
    * - loopback: 127.0.0.1
@@ -596,6 +609,9 @@ export async function startGatewayServer(
   opts: GatewayServerOptions = {},
 ): Promise<GatewayServer> {
   normalizeStateDirEnv(process.env);
+  resolveHostingProfile({ env: process.env });
+  const runtimeActivationIdentity =
+    opts.runtimeActivationIdentity ?? resolveRuntimeActivationIdentity({ env: process.env });
   const { bootstrapGatewayNetworkRuntime } = await import("./server-network-runtime.js");
   bootstrapGatewayNetworkRuntime();
 
@@ -1136,18 +1152,43 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   const resolveSelectedReadiness = createSelectedReadinessResolver();
+  const resolveNodeModeReadiness = createNodeModeReadinessEvidenceResolver();
+  let listConnectedNodesForReadiness: () => NodeSession[] = () => [];
   const evaluateRuntimeReadiness = async () => {
     const config = getRuntimeConfig();
+    const profile = resolveHostingProfile({ config, env: process.env });
+    const auth = getResolvedAuth();
+    const nodeMode =
+      profile === "node-mode"
+        ? await resolveNodeModeReadiness({
+            config,
+            connectedNodes: listConnectedNodesForReadiness(),
+          })
+        : undefined;
+    const profileConditions = buildHostingProfileConditions(
+      profile,
+      {
+        bind: opts.bind ?? config.gateway?.bind ?? "loopback",
+        bindHost,
+        port,
+        authMode: auth.mode,
+        trustedProxyUserHeader: auth.trustedProxy?.userHeader,
+        trustedProxyCount: config.gateway?.trustedProxies?.length ?? 0,
+      },
+      nodeMode,
+    );
     const additionalConditions = await resolveSelectedReadiness({
       config,
       registry: pluginRegistry,
       env: process.env,
+      additionalRequiredCriteria: requiredCriteriaForHostingProfile(profile),
     });
     return buildRuntimeReadiness({
       configLoaded: true,
       gateway: "responding",
       plugins: buildGatewayPluginReadinessInput(pluginRegistry),
-      additionalConditions,
+      activation: runtimeActivationIdentity,
+      additionalConditions: [...profileConditions, ...additionalConditions],
     });
   };
   const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
@@ -1241,6 +1282,7 @@ export async function startGatewayServer(
     nodePluginToolsEnabled: cfgAtStart.gateway?.nodes?.pluginTools?.enabled !== false,
     nodeSkillsEnabled: cfgAtStart.gateway?.nodes?.skills?.enabled !== false,
   });
+  listConnectedNodesForReadiness = () => nodeRegistry.listConnected();
   const { createWatchNodeHttpRuntime } = await import("./watch-node-http.js");
   const watchNodeHttpRuntime = createWatchNodeHttpRuntime({
     nodeRegistry,

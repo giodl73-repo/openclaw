@@ -34,6 +34,16 @@ import {
 import type { GatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setGatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setVerbose } from "../../globals.js";
+import {
+  formatHostingProfileIds,
+  HOSTING_PROFILE_ENV,
+  parseHostingProfileId,
+} from "../../hosting/profiles.js";
+import {
+  INCARNATION_ID_ENV,
+  resolveRuntimeActivationIdentity,
+  RUNTIME_ID_ENV,
+} from "../../hosting/runtime-activation.js";
 import { isTruthyEnvValue } from "../../infra/env.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import {
@@ -602,6 +612,31 @@ export async function runGatewayCommand(opts: GatewayRunOpts, hooks: GatewayRunR
     return;
   }
   setVerbose(Boolean(opts.verbose));
+  const hostingProfileRaw = toOptionString(opts.hostingProfile);
+  if (hostingProfileRaw !== undefined) {
+    const hostingProfile = parseHostingProfileId(hostingProfileRaw);
+    if (!hostingProfile) {
+      defaultRuntime.error(`Invalid --hosting-profile. Use ${formatHostingProfileIds()}.`);
+      defaultRuntime.exit(1);
+      return;
+    }
+    process.env[HOSTING_PROFILE_ENV] = hostingProfile;
+  }
+  const runtimeId = toOptionString(opts.runtimeId);
+  if (runtimeId !== undefined) {
+    process.env[RUNTIME_ID_ENV] = runtimeId;
+  }
+  const incarnationId = toOptionString(opts.incarnationId);
+  if (incarnationId !== undefined) {
+    process.env[INCARNATION_ID_ENV] = incarnationId;
+  }
+  try {
+    resolveRuntimeActivationIdentity({ env: process.env });
+  } catch (err) {
+    defaultRuntime.error(formatErrorMessage(err));
+    defaultRuntime.exit(1);
+    return;
+  }
   if (opts.cliBackendLogs || opts.claudeCliLogs) {
     setConsoleSubsystemFilter(["agent/cli-backend"]);
     process.env.OPENCLAW_CLI_BACKEND_LOG_OUTPUT = "1";
