@@ -174,6 +174,8 @@ type SpawnSubagentParams = {
 
 type SpawnSubagentContext = {
   agentSessionKey?: string;
+  /** Exact requester conversation instance; guards inherited business context across rotation. */
+  requesterSessionId?: string;
   /** Separate key used only for completion routing, not sandbox policy. */
   completionOwnerKey?: string;
   agentChannel?: string;
@@ -312,6 +314,17 @@ function buildDirectChildSessionPatch(patch: Record<string, unknown>): Partial<S
   if (typeof patch.spawnedCwd === "string" && patch.spawnedCwd.trim()) {
     entry.spawnedCwd = patch.spawnedCwd.trim();
   }
+  const regarding = patch.regarding;
+  if (regarding && typeof regarding === "object" && !Array.isArray(regarding)) {
+    const value = regarding as Record<string, unknown>;
+    const system = normalizeOptionalString(value.system);
+    const type = normalizeOptionalString(value.type);
+    const id = normalizeOptionalString(value.id);
+    const key = normalizeOptionalString(value.key);
+    if (system && type && id) {
+      entry.regarding = { system, type, id, ...(key ? { key } : {}) };
+    }
+  }
   const inheritedToolDeny = normalizeInheritedToolDenylist(patch.inheritedToolDeny);
   if (inheritedToolDeny.length > 0) {
     entry.inheritedToolDeny = inheritedToolDeny;
@@ -437,6 +450,34 @@ function readRequesterThinkingLevel(params: {
     provider: defaultModel.provider,
     model: defaultModel.model,
   });
+}
+
+function readExactRequesterRegarding(params: {
+  cfg: OpenClawConfig;
+  requesterInternalKey: string;
+  requesterSessionId?: string;
+}): SessionEntry["regarding"] | undefined {
+  const requesterSessionId = normalizeOptionalString(params.requesterSessionId);
+  if (!requesterSessionId) {
+    return undefined;
+  }
+  try {
+    const target = resolveGatewaySessionStoreTarget({
+      cfg: params.cfg,
+      key: params.requesterInternalKey,
+    });
+    const entry = loadSessionEntry({
+      storePath: target.storePath,
+      sessionKey: target.canonicalKey,
+      clone: false,
+    });
+    if (entry?.sessionId !== requesterSessionId || !entry.regarding) {
+      return undefined;
+    }
+    return { ...entry.regarding };
+  } catch {
+    return undefined;
+  }
 }
 
 type PreparedSpawnContext =
@@ -1327,6 +1368,15 @@ export async function spawnSubagentDirect(
     subagentControlScope: childCapabilities.controlScope,
     ...inheritedToolAllowPatch(ctx.inheritedToolAllowlist),
     ...inheritedToolDenyPatch(ctx.inheritedToolDenylist),
+    ...(params.explicitSkillInvocation
+      ? {
+          regarding: readExactRequesterRegarding({
+            cfg,
+            requesterInternalKey,
+            requesterSessionId: ctx.requesterSessionId,
+          }),
+        }
+      : {}),
     ...plan.initialSessionPatch,
   };
 

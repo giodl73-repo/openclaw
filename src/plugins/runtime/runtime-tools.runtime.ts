@@ -37,6 +37,7 @@ export async function invokeRuntimeTool(
     agentThreadId: delivery?.threadId === undefined ? undefined : String(delivery.threadId),
     modelProvider: context.activeModel?.provider,
     modelId: context.activeModel?.modelId,
+    sessionId: context.sessionId,
     skillsSnapshot: context.skillsSnapshot,
     parentSkillInvocation: context.explicitSkillInvocation,
     parentRunId: context.runId,

@@ -24,6 +24,7 @@ describe("invokeRuntimeTool", () => {
       getRuntimeConfig: () => config,
       agentId: "main",
       sessionKey: "agent:main:email:case-42",
+      sessionId: "session-case-42",
       messageChannel: "email",
       agentAccountId: "support",
       deliveryContext: {
@@ -76,6 +77,7 @@ describe("invokeRuntimeTool", () => {
       agentThreadId: "thread-42",
       modelProvider: "openai",
       modelId: "gpt-5.6-luna",
+      sessionId: "session-case-42",
       skillsSnapshot: context.skillsSnapshot,
       parentSkillInvocation: context.explicitSkillInvocation,
       parentRunId: "run-parent",

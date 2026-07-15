@@ -598,6 +598,7 @@ describe("POST /tools/invoke", () => {
       input: { name: "agents_list", sessionKey: "main" },
       modelProvider: "openai",
       modelId: "gpt-5.6-luna",
+      sessionId: "session-parent",
       toolCallIdPrefix: "plugin",
       surface: "loopback",
       allowRequestedToolExpansion: false,
@@ -611,6 +612,7 @@ describe("POST /tools/invoke", () => {
     expect(lastCreateOpenClawToolsContext).toMatchObject({
       modelProvider: "openai",
       modelId: "gpt-5.6-luna",
+      sessionId: "session-parent",
     });
   });
 

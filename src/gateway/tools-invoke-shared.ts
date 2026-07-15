@@ -168,6 +168,7 @@ export async function invokeGatewayTool(params: {
   agentThreadId?: string;
   modelProvider?: string;
   modelId?: string;
+  sessionId?: string;
   skillsSnapshot?: SkillSnapshot;
   parentSkillInvocation?: ExplicitSkillInvocation;
   parentRunId?: string;
@@ -250,6 +251,7 @@ export async function invokeGatewayTool(params: {
       agentThreadId: params.agentThreadId,
       modelProvider: params.modelProvider,
       modelId: params.modelId,
+      sessionId: params.sessionId,
       skillsSnapshot: params.skillsSnapshot,
       parentSkillInvocation: params.parentSkillInvocation,
       parentRunId: params.parentRunId,
