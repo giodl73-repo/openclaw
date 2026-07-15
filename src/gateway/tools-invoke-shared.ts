@@ -165,6 +165,9 @@ export async function invokeGatewayTool(params: {
   accountId?: string;
   agentTo?: string;
   agentThreadId?: string;
+  modelProvider?: string;
+  modelId?: string;
+  requesterSenderId?: string;
   senderIsOwner?: boolean;
   channelContext?: PluginHookChannelContext;
   clientCaps?: string[];
@@ -241,7 +244,10 @@ export async function invokeGatewayTool(params: {
       accountId: params.accountId,
       agentTo: params.agentTo,
       agentThreadId: params.agentThreadId,
+      modelProvider: params.modelProvider,
+      modelId: params.modelId,
       senderIsOwner: params.senderIsOwner,
+      requesterSenderId: params.requesterSenderId,
       channelContext: params.channelContext,
       clientCaps: params.clientCaps,
       conversationReadOrigin,

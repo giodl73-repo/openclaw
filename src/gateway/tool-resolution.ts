@@ -87,6 +87,7 @@ export function resolveGatewayScopedTools(params: {
   requireExplicitMessageTarget?: boolean;
   agentTo?: string;
   agentThreadId?: string;
+  requesterSenderId?: string;
   senderIsOwner?: boolean;
   conversationReadOrigin?: ConversationReadInvocationOrigin;
   allowGatewaySubagentBinding?: boolean;
@@ -275,12 +276,15 @@ export function resolveGatewayScopedTools(params: {
     currentThreadTs: params.currentThreadTs ?? params.agentThreadId,
     currentMessageId: params.currentMessageId,
     currentInboundAudio: params.currentInboundAudio,
+    modelProvider: params.modelProvider,
+    modelId: params.modelId,
     sessionId: params.sessionId,
     skillsSnapshot: params.skillsSnapshot,
     explicitSkillInvocation: params.parentSkillInvocation,
     runId: params.parentRunId,
     onYield: params.onYield,
     requireExplicitMessageTarget: params.requireExplicitMessageTarget,
+    requesterSenderId: params.requesterSenderId,
     senderIsOwner: params.senderIsOwner,
     conversationReadOrigin: params.conversationReadOrigin,
     allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,

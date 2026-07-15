@@ -35,6 +35,9 @@ export async function invokeRuntimeTool(
     accountId: context.agentAccountId ?? delivery?.accountId,
     agentTo: delivery?.to,
     agentThreadId: delivery?.threadId === undefined ? undefined : String(delivery.threadId),
+    modelProvider: context.activeModel?.provider,
+    modelId: context.activeModel?.modelId,
+    requesterSenderId: context.requesterSenderId,
     senderIsOwner: context.senderIsOwner,
     conversationReadOrigin: context.conversationReadOrigin,
     channelContext: context.requesterSenderId

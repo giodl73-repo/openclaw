@@ -35,6 +35,7 @@ describe("invokeRuntimeTool", () => {
       requesterSenderId: "customer-42",
       senderIsOwner: false,
       conversationReadOrigin: "delegated" as const,
+      activeModel: { provider: "openai", modelId: "gpt-5.6-luna" },
     };
 
     await expect(
@@ -65,6 +66,9 @@ describe("invokeRuntimeTool", () => {
       accountId: "support",
       agentTo: "customer@example.com",
       agentThreadId: "thread-42",
+      modelProvider: "openai",
+      modelId: "gpt-5.6-luna",
+      requesterSenderId: "customer-42",
       senderIsOwner: false,
       conversationReadOrigin: "delegated",
       channelContext: { sender: { id: "customer-42" } },
