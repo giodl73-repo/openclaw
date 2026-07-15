@@ -43,6 +43,7 @@ describe("collectAttemptToolAuditReceipts", () => {
         agentId: "main",
         attempt: {
           sessionFile,
+          sessionId: "session-1",
           sessionKey: "agent:main:main",
         },
         event: {
@@ -90,7 +91,7 @@ describe("collectAttemptToolAuditReceipts", () => {
     expect(
       collectAttemptToolAuditReceipts({
         agentId: "main",
-        attempt: { sessionFile, sessionKey: "agent:main:main" },
+        attempt: { sessionFile, sessionId: "session-1", sessionKey: "agent:main:main" },
         event: {
           toolCallId: "call-2",
           toolName: "invoices.pay",
@@ -105,12 +106,48 @@ describe("collectAttemptToolAuditReceipts", () => {
     ]);
   });
 
+  it("does not copy regarding from a replacement session", async () => {
+    const sessionFile = formatSqliteSessionFileMarker({
+      agentId: "main",
+      sessionId: "session-1",
+      storePath,
+    });
+    await replaceSessionEntry(
+      { sessionKey: "agent:main:main", storePath },
+      {
+        sessionId: "session-2",
+        updatedAt: 20,
+        regarding: { system: "dynamics", type: "case", id: "case-99" },
+      },
+    );
+
+    expect(
+      collectAttemptToolAuditReceipts({
+        agentId: "main",
+        attempt: { sessionFile, sessionId: "session-1", sessionKey: "agent:main:main" },
+        event: {
+          toolCallId: "call-late",
+          toolName: "payments.authorize",
+          isError: false,
+          result: { audit: [{ type: "payment.authorized" }] },
+        },
+      }),
+    ).toEqual([
+      {
+        type: "payment.authorized",
+        toolCallId: "call-late",
+        toolName: "payments.authorize",
+      },
+    ]);
+  });
+
   it("does not read session context when the tool result has no valid receipts", () => {
     expect(
       collectAttemptToolAuditReceipts({
         agentId: "main",
         attempt: {
           sessionFile: "not-a-session-file",
+          sessionId: "session-1",
           sessionKey: "agent:main:main",
         },
         event: {

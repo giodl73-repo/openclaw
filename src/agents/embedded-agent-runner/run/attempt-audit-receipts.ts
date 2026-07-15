@@ -16,7 +16,12 @@ export function collectAttemptToolAuditReceipts(params: {
   agentId: string;
   attempt: Pick<
     EmbeddedRunAttemptParams,
-    "config" | "sessionFile" | "sessionKey" | "sessionTarget" | "trajectorySessionFile"
+    | "config"
+    | "sessionFile"
+    | "sessionId"
+    | "sessionKey"
+    | "sessionTarget"
+    | "trajectorySessionFile"
   >;
   event: ObservedToolAuditResult;
 }): TrajectoryAuditReceipt[] {
@@ -36,12 +41,14 @@ export function collectAttemptToolAuditReceipts(params: {
       params.attempt.sessionTarget?.storePath ??
       marker?.storePath ??
       resolveStorePath(params.attempt.config?.session?.store, { agentId: params.agentId });
-    const regarding = loadSessionEntry({
+    const entry = loadSessionEntry({
       agentId: params.agentId,
       readConsistency: "latest",
       sessionKey,
       storePath,
-    })?.regarding;
+    });
+    const expectedSessionId = marker?.sessionId ?? params.attempt.sessionId;
+    const regarding = entry?.sessionId === expectedSessionId ? entry.regarding : undefined;
     return receipts.map((receipt) => snapshotAuditReceiptRegarding(receipt, regarding));
   } catch (error) {
     log.warn(
