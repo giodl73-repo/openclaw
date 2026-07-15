@@ -495,51 +495,68 @@ export async function prepareGatewayKernelState(params: {
   });
   const readinessIdentity = createGatewayReadinessIdentity();
   const resolveSelectedReadiness = createSelectedReadinessResolver();
-  const getReadiness = async (): Promise<CanonicalGatewayReadinessResult> => {
+  const resolveNodeModeReadiness = createNodeModeReadinessEvidenceResolver();
+  const nodeReadiness = {
+    listConnected: (): NodeSession[] => [],
+  };
+  const evaluateRuntimeReadiness = async () => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const snapshot = pluginRuntime.readinessSnapshot;
       const profile = resolveHostingProfile({ config: snapshot.config, env: process.env });
       const auth = getResolvedAuth();
-      const profileConditions = buildHostingProfileConditions(profile, {
-        bind: opts.bind ?? snapshot.config.gateway?.bind ?? "loopback",
-        bindHost,
-        port,
-        authMode: auth.mode,
-        trustedProxyUserHeader: auth.trustedProxy?.userHeader,
-        trustedProxyCount: snapshot.config.gateway?.trustedProxies?.length ?? 0,
-      });
-      const result = await evaluateConfiguredGatewayReadiness({
-        config: snapshot.config,
-        identity: readinessIdentity,
-        evaluateGateway: getGatewayReadiness,
-        evaluateRuntime: async () => {
-          const contribution = await resolveSelectedReadiness({
-            config: snapshot.config,
-            registry: snapshot.registry,
-            executionCapabilities: snapshot.executionCapabilities,
-            env: process.env,
-            stateServices: {
-              scheduler: runtimeStateRef.current?.cronState.cron.getReadinessSnapshot(),
+      const [nodeMode, contribution] = await Promise.all([
+        profile === "node-mode"
+          ? resolveNodeModeReadiness({
+              config: snapshot.config,
+              connectedNodes: nodeReadiness.listConnected(),
+            })
+          : Promise.resolve(undefined),
+        resolveSelectedReadiness({
+          config: snapshot.config,
+          registry: snapshot.registry,
+          executionCapabilities: snapshot.executionCapabilities,
+          env: process.env,
+          stateServices: {
+            scheduler: runtimeStateRef.current?.cronState.cron.getReadinessSnapshot(),
+          },
+          additionalRequiredCriteria: profile ? requiredCriteriaForHostingProfile(profile) : [],
+        }),
+      ]);
+      const profileConditions = profile
+        ? buildHostingProfileConditions(
+            profile,
+            {
+              bind: opts.bind ?? snapshot.config.gateway?.bind ?? "loopback",
+              bindHost,
+              port,
+              authMode: auth.mode,
+              trustedProxyUserHeader: auth.trustedProxy?.userHeader,
+              trustedProxyCount: snapshot.config.gateway?.trustedProxies?.length ?? 0,
             },
-            additionalRequiredCriteria: requiredCriteriaForHostingProfile(profile),
-          });
-          return buildRuntimeReadiness({
-            identity: readinessIdentity,
-            configLoaded: true,
-            gateway: "responding",
-            plugins: buildGatewayPluginReadinessInput(snapshot.registry),
-            additionalConditions: [...profileConditions, ...contribution.conditions],
-            additionalSubjects: contribution.subjects,
-          });
-        },
-      });
+            nodeMode,
+          )
+        : [];
       if (snapshot !== pluginRuntime.readinessSnapshot) {
         continue;
       }
-      return result;
+      return buildRuntimeReadiness({
+        identity: readinessIdentity,
+        configLoaded: true,
+        gateway: "responding",
+        plugins: buildGatewayPluginReadinessInput(snapshot.registry),
+        additionalConditions: [...profileConditions, ...contribution.conditions],
+        additionalSubjects: contribution.subjects,
+      });
     }
     throw new ReadinessEvaluationSupersededError();
   };
+  const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
+    evaluateConfiguredGatewayReadiness({
+      config: pluginRuntime.readinessSnapshot.config,
+      identity: readinessIdentity,
+      evaluateGateway: getGatewayReadiness,
+      evaluateRuntime: evaluateRuntimeReadiness,
+    });
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   } = {};
@@ -618,6 +635,8 @@ export async function prepareGatewayKernelState(params: {
     ...bootstrap,
     bootId,
     pluginRuntime,
+    nodeReadiness,
+    hasConfiguredWorkerProfiles,
     workerEnvironmentService,
     workerLiveEvents,
     bindDeviceNodeControl: bindDeviceNodeRuntime,
