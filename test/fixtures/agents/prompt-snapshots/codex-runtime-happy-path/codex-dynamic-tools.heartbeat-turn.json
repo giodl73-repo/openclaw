@@ -205,6 +205,10 @@
           "enum": ["inherit", "require"],
           "type": "string"
         },
+        "skill": {
+          "description": "Available skill to run in the spawned subagent.",
+          "type": "string"
+        },
         "task": {
           "type": "string"
         },
