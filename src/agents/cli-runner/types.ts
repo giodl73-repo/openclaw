@@ -21,7 +21,7 @@ import type { CliBackendExecutionMode } from "../../plugins/cli-backend.types.js
 import type { PluginHookChannelContext } from "../../plugins/hook-types.js";
 import type { InputProvenance } from "../../sessions/input-provenance.js";
 import type { UserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
-import type { SkillSnapshot } from "../../skills/types.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../../skills/types.js";
 import type { ExecElevatedDefaults } from "../bash-tools.exec-types.js";
 import type { BootstrapContextMode } from "../bootstrap-files.js";
 import type { BootstrapContextRunKind } from "../bootstrap-mode.js";
@@ -148,6 +148,8 @@ export type RunCliAgentParams = {
   images?: ImageContent[];
   imageOrder?: PromptImageOrderEntry[];
   skillsSnapshot?: SkillSnapshot;
+  /** Trusted identity for an explicit skill command or managed child invocation. */
+  explicitSkillInvocation?: ExplicitSkillInvocation;
   messageChannel?: string;
   messageProvider?: string;
   /** Capabilities declared by the gateway client that originated this run. */

@@ -26,6 +26,9 @@ const {
   prepareCliRunContextMock,
   closeClaudeLiveSessionForContextMock,
   closeMcpLoopbackServerMock,
+  createTrajectoryRuntimeRecorderMock,
+  trajectoryFlushMock,
+  trajectoryRecordEventMock,
 } = vi.hoisted(() => ({
   hasHooksMock: vi.fn<(hookName: string) => boolean>(() => false),
   runBeforeAgentReplyMock: vi.fn<(event: unknown, ctx: unknown) => Promise<BeforeAgentReplyResult>>(
@@ -37,6 +40,13 @@ const {
   prepareCliRunContextMock: vi.fn(),
   closeClaudeLiveSessionForContextMock: vi.fn(),
   closeMcpLoopbackServerMock: vi.fn(),
+  createTrajectoryRuntimeRecorderMock: vi.fn(),
+  trajectoryFlushMock: vi.fn(),
+  trajectoryRecordEventMock: vi.fn(),
+}));
+
+vi.mock("../trajectory/runtime.js", () => ({
+  createTrajectoryRuntimeRecorder: createTrajectoryRuntimeRecorderMock,
 }));
 
 vi.mock("../plugins/hook-runner-global.js", () => ({
@@ -111,6 +121,13 @@ beforeEach(() => {
   );
   closeClaudeLiveSessionForContextMock.mockReset();
   closeMcpLoopbackServerMock.mockReset();
+  trajectoryFlushMock.mockReset();
+  trajectoryRecordEventMock.mockReset();
+  createTrajectoryRuntimeRecorderMock.mockReset();
+  createTrajectoryRuntimeRecorderMock.mockReturnValue({
+    recordEvent: trajectoryRecordEventMock,
+    flush: trajectoryFlushMock,
+  });
 });
 
 beforeAll(async () => {
@@ -122,6 +139,38 @@ afterEach(() => {
 });
 
 describe("runCliAgent cron before_agent_reply seam", () => {
+  it("records explicit skill identity around a CLI-backed run", async () => {
+    hasHooksMock.mockReturnValue(true);
+    runBeforeAgentReplyMock.mockResolvedValue({ handled: true, reply: { text: "done" } });
+    const explicitSkillInvocation = {
+      invocationId: "invocation-1",
+      commandName: "invoice-paid",
+      skillName: "invoice-paid",
+    };
+
+    await runCliAgent({
+      ...baseRunParams,
+      trigger: "cron",
+      explicitSkillInvocation,
+    });
+
+    expect(createTrajectoryRuntimeRecorderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelApi: "cli", sessionId: "test-session" }),
+    );
+    expect(trajectoryRecordEventMock).toHaveBeenNthCalledWith(1, "skill.invocation.started", {
+      ...explicitSkillInvocation,
+      activation: "command",
+      caller: "inbound",
+    });
+    expect(trajectoryRecordEventMock).toHaveBeenNthCalledWith(2, "skill.invocation.completed", {
+      ...explicitSkillInvocation,
+      activation: "command",
+      caller: "inbound",
+      status: "success",
+    });
+    expect(trajectoryFlushMock).toHaveBeenCalledOnce();
+  });
+
   it("rejects stale lifecycle ownership before CLI preparation", async () => {
     await expect(
       runCliAgent({

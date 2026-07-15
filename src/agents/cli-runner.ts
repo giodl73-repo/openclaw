@@ -5,6 +5,7 @@ import { setReplyPayloadMetadata, type ReplyPayload } from "../auto-reply/reply-
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { appendExactAssistantMessageToSessionTranscript } from "../config/sessions/transcript.js";
 import { buildGenericCliContextEngineHostSupport } from "../context-engine/host-compat.js";
+import { isAbortError } from "../infra/abort-signal.js";
 import {
   assertAgentRunLifecycleGenerationCurrent,
   captureAgentRunLifecycleGeneration,
@@ -18,6 +19,11 @@ import {
 } from "../plugins/hook-agent-context.js";
 import { resolveBlockMessage } from "../plugins/hook-decision-types.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { createTrajectoryRuntimeRecorder } from "../trajectory/runtime.js";
+import {
+  recordSkillInvocationCompleted,
+  recordSkillInvocationStarted,
+} from "../trajectory/skill-invocation.js";
 import { isHeartbeatLifecycleRunKind } from "./bootstrap-mode.js";
 import {
   resolveCliRuntimeArtifactFingerprint,
@@ -471,12 +477,48 @@ async function finalizeCliContextEngineTurn(params: {
 export function runCliAgent(paramsInput: RunCliAgentParams): Promise<EmbeddedAgentRunResult> {
   const lifecycleGeneration =
     paramsInput.lifecycleGeneration ?? captureAgentRunLifecycleGeneration(paramsInput.runId);
-  return withAgentRunLifecycleGeneration(lifecycleGeneration, () =>
-    runCliAgentInternal({
+  return withAgentRunLifecycleGeneration(lifecycleGeneration, async () => {
+    const params = {
       ...paramsInput,
       lifecycleGeneration,
-    }),
-  );
+    };
+    const recorder = params.explicitSkillInvocation
+      ? createTrajectoryRuntimeRecorder({
+          cfg: params.config,
+          runId: params.runId,
+          sessionId: params.sessionId,
+          sessionKey: params.sessionKey,
+          sessionFile: params.sessionFile,
+          provider: params.provider,
+          modelId: params.model,
+          modelApi: "cli",
+          workspaceDir: params.workspaceDir,
+        })
+      : null;
+    recordSkillInvocationStarted(recorder, params.explicitSkillInvocation);
+    try {
+      const result = await runCliAgentInternal(params);
+      recordSkillInvocationCompleted(
+        recorder,
+        params.explicitSkillInvocation,
+        result.meta.stopReason === "error" ? "error" : "success",
+      );
+      return result;
+    } catch (error) {
+      recordSkillInvocationCompleted(
+        recorder,
+        params.explicitSkillInvocation,
+        isAbortError(error) ? "interrupted" : "error",
+      );
+      throw error;
+    } finally {
+      try {
+        await recorder?.flush();
+      } catch (error) {
+        log.warn(`CLI skill trajectory flush failed: ${formatErrorMessage(error)}`);
+      }
+    }
+  });
 }
 
 async function runCliAgentInternal(params: RunCliAgentParams): Promise<EmbeddedAgentRunResult> {

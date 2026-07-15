@@ -3,6 +3,7 @@
  */
 import { formatErrorMessage, toErrorObject } from "../../../infra/errors.js";
 import type { createTrajectoryRuntimeRecorder } from "../../../trajectory/runtime.js";
+import { recordSkillInvocationCompleted } from "../../../trajectory/skill-invocation.js";
 import type { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
 import type { AgentSession } from "../../sessions/index.js";
 import { clearToolSearchCatalog, type ToolSearchCatalogRef } from "../../tool-search.js";
@@ -81,12 +82,18 @@ export async function cleanupEmbeddedAttemptSessionPhase(
   const { attempt } = input;
   const initialState = input.readState();
   if (input.trajectoryRecorder && !input.trajectoryEndRecorded) {
+    const status = initialState.promptError
+      ? "error"
+      : initialState.aborted || initialState.timedOut
+        ? "interrupted"
+        : "cleanup";
+    recordSkillInvocationCompleted(
+      input.trajectoryRecorder,
+      attempt.explicitSkillInvocation,
+      status === "cleanup" ? "error" : status,
+    );
     input.trajectoryRecorder.recordEvent("session.ended", {
-      status: initialState.promptError
-        ? "error"
-        : initialState.aborted || initialState.timedOut
-          ? "interrupted"
-          : "cleanup",
+      status,
       aborted: initialState.aborted,
       externalAbort: initialState.externalAbort,
       timedOut: initialState.timedOut,

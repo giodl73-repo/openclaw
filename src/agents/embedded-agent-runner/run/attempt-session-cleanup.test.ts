@@ -96,6 +96,29 @@ describe("cleanupEmbeddedAttemptSessionPhase", () => {
     expect(input.emitDiagnosticRunCompleted).toHaveBeenCalledWith("completed", null, undefined);
   });
 
+  it("closes an explicit skill invocation when normal finalization was skipped", async () => {
+    const explicitSkillInvocation = {
+      invocationId: "invocation-1",
+      commandName: "invoice-paid",
+      skillName: "invoice-paid",
+    };
+    const input = createInput({
+      attempt: { ...attempt, explicitSkillInvocation },
+    });
+
+    await cleanupEmbeddedAttemptSessionPhase(input as never);
+
+    expect(input.trajectoryRecorder.recordEvent).toHaveBeenCalledWith(
+      "skill.invocation.completed",
+      {
+        ...explicitSkillInvocation,
+        activation: "command",
+        caller: "inbound",
+        status: "error",
+      },
+    );
+  });
+
   it("re-reads abort state after trajectory flushing", async () => {
     let aborted = false;
     hoisted.flushEmbeddedAttemptTrajectoryRecorder.mockImplementation(async () => {
