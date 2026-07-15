@@ -1506,147 +1506,59 @@ async function runWithModelFallbackInternal<T>(
 
   const hasFallbackCandidates = candidates.length > 1;
   const requestedCandidate = candidates[0];
+  let pendingFallbackDecisionHandler:
+    | ((decision: "continue" | "terminal") => Promise<void> | void)
+    | undefined;
 
-  for (let i = 0; i < candidates.length; i += 1) {
-    const candidate = candidates.at(i);
-    if (!candidate) {
-      throw new Error(`Missing model fallback candidate at index ${i}`);
-    }
-    const candidateHarnessAuth = await resolveModelFallbackCandidateHarnessAuthPrecheck({
-      cfg: params.cfg,
-      agentId: params.agentId,
-      sessionKey: params.sessionKey,
-      resolveAgentHarnessRuntimeOverride: params.resolveAgentHarnessRuntimeOverride,
-      prepareAgentHarnessRuntime: params.prepareAgentHarnessRuntime,
-      ...candidate,
-    });
-    const isPrimary = i === 0;
-    const requestedModel = requestedCandidate
-      ? sameModelCandidate(candidate, requestedCandidate)
-      : false;
-
-    // Skip-known-bad cache: when a previous turn in this session failed this
-    // candidate with `auth` / `auth_permanent` (e.g. missing or expired
-    // credentials), suppress repeat attempts for the cache TTL so we do not
-    // burn latency on the same broken candidate every turn. Primary is never
-    // skipped — if the user explicitly requested it we should still surface
-    // the auth error rather than silently jumping past it.
-    if (!isPrimary && params.sessionId) {
-      const skipped = isFallbackCandidateSkipped({
-        sessionId: params.sessionId,
-        provider: candidate.provider,
-        model: candidate.model,
+  try {
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates.at(i);
+      if (!candidate) {
+        throw new Error(`Missing model fallback candidate at index ${i}`);
+      }
+      const candidateHarnessAuth = await resolveModelFallbackCandidateHarnessAuthPrecheck({
+        cfg: params.cfg,
+        agentId: params.agentId,
+        sessionKey: params.sessionKey,
+        resolveAgentHarnessRuntimeOverride: params.resolveAgentHarnessRuntimeOverride,
+        prepareAgentHarnessRuntime: params.prepareAgentHarnessRuntime,
+        ...candidate,
       });
-      if (skipped) {
-        const skipReason =
-          getFallbackCandidateSkipReason({
-            sessionId: params.sessionId,
-            provider: candidate.provider,
-            model: candidate.model,
-          }) ?? "auth";
-        const reauthCommand = buildProviderReauthCommand(candidate.provider);
-        const reauthHint = reauthCommand
-          ? `run \`${reauthCommand}\` to re-authenticate`
-          : "re-authenticate that provider";
-        const error = `Skipping ${candidate.provider}/${candidate.model}: recent ${skipReason} failure in this session (${reauthHint})`;
-        attempts.push({
+      const isPrimary = i === 0;
+      const requestedModel = requestedCandidate
+        ? sameModelCandidate(candidate, requestedCandidate)
+        : false;
+
+      // Skip-known-bad cache: when a previous turn in this session failed this
+      // candidate with `auth` / `auth_permanent` (e.g. missing or expired
+      // credentials), suppress repeat attempts for the cache TTL so we do not
+      // burn latency on the same broken candidate every turn. Primary is never
+      // skipped — if the user explicitly requested it we should still surface
+      // the auth error rather than silently jumping past it.
+      if (!isPrimary && params.sessionId) {
+        const skipped = isFallbackCandidateSkipped({
+          sessionId: params.sessionId,
           provider: candidate.provider,
           model: candidate.model,
-          error,
-          reason: skipReason as FailoverReason,
         });
-        await observeDecision({
-          decision: "skip_candidate",
-          runId: params.runId,
-          sessionId: params.sessionId,
-          lane: params.lane,
-          requestedProvider: params.provider,
-          requestedModel: params.model,
-          candidate,
-          attempt: i + 1,
-          total: candidates.length,
-          reason: skipReason as FailoverReason,
-          error,
-          nextCandidate: candidates[i + 1],
-          isPrimary,
-          requestedModelMatched: requestedModel,
-          fallbackConfigured: hasFallbackCandidates,
-        });
-        continue;
-      }
-    }
-
-    let runOptions: ModelFallbackRunOptions | undefined;
-    let attemptedDuringCooldown = false;
-    let transientProbeProviderForAttempt: string | null = null;
-    if (authRuntime && authStore && !candidateHarnessAuth.skipsProviderAuthCooldown) {
-      const profileIds = authRuntime.resolveAuthProfileOrder({
-        cfg: params.cfg,
-        store: authStore,
-        provider: candidate.provider,
-      });
-      const isAnyProfileAvailable = profileIds.some(
-        (id) => !authRuntime.isProfileInCooldown(authStore, id, undefined, candidate.model),
-      );
-
-      if (profileIds.length > 0 && !isAnyProfileAvailable) {
-        // All profiles for this provider are in cooldown.
-        const now = Date.now();
-        const probeThrottleKey = resolveProbeThrottleKey(candidate.provider, params.agentDir);
-        const decision = resolveCooldownDecision({
-          candidate,
-          isPrimary,
-          requestedModel,
-          hasFallbackCandidates,
-          now,
-          probeThrottleKey,
-          authRuntime,
-          authStore,
-          profileIds,
-        });
-        const authMode =
-          decision.reason === "billing"
-            ? resolveSubscriptionAuthModeForProfiles({ store: authStore, profileIds })
-            : undefined;
-
-        if (decision.type === "suspend_lanes") {
-          const error = `Provider ${candidate.provider} is in cooldown (suspending lanes)`;
-          attempts.push({
-            provider: candidate.provider,
-            model: candidate.model,
-            error,
-            reason: decision.reason,
-            authMode,
-          });
-
-          // Only lock the lane when no remaining candidates can serve as
-          // fallbacks. Per-provider cooldown state already prevents
-          // re-attempting the failed provider on subsequent turns.
-          const hasRemainingCandidates = i + 1 < candidates.length;
-          if (params.sessionId) {
-            emitFailoverEvent({
+        if (skipped) {
+          const skipReason =
+            getFallbackCandidateSkipReason({
               sessionId: params.sessionId,
-              lane: params.lane,
-              fromProvider: candidate.provider,
-              fromModel: candidate.model,
-              reason: decision.reason,
-              suspended: !hasRemainingCandidates,
-            });
-            if (!hasRemainingCandidates) {
-              const laneId = resolveTerminalSuspensionLane();
-              deferredSuspension.pending = undefined;
-              void suspendSession({
-                cfg: params.cfg,
-                agentDir: params.agentDir,
-                sessionId: params.sessionId,
-                laneId,
-                reason: resolveSessionSuspensionReason(decision.reason),
-                failedProvider: candidate.provider,
-                failedModel: candidate.model,
-              });
-            }
-          }
-
+              provider: candidate.provider,
+              model: candidate.model,
+            }) ?? "auth";
+          const reauthCommand = buildProviderReauthCommand(candidate.provider);
+          const reauthHint = reauthCommand
+            ? `run \`${reauthCommand}\` to re-authenticate`
+            : "re-authenticate that provider";
+          const error = `Skipping ${candidate.provider}/${candidate.model}: recent ${skipReason} failure in this session (${reauthHint})`;
+          attempts.push({
+            provider: candidate.provider,
+            model: candidate.model,
+            error,
+            reason: skipReason as FailoverReason,
+          });
           await observeDecision({
             decision: "skip_candidate",
             runId: params.runId,
@@ -1657,56 +1569,52 @@ async function runWithModelFallbackInternal<T>(
             candidate,
             attempt: i + 1,
             total: candidates.length,
-            reason: decision.reason,
+            reason: skipReason as FailoverReason,
             error,
             nextCandidate: candidates[i + 1],
             isPrimary,
             requestedModelMatched: requestedModel,
             fallbackConfigured: hasFallbackCandidates,
-            profileCount: profileIds.length,
           });
           continue;
         }
+      }
 
-        if (decision.type === "skip") {
-          attempts.push({
-            provider: candidate.provider,
-            model: candidate.model,
-            error: decision.error,
-            reason: decision.reason,
-            authMode,
-          });
-          await observeDecision({
-            decision: "skip_candidate",
-            runId: params.runId,
-            sessionId: params.sessionId,
-            lane: params.lane,
-            requestedProvider: params.provider,
-            requestedModel: params.model,
+      let runOptions: ModelFallbackRunOptions | undefined;
+      let attemptedDuringCooldown = false;
+      let transientProbeProviderForAttempt: string | null = null;
+      if (authRuntime && authStore && !candidateHarnessAuth.skipsProviderAuthCooldown) {
+        const profileIds = authRuntime.resolveAuthProfileOrder({
+          cfg: params.cfg,
+          store: authStore,
+          provider: candidate.provider,
+        });
+        const isAnyProfileAvailable = profileIds.some(
+          (id) => !authRuntime.isProfileInCooldown(authStore, id, undefined, candidate.model),
+        );
+
+        if (profileIds.length > 0 && !isAnyProfileAvailable) {
+          // All profiles for this provider are in cooldown.
+          const now = Date.now();
+          const probeThrottleKey = resolveProbeThrottleKey(candidate.provider, params.agentDir);
+          const decision = resolveCooldownDecision({
             candidate,
-            attempt: i + 1,
-            total: candidates.length,
-            reason: decision.reason,
-            error: decision.error,
-            nextCandidate: candidates[i + 1],
             isPrimary,
-            requestedModelMatched: requestedModel,
-            fallbackConfigured: hasFallbackCandidates,
-            profileCount: profileIds.length,
+            requestedModel,
+            hasFallbackCandidates,
+            now,
+            probeThrottleKey,
+            authRuntime,
+            authStore,
+            profileIds,
           });
-          continue;
-        }
+          const authMode =
+            decision.reason === "billing"
+              ? resolveSubscriptionAuthModeForProfiles({ store: authStore, profileIds })
+              : undefined;
 
-        if (decision.markProbe) {
-          markProbeAttempt(now, probeThrottleKey);
-        }
-        if (shouldAllowCooldownProbeForReason(decision.reason)) {
-          // Probe at most once per provider per fallback run when all profiles
-          // are cooldowned. Re-probing every same-provider candidate can stall
-          // cross-provider fallback on providers with long internal retries.
-          const isTransientCooldownReason = shouldUseTransientCooldownProbeSlot(decision.reason);
-          if (isTransientCooldownReason && cooldownProbeUsedProviders.has(candidate.provider)) {
-            const error = `Provider ${candidate.provider} is in cooldown (probe already attempted this run)`;
+          if (decision.type === "suspend_lanes") {
+            const error = `Provider ${candidate.provider} is in cooldown (suspending lanes)`;
             attempts.push({
               provider: candidate.provider,
               model: candidate.model,
@@ -1714,6 +1622,35 @@ async function runWithModelFallbackInternal<T>(
               reason: decision.reason,
               authMode,
             });
+
+            // Only lock the lane when no remaining candidates can serve as
+            // fallbacks. Per-provider cooldown state already prevents
+            // re-attempting the failed provider on subsequent turns.
+            const hasRemainingCandidates = i + 1 < candidates.length;
+            if (params.sessionId) {
+              emitFailoverEvent({
+                sessionId: params.sessionId,
+                lane: params.lane,
+                fromProvider: candidate.provider,
+                fromModel: candidate.model,
+                reason: decision.reason,
+                suspended: !hasRemainingCandidates,
+              });
+              if (!hasRemainingCandidates) {
+                const laneId = resolveTerminalSuspensionLane();
+                deferredSuspension.pending = undefined;
+                void suspendSession({
+                  cfg: params.cfg,
+                  agentDir: params.agentDir,
+                  sessionId: params.sessionId,
+                  laneId,
+                  reason: resolveSessionSuspensionReason(decision.reason),
+                  failedProvider: candidate.provider,
+                  failedModel: candidate.model,
+                });
+              }
+            }
+
             await observeDecision({
               decision: "skip_candidate",
               runId: params.runId,
@@ -1734,72 +1671,81 @@ async function runWithModelFallbackInternal<T>(
             });
             continue;
           }
-          runOptions = { allowTransientCooldownProbe: true };
-          if (isTransientCooldownReason) {
-            transientProbeProviderForAttempt = candidate.provider;
-          }
-        }
-        attemptedDuringCooldown = true;
-        await observeDecision({
-          decision: "probe_cooldown_candidate",
-          runId: params.runId,
-          sessionId: params.sessionId,
-          lane: params.lane,
-          requestedProvider: params.provider,
-          requestedModel: params.model,
-          candidate,
-          attempt: i + 1,
-          total: candidates.length,
-          reason: decision.reason,
-          nextCandidate: candidates[i + 1],
-          isPrimary,
-          requestedModelMatched: requestedModel,
-          fallbackConfigured: hasFallbackCandidates,
-          allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
-          profileCount: profileIds.length,
-        });
-      }
-    }
 
-    let fallbackDecision: "continue" | "terminal" = "terminal";
-    let fallbackDecisionHandler:
-      | ((decision: "continue" | "terminal") => Promise<void> | void)
-      | undefined;
-    try {
-      const attemptRun = await runFallbackAttempt({
-        run: params.run,
-        ...candidate,
-        attempts,
-        options: {
-          ...runOptions,
-          isFinalFallbackAttempt: i + 1 === candidates.length,
-          ...(params.manageFallbackDecision
-            ? {
-                registerFallbackDecisionHandler: (
-                  handler: (decision: "continue" | "terminal") => Promise<void> | void,
-                ) => {
-                  fallbackDecisionHandler = handler;
-                },
-              }
-            : {}),
-        },
-        // Only the outer fallback loop knows another candidate remains. Carry
-        // that fact through this attempt so the embedded runner does not freeze
-        // the shared lane before the next candidate can run.
-        deferSessionSuspension: i + 1 < candidates.length,
-        onDeferredSessionSuspension: (suspension) => {
-          deferredSuspension.pending = suspension;
-        },
-        classifyResult: params.classifyResult,
-        attempt: i + 1,
-        total: candidates.length,
-        attribution: { sessionId: params.sessionId, lane: params.lane },
-        abortSignal: params.abortSignal,
-      });
-      if ("success" in attemptRun) {
-        if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
+          if (decision.type === "skip") {
+            attempts.push({
+              provider: candidate.provider,
+              model: candidate.model,
+              error: decision.error,
+              reason: decision.reason,
+              authMode,
+            });
+            await observeDecision({
+              decision: "skip_candidate",
+              runId: params.runId,
+              sessionId: params.sessionId,
+              lane: params.lane,
+              requestedProvider: params.provider,
+              requestedModel: params.model,
+              candidate,
+              attempt: i + 1,
+              total: candidates.length,
+              reason: decision.reason,
+              error: decision.error,
+              nextCandidate: candidates[i + 1],
+              isPrimary,
+              requestedModelMatched: requestedModel,
+              fallbackConfigured: hasFallbackCandidates,
+              profileCount: profileIds.length,
+            });
+            continue;
+          }
+
+          if (decision.markProbe) {
+            markProbeAttempt(now, probeThrottleKey);
+          }
+          if (shouldAllowCooldownProbeForReason(decision.reason)) {
+            // Probe at most once per provider per fallback run when all profiles
+            // are cooldowned. Re-probing every same-provider candidate can stall
+            // cross-provider fallback on providers with long internal retries.
+            const isTransientCooldownReason = shouldUseTransientCooldownProbeSlot(decision.reason);
+            if (isTransientCooldownReason && cooldownProbeUsedProviders.has(candidate.provider)) {
+              const error = `Provider ${candidate.provider} is in cooldown (probe already attempted this run)`;
+              attempts.push({
+                provider: candidate.provider,
+                model: candidate.model,
+                error,
+                reason: decision.reason,
+                authMode,
+              });
+              await observeDecision({
+                decision: "skip_candidate",
+                runId: params.runId,
+                sessionId: params.sessionId,
+                lane: params.lane,
+                requestedProvider: params.provider,
+                requestedModel: params.model,
+                candidate,
+                attempt: i + 1,
+                total: candidates.length,
+                reason: decision.reason,
+                error,
+                nextCandidate: candidates[i + 1],
+                isPrimary,
+                requestedModelMatched: requestedModel,
+                fallbackConfigured: hasFallbackCandidates,
+                profileCount: profileIds.length,
+              });
+              continue;
+            }
+            runOptions = { allowTransientCooldownProbe: true };
+            if (isTransientCooldownReason) {
+              transientProbeProviderForAttempt = candidate.provider;
+            }
+          }
+          attemptedDuringCooldown = true;
           await observeDecision({
-            decision: "candidate_succeeded",
+            decision: "probe_cooldown_candidate",
             runId: params.runId,
             sessionId: params.sessionId,
             lane: params.lane,
@@ -1808,127 +1754,236 @@ async function runWithModelFallbackInternal<T>(
             candidate,
             attempt: i + 1,
             total: candidates.length,
-            previousAttempts: attempts,
+            reason: decision.reason,
+            nextCandidate: candidates[i + 1],
             isPrimary,
             requestedModelMatched: requestedModel,
             fallbackConfigured: hasFallbackCandidates,
+            allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
+            profileCount: profileIds.length,
           });
         }
-        const notFoundAttempt =
-          i > 0 ? attempts.find((a) => a.reason === "model_not_found") : undefined;
-        if (notFoundAttempt) {
-          log.warn(
-            `Model "${sanitizeForLog(notFoundAttempt.provider)}/${sanitizeForLog(notFoundAttempt.model)}" not found. Fell back to "${sanitizeForLog(candidate.provider)}/${sanitizeForLog(candidate.model)}".`,
-          );
-        }
-        return attemptRun.success;
       }
-      const err = attemptRun.error;
-      // Max-turn termination can follow successful tool actions. Stop before
-      // candidate fallback so the user can verify effects before any replay.
-      if (findCliMaxTurnsError(err)) {
-        throw err;
+
+      let fallbackDecision: "continue" | "terminal" = "terminal";
+      let fallbackDecisionHandler:
+        | ((decision: "continue" | "terminal") => Promise<void> | void)
+        | undefined;
+      if (pendingFallbackDecisionHandler) {
+        await pendingFallbackDecisionHandler("continue");
+        pendingFallbackDecisionHandler = undefined;
       }
-      if (
-        !attemptRun.classifiedResult &&
-        params.canFallbackAfterError &&
-        !(await params.canFallbackAfterError({
-          provider: candidate.provider,
-          model: candidate.model,
-          error: err,
+      try {
+        const attemptRun = await runFallbackAttempt({
+          run: params.run,
+          ...candidate,
+          attempts,
+          options: {
+            ...runOptions,
+            isFinalFallbackAttempt: i + 1 === candidates.length,
+            ...(params.manageFallbackDecision
+              ? {
+                  registerFallbackDecisionHandler: (
+                    handler: (decision: "continue" | "terminal") => Promise<void> | void,
+                  ) => {
+                    fallbackDecisionHandler = handler;
+                  },
+                }
+              : {}),
+          },
+          // Only the outer fallback loop knows another candidate remains. Carry
+          // that fact through this attempt so the embedded runner does not freeze
+          // the shared lane before the next candidate can run.
+          deferSessionSuspension: i + 1 < candidates.length,
+          onDeferredSessionSuspension: (suspension) => {
+            deferredSuspension.pending = suspension;
+          },
+          classifyResult: params.classifyResult,
           attempt: i + 1,
           total: candidates.length,
-        }))
-      ) {
-        throw err;
-      }
-      if (attemptRun.classifiedResult) {
-        latestClassifiedResult = attemptRun.classifiedResult;
-      }
-      if (
-        attemptRun.exhaustionResult &&
-        (!exhaustionResult || attemptRun.exhaustionResult.priority >= exhaustionResult.priority)
-      ) {
-        exhaustionResult = attemptRun.exhaustionResult;
-      }
-      {
-        // Local runtime coordination errors (session write-lock timeout, embedded
-        // attempt session takeover) are not provider/model failures. Aborting
-        // here prevents the fallback chain from consuming candidates retrying
-        // the same local condition and surfacing a misleading "All models
-        // failed" summary. See #83510.
-        if (isNonProviderRuntimeCoordinationError(err)) {
-          throw err;
-        }
-        if (isTranscriptNotContinuableError(err)) {
-          throw err;
-        }
-        if (transientProbeProviderForAttempt) {
-          const probeFailureReason = describeFailoverError(err).reason;
-          if (!shouldPreserveTransientCooldownProbeSlot(probeFailureReason)) {
-            cooldownProbeUsedProviders.add(transientProbeProviderForAttempt);
+          attribution: { sessionId: params.sessionId, lane: params.lane },
+          abortSignal: params.abortSignal,
+        });
+        if ("success" in attemptRun) {
+          if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
+            await observeDecision({
+              decision: "candidate_succeeded",
+              runId: params.runId,
+              sessionId: params.sessionId,
+              lane: params.lane,
+              requestedProvider: params.provider,
+              requestedModel: params.model,
+              candidate,
+              attempt: i + 1,
+              total: candidates.length,
+              previousAttempts: attempts,
+              isPrimary,
+              requestedModelMatched: requestedModel,
+              fallbackConfigured: hasFallbackCandidates,
+            });
           }
+          const notFoundAttempt =
+            i > 0 ? attempts.find((a) => a.reason === "model_not_found") : undefined;
+          if (notFoundAttempt) {
+            log.warn(
+              `Model "${sanitizeForLog(notFoundAttempt.provider)}/${sanitizeForLog(notFoundAttempt.model)}" not found. Fell back to "${sanitizeForLog(candidate.provider)}/${sanitizeForLog(candidate.model)}".`,
+            );
+          }
+          return attemptRun.success;
         }
-        // Context overflow errors should be handled by the inner runner's
-        // compaction/retry logic, not by model fallback.  If one escapes as a
-        // throw, rethrow it immediately rather than trying a different model
-        // that may have a smaller context window and fail worse.
-        const errMessage = formatErrorMessage(err);
-        if (isLikelyContextOverflowError(errMessage)) {
+        const err = attemptRun.error;
+        // Max-turn termination can follow successful tool actions. Stop before
+        // candidate fallback so the user can verify effects before any replay.
+        if (findCliMaxTurnsError(err)) {
           throw err;
         }
-        if (isMissingAgentHarnessError(err)) {
-          throw err;
-        }
-        const normalized =
-          coerceToFailoverError(err, {
+        if (
+          !attemptRun.classifiedResult &&
+          params.canFallbackAfterError &&
+          !(await params.canFallbackAfterError({
             provider: candidate.provider,
             model: candidate.model,
-            sessionId: params.sessionId,
-            lane: params.lane,
-          }) ?? err;
-
-        // LiveSessionModelSwitchError during fallback may point at a later
-        // candidate that is already the active live-session selection.  Jump
-        // there directly.  Stale same/earlier targets remain a known failover
-        // so the outer runner cannot loop on the conflicting model, but they
-        // are not provider overloads.
-        if (err instanceof LiveSessionModelSwitchError) {
-          // Runtime selection is part of the live switch transaction. The outer
-          // owner must apply it before any retry; redirecting here would pair the
-          // new model with the stale harness runtime captured by the caller.
-          if (
-            hasDifferentLiveSessionRuntimeSelection({
-              error: err,
-              currentAgentHarnessRuntimeOverride: candidateHarnessAuth.agentHarnessRuntimeOverride,
-            })
-          ) {
+            error: err,
+            attempt: i + 1,
+            total: candidates.length,
+          }))
+        ) {
+          throw err;
+        }
+        if (attemptRun.classifiedResult) {
+          latestClassifiedResult = attemptRun.classifiedResult;
+        }
+        if (
+          attemptRun.exhaustionResult &&
+          (!exhaustionResult || attemptRun.exhaustionResult.priority >= exhaustionResult.priority)
+        ) {
+          exhaustionResult = attemptRun.exhaustionResult;
+        }
+        {
+          // Local runtime coordination errors (session write-lock timeout, embedded
+          // attempt session takeover) are not provider/model failures. Aborting
+          // here prevents the fallback chain from consuming candidates retrying
+          // the same local condition and surfacing a misleading "All models
+          // failed" summary. See #83510.
+          if (isNonProviderRuntimeCoordinationError(err)) {
             throw err;
           }
-          const liveSwitchTargetIndex = findLiveSessionModelSwitchRedirectIndex({
-            error: err,
-            candidates,
-            currentIndex: i,
-          });
-          if (liveSwitchTargetIndex !== null) {
-            i = liveSwitchTargetIndex - 1;
-            fallbackDecision = "continue";
+          if (isTranscriptNotContinuableError(err)) {
+            throw err;
+          }
+          if (transientProbeProviderForAttempt) {
+            const probeFailureReason = describeFailoverError(err).reason;
+            if (!shouldPreserveTransientCooldownProbeSlot(probeFailureReason)) {
+              cooldownProbeUsedProviders.add(transientProbeProviderForAttempt);
+            }
+          }
+          // Context overflow errors should be handled by the inner runner's
+          // compaction/retry logic, not by model fallback.  If one escapes as a
+          // throw, rethrow it immediately rather than trying a different model
+          // that may have a smaller context window and fail worse.
+          const errMessage = formatErrorMessage(err);
+          if (isLikelyContextOverflowError(errMessage)) {
+            throw err;
+          }
+          if (isMissingAgentHarnessError(err)) {
+            throw err;
+          }
+          const normalized =
+            coerceToFailoverError(err, {
+              provider: candidate.provider,
+              model: candidate.model,
+              sessionId: params.sessionId,
+              lane: params.lane,
+            }) ?? err;
+
+          // LiveSessionModelSwitchError during fallback may point at a later
+          // candidate that is already the active live-session selection.  Jump
+          // there directly.  Stale same/earlier targets remain a known failover
+          // so the outer runner cannot loop on the conflicting model, but they
+          // are not provider overloads.
+          if (err instanceof LiveSessionModelSwitchError) {
+            // Runtime selection is part of the live switch transaction. The outer
+            // owner must apply it before any retry; redirecting here would pair the
+            // new model with the stale harness runtime captured by the caller.
+            if (
+              hasDifferentLiveSessionRuntimeSelection({
+                error: err,
+                currentAgentHarnessRuntimeOverride:
+                  candidateHarnessAuth.agentHarnessRuntimeOverride,
+              })
+            ) {
+              throw err;
+            }
+            const liveSwitchTargetIndex = findLiveSessionModelSwitchRedirectIndex({
+              error: err,
+              candidates,
+              currentIndex: i,
+            });
+            if (liveSwitchTargetIndex !== null) {
+              i = liveSwitchTargetIndex - 1;
+              fallbackDecision = "continue";
+              continue;
+            }
+
+            const switchMsg = err.message;
+            const switchNormalized = new FailoverError(switchMsg, {
+              reason: "unknown",
+              provider: candidate.provider,
+              model: candidate.model,
+              sessionId: params.sessionId,
+              lane: params.lane,
+            });
+            lastError = switchNormalized;
+            await observeFailedCandidate({
+              attempts,
+              candidate,
+              error: switchNormalized,
+              runId: params.runId,
+              sessionId: params.sessionId,
+              lane: params.lane,
+              requestedProvider: params.provider,
+              requestedModel: params.model,
+              attempt: i + 1,
+              total: candidates.length,
+              nextCandidate: candidates[i + 1],
+              isPrimary,
+              requestedModelMatched: requestedModel,
+              fallbackConfigured: hasFallbackCandidates,
+            });
+            fallbackDecision = i + 1 < candidates.length ? "continue" : "terminal";
             continue;
           }
 
-          const switchMsg = err.message;
-          const switchNormalized = new FailoverError(switchMsg, {
-            reason: "unknown",
-            provider: candidate.provider,
-            model: candidate.model,
-            sessionId: params.sessionId,
-            lane: params.lane,
-          });
-          lastError = switchNormalized;
+          // Even unrecognized errors should not abort the fallback loop when
+          // there are remaining candidates.  Only abort/context-overflow errors
+          // (handled above) are truly non-retryable.
+          const isKnownFailover = isFailoverError(normalized);
+          if (!isKnownFailover && i === candidates.length - 1) {
+            throw err;
+          }
+
+          // Record auth-class failures in the session-scoped skip cache so the
+          // next turn does not re-attempt the same broken candidate. Only mark
+          // for non-primary candidates — see the skip-check above for rationale.
+          if (
+            isKnownFailover &&
+            !isPrimary &&
+            params.sessionId &&
+            (normalized.reason === "auth" || normalized.reason === "auth_permanent")
+          ) {
+            markFallbackCandidateSkipped({
+              sessionId: params.sessionId,
+              provider: candidate.provider,
+              model: candidate.model,
+              reason: normalized.reason,
+            });
+          }
+
+          lastError = isKnownFailover ? normalized : err;
           await observeFailedCandidate({
             attempts,
             candidate,
-            error: switchNormalized,
+            error: normalized,
             runId: params.runId,
             sessionId: params.sessionId,
             lane: params.lane,
@@ -1941,64 +1996,25 @@ async function runWithModelFallbackInternal<T>(
             requestedModelMatched: requestedModel,
             fallbackConfigured: hasFallbackCandidates,
           });
-          fallbackDecision = i + 1 < candidates.length ? "continue" : "terminal";
-          continue;
-        }
-
-        // Even unrecognized errors should not abort the fallback loop when
-        // there are remaining candidates.  Only abort/context-overflow errors
-        // (handled above) are truly non-retryable.
-        const isKnownFailover = isFailoverError(normalized);
-        if (!isKnownFailover && i === candidates.length - 1) {
-          throw err;
-        }
-
-        // Record auth-class failures in the session-scoped skip cache so the
-        // next turn does not re-attempt the same broken candidate. Only mark
-        // for non-primary candidates — see the skip-check above for rationale.
-        if (
-          isKnownFailover &&
-          !isPrimary &&
-          params.sessionId &&
-          (normalized.reason === "auth" || normalized.reason === "auth_permanent")
-        ) {
-          markFallbackCandidateSkipped({
-            sessionId: params.sessionId,
+          await params.onError?.({
             provider: candidate.provider,
             model: candidate.model,
-            reason: normalized.reason,
+            error: isKnownFailover ? normalized : err,
+            attempt: i + 1,
+            total: candidates.length,
           });
+          fallbackDecision = i + 1 < candidates.length ? "continue" : "terminal";
         }
-
-        lastError = isKnownFailover ? normalized : err;
-        await observeFailedCandidate({
-          attempts,
-          candidate,
-          error: normalized,
-          runId: params.runId,
-          sessionId: params.sessionId,
-          lane: params.lane,
-          requestedProvider: params.provider,
-          requestedModel: params.model,
-          attempt: i + 1,
-          total: candidates.length,
-          nextCandidate: candidates[i + 1],
-          isPrimary,
-          requestedModelMatched: requestedModel,
-          fallbackConfigured: hasFallbackCandidates,
-        });
-        await params.onError?.({
-          provider: candidate.provider,
-          model: candidate.model,
-          error: isKnownFailover ? normalized : err,
-          attempt: i + 1,
-          total: candidates.length,
-        });
-        fallbackDecision = i + 1 < candidates.length ? "continue" : "terminal";
+      } finally {
+        if (fallbackDecision === "continue") {
+          pendingFallbackDecisionHandler = fallbackDecisionHandler;
+        } else {
+          await fallbackDecisionHandler?.("terminal");
+        }
       }
-    } finally {
-      await fallbackDecisionHandler?.(fallbackDecision);
     }
+  } finally {
+    await pendingFallbackDecisionHandler?.("terminal");
   }
 
   if (exhaustionResult) {

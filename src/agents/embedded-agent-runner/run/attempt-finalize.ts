@@ -5,6 +5,7 @@ import {
   recordOrDeferSkillInvocationCompleted,
   type RegisterFallbackDecisionHandler,
 } from "../../../trajectory/skill-invocation.js";
+import { log } from "../logger.js";
 import {
   resolveAttemptTrajectoryTerminal,
   resolveTerminalAssistantTexts,
@@ -111,6 +112,7 @@ export function finalizeEmbeddedAttempt(
     params.explicitSkillInvocation,
     terminal.status,
     params.registerFallbackDecisionHandler,
+    (error) => log.warn(`embedded skill trajectory flush failed: ${formatErrorMessage(error)}`),
   );
   trajectoryRecorder?.recordEvent("session.ended", {
     status: terminal.status,
