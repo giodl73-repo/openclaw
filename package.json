@@ -1331,6 +1331,10 @@
       "types": "./dist/plugin-sdk/provider-model-shared.d.ts",
       "default": "./dist/plugin-sdk/provider-model-shared.js"
     },
+    "./plugin-sdk/provider-request-runtime": {
+      "types": "./dist/plugin-sdk/provider-request-runtime.d.ts",
+      "default": "./dist/plugin-sdk/provider-request-runtime.js"
+    },
     "./plugin-sdk/provider-onboard": {
       "types": "./dist/plugin-sdk/provider-onboard.d.ts",
       "default": "./dist/plugin-sdk/provider-onboard.js"

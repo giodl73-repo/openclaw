@@ -10,15 +10,20 @@ export type ProviderRequestTrafficPolicyProvenanceV1 = {
 };
 
 // V1 is attached only to the guarded streaming LLM fetch path. Additional
-// capabilities and transports require equivalent enforcement before expansion.
-export type ProviderRequestTrafficPolicyCapabilityV1 = "llm";
-export type ProviderRequestTrafficPolicyTransportV1 = "stream";
+// capabilities and transports are admitted only after they use the same guarded
+// one-hop dispatcher and credential-slot enforcement.
+export type ProviderRequestTrafficPolicyCapabilityV1 = "channel" | "llm";
+export type ProviderRequestTrafficPolicyTransportV1 = "request-response" | "stream";
+export type ProviderRequestTrafficPolicyEndpointClassV1 =
+  | ProviderEndpointClass
+  | "bot-framework-connector"
+  | "microsoft-graph-mail";
 
 export type ProviderRequestTrafficPolicyMatchV1 = {
   providers?: readonly string[];
   capabilities?: readonly ProviderRequestTrafficPolicyCapabilityV1[];
   transports?: readonly ProviderRequestTrafficPolicyTransportV1[];
-  endpointClasses?: readonly ProviderEndpointClass[];
+  endpointClasses?: readonly ProviderRequestTrafficPolicyEndpointClassV1[];
   origins?: readonly string[];
 };
 
@@ -63,7 +68,7 @@ export type ProviderRequestTrafficPolicyFactsV1 = {
   provider: string;
   capability: ProviderRequestTrafficPolicyCapabilityV1;
   transport: ProviderRequestTrafficPolicyTransportV1;
-  endpointClass: ProviderEndpointClass;
+  endpointClass: ProviderRequestTrafficPolicyEndpointClassV1;
   url: string;
   allowPrivateNetwork: boolean;
   timeoutMs?: number;
@@ -241,7 +246,7 @@ function normalizeRegistration(
         | readonly ProviderRequestTrafficPolicyTransportV1[]
         | undefined,
       endpointClasses: normalizeStringSet(rule.match.endpointClasses) as
-        | readonly ProviderEndpointClass[]
+        | readonly ProviderRequestTrafficPolicyEndpointClassV1[]
         | undefined,
       origins: rule.match.origins
         ? Object.freeze(rule.match.origins.map(normalizeOrigin).toSorted())
@@ -464,6 +469,13 @@ export function evaluateCurrentProviderRequestTrafficPolicyV1(
   if (!policy) {
     return undefined;
   }
+  return evaluateProviderRequestTrafficPolicyV1(policy, facts);
+}
+
+export function evaluateProviderRequestTrafficPolicyV1(
+  policy: ProviderRequestTrafficPolicySnapshotV1,
+  facts: ProviderRequestTrafficPolicyFactsV1,
+): ProviderRequestTrafficPolicyDecisionV1 | undefined {
   const origin = new URL(facts.url).origin;
   const matching = policy.rules.filter((rule) => matchesRule(rule.match, facts, origin));
   if (matching.length === 0) {

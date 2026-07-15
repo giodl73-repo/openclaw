@@ -114,6 +114,11 @@
       - any-glob-to-any-file:
           - "extensions/msteams/**"
           - "docs/channels/msteams.md"
+"channel: m365mail":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/m365mail/**"
+          - "docs/channels/m365mail.md"
 "channel: nextcloud-talk":
   - changed-files:
       - any-glob-to-any-file:

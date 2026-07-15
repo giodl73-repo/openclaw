@@ -1,0 +1,38 @@
+{
+  "request": {
+    "context": {
+      "account": {
+        "accountId": "default",
+        "enabled": true,
+        "brokered": true,
+        "graphBaseUrl": "https://graph.microsoft.com/v1.0",
+        "agentId": "11111111-2222-3333-4444-555555555555",
+        "webhookPath": "/webhook/m365mail",
+        "dmPolicy": "open",
+        "allowedSenders": [],
+        "allowCrossTenant": false,
+        "rateLimitPerMinute": 30,
+        "botName": "OpenClaw"
+      },
+      "agentId": "11111111-2222-3333-4444-555555555555"
+    },
+    "operation": {
+      "kind": "reply",
+      "messageId": "AAMk/id=with+special",
+      "text": "Thanks - I will follow up."
+    }
+  },
+  "expected": {
+    "url": "https://graph.microsoft.com/v1.0/users/11111111-2222-3333-4444-555555555555/messages/AAMk%2Fid%3Dwith%2Bspecial/reply",
+    "method": "POST",
+    "body": "{\"comment\":\"Thanks - I will follow up.\"}",
+    "credentialSlotRefs": [
+      "m365mail/graph-token"
+    ],
+    "responsePolicy": {
+      "mode": "m365mail-graph",
+      "successStatus": 202,
+      "replay": "never"
+    }
+  }
+}
