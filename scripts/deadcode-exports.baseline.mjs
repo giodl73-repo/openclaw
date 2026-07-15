@@ -4,6 +4,7 @@
 export const KNIP_UNUSED_EXPORT_BASELINE = [
   "extensions/acpx/src/process-reaper.ts: AcpxProcessInfo",
   "extensions/acpx/src/process-reaper.ts: isOpenClawOwnedAcpxProcessCommand",
+  "extensions/browser/src/browser/routes/types.ts: BrowserRouteHandler",
   "extensions/canvas/src/host/a2ui.ts: createA2uiHttpRequestHandler",
   "extensions/canvas/src/host/a2ui.ts: injectCanvasRuntime",
   "extensions/canvas/src/host/a2ui.ts: isA2uiPath",
@@ -667,6 +668,7 @@ export const KNIP_UNUSED_EXPORT_BASELINE = [
   "src/agents/embedded-agent-runner/run/incomplete-turn.ts: REASONING_ONLY_RETRY_INSTRUCTION",
   "src/agents/embedded-agent-runner/run/message-merge-strategy.ts: DEFAULT_MESSAGE_MERGE_STRATEGY_ID",
   "src/agents/embedded-agent-runner/run/message-merge-strategy.ts: registerMessageMergeStrategyForTest",
+  "src/agents/embedded-agent-runner/run/runtime-resolution.ts: CODEX_HARNESS_ID",
   "src/agents/embedded-agent-runner/run/setup.ts: resolveEffectiveRuntimeModel",
   "src/agents/embedded-agent-runner/runs.ts: clearEmbeddedRunAbandonment",
   "src/agents/embedded-agent-runner/runs.ts: forceClearEmbeddedAgentRun",
