@@ -2253,6 +2253,7 @@ async function runAgentTurnWithFallbackInternal(
                         images: currentTurnImages.images,
                         imageOrder: currentTurnImages.imageOrder,
                         skillsSnapshot: params.followupRun.run.skillsSnapshot,
+                        explicitSkillInvocation: params.sessionCtx.ExplicitSkillInvocation,
                         messageChannel: params.followupRun.originatingChannel ?? undefined,
                         messageProvider: hookMessageProvider,
                         clientCaps: params.followupRun.run.clientCaps,
