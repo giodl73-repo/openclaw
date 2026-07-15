@@ -90,6 +90,7 @@ export async function cleanupEmbeddedAttemptSessionPhase(
       attempt.explicitSkillInvocation,
       status === "cleanup" ? "error" : status,
       attempt.registerFallbackDecisionHandler,
+      (error) => log.warn(`embedded skill trajectory flush failed: ${formatErrorMessage(error)}`),
     );
     input.trajectoryRecorder.recordEvent("session.ended", {
       status,

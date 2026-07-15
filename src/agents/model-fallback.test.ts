@@ -833,6 +833,78 @@ describe("runWithModelFallback", () => {
     }
   });
 
+  it("settles the last attempted candidate when all remaining candidates are skipped", async () => {
+    const previous = process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS;
+    process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS = "60000";
+    const decisions: string[] = [];
+    let captureDecisions = false;
+    try {
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "openai/gpt-5.4",
+              fallbacks: ["anthropic/claude-opus-4-7", "google/gemini-3.1-pro-preview"],
+            },
+          },
+        },
+      });
+      const run = vi.fn(
+        async (
+          provider: string,
+          model: string,
+          options?: {
+            registerFallbackDecisionHandler?: (
+              handler: (decision: "continue" | "terminal") => void,
+            ) => void;
+          },
+        ) => {
+          options?.registerFallbackDecisionHandler?.((decision) => {
+            if (captureDecisions) {
+              decisions.push(`${provider}:${decision}`);
+            }
+          });
+          throw new FailoverError(`${provider} unavailable`, {
+            provider,
+            model,
+            reason: provider === "openai" ? "rate_limit" : "auth",
+          });
+        },
+      );
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "openai",
+          model: "gpt-5.4",
+          sessionId: "session:all-skipped-lifecycle",
+          run,
+          manageFallbackDecision: true,
+        }),
+      ).rejects.toBeInstanceOf(FallbackSummaryError);
+
+      captureDecisions = true;
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "openai",
+          model: "gpt-5.4",
+          sessionId: "session:all-skipped-lifecycle",
+          run,
+          manageFallbackDecision: true,
+        }),
+      ).rejects.toBeInstanceOf(FallbackSummaryError);
+
+      expect(decisions).toEqual(["openai:terminal"]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS;
+      } else {
+        process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS = previous;
+      }
+    }
+  });
+
   it("skips auth store bootstrap when no auth profile sources exist", async () => {
     authSourceCheckMock.hasAnyAuthProfileStoreSource.mockReturnValue(false);
     const run = vi.fn().mockResolvedValueOnce("ok");

@@ -526,6 +526,7 @@ export function runCliAgent(paramsInput: RunCliAgentParams): Promise<EmbeddedAge
             ? "interrupted"
             : "error",
         params.registerFallbackDecisionHandler,
+        (error) => log.warn(`CLI skill trajectory flush failed: ${formatErrorMessage(error)}`),
       );
       return result;
     } catch (error) {
@@ -534,6 +535,8 @@ export function runCliAgent(paramsInput: RunCliAgentParams): Promise<EmbeddedAge
         params.explicitSkillInvocation,
         isAbortError(error) ? "interrupted" : "error",
         params.registerFallbackDecisionHandler,
+        (flushError) =>
+          log.warn(`CLI skill trajectory flush failed: ${formatErrorMessage(flushError)}`),
       );
       throw error;
     } finally {

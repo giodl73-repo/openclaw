@@ -50,6 +50,7 @@ export function recordOrDeferSkillInvocationCompleted(
   invocation: ExplicitSkillInvocation | undefined,
   status: "success" | "error" | "interrupted",
   registerFallbackDecisionHandler?: RegisterFallbackDecisionHandler,
+  onFlushError?: (error: unknown) => void,
 ): void {
   if (!registerFallbackDecisionHandler) {
     recordSkillInvocationCompleted(recorder, invocation, status);
@@ -58,7 +59,11 @@ export function recordOrDeferSkillInvocationCompleted(
   registerFallbackDecisionHandler(async (decision) => {
     if (decision === "terminal") {
       recordSkillInvocationCompleted(recorder, invocation, status);
-      await recorder?.flush?.();
+      try {
+        await recorder?.flush?.();
+      } catch (error) {
+        onFlushError?.(error);
+      }
     }
   });
 }

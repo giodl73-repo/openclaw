@@ -120,6 +120,7 @@ describe("finalizeEmbeddedAttempt", () => {
 
   it("closes an explicit invocation when an earlier fallback candidate succeeds", async () => {
     const recordEvent = vi.fn();
+    const flush = vi.fn().mockRejectedValue(new Error("trajectory unavailable"));
     let decideFallback: ((decision: "continue" | "terminal") => Promise<void> | void) | undefined;
     const result = {
       assistantTexts: ["done"],
@@ -134,7 +135,7 @@ describe("finalizeEmbeddedAttempt", () => {
 
     finalizeEmbeddedAttempt({
       result,
-      trajectoryRecorder: { recordEvent, flush: async () => {} },
+      trajectoryRecorder: { recordEvent, flush },
       synthesizedPayloadCount: 0,
       emptyAssistantReplyIsSilent: false,
       hasTerminalOutput: true,
@@ -148,7 +149,7 @@ describe("finalizeEmbeddedAttempt", () => {
       },
     });
 
-    await decideFallback?.("terminal");
+    await expect(decideFallback?.("terminal")).resolves.toBeUndefined();
     expect(recordEvent).toHaveBeenCalledWith(
       "skill.invocation.completed",
       expect.objectContaining({ status: "success" }),
