@@ -256,7 +256,6 @@ import {
   normalizeEmbeddedRunAttemptResult,
 } from "./run/run-attempt-result.js";
 import {
-  CODEX_HARNESS_ID,
   resolveAttemptTrajectoryAttribution,
   resolveInitialEmbeddedRunModel,
   resolveInitialThinkLevel,
@@ -1908,21 +1907,20 @@ async function runEmbeddedAgentInternal(
             provider,
             runtimePlan,
           });
-          const hostTrajectoryRecorder =
-            agentHarness.id === CODEX_HARNESS_ID && !params.disableTrajectory
-              ? createTrajectoryRuntimeRecorder({
-                  cfg: params.config,
-                  env: process.env,
-                  runId: params.runId,
-                  sessionId: activeSessionId,
-                  sessionKey: resolvedSessionKey,
-                  sessionFile: trajectorySessionFile,
-                  provider: trajectoryAttribution.provider,
-                  modelId: trajectoryAttribution.modelId,
-                  modelApi: trajectoryAttribution.modelApi,
-                  workspaceDir: resolvedWorkspace,
-                })
-              : undefined;
+          const hostTrajectoryRecorder = !params.disableTrajectory
+            ? createTrajectoryRuntimeRecorder({
+                cfg: params.config,
+                env: process.env,
+                runId: params.runId,
+                sessionId: activeSessionId,
+                sessionKey: resolvedSessionKey,
+                sessionFile: trajectorySessionFile,
+                provider: trajectoryAttribution.provider,
+                modelId: trajectoryAttribution.modelId,
+                modelApi: trajectoryAttribution.modelApi,
+                workspaceDir: resolvedWorkspace,
+              })
+            : undefined;
           const runAttemptAuthProfileStore = resolveRunAttemptAuthProfileStore();
           if (!startupStagesEmitted) {
             startupStages.mark(EMBEDDED_RUN_ATTEMPT_DISPATCH_STAGE.runtimePlan);

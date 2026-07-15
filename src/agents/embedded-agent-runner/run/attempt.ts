@@ -857,7 +857,8 @@ export async function runEmbeddedAttempt(
       });
       trajectoryRecorder = params.disableTrajectory
         ? null
-        : createTrajectoryRuntimeRecorder({
+        : (params.trajectoryRecorder ??
+          createTrajectoryRuntimeRecorder({
             cfg: params.config,
             env: process.env,
             runId: params.runId,
@@ -868,7 +869,7 @@ export async function runEmbeddedAttempt(
             modelId: params.modelId,
             modelApi: params.model.api,
             workspaceDir: params.workspaceDir,
-          });
+          }));
       trajectoryRecorder?.recordEvent("session.started", {
         trigger: params.trigger,
         sessionFile: params.sessionFile,
