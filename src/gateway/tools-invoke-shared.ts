@@ -18,6 +18,7 @@ import { resolveSessionEntryAccessTarget } from "../config/sessions/session-acce
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
 import { isTestDefaultMemorySlotDisabled } from "../plugins/config-state.js";
+import type { PluginHookChannelContext } from "../plugins/hook-types.js";
 import { defaultSlotIdForKey } from "../plugins/slots.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import {
@@ -165,10 +166,13 @@ export async function invokeGatewayTool(params: {
   agentTo?: string;
   agentThreadId?: string;
   senderIsOwner?: boolean;
+  channelContext?: PluginHookChannelContext;
   clientCaps?: string[];
   conversationReadOrigin?: ConversationReadInvocationOrigin;
   toolCallIdPrefix: string;
   approvalMode?: "request" | "report";
+  surface?: "http" | "loopback";
+  allowRequestedToolExpansion?: boolean;
 }): Promise<ToolsInvokeOutcome> {
   const conversationReadOrigin = normalizeConversationReadInvocationOrigin(
     params.conversationReadOrigin,
@@ -202,7 +206,8 @@ export async function invokeGatewayTool(params: {
   }
 
   const knownCoreTool = isKnownCoreToolId(toolName);
-  const gatewayRequestedTools = knownCoreTool ? [] : [toolName];
+  const gatewayRequestedTools =
+    knownCoreTool || params.allowRequestedToolExpansion === false ? [] : [toolName];
 
   const action = normalizeOptionalString(params.input.action);
   const argsRaw = params.input.args;
@@ -237,11 +242,12 @@ export async function invokeGatewayTool(params: {
       agentTo: params.agentTo,
       agentThreadId: params.agentThreadId,
       senderIsOwner: params.senderIsOwner,
+      channelContext: params.channelContext,
       clientCaps: params.clientCaps,
       conversationReadOrigin,
       allowGatewaySubagentBinding: true,
       allowMediaInvokeCommands: true,
-      surface: "http",
+      surface: params.surface ?? "http",
       disablePluginTools,
       gatewayRequestedTools,
     });

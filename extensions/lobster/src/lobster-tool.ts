@@ -43,15 +43,11 @@ type LobsterToolOptions = {
   toolContext?: OpenClawPluginToolContext;
 };
 
-type ToolsInvokeResult =
-  | { ok: true; output: unknown }
-  | { ok: false; error?: { message?: string }; requiresApproval?: boolean };
-
 export function createEmbeddedOpenClawInvoke(
   api: OpenClawPluginApi,
   ctx: OpenClawPluginToolContext | undefined,
 ) {
-  if (!ctx?.sessionKey || !api.runtime?.gateway) {
+  if (!ctx?.sessionKey || !api.runtime?.tools) {
     return undefined;
   }
   return async (params: {
@@ -60,13 +56,11 @@ export function createEmbeddedOpenClawInvoke(
     args: Record<string, unknown>;
     idempotencyKey?: string;
   }) => {
-    const result = await api.runtime.gateway.request<ToolsInvokeResult>("tools.invoke", {
+    const result = await api.runtime.tools.invoke(ctx, {
       name: params.tool,
       action: params.action,
       args: params.args,
-      sessionKey: ctx.sessionKey,
       ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
-      ...(ctx.conversationReadOrigin ? { conversationReadOrigin: ctx.conversationReadOrigin } : {}),
     });
     if (!result.ok) {
       const suffix = result.requiresApproval ? " (approval required)" : "";

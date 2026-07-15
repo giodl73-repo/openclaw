@@ -42,7 +42,7 @@ Enable it in an agent allowlist:
 
 Some Lobster pipelines may include a `openclaw.invoke` step to call back into OpenClaw tools/plugins (for example: `gog` for Google Workspace, `gh` for GitHub, `message.send`, etc.).
 
-In the embedded plugin, `openclaw.invoke` uses the trusted in-process Gateway bridge and automatically inherits the active session. No Gateway URL or bearer token is required. The target tool is still filtered by the active agent, channel, sender, subagent, and Gateway tool policies.
+In the embedded plugin, `openclaw.invoke` uses OpenClaw's context-bound plugin runtime and automatically inherits the active session and caller policy context. No Gateway URL or bearer token is required. The runtime reuses OpenClaw's canonical tool invocation engine, so the target remains filtered by the active agent, channel, sender, subagent, and Gateway tool policies.
 
 Embedded workflows cannot override the active session. With `--each`, a supplied or TaskFlow-derived idempotency key is suffixed with the stable input index so each mapped side effect remains distinct.
 

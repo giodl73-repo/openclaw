@@ -527,6 +527,12 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
               }),
           } satisfies PluginRuntime["gateway"];
         }
+        if (prop === "tools") {
+          const tools = getRuntimeProperty();
+          return {
+            invoke: (context, params) => runWithPluginScope(() => tools.invoke(context, params)),
+          } satisfies PluginRuntime["tools"];
+        }
         if (prop === "nodes") {
           const nodes = getRuntimeProperty();
           return {

@@ -39,17 +39,26 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 describe("lobster plugin tool", () => {
   it("binds embedded OpenClaw invocation to the active session", async () => {
-    const request = vi.fn().mockResolvedValue({ ok: true, output: { sent: true } });
+    const invokeTool = vi.fn().mockResolvedValue({
+      ok: true,
+      toolName: "message",
+      output: { sent: true },
+      source: "core",
+    });
     const api = fakeApi({
       runtime: {
         version: "test",
-        gateway: { request },
+        tools: { invoke: invokeTool },
       } as unknown as OpenClawPluginApi["runtime"],
     });
-    const invoke = createEmbeddedOpenClawInvoke(
-      api,
-      fakeCtx({ sessionKey: "agent:main:email:42" }),
-    );
+    const context = fakeCtx({
+      sessionKey: "agent:main:email:42",
+      messageChannel: "email",
+      agentAccountId: "support",
+      requesterSenderId: "customer-42",
+      senderIsOwner: false,
+    });
+    const invoke = createEmbeddedOpenClawInvoke(api, context);
 
     await expect(
       invoke?.({
@@ -59,11 +68,10 @@ describe("lobster plugin tool", () => {
         idempotencyKey: "lobster:flow-1:notify",
       }),
     ).resolves.toEqual({ sent: true });
-    expect(request).toHaveBeenCalledWith("tools.invoke", {
+    expect(invokeTool).toHaveBeenCalledWith(context, {
       name: "message",
       action: "send",
       args: { to: "customer@example.com" },
-      sessionKey: "agent:main:email:42",
       idempotencyKey: "lobster:flow-1:notify",
     });
   });

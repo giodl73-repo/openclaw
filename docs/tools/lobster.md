@@ -209,10 +209,12 @@ openclaw.invoke --tool llm-task --action json --step-id classify-email --args-js
 }'
 ```
 
-The invoked tool remains subject to the active agent, channel, sender,
-subagent, and Gateway policies. The bridge refuses recursive invocation of the
-`lobster` tool. Standalone Lobster continues to use the HTTP tool bridge and
-therefore still requires its Gateway URL and authentication context.
+The embedded bridge uses OpenClaw's context-bound plugin runtime and canonical
+tool invocation engine. The invoked tool remains subject to the active agent,
+channel, sender, subagent, and Gateway policies. The bridge refuses recursive
+invocation of the `lobster` tool. Standalone Lobster continues to use the HTTP
+tool bridge and therefore still requires its Gateway URL and authentication
+context.
 
 See [LLM Task](/tools/llm-task) for details and configuration options.
 
