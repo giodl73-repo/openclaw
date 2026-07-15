@@ -19,6 +19,7 @@ openclaw backup create --verify
 openclaw backup create --no-include-workspace
 openclaw backup create --only-config
 openclaw backup verify ./2026-03-09T08-00-00.000+08-00-openclaw-backup.tar.gz
+openclaw backup publish --managed --json < publication-request.json
 openclaw backup sqlite create --global --repository ~/Backups/openclaw-sqlite
 openclaw backup sqlite create --agent main --repository ~/Backups/openclaw-sqlite
 openclaw backup sqlite list --repository ~/Backups/openclaw-sqlite
@@ -34,6 +35,61 @@ openclaw backup sqlite restore ~/Backups/openclaw-sqlite/<snapshot-id> --target 
 - Existing archive files are never overwritten. Output paths inside the source state/workspace trees are rejected to avoid self-inclusion.
 - `openclaw backup verify <archive>` checks that the archive contains exactly one root manifest, rejects traversal-style archive paths and SQLite sidecars, confirms every manifest-declared payload exists, validates every SQLite snapshot's file shape, and runs full integrity and role checks on canonical OpenClaw databases. Dedicated plugin schemas remain opaque because they may require owner-defined SQLite capabilities. `openclaw backup create --verify` runs that validation immediately after writing the archive.
 - `openclaw backup create --only-config` backs up just the active JSON config file.
+
+## Managed continuity publication
+
+`openclaw backup publish --managed --json` is a host-managed final-handoff
+operation. It accepts one bounded JSON request on stdin, reopens and verifies
+the exact E5a archive, loads only the enabled `lobster-host` plugin, starts only
+that registry's plugin services, publishes through the frozen
+`lobster/continuity` binding, and verifies a full retrieval through a fresh
+provider instance. It does not start the Gateway.
+
+The request shape is strict:
+
+```json
+{
+  "version": "continuity-managed-publication/v1",
+  "receipt": {
+    "ownerId": "sha256:<64 lowercase hex characters>",
+    "ownerGeneration": "runtime-7",
+    "handoffIdentity": "handoff-7",
+    "captureIdentity": "capture-7",
+    "executionIncarnationIdentity": "sha256:<64 lowercase hex characters>",
+    "archivePath": "/srv/openclaw/handoff/continuity.tar.gz",
+    "archiveSha256": "<64 lowercase hex characters>",
+    "archiveSize": 123456,
+    "manifestSha256": "<64 lowercase hex characters>"
+  },
+  "provider": {
+    "id": "lobster/continuity",
+    "version": "continuity-publication-provider/v1",
+    "generation": "lobster-continuity-1",
+    "hostBundleIdentity": "lobster/host@1.0.0"
+  }
+}
+```
+
+Unknown fields, alternate destinations, commands, URLs, headers, and
+credentials are rejected. Success returns the portable immutable acceptance
+receipt plus the handoff and execution identities. Failures are JSON with a
+`hold`, `retry-same-publication`, or `quarantine` disposition.
+
+`ownerGeneration`, `handoffIdentity`, and `captureIdentity` must use the
+continuity publication identifier grammar: 1-256 characters beginning with an
+ASCII letter or digit and containing only letters, digits, `.`, `_`, `:`, `/`,
+`@`, `+`, `#`, or `-`. Lobster must preserve those exact E5a values rather than
+rewriting them for publication.
+
+`hostBundleIdentity` is the portable bundle ID and exact semantic version. The
+managed process validates it after starting the scoped bundle, then freezes
+that process's exact registration generation in the acceptance receipt.
+Process-local registration incarnation numbers are never carried from E5a into
+a separate E5b process.
+
+The `lobster-host` plugin stays disabled by default. Its required
+`publicationRoot` and `providerGeneration` config is documented in the bundled
+plugin README.
 
 ## SQLite snapshots
 

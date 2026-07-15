@@ -3,6 +3,11 @@ import type { Command } from "commander";
 import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
 import {
+  backupPublishManagedCommand,
+  managedPublicationRequestFailure,
+  readManagedPublicationRequestFromStdin,
+} from "../../commands/backup-publish-managed.js";
+import {
   backupSqliteCreateCommand,
   backupSqliteListCommand,
   backupSqliteRestoreCommand,
@@ -95,6 +100,29 @@ export function registerBackupCommand(program: Command) {
           archive: archive as string,
           json: Boolean(opts.json),
         });
+      });
+    });
+
+  backup
+    .command("publish")
+    .description("Publish and freshly verify one managed continuity handoff")
+    .option("--managed", "Read a strict managed publication request from stdin")
+    .option("--json", "Output JSON", false)
+    .action(async (opts: { managed?: boolean; json?: boolean }) => {
+      if (!opts.managed || !opts.json) {
+        defaultRuntime.error("backup publish requires --managed --json.");
+        defaultRuntime.exit(1);
+        return;
+      }
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        let rawRequest: string;
+        try {
+          rawRequest = await readManagedPublicationRequestFromStdin();
+        } catch (error) {
+          managedPublicationRequestFailure(defaultRuntime, error);
+          return;
+        }
+        await backupPublishManagedCommand(defaultRuntime, rawRequest);
       });
     });
 

@@ -230,7 +230,9 @@ export function createPluginApiFactory(
               registerSecurityAuditCollector: (collector) =>
                 registerSecurityAuditCollector(record, collector),
               registerHostIntegrationBundle: (manifest) =>
-                registerHostIntegrationBundle(record, manifest),
+                isPluginRegistryRetired(registry)
+                  ? () => {}
+                  : registerHostIntegrationBundle(record, manifest),
               registerProviderRequestTrafficPolicy: (registration) => {
                 if (
                   registryParams.activateGlobalSideEffects === false ||

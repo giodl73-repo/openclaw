@@ -18,6 +18,7 @@ type PluginApiLifecyclePolicy = {
 };
 
 const PLUGIN_API_METHOD_POLICIES: Partial<Record<PluginApiMethodName, PluginApiLifecyclePolicy>> = {
+  registerHostIntegrationBundle: { phase: "runtime", lateCallable: true },
   emitAgentEvent: { phase: "runtime", lateCallable: true },
   sendSessionAttachment: { phase: "runtime", lateCallable: true },
   scheduleSessionTurn: { phase: "runtime", lateCallable: true },

@@ -5,11 +5,14 @@ import { registerBackupCommand } from "./register.backup.js";
 
 const mocks = vi.hoisted(() => ({
   backupCreateCommand: vi.fn(),
+  backupPublishManagedCommand: vi.fn(),
   backupSqliteCreateCommand: vi.fn(),
   backupSqliteListCommand: vi.fn(),
   backupSqliteRestoreCommand: vi.fn(),
   backupSqliteVerifyCommand: vi.fn(),
   backupVerifyCommand: vi.fn(),
+  managedPublicationRequestFailure: vi.fn(),
+  readManagedPublicationRequestFromStdin: vi.fn(),
   runtime: {
     log: vi.fn(),
     error: vi.fn(),
@@ -18,11 +21,14 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const backupCreateCommand = mocks.backupCreateCommand;
+const backupPublishManagedCommand = mocks.backupPublishManagedCommand;
 const backupSqliteCreateCommand = mocks.backupSqliteCreateCommand;
 const backupSqliteListCommand = mocks.backupSqliteListCommand;
 const backupSqliteRestoreCommand = mocks.backupSqliteRestoreCommand;
 const backupSqliteVerifyCommand = mocks.backupSqliteVerifyCommand;
 const backupVerifyCommand = mocks.backupVerifyCommand;
+const managedPublicationRequestFailure = mocks.managedPublicationRequestFailure;
+const readManagedPublicationRequestFromStdin = mocks.readManagedPublicationRequestFromStdin;
 const runtime = mocks.runtime;
 
 vi.mock("../../commands/backup.js", () => ({
@@ -31,6 +37,12 @@ vi.mock("../../commands/backup.js", () => ({
 
 vi.mock("../../commands/backup-verify.js", () => ({
   backupVerifyCommand: mocks.backupVerifyCommand,
+}));
+
+vi.mock("../../commands/backup-publish-managed.js", () => ({
+  backupPublishManagedCommand: mocks.backupPublishManagedCommand,
+  managedPublicationRequestFailure: mocks.managedPublicationRequestFailure,
+  readManagedPublicationRequestFromStdin: mocks.readManagedPublicationRequestFromStdin,
 }));
 
 vi.mock("../../commands/backup-sqlite.js", () => ({
@@ -54,11 +66,13 @@ describe("registerBackupCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     backupCreateCommand.mockResolvedValue(undefined);
+    backupPublishManagedCommand.mockResolvedValue(undefined);
     backupSqliteCreateCommand.mockResolvedValue(undefined);
     backupSqliteListCommand.mockResolvedValue(undefined);
     backupSqliteRestoreCommand.mockResolvedValue(undefined);
     backupSqliteVerifyCommand.mockResolvedValue(undefined);
     backupVerifyCommand.mockResolvedValue(undefined);
+    readManagedPublicationRequestFromStdin.mockResolvedValue('{"version":"request"}');
   });
 
   function expectForwardedOptions(command: typeof backupCreateCommand): Record<string, unknown> {
@@ -111,6 +125,32 @@ describe("registerBackupCommand", () => {
     const options = expectForwardedOptions(backupVerifyCommand);
     expect(options.archive).toBe("/tmp/openclaw-backup.tar.gz");
     expect(options.json).toBe(true);
+  });
+
+  it("requires --managed --json for backup publish", async () => {
+    await runCli(["backup", "publish", "--managed"]);
+
+    expect(runtime.error).toHaveBeenCalledWith("backup publish requires --managed --json.");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(readManagedPublicationRequestFromStdin).not.toHaveBeenCalled();
+    expect(backupPublishManagedCommand).not.toHaveBeenCalled();
+  });
+
+  it("reads bounded stdin and runs managed backup publish", async () => {
+    await runCli(["backup", "publish", "--managed", "--json"]);
+
+    expect(readManagedPublicationRequestFromStdin).toHaveBeenCalledOnce();
+    expect(backupPublishManagedCommand).toHaveBeenCalledWith(runtime, '{"version":"request"}');
+  });
+
+  it("reports managed publication stdin failures as JSON", async () => {
+    const error = new Error("too large");
+    readManagedPublicationRequestFromStdin.mockRejectedValueOnce(error);
+
+    await runCli(["backup", "publish", "--managed", "--json"]);
+
+    expect(managedPublicationRequestFailure).toHaveBeenCalledWith(runtime, error);
+    expect(backupPublishManagedCommand).not.toHaveBeenCalled();
   });
 
   it("registers the SQLite snapshot command group", () => {

@@ -6,6 +6,7 @@ import {
   type HostIntegrationBundleManifestV1,
 } from "../hosting/host-integration-bundle.js";
 import { createPluginRecord } from "./loader-records.js";
+import { markPluginRegistryRetired } from "./registry-lifecycle.js";
 import { createPluginRegistry } from "./registry.js";
 import { createPluginRuntime } from "./runtime/index.js";
 
@@ -99,5 +100,30 @@ describe("plugin host-integration registration", () => {
 
     unregisterFirst();
     expect(getCurrentHostIntegrationBundleSnapshotV1()).toBeUndefined();
+  });
+
+  it("does not let a retired registry republish a host bundle", () => {
+    const pluginRegistry = createPluginRegistry({
+      logger: { info() {}, warn() {}, error() {}, debug() {} },
+      runtime: createPluginRuntime(),
+      activateGlobalSideEffects: false,
+    });
+    const api = pluginRegistry.createApi(
+      createPluginRecord({
+        id: "retired-host",
+        name: "Retired Host",
+        source: "/plugins/retired-host/index.js",
+        origin: "global",
+        enabled: true,
+        configSchema: false,
+      }),
+      { config: {} as OpenClawConfig },
+    );
+    markPluginRegistryRetired(pluginRegistry.registry);
+
+    const unregister = api.registerHostIntegrationBundle(manifest());
+
+    expect(getCurrentHostIntegrationBundleSnapshotV1()).toBeUndefined();
+    expect(() => unregister()).not.toThrow();
   });
 });

@@ -45,5 +45,13 @@ export const LOBSTER_HOST_BUNDLE_MANIFEST_V1 = {
       required: true,
       readinessCriteria: ["provider.request.carrier.lobster"],
     },
+    {
+      owner: "continuity",
+      kind: "continuity-publication-provider",
+      id: "lobster/continuity",
+      version: "continuity-publication-provider/v1",
+      required: true,
+      readinessCriteria: ["continuity.publication.lobster"],
+    },
   ],
 } satisfies HostIntegrationBundleManifestV1;
