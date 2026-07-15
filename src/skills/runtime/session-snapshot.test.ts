@@ -270,4 +270,19 @@ describe("resolveReusableWorkspaceSkillSnapshot", () => {
     );
     expect(snapshotParams.snapshotVersion).toBe(0);
   });
+
+  it("refreshes version-2 snapshots that predate execution metadata", () => {
+    const result = resolveReusableWorkspaceSkillSnapshot({
+      workspaceDir: TEST_WORKSPACE_DIR,
+      config: {},
+      existingSnapshot: {
+        ...strippedSnapshot(),
+        promptFormatVersion: 2,
+      },
+    });
+
+    expect(WORKSPACE_SKILLS_PROMPT_FORMAT_VERSION).toBe(3);
+    expect(result.shouldRefresh).toBe(true);
+    expect(buildWorkspaceSkillSnapshotMock).toHaveBeenCalledOnce();
+  });
 });
