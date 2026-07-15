@@ -1088,9 +1088,6 @@ export async function runEmbeddedAttempt(
           timedOut,
           yieldDetected,
         }),
-        onToolAuditReceipt: (receipt) => {
-          trajectoryRecorder?.recordEvent("audit.receipt", { ...receipt });
-        },
         hasDeliveredSourceReply,
         markSourceReplyDelivered,
         onBlockReply,

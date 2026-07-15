@@ -1487,6 +1487,7 @@ describe("convertOpenClawToolToSdkTool", () => {
 
     expect(result).toEqual({ resultType: "success", textResultForLlm: "hello" });
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "tool-a",
       result: sourceResult,
       isError: false,
@@ -1531,6 +1532,7 @@ describe("convertOpenClawToolToSdkTool", () => {
     await runSdkTool(sdkTool, {});
 
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "tool-a",
       result: {
         content: [
@@ -1588,6 +1590,7 @@ describe("convertOpenClawToolToSdkTool", () => {
 
     expect(result).toMatchObject({ resultType: "success" });
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "tool-a",
       result: sourceResult,
       isError: true,

@@ -168,6 +168,7 @@ export async function handleDynamicToolCallWithTimeout(params: {
     terminalReason: "failed" | "cancelled" | "timed_out" = "failed",
   ) => {
     notifyAgentToolResult({
+      toolCallId: params.call.callId,
       toolName: params.call.tool,
       result: {
         content: [{ type: "text", text: message }],

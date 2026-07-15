@@ -14,7 +14,6 @@ import {
   buildAgentHookContextIdentityFields,
 } from "../../../plugins/hook-agent-context.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
-import type { TrajectoryAuditReceipt } from "../../../trajectory/audit.js";
 import { recordStructuredReplayTrustForToolCall } from "../../agent-tools.before-tool-call.js";
 import { subscribeEmbeddedAgentSession } from "../../embedded-agent-subscribe.js";
 import { runAgentHarnessBeforeAgentFinalizeHook } from "../../harness/lifecycle-hook-helpers.js";
@@ -36,7 +35,6 @@ import {
   type EmbeddedAgentQueueHandle,
   setActiveEmbeddedRun,
 } from "../runs.js";
-import { collectAttemptToolAuditReceipts } from "./attempt-audit-receipts.js";
 import type { EmbeddedAttemptClientToolCallSlot } from "./attempt-result.js";
 import {
   requiresCompletionRequiredAsyncTaskWait,
@@ -79,7 +77,6 @@ export function prepareEmbeddedAttemptStream(input: {
   abortRun: (isTimeout?: boolean, reason?: unknown) => void;
   markExternalAbort: () => void;
   getRunState: () => StreamRunState;
-  onToolAuditReceipt: (receipt: TrajectoryAuditReceipt) => void;
   hasDeliveredSourceReply: () => boolean;
   markSourceReplyDelivered: () => void;
   onBlockReply: EmbeddedRunAttemptParams["onBlockReply"];
@@ -225,16 +222,7 @@ export function prepareEmbeddedAttemptStream(input: {
       sourceReplyDeliveryMode: attempt.sourceReplyDeliveryMode,
       hasDeliveredMessageToolOnlySourceReply: input.hasDeliveredSourceReply,
       onDeliveredMessageToolOnlySourceReply: input.markSourceReplyDelivered,
-      onAgentToolResult: (event) => {
-        for (const receipt of collectAttemptToolAuditReceipts({
-          agentId: input.hookAgentId,
-          attempt,
-          event,
-        })) {
-          input.onToolAuditReceipt(receipt);
-        }
-        attempt.onAgentToolResult?.(event);
-      },
+      onAgentToolResult: attempt.onAgentToolResult,
       onToolResult: attempt.onToolResult,
       onReasoningStream: attempt.onReasoningStream,
       streamReasoningInNonStreamModes: attempt.streamReasoningInNonStreamModes,

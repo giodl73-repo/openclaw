@@ -472,9 +472,9 @@ export function convertOpenClawToolToSdkTool(
   }
 
   let sequentialLock = Promise.resolve();
-  const notifyToolResult = (result: unknown, isError: boolean) => {
+  const notifyToolResult = (toolCallId: string, result: unknown, isError: boolean) => {
     try {
-      ctx.onAgentToolResult?.({ toolName: sourceTool.name, result, isError });
+      ctx.onAgentToolResult?.({ toolCallId, toolName: sourceTool.name, result, isError });
     } catch (error) {
       console.warn("[copilot-tool-bridge] onAgentToolResult handler threw; continuing", error);
     }
@@ -497,6 +497,7 @@ export function convertOpenClawToolToSdkTool(
   ): ToolResultObject => {
     const errorMessage = toError(error).message;
     notifyToolResult(
+      invocation.toolCallId,
       sanitizeToolResult({
         content: [{ type: "text", text: message }],
         details: { status: "failed", error: errorMessage },
@@ -577,7 +578,7 @@ export function convertOpenClawToolToSdkTool(
     const sanitizedResult = sanitizeToolResult(result);
     const resultIsError = sdkResult.resultType === "failure" || isToolResultError(sanitizedResult);
     const resultError = resultIsError ? extractToolErrorMessage(sanitizedResult) : undefined;
-    notifyToolResult(sanitizedResult, resultIsError);
+    notifyToolResult(invocation.toolCallId, sanitizedResult, resultIsError);
     notifyToolCompleted({
       toolName: sourceTool.name,
       toolCallId: invocation.toolCallId,
@@ -654,6 +655,7 @@ async function executeCatalogTool(
     const sanitizedResult = sanitizeToolResult(result);
     const isError = isToolResultError(sanitizedResult);
     input.attemptParams?.onAgentToolResult?.({
+      toolCallId: params.toolCallId,
       toolName: params.toolName,
       result: sanitizedResult,
       isError,
@@ -676,6 +678,7 @@ async function executeCatalogTool(
       details: { status: "failed", error: message },
     });
     input.attemptParams?.onAgentToolResult?.({
+      toolCallId: params.toolCallId,
       toolName: params.toolName,
       result: failure,
       isError: true,

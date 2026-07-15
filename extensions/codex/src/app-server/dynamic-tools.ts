@@ -503,6 +503,7 @@ export function createCodexDynamicToolBridge(params: {
         });
         notifyAgentToolResult(
           options?.onAgentToolResult,
+          call.callId,
           call.tool,
           failedToolResult(message),
           true,
@@ -592,7 +593,13 @@ export function createCodexDynamicToolBridge(params: {
                 },
               }
             : result;
-        notifyAgentToolResult(options?.onAgentToolResult, toolName, observerResult, resultIsError);
+        notifyAgentToolResult(
+          options?.onAgentToolResult,
+          call.callId,
+          toolName,
+          observerResult,
+          resultIsError,
+        );
         void runAgentHarnessAfterToolCallHook({
           toolName,
           toolCallId: call.callId,
@@ -771,7 +778,13 @@ export function createCodexDynamicToolBridge(params: {
           toolName,
           toolCallOrdinal: options?.toolCallOrdinal,
         });
-        notifyAgentToolResult(options?.onAgentToolResult, toolName, failedResult, true);
+        notifyAgentToolResult(
+          options?.onAgentToolResult,
+          call.callId,
+          toolName,
+          failedResult,
+          true,
+        );
         collectToolTelemetry({
           toolName,
           args: executedArgs,
@@ -818,12 +831,14 @@ export function createCodexDynamicToolBridge(params: {
 
 function notifyAgentToolResult(
   observer: EmbeddedRunAttemptParams["onAgentToolResult"] | undefined,
+  toolCallId: string,
   toolName: string,
   result: unknown,
   isError: boolean,
 ) {
   try {
     observer?.({
+      toolCallId,
       toolName,
       result: sanitizeToolResult(result),
       isError,

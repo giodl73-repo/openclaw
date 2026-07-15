@@ -331,6 +331,7 @@ describe("dynamic tool execution helpers", () => {
     expect(onFallbackSelected).toHaveBeenCalledOnce();
     expect(onTimeout).toHaveBeenCalledTimes(1);
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-timeout",
       toolName: "message",
       result: {
         content: [
@@ -423,6 +424,7 @@ describe("dynamic tool execution helpers", () => {
     expect(handleToolCall).not.toHaveBeenCalled();
     expect(onAgentToolResult).toHaveBeenCalledOnce();
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-aborted",
       toolName: "memory_search",
       result: {
         content: [{ type: "text", text: "OpenClaw dynamic tool call aborted before execution." }],
@@ -533,6 +535,7 @@ describe("dynamic tool execution helpers", () => {
       diagnosticTerminalReason: "timed_out",
     });
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-rejected-timeout",
       toolName: "memory_search",
       result: {
         content: [{ type: "text", text: "tool deadline elapsed" }],
