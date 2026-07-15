@@ -1256,6 +1256,43 @@ describe("sessions_spawn tool", () => {
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 
+  it("rejects managed skill invocation on a different target agent", async () => {
+    const tool = createSessionsSpawnTool({
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "invoice-paid" }],
+        resolvedSkills: [
+          {
+            name: "invoice-paid",
+            description: "Record a paid invoice.",
+            filePath: "/skills/invoice-paid/SKILL.md",
+            baseDir: "/skills/invoice-paid",
+            source: "workspace",
+            sourceInfo: {
+              source: "workspace",
+              path: "/skills/invoice-paid/SKILL.md",
+              scope: "project",
+              origin: "top-level",
+            },
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    const result = await tool.execute("call-cross-agent-skill", {
+      task: "Record the payment.",
+      skill: "invoice-paid",
+      agentId: "finance",
+    });
+
+    expectDetailFields(result.details, { status: "error", role: "finance" });
+    expect(requireRecord(result.details, "result details").error).toContain(
+      "requires the child to use the current agent",
+    );
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
   it("uses completionOwnerKey for ACP registerSubagentRun requesterSessionKey", async () => {
     registerAcpBackendForTest();
     const tool = createSessionsSpawnTool({

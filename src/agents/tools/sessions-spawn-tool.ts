@@ -359,6 +359,13 @@ export function createSessionsSpawnTool(
       const label = readStringParam(params, "label") ?? "";
       const runtime = params.runtime === "acp" ? "acp" : "subagent";
       const requestedAgentId = readStringParam(params, "agentId");
+      if (requestedSkill && requestedAgentId) {
+        return jsonResult({
+          status: "error",
+          error: "Managed skill invocation currently requires the child to use the current agent.",
+          role: requestedAgentId,
+        });
+      }
       const resumeSessionId = readStringParam(params, "resumeSessionId");
       const modelOverride = normalizeToolModelOverride(readStringParam(params, "model"));
       const thinkingOverrideRaw = readStringParam(params, "thinking");
