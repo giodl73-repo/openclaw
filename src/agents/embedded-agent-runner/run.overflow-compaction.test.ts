@@ -116,7 +116,6 @@ function makeForwardingCase(internalEvents: AgentInternalEvent[]) {
       requireExplicitMessageTarget: true,
       chatType: "channel",
       senderIsOwner: true,
-      onAgentToolResult,
     },
   } satisfies {
     runId: string;

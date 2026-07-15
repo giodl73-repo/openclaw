@@ -26,7 +26,7 @@ const attempt = {
   runId: "run-1",
   sessionId: "session-1",
   sessionFile: "/tmp/session.jsonl",
-} as never;
+};
 
 function createInput(overrides: Record<string, unknown> = {}) {
   const sessionLockController = {
@@ -124,7 +124,9 @@ describe("cleanupEmbeddedAttemptSessionPhase", () => {
     const input = createInput({
       attempt: {
         ...attempt,
-        registerFallbackDecisionHandler: (handler) => {
+        registerFallbackDecisionHandler: (
+          handler: (decision: "continue" | "terminal") => Promise<void> | void,
+        ) => {
           decideFallback = handler;
         },
         explicitSkillInvocation: {
