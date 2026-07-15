@@ -735,6 +735,7 @@ export function runAgentAttempt(params: {
             workspaceDir: params.workspaceDir,
             cwd: params.cwd,
             config: params.cfg,
+            explicitSkillInvocation: params.opts.explicitSkillInvocation,
             prompt: cliPrompt,
             transcriptPrompt: params.transcriptBody,
             modelProvider: params.providerOverride,

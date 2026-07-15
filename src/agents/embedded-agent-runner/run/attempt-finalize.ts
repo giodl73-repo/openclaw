@@ -1,6 +1,7 @@
 import { formatErrorMessage } from "../../../infra/errors.js";
 import type { ExplicitSkillInvocation } from "../../../skills/types.js";
 import { buildTrajectoryArtifacts } from "../../../trajectory/metadata.js";
+import { recordSkillInvocationCompleted } from "../../../trajectory/skill-invocation.js";
 import {
   resolveAttemptTrajectoryTerminal,
   resolveTerminalAssistantTexts,
@@ -101,14 +102,11 @@ export function finalizeEmbeddedAttempt(
       lastToolError: result.lastToolError,
     }),
   );
-  if (params.explicitSkillInvocation) {
-    trajectoryRecorder?.recordEvent("skill.invocation.completed", {
-      ...params.explicitSkillInvocation,
-      activation: params.explicitSkillInvocation.parentInvocationId ? "orchestration" : "command",
-      caller: params.explicitSkillInvocation.parentInvocationId ? "skill" : "inbound",
-      status: terminal.status,
-    });
-  }
+  recordSkillInvocationCompleted(
+    trajectoryRecorder,
+    params.explicitSkillInvocation,
+    terminal.status,
+  );
   trajectoryRecorder?.recordEvent("session.ended", {
     status: terminal.status,
     aborted: result.aborted,

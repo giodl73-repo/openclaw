@@ -30,6 +30,7 @@ import {
   createTrajectoryRuntimeRecorder,
   toTrajectoryToolDefinitions,
 } from "../../../trajectory/runtime.js";
+import { recordSkillInvocationStarted } from "../../../trajectory/skill-invocation.js";
 import { createBundleLspToolRuntime } from "../../agent-bundle-lsp-runtime.js";
 import { materializeBundleMcpToolsForRun } from "../../agent-bundle-mcp-tools.js";
 import { resolveAgentDir, resolveSessionAgentIds } from "../../agent-scope.js";
@@ -881,15 +882,7 @@ export async function runEmbeddedAttempt(
         toolCount: effectiveTools.length,
         clientToolCount: clientToolDefs.length,
       });
-      if (params.explicitSkillInvocation) {
-        trajectoryRecorder?.recordEvent("skill.invocation.started", {
-          ...params.explicitSkillInvocation,
-          activation: params.explicitSkillInvocation.parentInvocationId
-            ? "orchestration"
-            : "command",
-          caller: params.explicitSkillInvocation.parentInvocationId ? "skill" : "inbound",
-        });
-      }
+      recordSkillInvocationStarted(trajectoryRecorder, params.explicitSkillInvocation);
       const trajectoryFastMode = typeof params.fastMode === "boolean" ? params.fastMode : undefined;
       trajectoryRecorder?.recordEvent(
         "trace.metadata",
