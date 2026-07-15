@@ -51,6 +51,8 @@ export function buildGatewaySessionEventFields(params: {
     label: params.label ?? sessionRow.label ?? null,
     // Explicit null so subscribed clients drop a cleared category during merge-reconcile.
     category: sessionRow.category ?? null,
+    // Explicit null so subscribed clients drop a cleared business-record association.
+    regarding: sessionRow.regarding ?? null,
     displayName: params.displayName ?? sessionRow.displayName ?? null,
     deliveryContext: sessionRow.deliveryContext,
     parentSessionKey: params.parentSessionKey ?? sessionRow.parentSessionKey,

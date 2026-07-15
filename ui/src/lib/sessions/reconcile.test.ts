@@ -75,6 +75,32 @@ describe("reconcileSessionChanged", () => {
     expect(next.row?.category).toBe("Research");
   });
 
+  it("sets and clears a regarding association from live events", () => {
+    const key = "agent:main:email:customer:1";
+    const result = buildResult([{ key, kind: "direct", updatedAt: 1, sessionId: "s1" }]);
+    const regarding = { system: "dynamics", type: "case", id: "case-42", key: "CAS-42" };
+    const set = reconcileSessionChanged(result, {
+      sessionKey: key,
+      key,
+      kind: "direct",
+      updatedAt: 2,
+      sessionId: "s1",
+      regarding,
+    });
+
+    expect(set.row?.regarding).toEqual(regarding);
+
+    const cleared = reconcileSessionChanged(set.result, {
+      sessionKey: key,
+      key,
+      kind: "direct",
+      updatedAt: 3,
+      sessionId: "s1",
+      regarding: null,
+    });
+    expect(cleared.row?.regarding).toBeUndefined();
+  });
+
   it("replaces thinking metadata when the same model changes runtime", () => {
     const key = "agent:main:main";
     const result = buildResult([

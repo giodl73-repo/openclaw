@@ -368,6 +368,9 @@ export function reconcileSessionChanged(
   if (rowFields.category === null) {
     delete row.category;
   }
+  if (rowFields.regarding === null) {
+    delete row.regarding;
+  }
   if (rowFields.displayName === null) {
     delete row.displayName;
   }

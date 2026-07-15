@@ -218,6 +218,19 @@ describe("gateway session utils", () => {
       entry: { sessionId: "session-1", updatedAt: 1, regarding },
     });
     expect(row.regarding).toEqual(regarding);
+    expect(buildGatewaySessionEventFields({ sessionRow: row }).regarding).toEqual(regarding);
+  });
+
+  test("projects a cleared session regarding record as null in change events", () => {
+    const row = buildGatewaySessionRow({
+      cfg: createModelDefaultsConfig({ primary: "openai/gpt-5.4" }),
+      storePath: "",
+      store: {},
+      key: "agent:main:main",
+      entry: { sessionId: "session-1", updatedAt: 1 },
+    });
+
+    expect(buildGatewaySessionEventFields({ sessionRow: row }).regarding).toBeNull();
   });
 
   test("session lists apply a bounded default and expose truncation metadata", async () => {
