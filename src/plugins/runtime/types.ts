@@ -3,6 +3,7 @@
 // public plugin-sdk dts graph (check-plugin-sdk-exports guards this).
 import type { NodePluginToolDescriptor } from "../../../packages/gateway-protocol/src/schema/nodes.js";
 import type { OperatorScope } from "../../gateway/operator-scopes.js";
+import type { OpenClawPluginToolContext } from "../tool-types.js";
 import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
 
 export type { RuntimeLogger };
@@ -36,12 +37,50 @@ export type SubagentRunResult = {
 
 type SubagentWaitParams = {
   runId: string;
+  /** Include the persisted audit summary for this run when the session is known. */
+  sessionKey?: string;
   timeoutMs?: number;
+};
+
+export type SubagentRunAudit = {
+  auditSchema: "openclaw-audit-run";
+  schemaVersion: 1;
+  sessionId: string;
+  sessionKey?: string;
+  runId: string;
+  firstEventAt: string;
+  lastEventAt: string;
+  status?: string;
+  models: Array<{ provider?: string; modelId?: string }>;
+  usage?: Partial<
+    Record<"input" | "output" | "cacheRead" | "cacheWrite" | "reasoningTokens" | "total", number>
+  >;
+  cost?: { usd: number; basis: "provider-billed" | "catalog-estimate" | "mixed" };
+  skillInvocations: Array<{
+    invocationId: string;
+    parentInvocationId?: string;
+    parentRunId?: string;
+    commandName?: string;
+    skillName?: string;
+    skillSource?: string;
+    skillDigest?: string;
+    executionHints?: Record<string, unknown>;
+    status?: string;
+  }>;
+  skills: Array<{
+    skillName: string;
+    skillSource?: string;
+    activation?: string;
+    toolName?: string;
+    toolCallId?: string;
+  }>;
+  receipts: Array<Record<string, unknown>>;
 };
 
 type SubagentWaitResult = {
   status: "ok" | "error" | "timeout";
   error?: string;
+  audit?: SubagentRunAudit;
 };
 
 type SubagentGetSessionMessagesParams = {
@@ -98,6 +137,27 @@ export type RuntimeGatewayRequestOptions = {
   scopes?: OperatorScope[];
 };
 
+export type RuntimeToolInvokeParams = {
+  name: string;
+  action?: string;
+  args?: Record<string, unknown>;
+  idempotencyKey?: string;
+};
+
+export type RuntimeToolInvokeResult =
+  | {
+      ok: true;
+      toolName: string;
+      output: unknown;
+      source: "core" | "plugin" | "channel";
+    }
+  | {
+      ok: false;
+      toolName: string;
+      requiresApproval?: boolean;
+      error: { code: string; message: string };
+    };
+
 /** Trusted in-process runtime surface injected into native plugins. */
 export type PluginRuntime = PluginRuntimeCore & {
   gateway: {
@@ -109,6 +169,13 @@ export type PluginRuntime = PluginRuntimeCore & {
       params?: Record<string, unknown>,
       options?: RuntimeGatewayRequestOptions,
     ) => Promise<T>;
+  };
+  tools: {
+    /** Invoke a tool under the trusted policy context of the current plugin tool call. */
+    invoke: (
+      context: OpenClawPluginToolContext,
+      params: RuntimeToolInvokeParams,
+    ) => Promise<RuntimeToolInvokeResult>;
   };
   subagent: {
     run: (params: SubagentRunParams) => Promise<SubagentRunResult>;

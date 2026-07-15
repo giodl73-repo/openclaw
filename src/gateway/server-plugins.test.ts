@@ -38,6 +38,7 @@ type HandleGatewayRequestOptions = GatewayRequestOptions & {
 const handleGatewayRequest = vi.hoisted(() =>
   vi.fn(async (_opts: HandleGatewayRequestOptions) => {}),
 );
+const readTrajectoryAuditRun = vi.hoisted(() => vi.fn());
 
 vi.mock("../plugins/loader.js", () => ({
   clearActivatedPluginRuntimeState,
@@ -68,6 +69,10 @@ vi.mock("../channels/plugins/binding-registry.js", async () => {
 
 vi.mock("./server-methods.js", () => ({
   handleGatewayRequest,
+}));
+
+vi.mock("../trajectory/audit-run-reader.js", () => ({
+  readTrajectoryAuditRun,
 }));
 
 vi.mock("../channels/registry.js", () => ({
@@ -819,6 +824,49 @@ describe("loadGatewayPlugins", () => {
       }),
     ).resolves.toEqual({
       messages: [{ id: "m-3" }],
+    });
+  });
+
+  test("returns the persisted audit summary when waiting with a session key", async () => {
+    const runtime = await createSubagentRuntime(serverPluginsModule);
+    serverPluginsModule.setFallbackGatewayContext({
+      ...createTestContext("wait-run-audit"),
+      getRuntimeConfig: () => ({}),
+    });
+    readTrajectoryAuditRun.mockReturnValue({
+      auditSchema: "openclaw-audit-run",
+      schemaVersion: 1,
+      sessionId: "session-child",
+      sessionKey: "agent:main:subagent:verify",
+      runId: "run-child",
+      firstEventAt: "2026-07-15T00:00:00.000Z",
+      lastEventAt: "2026-07-15T00:00:01.000Z",
+      models: [],
+      skillInvocations: [],
+      skills: [],
+      receipts: [{ type: "customer.verified" }],
+    });
+    handleGatewayRequest.mockImplementationOnce(async (opts: HandleGatewayRequestOptions) => {
+      expect(opts.req.method).toBe("agent.wait");
+      opts.respond(true, { status: "completed" });
+    });
+
+    await expect(
+      runtime.waitForRun({
+        runId: "run-child",
+        sessionKey: "agent:main:subagent:verify",
+      }),
+    ).resolves.toMatchObject({
+      status: "ok",
+      audit: {
+        runId: "run-child",
+        receipts: [{ type: "customer.verified" }],
+      },
+    });
+    expect(readTrajectoryAuditRun).toHaveBeenCalledWith({
+      cfg: {},
+      runId: "run-child",
+      sessionKey: "agent:main:subagent:verify",
     });
   });
 

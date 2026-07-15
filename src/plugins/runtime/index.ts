@@ -45,6 +45,7 @@ const loadModelAuthRuntime = createLazyRuntimeModule(
 const loadGatewayPluginRuntime = createLazyRuntimeModule(
   () => import("../../gateway/server-plugins.js"),
 );
+const loadToolInvokeRuntime = createLazyRuntimeModule(() => import("./runtime-tools.runtime.js"));
 
 function createRuntimeGateway(): PluginRuntime["gateway"] {
   return {
@@ -55,6 +56,15 @@ function createRuntimeGateway(): PluginRuntime["gateway"] {
     request: async (method, params, options) => {
       const runtime = await loadGatewayPluginRuntime();
       return runtime.dispatchTrustedPluginGatewayMethod(method, params, options);
+    },
+  };
+}
+
+function createRuntimeTools(): PluginRuntime["tools"] {
+  return {
+    invoke: async (context, params) => {
+      const runtime = await loadToolInvokeRuntime();
+      return await runtime.invokeRuntimeTool(context, params);
     },
   };
 }
@@ -269,6 +279,7 @@ export function createPluginRuntime(_options: CreatePluginRuntimeOptions = {}): 
     // always see the same version the CLI reports, avoiding API-version drift.
     version: VERSION,
     gateway: createRuntimeGateway(),
+    tools: createRuntimeTools(),
     config: createRuntimeConfig(),
     agent: createRuntimeAgent(),
     subagent: createLateBindingSubagent(

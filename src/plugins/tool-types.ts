@@ -4,6 +4,7 @@ import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { ConversationReadInvocationOrigin } from "../channels/plugins/conversation-read-origin.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { HookEntry } from "../hooks/types.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../skills/types.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 
 export type OpenClawPluginActiveModelContext = {
@@ -27,6 +28,12 @@ export type OpenClawPluginToolContext = {
   sessionKey?: string;
   /** Ephemeral session UUID - regenerated on /new and /reset. Use for per-conversation isolation. */
   sessionId?: string;
+  /** Stable identifier for the active agent run. */
+  runId?: string;
+  /** Skills visible to the active run, used by managed child skill invocation. */
+  skillsSnapshot?: SkillSnapshot;
+  /** Trusted identity of the explicitly invoked skill, when this run is skill-managed. */
+  explicitSkillInvocation?: ExplicitSkillInvocation;
   /**
    * Runtime-supplied active model metadata for informational use, diagnostics,
    * and plugin-owned policy decisions. This is not a security boundary against

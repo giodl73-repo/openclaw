@@ -10,6 +10,7 @@ import {
 import { jsonResult } from "openclaw/plugin-sdk/tool-results";
 import { Type } from "typebox";
 import type { OpenClawPluginApi } from "../runtime-api.js";
+import type { OpenClawPluginToolContext } from "../runtime-api.js";
 import {
   createEmbeddedLobsterRunner,
   resolveLobsterCwd,
@@ -39,7 +40,44 @@ type JsonLike =
 type LobsterToolOptions = {
   runner?: LobsterRunner;
   taskFlow?: BoundTaskFlow;
+  toolContext?: OpenClawPluginToolContext;
 };
+
+export function createEmbeddedOpenClawInvoke(
+  api: OpenClawPluginApi,
+  ctx: OpenClawPluginToolContext | undefined,
+) {
+  if (!ctx?.sessionKey || !api.runtime?.tools) {
+    return undefined;
+  }
+  return async (params: {
+    tool: string;
+    action?: string;
+    args: Record<string, unknown>;
+    idempotencyKey?: string;
+  }) => {
+    const result = await api.runtime.tools.invoke(ctx, {
+      name: params.tool,
+      ...(params.action ? { action: params.action } : {}),
+      args: params.args,
+      ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
+    });
+    if (!result.ok) {
+      const suffix = result.requiresApproval ? " (approval required)" : "";
+      throw new Error(`${result.error?.message ?? "OpenClaw tool invocation failed"}${suffix}`);
+    }
+    return result.output;
+  };
+}
+
+export function createEmbeddedOpenClawWaitForRun(api: OpenClawPluginApi) {
+  const subagent = api.runtime?.subagent;
+  if (!subagent) {
+    return undefined;
+  }
+  return async (params: { runId: string; sessionKey?: string; timeoutMs: number }) =>
+    await subagent.waitForRun(params);
+}
 
 type ManagedFlowRunParams = {
   controllerId: string;
@@ -231,7 +269,18 @@ function resolveManagedFlowToolResult(result: ManagedLobsterFlowResult) {
 }
 
 export function createLobsterTool(api: OpenClawPluginApi, options?: LobsterToolOptions) {
-  const runner = options?.runner ?? createEmbeddedLobsterRunner();
+  const embeddedInvoke = createEmbeddedOpenClawInvoke(api, options?.toolContext);
+  const embeddedWaitForRun = createEmbeddedOpenClawWaitForRun(api);
+  const runner =
+    options?.runner ??
+    createEmbeddedLobsterRunner(
+      embeddedInvoke && embeddedWaitForRun
+        ? {
+            invokeOpenClawTool: embeddedInvoke,
+            waitForOpenClawRun: embeddedWaitForRun,
+          }
+        : undefined,
+    );
   return {
     name: "lobster",
     label: "Lobster Workflow",

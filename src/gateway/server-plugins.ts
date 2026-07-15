@@ -26,6 +26,7 @@ import { createPluginRuntimeLoaderLogger } from "../plugins/runtime/load-context
 import type { PluginRuntime, RuntimeGatewayRequestOptions } from "../plugins/runtime/types.js";
 import type { PluginLogger, PluginOrigin } from "../plugins/types.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
+import { readTrajectoryAuditRun } from "../trajectory/audit-run-reader.js";
 import { resolveSafeTimeoutDelayMs } from "../utils/timer-delay.js";
 import { ADMIN_SCOPE, APPROVALS_SCOPE, WRITE_SCOPE } from "./method-scopes.js";
 import { normalizeOperatorScopeList, type OperatorScope } from "./operator-scopes.js";
@@ -628,8 +629,20 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
       if (status !== "ok" && status !== "error" && status !== "timeout") {
         throw new Error(`Gateway agent.wait returned unexpected status: ${payload?.status}`);
       }
+      const runtimeConfig = params.sessionKey
+        ? getFallbackGatewayContext()?.getRuntimeConfig?.()
+        : undefined;
+      const audit =
+        status === "ok" && params.sessionKey && runtimeConfig
+          ? readTrajectoryAuditRun({
+              cfg: runtimeConfig,
+              runId: params.runId,
+              sessionKey: params.sessionKey,
+            })
+          : undefined;
       return {
         status,
+        ...(audit ? { audit } : {}),
         ...(status !== "ok" &&
           typeof payload?.error === "string" &&
           payload.error && { error: payload.error }),
