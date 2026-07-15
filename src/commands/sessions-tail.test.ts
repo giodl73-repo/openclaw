@@ -522,6 +522,51 @@ describe("sessionsTailCommand", () => {
     });
   });
 
+  it("includes retained trajectories from rotated session ids in a thread audit", async () => {
+    const runtime = makeRuntime();
+    await writeSessionEntry(sessionKey, {
+      status: "idle",
+      usageFamilySessionIds: ["session-old", "session-one"],
+    });
+    await appendEvents(
+      [
+        makeEvent({
+          sessionId: "session-old",
+          type: "audit.receipt",
+          ts: "2026-05-18T12:04:19.000Z",
+          runId: "run-old",
+          data: { type: "customer.verified" },
+        }),
+      ],
+      { sessionId: "session-old" },
+    );
+    await appendEvents([
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:20.000Z",
+        runId: "run-current",
+        data: { type: "case.resolved" },
+      }),
+    ]);
+
+    await sessionsTailCommand(
+      { store: storePath, auditThread: true, sessionKey, json: true },
+      runtime,
+    );
+
+    const output = JSON.parse(String(vi.mocked(runtime.log).mock.calls[0]?.[0]));
+    expect(output.outcomes).toEqual([
+      { type: "case.resolved", count: 1 },
+      { type: "customer.verified", count: 1 },
+    ]);
+    expect(output.runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ runId: "run-old" }),
+        expect.objectContaining({ runId: "run-current" }),
+      ]),
+    );
+  });
+
   it("requires an explicit session for a thread audit", async () => {
     const runtime = makeRuntime();
 

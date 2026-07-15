@@ -535,9 +535,10 @@ async function buildTailSelection(params: {
   agentId: string;
   entry: SessionEntry;
   key: string;
+  sessionId?: string;
   storePath: string;
 }): Promise<TailSelection | null> {
-  const sessionId = params.entry.sessionId?.trim();
+  const sessionId = params.sessionId?.trim() || params.entry.sessionId?.trim();
   if (!sessionId) {
     return null;
   }
@@ -546,7 +547,7 @@ async function buildTailSelection(params: {
   try {
     const entrySessionFile = params.entry.sessionFile?.trim();
     const marker = entrySessionFile ? parseSqliteSessionFileMarker(entrySessionFile) : null;
-    if (marker && marker.sessionId === sessionId) {
+    if (marker) {
       return {
         agentId: params.agentId,
         entry: params.entry,
@@ -555,13 +556,17 @@ async function buildTailSelection(params: {
         source: {
           agentId: marker.agentId,
           kind: "sqlite",
-          sessionId: marker.sessionId,
+          sessionId,
           storePath: marker.storePath,
         },
         storePath: params.storePath,
       };
     }
-    sessionFile = resolveSessionFilePath(sessionId, params.entry, {
+    const entryForSession =
+      sessionId === params.entry.sessionId
+        ? params.entry
+        : { ...params.entry, sessionFile: undefined };
+    sessionFile = resolveSessionFilePath(sessionId, entryForSession, {
       agentId: params.agentId,
       sessionsDir,
     });
@@ -583,6 +588,24 @@ async function buildTailSelection(params: {
     },
     storePath: params.storePath,
   };
+}
+
+async function buildAuditFamilySelections(selection: TailSelection): Promise<TailSelection[]> {
+  const sessionIds = [selection.sessionId, ...(selection.entry.usageFamilySessionIds ?? [])]
+    .map((sessionId) => sessionId.trim())
+    .filter((sessionId, index, values) => sessionId && values.indexOf(sessionId) === index);
+  const family = await Promise.all(
+    sessionIds.map((sessionId) =>
+      buildTailSelection({
+        agentId: selection.agentId,
+        entry: selection.entry,
+        key: selection.key,
+        sessionId,
+        storePath: selection.storePath,
+      }),
+    ),
+  );
+  return family.filter((candidate): candidate is TailSelection => candidate !== null);
 }
 
 function selectSessionsToTail(selections: TailSelection[], sessionKey?: string): TailSelection[] {
@@ -918,8 +941,11 @@ export async function sessionsTailCommand(
 
   const followSnapshots = new Map<TailSelection, TrajectorySnapshot>();
   if (opts.auditOrchestrations) {
+    const auditSelections = (
+      await Promise.all(selected.map((selection) => buildAuditFamilySelections(selection)))
+    ).flat();
     renderAuditOrchestrations(
-      selected.flatMap((selection) => readTailSnapshot(selection).events),
+      auditSelections.flatMap((selection) => readTailSnapshot(selection).events),
       runtime,
       { json: opts.json, tailCount },
     );
@@ -927,7 +953,13 @@ export async function sessionsTailCommand(
   }
   if (opts.auditThread) {
     for (const selection of selected) {
-      renderAuditThread(selection, readTailSnapshot(selection).events, runtime, opts.json);
+      const family = await buildAuditFamilySelections(selection);
+      renderAuditThread(
+        selection,
+        family.flatMap((candidate) => readTailSnapshot(candidate).events),
+        runtime,
+        opts.json,
+      );
     }
     return;
   }

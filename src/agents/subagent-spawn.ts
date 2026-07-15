@@ -1075,6 +1075,12 @@ export async function spawnSubagentDirect(
     if (params.explicitSkillInvocation.orchestrationBudget) {
       return { status: "error", error: "descendant skill runs inherit the root token budget" };
     }
+    if (params.cleanup === "delete") {
+      return {
+        status: "error",
+        error: 'budgeted skill runs require cleanup="keep" so descendants retain the owner',
+      };
+    }
   }
   const taskName = taskNameResult.taskName;
   const label = params.label?.trim() || "";

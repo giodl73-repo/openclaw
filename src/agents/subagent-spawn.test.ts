@@ -1149,6 +1149,31 @@ describe("spawnSubagentDirect seam flow", () => {
     );
   });
 
+  it("rejects delete cleanup for a shared budget owner", async () => {
+    const result = await spawnSubagentDirect(
+      {
+        task: "Record the invoice payment.",
+        orchestrationTokenBudget: 5_000,
+        cleanup: "delete",
+        explicitSkillInvocation: {
+          invocationId: "skill-child",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+        },
+      },
+      { agentSessionKey: "agent:main:main" },
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: 'budgeted skill runs require cleanup="keep" so descendants retain the owner',
+    });
+    expect(hoisted.createSessionOrchestrationBudgetMock).not.toHaveBeenCalled();
+    expect(gatewayRequestRecords()).not.toContainEqual(
+      expect.objectContaining({ method: "agent" }),
+    );
+  });
+
   it("returns an error when the initial child session patch is rejected", async () => {
     hoisted.callGatewayMock.mockImplementation(
       async (request: { method?: string; params?: unknown }) => {
