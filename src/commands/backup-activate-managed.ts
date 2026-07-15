@@ -7,6 +7,7 @@ import type {
   ContinuityRestorePlanGroup,
 } from "../continuity/restore-plan.js";
 import { sha256File, sha256Hex } from "../infra/crypto-digest.js";
+import { syncDirectoryEntry } from "../infra/fs-durability.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { isRecord } from "../utils.js";
 import { planContinuityRestore } from "./backup-plan-restore.js";
@@ -278,21 +279,6 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
-async function syncDirectory(directory: string): Promise<void> {
-  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-  try {
-    handle = await fs.open(directory, fsConstants.O_RDONLY);
-    await handle.sync();
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "EPERM" && code !== "EINVAL" && code !== "ENOTSUP" && code !== "EISDIR") {
-      throw error;
-    }
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
 async function writeNewRecord(filePath: string, value: unknown): Promise<string> {
   const raw = canonicalJson(value);
   const handle = await fs.open(
@@ -306,7 +292,7 @@ async function writeNewRecord(filePath: string, value: unknown): Promise<string>
   } finally {
     await handle.close();
   }
-  await syncDirectory(path.dirname(filePath));
+  await syncDirectoryEntry(path.dirname(filePath));
   return recordIdentity(raw);
 }
 
@@ -456,7 +442,7 @@ async function ensureDirectoryPath(
     current = path.join(current, segment);
     try {
       await fs.mkdir(current, { mode: 0o700 });
-      await syncDirectory(parent);
+      await syncDirectoryEntry(parent);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw error;
@@ -575,7 +561,7 @@ async function copyOrVerifyFile(
     await destinationHandle?.close().catch(() => undefined);
     await sourceHandle.close().catch(() => undefined);
   }
-  await syncDirectory(path.dirname(file.canonicalTargetPath));
+  await syncDirectoryEntry(path.dirname(file.canonicalTargetPath));
   await verifyExactFile(file.canonicalTargetPath, file);
 }
 
@@ -709,7 +695,7 @@ async function claimDirectoryRoot(
   try {
     await fs.mkdir(group.canonicalTargetPath, { mode: 0o700 });
     created = true;
-    await syncDirectory(path.dirname(group.canonicalTargetPath));
+    await syncDirectoryEntry(path.dirname(group.canonicalTargetPath));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       throw error;
@@ -848,7 +834,7 @@ export async function executeManagedRestore(
         );
       }
       await fs.mkdir(restoreDirectory, { mode: 0o700 });
-      await syncDirectory(journalRoot);
+      await syncDirectoryEntry(journalRoot);
       return await writeNewRecord(intentPath, intent);
     },
   );

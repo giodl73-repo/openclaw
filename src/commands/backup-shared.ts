@@ -7,6 +7,7 @@ import {
   resolveOAuthDir,
   resolveStateDir,
 } from "../config/config.js";
+import type { ConfigFileSnapshot } from "../config/types.openclaw.js";
 import { pathExists, shortenHomePath } from "../utils.js";
 import { buildCleanupPlan, isPathWithin } from "./cleanup-utils.js";
 
@@ -278,13 +279,23 @@ export async function resolveBackupPlanFromDisk(
     nowMs?: number;
   } = {},
 ): Promise<BackupPlan> {
+  return await resolveBackupPlanFromConfigSnapshot(await readConfigFileSnapshot(), params);
+}
+
+export async function resolveBackupPlanFromConfigSnapshot(
+  configSnapshot: ConfigFileSnapshot,
+  params: {
+    includeWorkspace?: boolean;
+    onlyConfig?: boolean;
+    nowMs?: number;
+  } = {},
+): Promise<BackupPlan> {
   const includeWorkspace = params.includeWorkspace ?? true;
   const onlyConfig = params.onlyConfig ?? false;
   const stateDir = resolveStateDir();
   const configPath = resolveConfigPath();
   const oauthDir = resolveOAuthDir();
 
-  const configSnapshot = await readConfigFileSnapshot();
   if (includeWorkspace && configSnapshot.exists && !configSnapshot.valid) {
     throw new Error(
       `Config invalid at ${shortenHomePath(configSnapshot.path)}. OpenClaw cannot reliably discover custom workspaces for backup. Fix the config or rerun with --no-include-workspace for a partial backup.`,
