@@ -54,6 +54,27 @@ function readBusinessEvents(
   });
 }
 
+function compareThreadEvents(left: TrajectoryEvent, right: TrajectoryEvent): number {
+  const byTimestamp = left.ts.localeCompare(right.ts);
+  if (byTimestamp !== 0) {
+    return byTimestamp;
+  }
+  const bySession = left.sessionId.localeCompare(right.sessionId);
+  if (bySession !== 0) {
+    return bySession;
+  }
+  const bySource = left.source.localeCompare(right.source);
+  if (bySource !== 0) {
+    return bySource;
+  }
+  const bySequence = (left.sourceSeq ?? left.seq) - (right.sourceSeq ?? right.seq);
+  if (bySequence !== 0) {
+    return bySequence;
+  }
+  const byTrace = left.traceId.localeCompare(right.traceId);
+  return byTrace !== 0 ? byTrace : left.type.localeCompare(right.type);
+}
+
 /** Reconstructs one durable business thread from existing session and trajectory facts. */
 export function summarizeTrajectoryAuditThread(params: {
   agentId: string;
@@ -62,8 +83,9 @@ export function summarizeTrajectoryAuditThread(params: {
   regarding?: SessionRegarding;
   events: TrajectoryEvent[];
 }): TrajectoryAuditThreadSummary {
-  const firstEventAt = params.events[0]?.ts;
-  const lastEventAt = params.events.at(-1)?.ts;
+  const events = params.events.toSorted(compareThreadEvents);
+  const firstEventAt = events[0]?.ts;
+  const lastEventAt = events.at(-1)?.ts;
   return {
     auditSchema: "openclaw-audit-thread",
     schemaVersion: 1,
@@ -73,8 +95,8 @@ export function summarizeTrajectoryAuditThread(params: {
     ...(params.regarding ? { regarding: params.regarding } : {}),
     ...(firstEventAt ? { firstEventAt } : {}),
     ...(lastEventAt ? { lastEventAt } : {}),
-    outcomes: readOutcomeCounts(params.events),
-    businessEvents: readBusinessEvents(params.events),
-    runs: summarizeTrajectoryAuditRuns(params.events),
+    outcomes: readOutcomeCounts(events),
+    businessEvents: readBusinessEvents(events),
+    runs: summarizeTrajectoryAuditRuns(events),
   };
 }
