@@ -26,6 +26,7 @@ import {
   isAgentHarnessSessionKey,
   isAgentHarnessSessionStoreEntryProtected,
 } from "../sessions/agent-harness-session-key.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../skills/types.js";
 import { canonicalizeSessionKeyForAgent } from "./session-store-key.js";
 import { resolveGatewayScopedTools } from "./tool-resolution.js";
 
@@ -167,6 +168,9 @@ export async function invokeGatewayTool(params: {
   agentThreadId?: string;
   modelProvider?: string;
   modelId?: string;
+  skillsSnapshot?: SkillSnapshot;
+  parentSkillInvocation?: ExplicitSkillInvocation;
+  parentRunId?: string;
   requesterSenderId?: string;
   senderIsOwner?: boolean;
   channelContext?: PluginHookChannelContext;
@@ -246,6 +250,9 @@ export async function invokeGatewayTool(params: {
       agentThreadId: params.agentThreadId,
       modelProvider: params.modelProvider,
       modelId: params.modelId,
+      skillsSnapshot: params.skillsSnapshot,
+      parentSkillInvocation: params.parentSkillInvocation,
+      parentRunId: params.parentRunId,
       senderIsOwner: params.senderIsOwner,
       requesterSenderId: params.requesterSenderId,
       channelContext: params.channelContext,

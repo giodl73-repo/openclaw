@@ -52,13 +52,13 @@ export function createEmbeddedOpenClawInvoke(
   }
   return async (params: {
     tool: string;
-    action: string;
+    action?: string;
     args: Record<string, unknown>;
     idempotencyKey?: string;
   }) => {
     const result = await api.runtime.tools.invoke(ctx, {
       name: params.tool,
-      action: params.action,
+      ...(params.action ? { action: params.action } : {}),
       args: params.args,
       ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
     });

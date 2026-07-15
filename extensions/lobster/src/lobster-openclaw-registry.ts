@@ -26,13 +26,32 @@ export type LobsterCommandRegistry = {
 
 export type EmbeddedOpenClawInvoke = (params: {
   tool: string;
-  action: string;
+  action?: string;
   args: JsonRecord;
   idempotencyKey?: string;
 }) => Promise<unknown>;
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readOptionalPositiveInteger(value: unknown, flag: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function resolveStepIdempotencyKey(args: JsonRecord, ctx: LobsterCommandContext) {
+  const explicitIdempotencyKey = readOptionalString(args.idempotencyKey ?? args["idempotency-key"]);
+  const flowId = readOptionalString(ctx.env.OPENCLAW_TASK_FLOW_ID);
+  const stepId = readOptionalString(args.stepId ?? args["step-id"]);
+  return explicitIdempotencyKey ?? (flowId && stepId ? `lobster:${flowId}:${stepId}` : undefined);
 }
 
 function parseArgsJson(value: unknown): JsonRecord {
@@ -88,13 +107,7 @@ function createInvokeCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
       if (readOptionalString(args.sessionKey ?? args["session-key"])) {
         throw new Error("embedded openclaw.invoke always uses the current OpenClaw session");
       }
-      const explicitIdempotencyKey = readOptionalString(
-        args.idempotencyKey ?? args["idempotency-key"],
-      );
-      const flowId = readOptionalString(ctx.env.OPENCLAW_TASK_FLOW_ID);
-      const stepId = readOptionalString(args.stepId ?? args["step-id"]);
-      const idempotencyKey =
-        explicitIdempotencyKey ?? (flowId && stepId ? `lobster:${flowId}:${stepId}` : undefined);
+      const idempotencyKey = resolveStepIdempotencyKey(args, ctx);
 
       const invokeOnce = async (toolArgs: JsonRecord, itemIndex?: number) =>
         await invoke({
@@ -130,18 +143,79 @@ function createInvokeCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
   };
 }
 
-/** Overrides only openclaw.invoke; every other Lobster command stays package-owned. */
+function createSkillCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
+  return {
+    name: "openclaw.skill",
+    meta: {
+      description: "Run an available OpenClaw skill as a managed child step",
+      sideEffects: ["spawns_managed_skill"],
+    },
+    help: () =>
+      "openclaw.skill --skill <name> --task <task> [--token-budget <tokens>] [--model <model>] [--task-name <name>] [--step-id <id>]",
+    async run({ input, args, ctx }) {
+      for await (const item of input) {
+        // Skill steps are explicit and do not implicitly consume pipeline input.
+        void item;
+      }
+      const skill = readOptionalString(args.skill);
+      const task = readOptionalString(args.task);
+      if (!skill || !task) {
+        throw new Error("openclaw.skill requires --skill and --task");
+      }
+      if (readOptionalString(args.sessionKey ?? args["session-key"])) {
+        throw new Error("embedded openclaw.skill always uses the current OpenClaw session");
+      }
+      const tokenBudget = readOptionalPositiveInteger(
+        args.tokenBudget ?? args["token-budget"],
+        "openclaw.skill --token-budget",
+      );
+      const model = readOptionalString(args.model);
+      const taskName = readOptionalString(args.taskName ?? args["task-name"]);
+      const result = await invoke({
+        tool: "sessions_spawn",
+        args: {
+          task,
+          skill,
+          runtime: "subagent",
+          mode: "run",
+          ...(tokenBudget ? { tokenBudget } : {}),
+          ...(model ? { model } : {}),
+          ...(taskName ? { taskName } : {}),
+        },
+        idempotencyKey: resolveStepIdempotencyKey(args, ctx),
+      });
+      return { output: outputItems(result) };
+    },
+  };
+}
+
+/** Adds OpenClaw-owned bridges; every other Lobster command stays package-owned. */
 export function createOpenClawLobsterRegistry(
   base: LobsterCommandRegistry,
   invoke: EmbeddedOpenClawInvoke,
 ): LobsterCommandRegistry {
-  const command = createInvokeCommand(invoke);
+  const invokeCommand = createInvokeCommand(invoke);
+  const skillCommand = createSkillCommand(invoke);
   return {
     get(name) {
-      return name === command.name || name === "clawd.invoke" ? command : base.get(name);
+      if (name === invokeCommand.name || name === "clawd.invoke") {
+        return invokeCommand;
+      }
+      if (name === skillCommand.name || name === "clawd.skill") {
+        return skillCommand;
+      }
+      return base.get(name);
     },
     list() {
-      return [...new Set([...base.list(), "openclaw.invoke", "clawd.invoke"])].toSorted();
+      return [
+        ...new Set([
+          ...base.list(),
+          "openclaw.invoke",
+          "clawd.invoke",
+          "openclaw.skill",
+          "clawd.skill",
+        ]),
+      ].toSorted();
     },
   };
 }

@@ -36,6 +36,14 @@ describe("invokeRuntimeTool", () => {
       senderIsOwner: false,
       conversationReadOrigin: "delegated" as const,
       activeModel: { provider: "openai", modelId: "gpt-5.6-luna" },
+      runId: "run-parent",
+      skillsSnapshot: { prompt: "", skills: [{ name: "verify-customer" }], version: 1 },
+      explicitSkillInvocation: {
+        invocationId: "inv-parent",
+        commandName: "support-case",
+        skillName: "support-case",
+        executionHints: { usesSkills: ["verify-customer"] },
+      },
     };
 
     await expect(
@@ -68,6 +76,9 @@ describe("invokeRuntimeTool", () => {
       agentThreadId: "thread-42",
       modelProvider: "openai",
       modelId: "gpt-5.6-luna",
+      skillsSnapshot: context.skillsSnapshot,
+      parentSkillInvocation: context.explicitSkillInvocation,
+      parentRunId: "run-parent",
       requesterSenderId: "customer-42",
       senderIsOwner: false,
       conversationReadOrigin: "delegated",

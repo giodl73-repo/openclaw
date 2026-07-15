@@ -91,6 +91,71 @@ describe("embedded OpenClaw Lobster registry", () => {
     expect(await collect(result?.output ?? input())).toEqual([{ id: "INV-1" }, { id: "INV-2" }]);
   });
 
+  it("runs a managed skill step through sessions_spawn", async () => {
+    const invoke = vi.fn().mockResolvedValue({ status: "accepted", runId: "run-child" });
+    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke).get("openclaw.skill");
+
+    const result = await command?.run({
+      input: input(),
+      args: {
+        skill: "verify-customer",
+        task: "Verify the customer for case 42",
+        "token-budget": "12000",
+        model: "anthropic/claude-sonnet-4-5",
+        "task-name": "verify_customer",
+        "step-id": "verify",
+      },
+      ctx: { env: { OPENCLAW_TASK_FLOW_ID: "flow-42" } },
+    });
+
+    expect(invoke).toHaveBeenCalledWith({
+      tool: "sessions_spawn",
+      args: {
+        task: "Verify the customer for case 42",
+        skill: "verify-customer",
+        runtime: "subagent",
+        mode: "run",
+        tokenBudget: 12000,
+        model: "anthropic/claude-sonnet-4-5",
+        taskName: "verify_customer",
+      },
+      idempotencyKey: "lobster:flow-42:verify",
+    });
+    expect(await collect(result?.output ?? input())).toEqual([
+      { status: "accepted", runId: "run-child" },
+    ]);
+  });
+
+  it("keeps managed skill steps on the current session", async () => {
+    const command = createOpenClawLobsterRegistry(baseRegistry(), vi.fn()).get("clawd.skill");
+
+    await expect(
+      command?.run({
+        input: input(),
+        args: {
+          skill: "verify-customer",
+          task: "Verify the customer",
+          "session-key": "agent:other:main",
+        },
+        ctx: { env: {} },
+      }),
+    ).rejects.toThrow("always uses the current OpenClaw session");
+  });
+
+  it("validates managed skill budgets before invoking OpenClaw", async () => {
+    const invoke = vi.fn();
+    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke).get("openclaw.skill");
+
+    await expect(
+      command?.run({
+        input: input(),
+        args: { skill: "verify-customer", task: "Verify", "token-budget": true },
+        ctx: { env: {} },
+      }),
+    ).rejects.toThrow("--token-budget must be a positive integer");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("rejects attempts to select another OpenClaw session", async () => {
     const command = createOpenClawLobsterRegistry(baseRegistry(), vi.fn()).get("openclaw.invoke");
 
