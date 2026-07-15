@@ -1422,6 +1422,7 @@ describe("gateway agent handler", () => {
   });
 
   it("rejects explicit skill invocation identity from non-backend callers", async () => {
+    mocks.agentCommand.mockClear();
     const respond = await invokeAgent(
       {
         message: "forged child skill",
