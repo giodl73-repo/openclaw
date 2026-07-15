@@ -272,6 +272,12 @@ describe("plugin runtime command execution", () => {
       },
     },
     {
+      name: "exposes context-bound runtime.tools invocation",
+      assert: (runtime: ReturnType<typeof createPluginRuntime>) => {
+        expectFunctionKeys(runtime.tools as Record<string, unknown>, ["invoke"]);
+      },
+    },
+    {
       name: "exposes canonical runtime.tasks task runtimes while keeping legacy TaskFlow aliases",
       assert: (runtime: ReturnType<typeof createPluginRuntime>) => {
         expectFunctionKeys(runtime.tasks.runs as Record<string, unknown>, [

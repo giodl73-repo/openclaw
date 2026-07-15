@@ -181,7 +181,10 @@ export async function runManagedLobsterFlow(
   }
 
   try {
-    const envelope = await params.runner.run(params.runnerParams);
+    const envelope = await params.runner.run({
+      ...params.runnerParams,
+      taskFlowId: flow.flowId,
+    });
     const mutation = applyEnvelopeToFlow({
       taskFlow: params.taskFlow,
       flow,
@@ -244,7 +247,10 @@ export async function resumeManagedLobsterFlow(
   }
 
   try {
-    const envelope = await params.runner.run(params.runnerParams);
+    const envelope = await params.runner.run({
+      ...params.runnerParams,
+      taskFlowId: params.flowId,
+    });
     const mutation = applyEnvelopeToFlow({
       taskFlow: params.taskFlow,
       flow: resumed.flow,

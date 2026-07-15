@@ -112,6 +112,67 @@ describe("spawnSubagentDirect seam flow", () => {
     );
   });
 
+  it.each([
+    {
+      name: "matching managed skill session",
+      managed: true,
+      requesterSessionId: "session-parent",
+      expectedRegarding: { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" },
+    },
+    {
+      name: "rotated managed skill session",
+      managed: true,
+      requesterSessionId: "session-replaced",
+      expectedRegarding: undefined,
+    },
+    {
+      name: "ordinary subagent",
+      managed: false,
+      requesterSessionId: "session-parent",
+      expectedRegarding: undefined,
+    },
+  ])("inherits regarding only for an exact $name", async (testCase) => {
+    const store: Record<string, Record<string, unknown>> = {
+      "agent:main:main": {
+        sessionId: "session-parent",
+        updatedAt: Date.now(),
+        regarding: { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" },
+      },
+    };
+    hoisted.loadSessionStoreMock.mockReturnValue(store);
+    hoisted.updateSessionStoreMock.mockImplementation(
+      async (
+        _storePath: string,
+        mutator: (store: Record<string, Record<string, unknown>>) => unknown,
+      ) => {
+        await mutator(store);
+        return store;
+      },
+    );
+
+    const result = await spawnSubagentDirect(
+      {
+        task: "verify the customer",
+        ...(testCase.managed
+          ? {
+              explicitSkillInvocation: {
+                invocationId: "skill-child",
+                commandName: "verify-customer",
+                skillName: "verify-customer",
+              },
+            }
+          : {}),
+      },
+      {
+        agentSessionKey: "agent:main:main",
+        requesterSessionId: testCase.requesterSessionId,
+      },
+    );
+
+    expect(result.status).toBe("accepted");
+    expect(store[result.childSessionKey ?? ""]?.regarding).toEqual(testCase.expectedRegarding);
+  });
+
   it("rejects explicit same-agent targets when allowAgents excludes the requester", async () => {
     hoisted.configOverride = createConfigOverride({
       agents: {

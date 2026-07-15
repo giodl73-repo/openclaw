@@ -8,6 +8,7 @@ import {
  * Normalizes workspace, delivery, browser, sandbox, and active-model inputs before plugin tool invocation.
  */
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../skills/types.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentWorkspaceDir, resolveSessionAgentIds } from "./agent-scope.js";
@@ -34,6 +35,9 @@ export type OpenClawPluginToolOptions = {
   conversationReadOrigin?: ConversationReadInvocationOrigin;
   requesterAgentIdOverride?: string;
   sessionId?: string;
+  runId?: string;
+  skillsSnapshot?: SkillSnapshot;
+  explicitSkillInvocation?: ExplicitSkillInvocation;
   /**
    * Explicit one-shot local CLI runs should not keep plugin-owned process
    * resources alive after emitting their result.
@@ -93,6 +97,9 @@ export function resolveOpenClawPluginToolInputs(params: {
       agentId: sessionAgentId,
       sessionKey: options?.agentSessionKey,
       sessionId: options?.sessionId,
+      runId: options?.runId,
+      skillsSnapshot: options?.skillsSnapshot,
+      explicitSkillInvocation: options?.explicitSkillInvocation,
       activeModel,
       browser: {
         sandboxBridgeUrl: options?.sandboxBrowserBridgeUrl,

@@ -503,6 +503,215 @@ describe("createEmbeddedLobsterRunner", () => {
     ).resolves.toMatchObject({ ok: true, status: "ok" });
   });
 
+  it("requires approval before resolving a verified customer case", async () => {
+    const events: string[] = [];
+    const invoke = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        events.push("spawn:verify");
+        return {
+          status: "accepted",
+          runId: "run-verify",
+          childSessionKey: "agent:main:subagent:verify",
+        };
+      })
+      .mockImplementationOnce(async () => {
+        events.push("spawn:resolve");
+        return {
+          status: "accepted",
+          runId: "run-resolve",
+          childSessionKey: "agent:main:subagent:resolve",
+        };
+      });
+    const waitForRun = vi.fn(async ({ runId }: { runId: string }) => {
+      events.push(`complete:${runId}`);
+      return {
+        status: "ok" as const,
+        audit: {
+          receipts:
+            runId === "run-verify"
+              ? [{ type: "customer.verified", data: { authorizationCode: "RET-42" } }]
+              : [{ type: "case.resolved" }],
+        },
+      };
+    });
+    const runner = createEmbeddedLobsterRunner({
+      invokeOpenClawTool: invoke,
+      waitForOpenClawRun: waitForRun,
+    });
+
+    const pending = await runner.run({
+      action: "run",
+      pipeline: path.resolve("extensions/lobster/examples/support-case.lobster"),
+      argsJson: '{"case_id":"CAS-42"}',
+      cwd: process.cwd(),
+      timeoutMs: 2000,
+      maxStdoutBytes: 4096,
+      taskFlowId: "flow-case-42",
+    });
+
+    expect(pending).toMatchObject({
+      ok: true,
+      status: "needs_approval",
+      requiresApproval: {
+        type: "approval_request",
+        prompt: "Resolve this verified customer case?",
+        items: [{ type: "customer.verified" }],
+      },
+    });
+    expect(invoke).toHaveBeenCalledOnce();
+
+    if (!pending.ok || !pending.requiresApproval?.resumeToken) {
+      throw new Error("expected approval resume token");
+    }
+    const completed = await runner.run({
+      action: "resume",
+      token: pending.requiresApproval.resumeToken,
+      approve: true,
+      cwd: process.cwd(),
+      timeoutMs: 2000,
+      maxStdoutBytes: 4096,
+      taskFlowId: "flow-case-42",
+    });
+
+    expect(invoke.mock.calls).toEqual([
+      [
+        {
+          tool: "sessions_spawn",
+          args: {
+            task: "Verify the customer for case CAS-42",
+            skill: "verify-customer",
+            runtime: "subagent",
+            mode: "run",
+            taskName: "verify_customer",
+          },
+          idempotencyKey: "lobster:flow-case-42:verify-customer",
+        },
+      ],
+      [
+        {
+          tool: "sessions_spawn",
+          args: {
+            task: "Resolve case CAS-42 using the authorization code in workflow-input.json",
+            skill: "resolve-case",
+            runtime: "subagent",
+            mode: "run",
+            taskName: "resolve_case",
+            attachments: [
+              {
+                name: "workflow-input.json",
+                content: '{"authorizationCode":"RET-42"}',
+                encoding: "utf8",
+                mimeType: "application/json",
+              },
+            ],
+          },
+          idempotencyKey: "lobster:flow-case-42:resolve-case",
+        },
+      ],
+    ]);
+    expect(events).toEqual([
+      "spawn:verify",
+      "complete:run-verify",
+      "spawn:resolve",
+      "complete:run-resolve",
+    ]);
+    expect(completed).toMatchObject({ ok: true, status: "ok" });
+  });
+
+  it("does not resolve a verified customer case when approval is rejected", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: "accepted",
+      runId: "run-verify",
+      childSessionKey: "agent:main:subagent:verify",
+    });
+    const runner = createEmbeddedLobsterRunner({
+      invokeOpenClawTool: invoke,
+      waitForOpenClawRun: vi.fn().mockResolvedValue({
+        status: "ok",
+        audit: { receipts: [{ type: "customer.verified" }] },
+      }),
+    });
+
+    const pending = await runner.run({
+      action: "run",
+      pipeline: path.resolve("extensions/lobster/examples/support-case.lobster"),
+      argsJson: '{"case_id":"CAS-42"}',
+      cwd: process.cwd(),
+      timeoutMs: 2000,
+      maxStdoutBytes: 4096,
+      taskFlowId: "flow-case-42",
+    });
+    if (!pending.ok || !pending.requiresApproval?.resumeToken) {
+      throw new Error("expected approval resume token");
+    }
+
+    await expect(
+      runner.run({
+        action: "resume",
+        token: pending.requiresApproval.resumeToken,
+        approve: false,
+        cwd: process.cwd(),
+        timeoutMs: 2000,
+        maxStdoutBytes: 4096,
+        taskFlowId: "flow-case-42",
+      }),
+    ).resolves.toMatchObject({ ok: true, status: "cancelled" });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
+  it("stops a managed case workflow when verification fails", async () => {
+    const invoke = vi.fn().mockResolvedValue({ status: "accepted", runId: "run-verify" });
+    const runner = createEmbeddedLobsterRunner({
+      invokeOpenClawTool: invoke,
+      waitForOpenClawRun: vi.fn().mockResolvedValue({
+        status: "error",
+        error: "customer identity did not match",
+      }),
+    });
+
+    await expect(
+      runner.run({
+        action: "run",
+        pipeline: path.resolve("extensions/lobster/examples/support-case.lobster"),
+        argsJson: '{"case_id":"CAS-42"}',
+        cwd: process.cwd(),
+        timeoutMs: 2000,
+        maxStdoutBytes: 4096,
+        taskFlowId: "flow-case-42",
+      }),
+    ).rejects.toThrow("managed skill run error: customer identity did not match");
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
+  it("skips case resolution when verification records no matching receipt", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: "accepted",
+      runId: "run-verify",
+      childSessionKey: "agent:main:subagent:verify",
+    });
+    const runner = createEmbeddedLobsterRunner({
+      invokeOpenClawTool: invoke,
+      waitForOpenClawRun: vi.fn().mockResolvedValue({
+        status: "ok",
+        audit: { receipts: [{ type: "customer.verification_failed" }] },
+      }),
+    });
+
+    await expect(
+      runner.run({
+        action: "run",
+        pipeline: path.resolve("extensions/lobster/examples/support-case.lobster"),
+        argsJson: '{"case_id":"CAS-42"}',
+        cwd: process.cwd(),
+        timeoutMs: 2000,
+        maxStdoutBytes: 4096,
+        taskFlowId: "flow-case-42",
+      }),
+    ).resolves.toMatchObject({ ok: true, status: "ok" });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
   it("requires a pipeline for run", async () => {
     const runner = createEmbeddedLobsterRunner({
       loadRuntime: vi.fn().mockResolvedValue({

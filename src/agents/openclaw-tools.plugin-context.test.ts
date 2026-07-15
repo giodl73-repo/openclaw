@@ -240,6 +240,33 @@ describe("openclaw plugin tool context", () => {
     });
   });
 
+  it("forwards trusted managed-skill run context", () => {
+    const skillsSnapshot = {
+      prompt: "",
+      skills: [{ name: "verify-customer" }],
+      version: 1,
+    };
+    const explicitSkillInvocation = {
+      invocationId: "inv-parent",
+      commandName: "support-case",
+      skillName: "support-case",
+    };
+    const result = resolveOpenClawPluginToolInputs({
+      options: {
+        config: {} as never,
+        runId: "run-parent",
+        skillsSnapshot,
+        explicitSkillInvocation,
+      },
+    });
+
+    expect(result.context).toMatchObject({
+      runId: "run-parent",
+      skillsSnapshot,
+      explicitSkillInvocation,
+    });
+  });
+
   it("does not inject ambient thread defaults into plugin tools", async () => {
     const executeMock = vi.fn(async () => ({
       content: [{ type: "text" as const, text: "ok" }],

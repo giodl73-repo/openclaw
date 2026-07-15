@@ -258,6 +258,8 @@ function resolveAcpUnavailableMessage(opts?: { sandboxed?: boolean; config?: Ope
 export function createSessionsSpawnTool(
   opts?: {
     agentSessionKey?: string;
+    /** Exact requester conversation instance used for managed regarding inheritance. */
+    requesterSessionId?: string;
     /** Separate key used only for completion routing (registerSubagentRun requesterSessionKey). */
     completionOwnerKey?: string;
     agentChannel?: GatewayMessageChannel;
@@ -575,6 +577,7 @@ export function createSessionsSpawnTool(
         },
         {
           agentSessionKey: opts?.agentSessionKey,
+          requesterSessionId: opts?.requesterSessionId,
           completionOwnerKey: opts?.completionOwnerKey,
           agentChannel: opts?.agentChannel,
           agentAccountId: opts?.agentAccountId,

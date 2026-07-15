@@ -239,6 +239,7 @@ vi.mock("../agents/agent-tools.before-tool-call.js", () => ({
 const { authorizeHttpGatewayConnect } = await import("./auth.js");
 const { handleToolsInvokeHttpRequest } = await import("./tools-invoke-http.js");
 const { toolsInvokeHandlers } = await import("./server-methods/tools-invoke.js");
+const { invokeGatewayTool } = await import("./tools-invoke-shared.js");
 
 let pluginHttpHandlers: Array<(req: IncomingMessage, res: ServerResponse) => Promise<boolean>> = [];
 
@@ -581,6 +582,59 @@ describe("POST /tools/invoke", () => {
     expect(body.result?.ok).toBe(true);
     expect(body.result?.permissionFlow).toBe(true);
     expect(lastCreateOpenClawToolsContext?.pluginToolAllowlist).toContain("plugin_doctor");
+  });
+
+  it("keeps provider-specific denies on context-bound invocations", async () => {
+    cfg = {
+      agents: { list: [{ id: "main", default: true }] },
+      tools: {
+        allow: ["agents_list", "session_status"],
+        byProvider: { openai: { allow: ["session_status"] } },
+      },
+    };
+
+    const outcome = await invokeGatewayTool({
+      cfg,
+      input: { name: "agents_list", sessionKey: "main" },
+      modelProvider: "openai",
+      modelId: "gpt-5.6-luna",
+      sessionId: "session-parent",
+      toolCallIdPrefix: "plugin",
+      surface: "loopback",
+      allowRequestedToolExpansion: false,
+    });
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      status: 404,
+      error: { type: "not_found" },
+    });
+    expect(lastCreateOpenClawToolsContext).toMatchObject({
+      modelProvider: "openai",
+      modelId: "gpt-5.6-luna",
+      sessionId: "session-parent",
+    });
+  });
+
+  it("forwards trusted sender identity into nested plugin factories", async () => {
+    cfg = {
+      agents: { list: [{ id: "main", default: true }] },
+      tools: { allow: ["plugin_doctor"] },
+    };
+
+    const outcome = await invokeGatewayTool({
+      cfg,
+      input: { name: "plugin_doctor", sessionKey: "main" },
+      messageChannel: "email",
+      requesterSenderId: "customer-42",
+      channelContext: { sender: { id: "customer-42" } },
+      toolCallIdPrefix: "plugin",
+      surface: "loopback",
+      allowRequestedToolExpansion: false,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(lastCreateOpenClawToolsContext?.requesterSenderId).toBe("customer-42");
   });
 
   it("uses tools.alsoAllow for optional plugin discovery without loading every plugin tool", async () => {
