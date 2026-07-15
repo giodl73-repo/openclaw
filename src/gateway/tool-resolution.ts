@@ -55,6 +55,7 @@ import {
   DEFAULT_GATEWAY_HTTP_TOOL_DENY,
   GATEWAY_OWNER_ONLY_CORE_TOOLS,
 } from "../security/dangerous-tools.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../skills/types.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel-constants.js";
 import { normalizeMessageChannel } from "../utils/message-channel-core.js";
 
@@ -67,6 +68,9 @@ export function resolveGatewayScopedTools(params: {
   runtimePolicySessionKey?: string;
   agentId?: string;
   sessionId?: string;
+  skillsSnapshot?: SkillSnapshot;
+  parentSkillInvocation?: ExplicitSkillInvocation;
+  parentRunId?: string;
   modelProvider?: string;
   modelId?: string;
   onYield?: (message: string) => Promise<void> | void;
@@ -272,6 +276,9 @@ export function resolveGatewayScopedTools(params: {
     currentMessageId: params.currentMessageId,
     currentInboundAudio: params.currentInboundAudio,
     sessionId: params.sessionId,
+    skillsSnapshot: params.skillsSnapshot,
+    explicitSkillInvocation: params.parentSkillInvocation,
+    runId: params.parentRunId,
     onYield: params.onYield,
     requireExplicitMessageTarget: params.requireExplicitMessageTarget,
     senderIsOwner: params.senderIsOwner,

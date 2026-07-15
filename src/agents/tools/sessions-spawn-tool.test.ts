@@ -1293,6 +1293,46 @@ describe("sessions_spawn tool", () => {
     expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
   });
 
+  it("allows a managed skill invocation with an explicit current agent", async () => {
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+      requesterAgentIdOverride: "main",
+      parentRunId: "run-parent",
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "invoice-paid" }],
+        resolvedSkills: [
+          {
+            name: "invoice-paid",
+            description: "Record a paid invoice.",
+            filePath: "/skills/invoice-paid/SKILL.md",
+            baseDir: "/skills/invoice-paid",
+            source: "workspace",
+            sourceInfo: {
+              source: "workspace",
+              path: "/skills/invoice-paid/SKILL.md",
+              scope: "project",
+              origin: "top-level",
+            },
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    await tool.execute("call-current-agent-skill", {
+      task: "Record the payment.",
+      skill: "invoice-paid",
+      agentId: "MAIN",
+    });
+
+    const spawnParams = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawnSubagentDirect");
+    expect(spawnParams.explicitSkillInvocation).toMatchObject({
+      skillName: "invoice-paid",
+      parentRunId: "run-parent",
+    });
+  });
+
   it("uses completionOwnerKey for ACP registerSubagentRun requesterSessionKey", async () => {
     registerAcpBackendForTest();
     const tool = createSessionsSpawnTool({

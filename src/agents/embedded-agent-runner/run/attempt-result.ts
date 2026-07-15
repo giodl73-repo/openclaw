@@ -415,5 +415,6 @@ export function completeEmbeddedAttemptResult(
     hasTerminalOutput,
     silentExpected: attempt.silentExpected,
     explicitSkillInvocation: attempt.explicitSkillInvocation,
+    isFinalFallbackAttempt: attempt.isFinalFallbackAttempt,
   });
 }

@@ -3305,6 +3305,18 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
         model: "test-model",
         timeoutMs: 1_000,
         runId: "run-test-room-event-tools",
+        skillsSnapshot: {
+          prompt: "",
+          skills: [{ name: "support-case" }],
+          resolvedSkills: [],
+          version: 7,
+          promptFormatVersion: 3,
+        },
+        explicitSkillInvocation: {
+          invocationId: "skill-support-case",
+          commandName: "support-case",
+          skillName: "support-case",
+        },
         config: createCliBackendConfig(),
         sessionEntry: {
           execHost: "node",
@@ -3363,6 +3375,19 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
           agentId: "worker",
           sessionId: "session-test",
           runId: "run-test-room-event-tools",
+          skillsSnapshot: {
+            prompt: "",
+            skills: [{ name: "support-case" }],
+            resolvedSkills: [],
+            version: 7,
+            promptFormatVersion: 3,
+          },
+          parentSkillInvocation: {
+            invocationId: "skill-support-case",
+            commandName: "support-case",
+            skillName: "support-case",
+          },
+          parentRunId: "run-test-room-event-tools",
           modelProvider: "anthropic",
           modelId: "test-model",
           messageProvider: "discord",
@@ -3436,6 +3461,11 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
           agentId: "worker",
           modelProvider: "anthropic",
           modelId: "test-model",
+          skillsSnapshot: expect.objectContaining({ version: 7 }),
+          parentSkillInvocation: expect.objectContaining({
+            invocationId: "skill-support-case",
+          }),
+          parentRunId: "run-test-room-event-tools",
           execOverrides: {
             host: "node",
             security: "allowlist",

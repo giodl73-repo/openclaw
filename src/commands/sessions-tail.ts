@@ -388,12 +388,18 @@ function formatAuditRunSummary(summary: TrajectoryAuditRunSummary): string {
     .map((receipt) => toOptionalString(receipt.type))
     .filter((type): type is string => Boolean(type));
   const skillNames = summary.skills.map((skill) => skill.skillName);
+  const skillInvocations = summary.skillInvocations.map((invocation) =>
+    invocation.status
+      ? `${invocation.skillName ?? invocation.commandName ?? invocation.invocationId}:${invocation.status}`
+      : (invocation.skillName ?? invocation.commandName ?? invocation.invocationId),
+  );
   const parts = [
     `run=${summary.runId}`,
     summary.status ? `status=${summary.status}` : undefined,
     summary.usage?.total !== undefined ? `tokens=${summary.usage.total}` : undefined,
     receiptTypes.length > 0 ? `receipts=${receiptTypes.join(",")}` : undefined,
     skillNames.length > 0 ? `skills=${skillNames.join(",")}` : undefined,
+    skillInvocations.length > 0 ? `invocations=${skillInvocations.join(",")}` : undefined,
   ];
   return parts.filter((part): part is string => Boolean(part)).join(" ");
 }

@@ -87,11 +87,13 @@ export async function cleanupEmbeddedAttemptSessionPhase(
       : initialState.aborted || initialState.timedOut
         ? "interrupted"
         : "cleanup";
-    recordSkillInvocationCompleted(
-      input.trajectoryRecorder,
-      attempt.explicitSkillInvocation,
-      status === "cleanup" ? "error" : status,
-    );
+    if (attempt.isFinalFallbackAttempt !== false) {
+      recordSkillInvocationCompleted(
+        input.trajectoryRecorder,
+        attempt.explicitSkillInvocation,
+        status === "cleanup" ? "error" : status,
+      );
+    }
     input.trajectoryRecorder.recordEvent("session.ended", {
       status,
       aborted: initialState.aborted,

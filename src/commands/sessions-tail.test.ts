@@ -391,6 +391,43 @@ describe("sessionsTailCommand", () => {
     });
   });
 
+  it("includes explicit invocation outcomes in human audit summaries", async () => {
+    const runtime = makeRuntime();
+    await writeSessionEntry();
+    await appendEvents([
+      makeEvent({
+        type: "skill.invocation.started",
+        ts: "2026-05-18T12:04:20.000Z",
+        runId: "run-cli",
+        data: {
+          invocationId: "skill-1",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+        },
+      }),
+      makeEvent({
+        type: "skill.invocation.completed",
+        ts: "2026-05-18T12:04:21.000Z",
+        runId: "run-cli",
+        data: {
+          invocationId: "skill-1",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+          status: "success",
+        },
+      }),
+    ]);
+
+    await sessionsTailCommand(
+      { store: storePath, sessionKey, auditRuns: true, tail: "1" },
+      runtime,
+    );
+
+    expect(runtime.log).toHaveBeenCalledWith(
+      expect.stringContaining("invocations=invoice-paid:success"),
+    );
+  });
+
   it("rejects following audit run summaries until incremental summaries are defined", async () => {
     const runtime = makeRuntime();
 

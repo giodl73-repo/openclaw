@@ -5,10 +5,16 @@ type SkillInvocationRecorder = {
 };
 
 function invocationFields(invocation: ExplicitSkillInvocation) {
+  const caller = invocation.parentInvocationId
+    ? "skill"
+    : invocation.parentRunId
+      ? "agent"
+      : "inbound";
   return {
     ...invocation,
-    activation: invocation.parentInvocationId ? "orchestration" : "command",
-    caller: invocation.parentInvocationId ? "skill" : "inbound",
+    activation:
+      invocation.parentInvocationId || invocation.parentRunId ? "orchestration" : "command",
+    caller,
   } as const;
 }
 
