@@ -184,7 +184,9 @@ export function summarizeTrajectoryAuditRuns(
   }
 
   return [...runs.entries()].flatMap(([runId, run]) => {
-    const receiptEvents = run.events.filter((event) => isTrajectoryAuditReceipt(event, receiptType));
+    const receiptEvents = run.events.filter((event) =>
+      isTrajectoryAuditReceipt(event, receiptType),
+    );
     if (receiptType && receiptEvents.length === 0) {
       return [];
     }
