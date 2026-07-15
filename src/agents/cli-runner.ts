@@ -515,24 +515,28 @@ export function runCliAgent(paramsInput: RunCliAgentParams): Promise<EmbeddedAge
         timeoutPhase: result.meta.timeoutPhase,
         providerStarted: result.meta.providerStarted,
       });
-      recordSkillInvocationCompleted(
-        recorder,
-        params.explicitSkillInvocation,
-        terminalOutcome.status === "ok"
-          ? "success"
-          : terminalOutcome.status === "timeout" ||
-              terminalOutcome.reason === "aborted" ||
-              terminalOutcome.reason === "cancelled"
-            ? "interrupted"
-            : "error",
-      );
+      if (params.isFinalFallbackAttempt !== false) {
+        recordSkillInvocationCompleted(
+          recorder,
+          params.explicitSkillInvocation,
+          terminalOutcome.status === "ok"
+            ? "success"
+            : terminalOutcome.status === "timeout" ||
+                terminalOutcome.reason === "aborted" ||
+                terminalOutcome.reason === "cancelled"
+              ? "interrupted"
+              : "error",
+        );
+      }
       return result;
     } catch (error) {
-      recordSkillInvocationCompleted(
-        recorder,
-        params.explicitSkillInvocation,
-        isAbortError(error) ? "interrupted" : "error",
-      );
+      if (params.isFinalFallbackAttempt !== false) {
+        recordSkillInvocationCompleted(
+          recorder,
+          params.explicitSkillInvocation,
+          isAbortError(error) ? "interrupted" : "error",
+        );
+      }
       throw error;
     } finally {
       try {

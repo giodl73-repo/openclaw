@@ -17,6 +17,7 @@ type FinalizeEmbeddedAttemptParams = {
   hasTerminalOutput: boolean;
   silentExpected?: boolean;
   explicitSkillInvocation?: ExplicitSkillInvocation;
+  isFinalFallbackAttempt?: boolean;
 };
 
 /** Classifies the completed attempt and records its terminal trajectory artifacts. */
@@ -102,11 +103,13 @@ export function finalizeEmbeddedAttempt(
       lastToolError: result.lastToolError,
     }),
   );
-  recordSkillInvocationCompleted(
-    trajectoryRecorder,
-    params.explicitSkillInvocation,
-    terminal.status,
-  );
+  if (params.isFinalFallbackAttempt !== false) {
+    recordSkillInvocationCompleted(
+      trajectoryRecorder,
+      params.explicitSkillInvocation,
+      terminal.status,
+    );
+  }
   trajectoryRecorder?.recordEvent("session.ended", {
     status: terminal.status,
     aborted: result.aborted,

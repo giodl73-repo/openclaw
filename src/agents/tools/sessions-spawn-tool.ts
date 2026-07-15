@@ -13,6 +13,7 @@ import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
+import { normalizeAgentId, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { createExplicitSkillInvocation } from "../../skills/invocation.js";
 import { resolveSkillTelemetrySource } from "../../skills/loading/source.js";
@@ -359,7 +360,14 @@ export function createSessionsSpawnTool(
       const label = readStringParam(params, "label") ?? "";
       const runtime = params.runtime === "acp" ? "acp" : "subagent";
       const requestedAgentId = readStringParam(params, "agentId");
-      if (requestedSkill && requestedAgentId) {
+      const requesterAgentId = normalizeAgentId(
+        opts?.requesterAgentIdOverride ?? resolveAgentIdFromSessionKey(opts?.agentSessionKey),
+      );
+      if (
+        requestedSkill &&
+        requestedAgentId &&
+        normalizeAgentId(requestedAgentId) !== requesterAgentId
+      ) {
         return jsonResult({
           status: "error",
           error: "Managed skill invocation currently requires the child to use the current agent.",
@@ -543,7 +551,7 @@ export function createSessionsSpawnTool(
                 skillSource: resolveSkillTelemetrySource(requestedSkill),
                 executionHints: requestedSkillMetadata?.executionHints,
                 parentInvocationId: opts?.parentSkillInvocation?.invocationId,
-                parentRunId: opts?.parentSkillInvocation ? opts.parentRunId : undefined,
+                parentRunId: opts?.parentRunId,
               })
             : undefined,
           taskName,

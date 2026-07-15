@@ -35,14 +35,22 @@ describe("createExplicitSkillInvocation", () => {
     });
   });
 
-  it("omits incomplete child invocation lineage", () => {
+  it("preserves each available parent identifier", () => {
     const invocation = createExplicitSkillInvocation({
       commandName: "invoice-paid",
       skillName: "invoice-paid",
       parentInvocationId: "skill_parent",
     });
 
-    expect(invocation).not.toHaveProperty("parentInvocationId");
+    expect(invocation).toHaveProperty("parentInvocationId", "skill_parent");
     expect(invocation).not.toHaveProperty("parentRunId");
+
+    const rootAgentInvocation = createExplicitSkillInvocation({
+      commandName: "invoice-paid",
+      skillName: "invoice-paid",
+      parentRunId: "run_parent",
+    });
+    expect(rootAgentInvocation).not.toHaveProperty("parentInvocationId");
+    expect(rootAgentInvocation).toHaveProperty("parentRunId", "run_parent");
   });
 });

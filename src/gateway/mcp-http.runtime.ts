@@ -9,6 +9,7 @@ import type {
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginHookChannelContext } from "../plugins/hook-types.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../skills/types.js";
 import {
   buildMcpToolSchema,
   type McpLoopbackTool,
@@ -37,6 +38,9 @@ type McpLoopbackScopeParams = {
   runtimePolicySessionKey?: string;
   agentId?: string;
   sessionId?: string;
+  skillsSnapshot?: SkillSnapshot;
+  parentSkillInvocation?: ExplicitSkillInvocation;
+  parentRunId?: string;
   modelProvider?: string;
   modelId?: string;
   yieldContextCacheKey?: string;
@@ -103,6 +107,10 @@ export class McpLoopbackToolCache {
       params.runtimePolicySessionKey ?? "",
       params.agentId ?? "",
       params.sessionId ?? "",
+      String(params.skillsSnapshot?.version ?? ""),
+      String(params.skillsSnapshot?.promptFormatVersion ?? ""),
+      params.parentSkillInvocation?.invocationId ?? "",
+      params.parentRunId ?? "",
       params.modelProvider ?? "",
       params.modelId ?? "",
       params.yieldContextCacheKey ?? "",

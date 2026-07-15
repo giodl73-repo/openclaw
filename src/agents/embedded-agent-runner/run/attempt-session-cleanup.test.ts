@@ -119,6 +119,27 @@ describe("cleanupEmbeddedAttemptSessionPhase", () => {
     );
   });
 
+  it("leaves an explicit invocation open during non-final fallback cleanup", async () => {
+    const input = createInput({
+      attempt: {
+        ...attempt,
+        isFinalFallbackAttempt: false,
+        explicitSkillInvocation: {
+          invocationId: "invocation-1",
+          commandName: "invoice-paid",
+          skillName: "invoice-paid",
+        },
+      },
+    });
+
+    await cleanupEmbeddedAttemptSessionPhase(input as never);
+
+    expect(input.trajectoryRecorder.recordEvent).not.toHaveBeenCalledWith(
+      "skill.invocation.completed",
+      expect.anything(),
+    );
+  });
+
   it("re-reads abort state after trajectory flushing", async () => {
     let aborted = false;
     hoisted.flushEmbeddedAttemptTrajectoryRecorder.mockImplementation(async () => {

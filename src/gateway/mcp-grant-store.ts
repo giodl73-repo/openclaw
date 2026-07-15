@@ -7,6 +7,7 @@ import type {
 } from "../auto-reply/get-reply-options.types.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import type { PluginHookChannelContext } from "../plugins/hook-types.js";
+import type { ExplicitSkillInvocation, SkillSnapshot } from "../skills/types.js";
 
 export type McpLoopbackRequestContext = {
   sessionKey: string;
@@ -14,6 +15,9 @@ export type McpLoopbackRequestContext = {
   agentId?: string;
   sessionId?: string;
   runId?: string;
+  skillsSnapshot?: SkillSnapshot;
+  parentSkillInvocation?: ExplicitSkillInvocation;
+  parentRunId?: string;
   modelProvider?: string;
   modelId?: string;
   messageProvider?: string;
