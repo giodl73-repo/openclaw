@@ -31,12 +31,13 @@ describe("runEmbeddedAttemptWithBackend", () => {
     };
     const receipt = { type: "invoice.sent" } as TrajectoryAuditReceipt;
     const recordEvent = vi.fn();
+    const flush = vi.fn();
     const onAgentToolResult = vi.fn();
     const result = {} as EmbeddedRunAttemptResult;
     const params = {
       agentId: "support",
       onAgentToolResult,
-      trajectoryRecorder: { recordEvent, flush: vi.fn() },
+      trajectoryRecorder: { recordEvent, flush },
     } as unknown as EmbeddedRunAttemptParams;
     mocks.collectAttemptToolAuditReceipts.mockReturnValue([receipt]);
     mocks.runAgentHarnessAttempt.mockImplementation(
@@ -54,6 +55,7 @@ describe("runEmbeddedAttemptWithBackend", () => {
       event,
     });
     expect(recordEvent).toHaveBeenCalledWith("audit.receipt", { ...receipt });
+    expect(flush).toHaveBeenCalledOnce();
     expect(onAgentToolResult).toHaveBeenCalledWith(event);
   });
 });
