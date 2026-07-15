@@ -320,10 +320,10 @@ export function registerStatusHealthSessionsCommands(program: Command) {
       "Sum observed usage across linked parent and child runs",
       false,
     )
-    .option("--receipt-type <type>", "Only show audit receipts of this business type")
-    .option("--regarding-system <system>", "Only show receipts for this external system")
-    .option("--regarding-type <type>", "Only show receipts for this external record type")
-    .option("--regarding-id <id>", "Only show receipts for this external record id")
+    .option("--receipt-type <type>", "Search audit receipts by business type")
+    .option("--regarding-system <system>", "Search receipts by external system")
+    .option("--regarding-type <type>", "Search receipts by external record type")
+    .option("--regarding-id <id>", "Search receipts by external record id")
     .option("--json", "Output matching trajectory events or audit runs as JSONL", false)
     .option("--follow", "Continue following for new trajectory events", false)
     .option("--store <path>", "Path to session store (default: resolved from config)")

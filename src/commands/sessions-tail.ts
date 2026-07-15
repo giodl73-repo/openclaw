@@ -418,7 +418,10 @@ function renderAuditRuns(
   runtime: RuntimeEnv,
   options: { json?: boolean; receiptFilter?: TrajectoryAuditReceiptFilter; tailCount: number },
 ): void {
-  const summaries = summarizeTrajectoryAuditRuns(events, options.receiptFilter);
+  const summaries = summarizeTrajectoryAuditRuns(events, options.receiptFilter).toSorted(
+    (left, right) =>
+      left.firstEventAt.localeCompare(right.firstEventAt) || left.runId.localeCompare(right.runId),
+  );
   for (const summary of options.tailCount > 0 ? summaries.slice(-options.tailCount) : []) {
     runtime.log(options.json ? JSON.stringify(summary) : formatAuditRunSummary(summary));
   }
@@ -930,9 +933,11 @@ export async function sessionsTailCommand(
       }
     }
   }
-  const selected = opts.auditOrchestrations
-    ? selections
-    : selectSessionsToTail(selections, opts.sessionKey);
+  const searchAuditRuns = Boolean(opts.auditRuns && receiptFilter && !opts.sessionKey?.trim());
+  const selected =
+    opts.auditOrchestrations || searchAuditRuns
+      ? selections
+      : selectSessionsToTail(selections, opts.sessionKey);
   if (selected.length === 0) {
     const suffix = opts.sessionKey ? ` for ${opts.sessionKey}` : "";
     runtime.log(`No sessions found${suffix}.`);
@@ -940,6 +945,17 @@ export async function sessionsTailCommand(
   }
 
   const followSnapshots = new Map<TailSelection, TrajectorySnapshot>();
+  if (searchAuditRuns) {
+    const auditSelections = (
+      await Promise.all(selected.map((selection) => buildAuditFamilySelections(selection)))
+    ).flat();
+    renderAuditRuns(
+      auditSelections.flatMap((selection) => readTailSnapshot(selection).events),
+      runtime,
+      { json: opts.json, receiptFilter, tailCount },
+    );
+    return;
+  }
   if (opts.auditOrchestrations) {
     const auditSelections = (
       await Promise.all(selected.map((selection) => buildAuditFamilySelections(selection)))

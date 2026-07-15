@@ -428,6 +428,181 @@ describe("sessionsTailCommand", () => {
     );
   });
 
+  it("finds one support case across parent and managed child runs", async () => {
+    const runtime = makeRuntime();
+    const childSessionKey = "agent:main:subagent:verify-customer";
+    const unrelatedSessionKey = "agent:main:email:thread:customer-99";
+    const regarding = { system: "dataverse", type: "case", id: "case-42", key: "CAS-42" };
+    for (const [key, sessionId, entryRegarding] of [
+      [sessionKey, "session-parent", regarding],
+      [childSessionKey, "session-child", regarding],
+      [
+        unrelatedSessionKey,
+        "session-unrelated",
+        { system: "dataverse", type: "case", id: "case-99", key: "CAS-99" },
+      ],
+    ] as const) {
+      await writeSessionEntry(key, {
+        sessionId,
+        sessionFile: formatSqliteSessionFileMarker({ agentId: "main", sessionId, storePath }),
+        updatedAt: Date.now(),
+        status: "idle",
+        regarding: entryRegarding,
+      });
+    }
+
+    appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-parent", storePath }, [
+      makeEvent({
+        type: "skill.invocation.started",
+        ts: "2026-05-18T12:04:18.000Z",
+        runId: "run-parent",
+        sessionId: "session-parent",
+        data: { invocationId: "skill-parent", skillName: "customer-support" },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:19.000Z",
+        runId: "run-parent",
+        sessionId: "session-parent",
+        data: {
+          type: "case.updated",
+          regarding: {
+            system: "dataverse",
+            type: "case",
+            id: "case-42",
+            reference: "CAS-42",
+          },
+          data: { channel: "email" },
+        },
+      }),
+      makeEvent({
+        type: "model.completed",
+        ts: "2026-05-18T12:04:20.000Z",
+        runId: "run-parent",
+        sessionId: "session-parent",
+        provider: "openai",
+        modelId: "gpt-5.6-luna",
+        data: {
+          usage: {
+            input: 100,
+            output: 20,
+            total: 120,
+            cost: { usd: 0.004, basis: "provider-billed" },
+          },
+        },
+      }),
+    ]);
+    appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-child", storePath }, [
+      makeEvent({
+        type: "skill.invocation.started",
+        ts: "2026-05-18T12:04:21.000Z",
+        runId: "run-child",
+        sessionId: "session-child",
+        sessionKey: childSessionKey,
+        data: {
+          invocationId: "skill-child",
+          parentInvocationId: "skill-parent",
+          parentRunId: "run-parent",
+          skillName: "verify-customer",
+        },
+      }),
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:22.000Z",
+        runId: "run-child",
+        sessionId: "session-child",
+        sessionKey: childSessionKey,
+        data: {
+          type: "customer.verified",
+          regarding: {
+            system: "dataverse",
+            type: "case",
+            id: "case-42",
+            reference: "CAS-42",
+          },
+          data: { verificationId: "VER-42" },
+        },
+      }),
+      makeEvent({
+        type: "model.completed",
+        ts: "2026-05-18T12:04:23.000Z",
+        runId: "run-child",
+        sessionId: "session-child",
+        sessionKey: childSessionKey,
+        provider: "openai",
+        modelId: "gpt-5.6-luna",
+        data: {
+          usage: {
+            input: 45,
+            output: 10,
+            total: 55,
+            cost: { usd: 0.006, basis: "catalog-estimate" },
+          },
+        },
+      }),
+    ]);
+    appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-unrelated", storePath }, [
+      makeEvent({
+        type: "audit.receipt",
+        ts: "2026-05-18T12:04:24.000Z",
+        runId: "run-unrelated",
+        sessionId: "session-unrelated",
+        sessionKey: unrelatedSessionKey,
+        data: {
+          type: "case.updated",
+          regarding: { system: "dataverse", type: "case", id: "case-99" },
+        },
+      }),
+    ]);
+
+    await sessionsTailCommand(
+      {
+        store: storePath,
+        auditRuns: true,
+        regardingSystem: "dataverse",
+        regardingType: "case",
+        regardingId: "case-42",
+        json: true,
+        tail: "2",
+      },
+      runtime,
+    );
+
+    const output = vi
+      .mocked(runtime.log)
+      .mock.calls.map((call) => JSON.parse(String(call[0])))
+      .toSorted((left, right) => String(left.runId).localeCompare(String(right.runId)));
+    expect(output).toHaveLength(2);
+    expect(output.reduce((total, run) => total + Number(run.usage?.total ?? 0), 0)).toBe(175);
+    expect(output.reduce((total, run) => total + Number(run.cost?.usd ?? 0), 0)).toBe(0.01);
+    expect(output).toEqual([
+      expect.objectContaining({
+        runId: "run-child",
+        sessionId: "session-child",
+        usage: { input: 45, output: 10, total: 55 },
+        skillInvocations: [
+          expect.objectContaining({
+            skillName: "verify-customer",
+            parentRunId: "run-parent",
+          }),
+        ],
+        receipts: [
+          expect.objectContaining({
+            type: "customer.verified",
+            data: { verificationId: "VER-42" },
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        runId: "run-parent",
+        sessionId: "session-parent",
+        usage: { input: 100, output: 20, total: 120 },
+        skillInvocations: [expect.objectContaining({ skillName: "customer-support" })],
+        receipts: [expect.objectContaining({ type: "case.updated", data: { channel: "email" } })],
+      }),
+    ]);
+  });
+
   it("reconstructs a queryable business thread with outcomes, evidence, and run spend", async () => {
     const runtime = makeRuntime();
     await writeSessionEntry(sessionKey, {
