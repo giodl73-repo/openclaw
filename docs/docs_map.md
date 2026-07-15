@@ -9764,7 +9764,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Enable
   - H2: Pattern: small CLI + JSON pipes + approvals
   - H2: JSON-only LLM steps (llm-task)
-  - H3: Important limitation: embedded Lobster vs openclaw.invoke
+  - H3: Embedded openclaw.invoke
   - H2: Workflow files (.lobster)
   - H2: Tool parameters
   - H3: run
