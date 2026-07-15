@@ -541,7 +541,6 @@ export function createSessionsSpawnTool(
                 commandName: requestedSkill.name,
                 skillName: requestedSkill.name,
                 skillSource: resolveSkillTelemetrySource(requestedSkill),
-                skillDigest: requestedSkillMetadata?.skillDigest,
                 executionHints: requestedSkillMetadata?.executionHints,
                 parentInvocationId: opts?.parentSkillInvocation?.invocationId,
                 parentRunId: opts?.parentSkillInvocation ? opts.parentRunId : undefined,

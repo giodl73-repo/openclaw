@@ -1190,11 +1190,11 @@ describe("sessions_spawn tool", () => {
       commandName: "invoice-paid",
       skillName: "invoice-paid",
       skillSource: "workspace",
-      skillDigest: `sha256:${"a".repeat(64)}`,
       executionHints: { isolation: "required" },
       parentInvocationId: "skill-parent",
       parentRunId: "run-parent",
     });
+    expect(spawnParams.explicitSkillInvocation).not.toHaveProperty("skillDigest");
   });
 
   it("rejects child skills not declared by the active parent skill", async () => {
