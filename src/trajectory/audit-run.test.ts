@@ -60,7 +60,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
           type: "case.updated",
           toolName: "dynamics",
           toolCallId: "call-1",
-          regarding: { system: "dynamics", type: "case", id: "case-42" },
+          subject: { type: "case", id: "case-42" },
         },
       }),
       event({
@@ -113,14 +113,14 @@ describe("summarizeTrajectoryAuditRuns", () => {
         receipts: [
           expect.objectContaining({
             type: "case.updated",
-            regarding: { system: "dynamics", type: "case", id: "case-42" },
+            subject: { type: "case", id: "case-42" },
           }),
         ],
       }),
     ]);
   });
 
-  it("selects runs and receipts by exact regarding identity", () => {
+  it("selects runs and receipts by exact outcome type", () => {
     const summaries = summarizeTrajectoryAuditRuns(
       [
         event({
@@ -129,7 +129,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
           runId: "run-1",
           data: {
             type: "case.updated",
-            regarding: { system: "dynamics", type: "case", id: "case-42" },
+            subject: { type: "case", id: "case-42" },
           },
         }),
         event({
@@ -138,7 +138,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
           runId: "run-1",
           data: {
             type: "invoice.paid",
-            regarding: { system: "dynamics", type: "case", id: "case-99" },
+            subject: { type: "invoice", id: "invoice-99" },
           },
         }),
         event({
@@ -146,12 +146,12 @@ describe("summarizeTrajectoryAuditRuns", () => {
           seq: 3,
           runId: "run-2",
           data: {
-            type: "case.updated",
-            regarding: { system: "dynamics", type: "case", id: "case-99" },
+            type: "inventory.sent",
+            subject: { type: "inventory", id: "inventory-99" },
           },
         }),
       ],
-      { type: "case.updated", regarding: { id: "case-42" } },
+      "case.updated",
     );
 
     expect(summaries).toHaveLength(1);
@@ -159,7 +159,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
     expect(summaries[0]?.receipts).toEqual([
       expect.objectContaining({
         type: "case.updated",
-        regarding: expect.objectContaining({ id: "case-42" }),
+        subject: { type: "case", id: "case-42" },
       }),
     ]);
   });
