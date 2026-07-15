@@ -21,7 +21,7 @@ import { resolveBlockMessage } from "../plugins/hook-decision-types.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { createTrajectoryRuntimeRecorder } from "../trajectory/runtime.js";
 import {
-  recordSkillInvocationCompleted,
+  recordOrDeferSkillInvocationCompleted,
   recordSkillInvocationStarted,
 } from "../trajectory/skill-invocation.js";
 import { buildAgentRunTerminalOutcome } from "./agent-run-terminal-outcome.js";
@@ -515,28 +515,26 @@ export function runCliAgent(paramsInput: RunCliAgentParams): Promise<EmbeddedAge
         timeoutPhase: result.meta.timeoutPhase,
         providerStarted: result.meta.providerStarted,
       });
-      if (params.isFinalFallbackAttempt !== false) {
-        recordSkillInvocationCompleted(
-          recorder,
-          params.explicitSkillInvocation,
-          terminalOutcome.status === "ok"
-            ? "success"
-            : terminalOutcome.status === "timeout" ||
-                terminalOutcome.reason === "aborted" ||
-                terminalOutcome.reason === "cancelled"
-              ? "interrupted"
-              : "error",
-        );
-      }
+      recordOrDeferSkillInvocationCompleted(
+        recorder,
+        params.explicitSkillInvocation,
+        terminalOutcome.status === "ok"
+          ? "success"
+          : terminalOutcome.status === "timeout" ||
+              terminalOutcome.reason === "aborted" ||
+              terminalOutcome.reason === "cancelled"
+            ? "interrupted"
+            : "error",
+        params.registerFallbackDecisionHandler,
+      );
       return result;
     } catch (error) {
-      if (params.isFinalFallbackAttempt !== false) {
-        recordSkillInvocationCompleted(
-          recorder,
-          params.explicitSkillInvocation,
-          isAbortError(error) ? "interrupted" : "error",
-        );
-      }
+      recordOrDeferSkillInvocationCompleted(
+        recorder,
+        params.explicitSkillInvocation,
+        isAbortError(error) ? "interrupted" : "error",
+        params.registerFallbackDecisionHandler,
+      );
       throw error;
     } finally {
       try {

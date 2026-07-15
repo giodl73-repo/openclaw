@@ -82,8 +82,9 @@ describe("finalizeEmbeddedAttempt", () => {
     );
   });
 
-  it("leaves an explicit invocation open before the final fallback attempt", () => {
+  it("leaves an explicit invocation open when fallback continues", async () => {
     const recordEvent = vi.fn();
+    let decideFallback: ((decision: "continue" | "terminal") => Promise<void> | void) | undefined;
     const result = {
       assistantTexts: [],
       toolMetas: [],
@@ -107,10 +108,51 @@ describe("finalizeEmbeddedAttempt", () => {
         commandName: "support",
         skillName: "customer-support",
       },
-      isFinalFallbackAttempt: false,
+      registerFallbackDecisionHandler: (handler) => {
+        decideFallback = handler;
+      },
     });
 
     expect(recordEvent).not.toHaveBeenCalledWith("skill.invocation.completed", expect.anything());
+    await decideFallback?.("continue");
+    expect(recordEvent).not.toHaveBeenCalledWith("skill.invocation.completed", expect.anything());
+  });
+
+  it("closes an explicit invocation when an earlier fallback candidate succeeds", async () => {
+    const recordEvent = vi.fn();
+    let decideFallback: ((decision: "continue" | "terminal") => Promise<void> | void) | undefined;
+    const result = {
+      assistantTexts: ["done"],
+      toolMetas: [],
+      messagingToolSentTexts: [],
+      messagingToolSentMediaUrls: [],
+      messagingToolSentTargets: [],
+      aborted: false,
+      externalAbort: false,
+      timedOut: false,
+    } as unknown as EmbeddedRunAttemptResult;
+
+    finalizeEmbeddedAttempt({
+      result,
+      trajectoryRecorder: { recordEvent, flush: async () => {} },
+      synthesizedPayloadCount: 0,
+      emptyAssistantReplyIsSilent: false,
+      hasTerminalOutput: true,
+      explicitSkillInvocation: {
+        invocationId: "skill-1",
+        commandName: "support",
+        skillName: "customer-support",
+      },
+      registerFallbackDecisionHandler: (handler) => {
+        decideFallback = handler;
+      },
+    });
+
+    await decideFallback?.("terminal");
+    expect(recordEvent).toHaveBeenCalledWith(
+      "skill.invocation.completed",
+      expect.objectContaining({ status: "success" }),
+    );
   });
 
   it("records root-agent child skill lineage as orchestration", () => {

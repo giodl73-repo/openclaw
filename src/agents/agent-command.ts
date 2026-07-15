@@ -2202,6 +2202,7 @@ async function agentCommandInternal(
             agentId: sessionAgentId,
             sessionId,
             sessionKey: sessionKey ?? sessionId,
+            manageFallbackDecision: Boolean(opts.explicitSkillInvocation),
             resolveAgentHarnessRuntimeOverride: (candidateProvider) =>
               resolveSessionRuntimeOverrideForProvider({
                 provider: candidateProvider,
@@ -2349,6 +2350,7 @@ async function agentCommandInternal(
                     ? (opts.fastModeAutoOnSeconds ?? fastModeState.fastAutoOnSeconds)
                     : fastModeState.fastAutoOnSeconds,
                 isFinalFallbackAttempt: runOptions?.isFinalFallbackAttempt,
+                registerFallbackDecisionHandler: runOptions?.registerFallbackDecisionHandler,
                 timeoutMs,
                 runTimeoutOverrideMs,
                 runId,

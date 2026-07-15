@@ -464,6 +464,7 @@ export function runAgentAttempt(params: {
   fastModeStartedAtMs?: number;
   fastModeAutoOnSeconds?: number;
   isFinalFallbackAttempt?: boolean;
+  registerFallbackDecisionHandler?: import("../../trajectory/skill-invocation.js").RegisterFallbackDecisionHandler;
   timeoutMs: number;
   runTimeoutOverrideMs?: number;
   runId: string;
@@ -929,6 +930,7 @@ export function runAgentAttempt(params: {
     fastModeStartedAtMs: params.fastModeStartedAtMs,
     fastModeAutoOnSeconds: params.fastModeAutoOnSeconds,
     isFinalFallbackAttempt: params.isFinalFallbackAttempt,
+    registerFallbackDecisionHandler: params.registerFallbackDecisionHandler,
     verboseLevel: params.resolvedVerboseLevel,
     bashElevated: params.opts.bashElevated,
     approvalReviewerDeviceId: params.opts.approvalReviewerDeviceId,

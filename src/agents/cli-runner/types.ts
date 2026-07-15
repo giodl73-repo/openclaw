@@ -92,6 +92,7 @@ export type RunCliAgentParams = {
   fastModeAutoProgressState?: FastModeAutoProgressState;
   /** True when the outer model fallback loop has reached its final candidate. */
   isFinalFallbackAttempt?: boolean;
+  registerFallbackDecisionHandler?: import("../../trajectory/skill-invocation.js").RegisterFallbackDecisionHandler;
   timeoutMs: number;
   /**
    * Explicit run timeout, in milliseconds, when the caller can distinguish a

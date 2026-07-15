@@ -1911,6 +1911,7 @@ async function runAgentTurnWithFallbackInternal(
           ...resolveModelFallbackOptions(effectiveRun, runtimeConfig),
           runId,
           sessionId: params.followupRun.run.sessionId,
+          manageFallbackDecision: Boolean(params.sessionCtx.ExplicitSkillInvocation),
           lane: runLane,
           abortSignal: runAbortSignal,
           resolveAgentHarnessRuntimeOverride: (provider) =>
@@ -2226,6 +2227,8 @@ async function runAgentTurnWithFallbackInternal(
                         fastModeAutoOnSeconds: candidateFastMode.fastModeAutoOnSeconds,
                         fastModeAutoProgressState,
                         isFinalFallbackAttempt: runOptions?.isFinalFallbackAttempt,
+                        registerFallbackDecisionHandler:
+                          runOptions?.registerFallbackDecisionHandler,
                         timeoutMs: params.followupRun.run.timeoutMs,
                         runTimeoutOverrideMs: params.followupRun.run.runTimeoutOverrideMs,
                         runId,
@@ -2412,6 +2415,7 @@ async function runAgentTurnWithFallbackInternal(
                     fastModeStartedAtMs,
                     fastModeAutoProgressState,
                     isFinalFallbackAttempt: runOptions?.isFinalFallbackAttempt,
+                    registerFallbackDecisionHandler: runOptions?.registerFallbackDecisionHandler,
                     sandboxSessionKey: params.runtimePolicySessionKey,
                     prompt: params.commandBody,
                     transcriptPrompt: params.transcriptCommandBody,

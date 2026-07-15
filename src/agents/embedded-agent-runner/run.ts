@@ -2059,6 +2059,7 @@ async function runEmbeddedAgentInternal(
             fallbackActive: modelId !== requestedModelId || Boolean(resolveRuntimeFallbackReason()),
             fallbackReason: resolveRuntimeFallbackReason(),
             isFinalFallbackAttempt: params.isFinalFallbackAttempt,
+            registerFallbackDecisionHandler: params.registerFallbackDecisionHandler,
             // Use the harness selected before model/auth setup for the actual
             // attempt too. Otherwise plugin-owned transports can skip OpenClaw auth
             // bootstrap but drift back to OpenClaw when the attempt is created.

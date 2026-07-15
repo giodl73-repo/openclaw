@@ -120,10 +120,13 @@ describe("cleanupEmbeddedAttemptSessionPhase", () => {
   });
 
   it("leaves an explicit invocation open during non-final fallback cleanup", async () => {
+    let decideFallback: ((decision: "continue" | "terminal") => Promise<void> | void) | undefined;
     const input = createInput({
       attempt: {
         ...attempt,
-        isFinalFallbackAttempt: false,
+        registerFallbackDecisionHandler: (handler) => {
+          decideFallback = handler;
+        },
         explicitSkillInvocation: {
           invocationId: "invocation-1",
           commandName: "invoice-paid",
@@ -134,6 +137,11 @@ describe("cleanupEmbeddedAttemptSessionPhase", () => {
 
     await cleanupEmbeddedAttemptSessionPhase(input as never);
 
+    expect(input.trajectoryRecorder.recordEvent).not.toHaveBeenCalledWith(
+      "skill.invocation.completed",
+      expect.anything(),
+    );
+    await decideFallback?.("continue");
     expect(input.trajectoryRecorder.recordEvent).not.toHaveBeenCalledWith(
       "skill.invocation.completed",
       expect.anything(),

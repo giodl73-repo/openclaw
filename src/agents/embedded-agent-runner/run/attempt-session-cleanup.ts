@@ -2,8 +2,7 @@
  * Finalizes trajectory and session-owned resources for one embedded attempt.
  */
 import { formatErrorMessage, toErrorObject } from "../../../infra/errors.js";
-import type { createTrajectoryRuntimeRecorder } from "../../../trajectory/runtime.js";
-import { recordSkillInvocationCompleted } from "../../../trajectory/skill-invocation.js";
+import { recordOrDeferSkillInvocationCompleted } from "../../../trajectory/skill-invocation.js";
 import type { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
 import type { AgentSession } from "../../sessions/index.js";
 import { clearToolSearchCatalog, type ToolSearchCatalogRef } from "../../tool-search.js";
@@ -16,12 +15,11 @@ import {
   EmbeddedAttemptSessionTakeoverError,
 } from "./attempt.session-lock.js";
 import { cleanupEmbeddedAttemptResources } from "./attempt.subscription-cleanup.js";
-import type { EmbeddedRunAttemptParams } from "./types.js";
+import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptTrajectoryRecorder } from "./types.js";
 
 type AttemptSessionLockController = Awaited<
   ReturnType<typeof createEmbeddedAttemptSessionLockController>
 >;
-type TrajectoryRecorder = ReturnType<typeof createTrajectoryRuntimeRecorder>;
 type DisposableRuntime = { dispose(): Promise<void> | void };
 
 type CleanupEmbeddedAttemptSessionInput = {
@@ -36,7 +34,7 @@ type CleanupEmbeddedAttemptSessionInput = {
   sandboxSessionKey?: string;
   sessionAgentId: string;
   buildAbortSettlePromise: () => Promise<void> | null;
-  trajectoryRecorder: TrajectoryRecorder | null;
+  trajectoryRecorder: EmbeddedRunAttemptTrajectoryRecorder | null;
   trajectoryEndRecorded: boolean;
   cleanupYieldAborted: boolean;
   emitDiagnosticRunCompleted?: EmitDiagnosticRunCompleted;
@@ -87,13 +85,12 @@ export async function cleanupEmbeddedAttemptSessionPhase(
       : initialState.aborted || initialState.timedOut
         ? "interrupted"
         : "cleanup";
-    if (attempt.isFinalFallbackAttempt !== false) {
-      recordSkillInvocationCompleted(
-        input.trajectoryRecorder,
-        attempt.explicitSkillInvocation,
-        status === "cleanup" ? "error" : status,
-      );
-    }
+    recordOrDeferSkillInvocationCompleted(
+      input.trajectoryRecorder,
+      attempt.explicitSkillInvocation,
+      status === "cleanup" ? "error" : status,
+      attempt.registerFallbackDecisionHandler,
+    );
     input.trajectoryRecorder.recordEvent("session.ended", {
       status,
       aborted: initialState.aborted,

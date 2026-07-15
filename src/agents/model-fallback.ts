@@ -181,6 +181,9 @@ export function isFallbackSummaryError(err: unknown): err is FallbackSummaryErro
 type ModelFallbackRunOptions = {
   allowTransientCooldownProbe?: boolean;
   isFinalFallbackAttempt?: boolean;
+  registerFallbackDecisionHandler?: (
+    handler: (decision: "continue" | "terminal") => Promise<void> | void,
+  ) => void;
 };
 
 type ModelFallbackRuntimeContext = {
@@ -1378,6 +1381,8 @@ type RunWithModelFallbackParams<T> = {
     total: number;
   }) => boolean | Promise<boolean>;
   mergeExhaustedResult?: (params: { latestResult: T; preferredResult: T }) => T;
+  /** Coordinate one invocation lifecycle across candidate attempts. */
+  manageFallbackDecision?: boolean;
   skipAuthProfileRuntime?: boolean;
   abortSignal?: AbortSignal;
 } & ModelManifestNormalizationContext;
@@ -1756,159 +1761,220 @@ async function runWithModelFallbackInternal<T>(
       }
     }
 
-    const attemptRun = await runFallbackAttempt({
-      run: params.run,
-      ...candidate,
-      attempts,
-      options: {
-        ...runOptions,
-        isFinalFallbackAttempt: i + 1 === candidates.length,
-      },
-      // Only the outer fallback loop knows another candidate remains. Carry
-      // that fact through this attempt so the embedded runner does not freeze
-      // the shared lane before the next candidate can run.
-      deferSessionSuspension: i + 1 < candidates.length,
-      onDeferredSessionSuspension: (suspension) => {
-        deferredSuspension.pending = suspension;
-      },
-      classifyResult: params.classifyResult,
-      attempt: i + 1,
-      total: candidates.length,
-      attribution: { sessionId: params.sessionId, lane: params.lane },
-      abortSignal: params.abortSignal,
-    });
-    if ("success" in attemptRun) {
-      if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
-        await observeDecision({
-          decision: "candidate_succeeded",
-          runId: params.runId,
-          sessionId: params.sessionId,
-          lane: params.lane,
-          requestedProvider: params.provider,
-          requestedModel: params.model,
-          candidate,
-          attempt: i + 1,
-          total: candidates.length,
-          previousAttempts: attempts,
-          isPrimary,
-          requestedModelMatched: requestedModel,
-          fallbackConfigured: hasFallbackCandidates,
-        });
-      }
-      const notFoundAttempt =
-        i > 0 ? attempts.find((a) => a.reason === "model_not_found") : undefined;
-      if (notFoundAttempt) {
-        log.warn(
-          `Model "${sanitizeForLog(notFoundAttempt.provider)}/${sanitizeForLog(notFoundAttempt.model)}" not found. Fell back to "${sanitizeForLog(candidate.provider)}/${sanitizeForLog(candidate.model)}".`,
-        );
-      }
-      return attemptRun.success;
-    }
-    const err = attemptRun.error;
-    // Max-turn termination can follow successful tool actions. Stop before
-    // candidate fallback so the user can verify effects before any replay.
-    if (findCliMaxTurnsError(err)) {
-      throw err;
-    }
-    if (
-      !attemptRun.classifiedResult &&
-      params.canFallbackAfterError &&
-      !(await params.canFallbackAfterError({
-        provider: candidate.provider,
-        model: candidate.model,
-        error: err,
+    let fallbackDecision: "continue" | "terminal" = "terminal";
+    let fallbackDecisionHandler:
+      | ((decision: "continue" | "terminal") => Promise<void> | void)
+      | undefined;
+    try {
+      const attemptRun = await runFallbackAttempt({
+        run: params.run,
+        ...candidate,
+        attempts,
+        options: {
+          ...runOptions,
+          isFinalFallbackAttempt: i + 1 === candidates.length,
+          ...(params.manageFallbackDecision
+            ? {
+                registerFallbackDecisionHandler: (
+                  handler: (decision: "continue" | "terminal") => Promise<void> | void,
+                ) => {
+                  fallbackDecisionHandler = handler;
+                },
+              }
+            : {}),
+        },
+        // Only the outer fallback loop knows another candidate remains. Carry
+        // that fact through this attempt so the embedded runner does not freeze
+        // the shared lane before the next candidate can run.
+        deferSessionSuspension: i + 1 < candidates.length,
+        onDeferredSessionSuspension: (suspension) => {
+          deferredSuspension.pending = suspension;
+        },
+        classifyResult: params.classifyResult,
         attempt: i + 1,
         total: candidates.length,
-      }))
-    ) {
-      throw err;
-    }
-    if (attemptRun.classifiedResult) {
-      latestClassifiedResult = attemptRun.classifiedResult;
-    }
-    if (
-      attemptRun.exhaustionResult &&
-      (!exhaustionResult || attemptRun.exhaustionResult.priority >= exhaustionResult.priority)
-    ) {
-      exhaustionResult = attemptRun.exhaustionResult;
-    }
-    {
-      // Local runtime coordination errors (session write-lock timeout, embedded
-      // attempt session takeover) are not provider/model failures. Aborting
-      // here prevents the fallback chain from consuming candidates retrying
-      // the same local condition and surfacing a misleading "All models
-      // failed" summary. See #83510.
-      if (isNonProviderRuntimeCoordinationError(err)) {
-        throw err;
-      }
-      if (isTranscriptNotContinuableError(err)) {
-        throw err;
-      }
-      if (transientProbeProviderForAttempt) {
-        const probeFailureReason = describeFailoverError(err).reason;
-        if (!shouldPreserveTransientCooldownProbeSlot(probeFailureReason)) {
-          cooldownProbeUsedProviders.add(transientProbeProviderForAttempt);
+        attribution: { sessionId: params.sessionId, lane: params.lane },
+        abortSignal: params.abortSignal,
+      });
+      if ("success" in attemptRun) {
+        if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
+          await observeDecision({
+            decision: "candidate_succeeded",
+            runId: params.runId,
+            sessionId: params.sessionId,
+            lane: params.lane,
+            requestedProvider: params.provider,
+            requestedModel: params.model,
+            candidate,
+            attempt: i + 1,
+            total: candidates.length,
+            previousAttempts: attempts,
+            isPrimary,
+            requestedModelMatched: requestedModel,
+            fallbackConfigured: hasFallbackCandidates,
+          });
         }
+        const notFoundAttempt =
+          i > 0 ? attempts.find((a) => a.reason === "model_not_found") : undefined;
+        if (notFoundAttempt) {
+          log.warn(
+            `Model "${sanitizeForLog(notFoundAttempt.provider)}/${sanitizeForLog(notFoundAttempt.model)}" not found. Fell back to "${sanitizeForLog(candidate.provider)}/${sanitizeForLog(candidate.model)}".`,
+          );
+        }
+        return attemptRun.success;
       }
-      // Context overflow errors should be handled by the inner runner's
-      // compaction/retry logic, not by model fallback.  If one escapes as a
-      // throw, rethrow it immediately rather than trying a different model
-      // that may have a smaller context window and fail worse.
-      const errMessage = formatErrorMessage(err);
-      if (isLikelyContextOverflowError(errMessage)) {
+      const err = attemptRun.error;
+      // Max-turn termination can follow successful tool actions. Stop before
+      // candidate fallback so the user can verify effects before any replay.
+      if (findCliMaxTurnsError(err)) {
         throw err;
       }
-      if (isMissingAgentHarnessError(err)) {
-        throw err;
-      }
-      const normalized =
-        coerceToFailoverError(err, {
+      if (
+        !attemptRun.classifiedResult &&
+        params.canFallbackAfterError &&
+        !(await params.canFallbackAfterError({
           provider: candidate.provider,
           model: candidate.model,
-          sessionId: params.sessionId,
-          lane: params.lane,
-        }) ?? err;
-
-      // LiveSessionModelSwitchError during fallback may point at a later
-      // candidate that is already the active live-session selection.  Jump
-      // there directly.  Stale same/earlier targets remain a known failover
-      // so the outer runner cannot loop on the conflicting model, but they
-      // are not provider overloads.
-      if (err instanceof LiveSessionModelSwitchError) {
-        // Runtime selection is part of the live switch transaction. The outer
-        // owner must apply it before any retry; redirecting here would pair the
-        // new model with the stale harness runtime captured by the caller.
-        if (
-          hasDifferentLiveSessionRuntimeSelection({
-            error: err,
-            currentAgentHarnessRuntimeOverride: candidateHarnessAuth.agentHarnessRuntimeOverride,
-          })
-        ) {
+          error: err,
+          attempt: i + 1,
+          total: candidates.length,
+        }))
+      ) {
+        throw err;
+      }
+      if (attemptRun.classifiedResult) {
+        latestClassifiedResult = attemptRun.classifiedResult;
+      }
+      if (
+        attemptRun.exhaustionResult &&
+        (!exhaustionResult || attemptRun.exhaustionResult.priority >= exhaustionResult.priority)
+      ) {
+        exhaustionResult = attemptRun.exhaustionResult;
+      }
+      {
+        // Local runtime coordination errors (session write-lock timeout, embedded
+        // attempt session takeover) are not provider/model failures. Aborting
+        // here prevents the fallback chain from consuming candidates retrying
+        // the same local condition and surfacing a misleading "All models
+        // failed" summary. See #83510.
+        if (isNonProviderRuntimeCoordinationError(err)) {
           throw err;
         }
-        const liveSwitchTargetIndex = findLiveSessionModelSwitchRedirectIndex({
-          error: err,
-          candidates,
-          currentIndex: i,
-        });
-        if (liveSwitchTargetIndex !== null) {
-          i = liveSwitchTargetIndex - 1;
+        if (isTranscriptNotContinuableError(err)) {
+          throw err;
+        }
+        if (transientProbeProviderForAttempt) {
+          const probeFailureReason = describeFailoverError(err).reason;
+          if (!shouldPreserveTransientCooldownProbeSlot(probeFailureReason)) {
+            cooldownProbeUsedProviders.add(transientProbeProviderForAttempt);
+          }
+        }
+        // Context overflow errors should be handled by the inner runner's
+        // compaction/retry logic, not by model fallback.  If one escapes as a
+        // throw, rethrow it immediately rather than trying a different model
+        // that may have a smaller context window and fail worse.
+        const errMessage = formatErrorMessage(err);
+        if (isLikelyContextOverflowError(errMessage)) {
+          throw err;
+        }
+        if (isMissingAgentHarnessError(err)) {
+          throw err;
+        }
+        const normalized =
+          coerceToFailoverError(err, {
+            provider: candidate.provider,
+            model: candidate.model,
+            sessionId: params.sessionId,
+            lane: params.lane,
+          }) ?? err;
+
+        // LiveSessionModelSwitchError during fallback may point at a later
+        // candidate that is already the active live-session selection.  Jump
+        // there directly.  Stale same/earlier targets remain a known failover
+        // so the outer runner cannot loop on the conflicting model, but they
+        // are not provider overloads.
+        if (err instanceof LiveSessionModelSwitchError) {
+          // Runtime selection is part of the live switch transaction. The outer
+          // owner must apply it before any retry; redirecting here would pair the
+          // new model with the stale harness runtime captured by the caller.
+          if (
+            hasDifferentLiveSessionRuntimeSelection({
+              error: err,
+              currentAgentHarnessRuntimeOverride: candidateHarnessAuth.agentHarnessRuntimeOverride,
+            })
+          ) {
+            throw err;
+          }
+          const liveSwitchTargetIndex = findLiveSessionModelSwitchRedirectIndex({
+            error: err,
+            candidates,
+            currentIndex: i,
+          });
+          if (liveSwitchTargetIndex !== null) {
+            i = liveSwitchTargetIndex - 1;
+            fallbackDecision = "continue";
+            continue;
+          }
+
+          const switchMsg = err.message;
+          const switchNormalized = new FailoverError(switchMsg, {
+            reason: "unknown",
+            provider: candidate.provider,
+            model: candidate.model,
+            sessionId: params.sessionId,
+            lane: params.lane,
+          });
+          lastError = switchNormalized;
+          await observeFailedCandidate({
+            attempts,
+            candidate,
+            error: switchNormalized,
+            runId: params.runId,
+            sessionId: params.sessionId,
+            lane: params.lane,
+            requestedProvider: params.provider,
+            requestedModel: params.model,
+            attempt: i + 1,
+            total: candidates.length,
+            nextCandidate: candidates[i + 1],
+            isPrimary,
+            requestedModelMatched: requestedModel,
+            fallbackConfigured: hasFallbackCandidates,
+          });
+          fallbackDecision = i + 1 < candidates.length ? "continue" : "terminal";
           continue;
         }
 
-        const switchMsg = err.message;
-        const switchNormalized = new FailoverError(switchMsg, {
-          reason: "unknown",
-          provider: candidate.provider,
-          model: candidate.model,
-          sessionId: params.sessionId,
-          lane: params.lane,
-        });
-        lastError = switchNormalized;
+        // Even unrecognized errors should not abort the fallback loop when
+        // there are remaining candidates.  Only abort/context-overflow errors
+        // (handled above) are truly non-retryable.
+        const isKnownFailover = isFailoverError(normalized);
+        if (!isKnownFailover && i === candidates.length - 1) {
+          throw err;
+        }
+
+        // Record auth-class failures in the session-scoped skip cache so the
+        // next turn does not re-attempt the same broken candidate. Only mark
+        // for non-primary candidates — see the skip-check above for rationale.
+        if (
+          isKnownFailover &&
+          !isPrimary &&
+          params.sessionId &&
+          (normalized.reason === "auth" || normalized.reason === "auth_permanent")
+        ) {
+          markFallbackCandidateSkipped({
+            sessionId: params.sessionId,
+            provider: candidate.provider,
+            model: candidate.model,
+            reason: normalized.reason,
+          });
+        }
+
+        lastError = isKnownFailover ? normalized : err;
         await observeFailedCandidate({
           attempts,
           candidate,
-          error: switchNormalized,
+          error: normalized,
           runId: params.runId,
           sessionId: params.sessionId,
           lane: params.lane,
@@ -1921,58 +1987,17 @@ async function runWithModelFallbackInternal<T>(
           requestedModelMatched: requestedModel,
           fallbackConfigured: hasFallbackCandidates,
         });
-        continue;
-      }
-
-      // Even unrecognized errors should not abort the fallback loop when
-      // there are remaining candidates.  Only abort/context-overflow errors
-      // (handled above) are truly non-retryable.
-      const isKnownFailover = isFailoverError(normalized);
-      if (!isKnownFailover && i === candidates.length - 1) {
-        throw err;
-      }
-
-      // Record auth-class failures in the session-scoped skip cache so the
-      // next turn does not re-attempt the same broken candidate. Only mark
-      // for non-primary candidates — see the skip-check above for rationale.
-      if (
-        isKnownFailover &&
-        !isPrimary &&
-        params.sessionId &&
-        (normalized.reason === "auth" || normalized.reason === "auth_permanent")
-      ) {
-        markFallbackCandidateSkipped({
-          sessionId: params.sessionId,
+        await params.onError?.({
           provider: candidate.provider,
           model: candidate.model,
-          reason: normalized.reason,
+          error: isKnownFailover ? normalized : err,
+          attempt: i + 1,
+          total: candidates.length,
         });
+        fallbackDecision = i + 1 < candidates.length ? "continue" : "terminal";
       }
-
-      lastError = isKnownFailover ? normalized : err;
-      await observeFailedCandidate({
-        attempts,
-        candidate,
-        error: normalized,
-        runId: params.runId,
-        sessionId: params.sessionId,
-        lane: params.lane,
-        requestedProvider: params.provider,
-        requestedModel: params.model,
-        attempt: i + 1,
-        total: candidates.length,
-        nextCandidate: candidates[i + 1],
-        isPrimary,
-        requestedModelMatched: requestedModel,
-        fallbackConfigured: hasFallbackCandidates,
-      });
-      await params.onError?.({
-        provider: candidate.provider,
-        model: candidate.model,
-        error: isKnownFailover ? normalized : err,
-        attempt: i + 1,
-        total: candidates.length,
-      });
+    } finally {
+      await fallbackDecisionHandler?.(fallbackDecision);
     }
   }
 

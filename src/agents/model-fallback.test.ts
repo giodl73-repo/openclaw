@@ -562,6 +562,75 @@ function parseDiagnosticModelRef(ref: string): { provider: string; model: string
 }
 
 describe("runWithModelFallback", () => {
+  it("settles an earlier successful candidate as terminal", async () => {
+    const decisions: string[] = [];
+    const run = vi.fn(
+      async (
+        provider: string,
+        _model: string,
+        options?: {
+          registerFallbackDecisionHandler?: (
+            handler: (decision: "continue" | "terminal") => void,
+          ) => void;
+        },
+      ) => {
+        options?.registerFallbackDecisionHandler?.((decision) => {
+          decisions.push(`${provider}:${decision}`);
+        });
+        return "ok";
+      },
+    );
+
+    const result = await runWithModelFallback({
+      cfg: makeDiagnosticFallbackConfig(["anthropic/claude-opus-4-7"]),
+      provider: "openai",
+      model: "gpt-5.4",
+      run,
+      manageFallbackDecision: true,
+    });
+
+    expect(result.result).toBe("ok");
+    expect(decisions).toEqual(["openai:terminal"]);
+  });
+
+  it("settles only an attempted fallback transition as continuing", async () => {
+    const decisions: string[] = [];
+    const run = vi.fn(
+      async (
+        provider: string,
+        _model: string,
+        options?: {
+          registerFallbackDecisionHandler?: (
+            handler: (decision: "continue" | "terminal") => void,
+          ) => void;
+        },
+      ) => {
+        options?.registerFallbackDecisionHandler?.((decision) => {
+          decisions.push(`${provider}:${decision}`);
+        });
+        if (provider === "openai") {
+          throw new FailoverError("overloaded", {
+            provider: "openai",
+            model: "gpt-5.4",
+            reason: "overloaded",
+          });
+        }
+        return "ok";
+      },
+    );
+
+    const result = await runWithModelFallback({
+      cfg: makeDiagnosticFallbackConfig(["anthropic/claude-opus-4-7"]),
+      provider: "openai",
+      model: "gpt-5.4",
+      run,
+      manageFallbackDecision: true,
+    });
+
+    expect(result.result).toBe("ok");
+    expect(decisions).toEqual(["openai:continue", "anthropic:terminal"]);
+  });
+
   it.each(DIAGNOSTIC_CASES)("$name", async ({ refs, reasons, expectError }) => {
     const candidates = refs.map(parseDiagnosticModelRef);
     const diagnostics = captureModelFailoverDiagnostics();
