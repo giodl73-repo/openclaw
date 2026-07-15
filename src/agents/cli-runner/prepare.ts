@@ -285,9 +285,13 @@ function buildCliMcpGrantContext(params: {
     agentId: params.agentId,
     sessionId: normalizeOptionalMcpContextValue(params.run.sessionId),
     runId: normalizeOptionalMcpContextValue(params.run.runId),
-    skillsSnapshot: params.run.skillsSnapshot,
-    parentSkillInvocation: params.run.explicitSkillInvocation,
-    parentRunId: normalizeOptionalMcpContextValue(params.run.runId),
+    ...(params.run.skillsSnapshot ? { skillsSnapshot: params.run.skillsSnapshot } : {}),
+    ...(params.run.explicitSkillInvocation
+      ? {
+          parentSkillInvocation: params.run.explicitSkillInvocation,
+          parentRunId: normalizeOptionalMcpContextValue(params.run.runId),
+        }
+      : {}),
     modelProvider: params.modelProvider,
     modelId: params.modelId,
     messageProvider: resolveCliMcpMessageProvider(params.run),
@@ -1041,9 +1045,13 @@ export async function prepareCliRunContext(
             nodeExecAllowed: true,
             modelProvider,
             modelId,
-            skillsSnapshot: params.skillsSnapshot,
-            parentSkillInvocation: params.explicitSkillInvocation,
-            parentRunId: normalizeOptionalMcpContextValue(params.runId),
+            ...(params.skillsSnapshot ? { skillsSnapshot: params.skillsSnapshot } : {}),
+            ...(params.explicitSkillInvocation
+              ? {
+                  parentSkillInvocation: params.explicitSkillInvocation,
+                  parentRunId: normalizeOptionalMcpContextValue(params.runId),
+                }
+              : {}),
             execSession: buildCliMcpExecSession(params.sessionEntry),
             execOverrides: buildCliMcpExecOverrides(params.execOverrides),
             bashElevated: buildCliMcpBashElevated(params.bashElevated),
