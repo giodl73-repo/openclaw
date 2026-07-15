@@ -37,12 +37,50 @@ export type SubagentRunResult = {
 
 type SubagentWaitParams = {
   runId: string;
+  /** Include the persisted audit summary for this run when the session is known. */
+  sessionKey?: string;
   timeoutMs?: number;
+};
+
+export type SubagentRunAudit = {
+  auditSchema: "openclaw-audit-run";
+  schemaVersion: 1;
+  sessionId: string;
+  sessionKey?: string;
+  runId: string;
+  firstEventAt: string;
+  lastEventAt: string;
+  status?: string;
+  models: Array<{ provider?: string; modelId?: string }>;
+  usage?: Partial<
+    Record<"input" | "output" | "cacheRead" | "cacheWrite" | "reasoningTokens" | "total", number>
+  >;
+  cost?: { usd: number; basis: "provider-billed" | "catalog-estimate" | "mixed" };
+  skillInvocations: Array<{
+    invocationId: string;
+    parentInvocationId?: string;
+    parentRunId?: string;
+    commandName?: string;
+    skillName?: string;
+    skillSource?: string;
+    skillDigest?: string;
+    executionHints?: Record<string, unknown>;
+    status?: string;
+  }>;
+  skills: Array<{
+    skillName: string;
+    skillSource?: string;
+    activation?: string;
+    toolName?: string;
+    toolCallId?: string;
+  }>;
+  receipts: Array<Record<string, unknown>>;
 };
 
 type SubagentWaitResult = {
   status: "ok" | "error" | "timeout";
   error?: string;
+  audit?: SubagentRunAudit;
 };
 
 type SubagentGetSessionMessagesParams = {

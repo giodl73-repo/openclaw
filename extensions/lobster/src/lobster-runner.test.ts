@@ -509,15 +509,29 @@ describe("createEmbeddedLobsterRunner", () => {
       .fn()
       .mockImplementationOnce(async () => {
         events.push("spawn:verify");
-        return { status: "accepted", runId: "run-verify" };
+        return {
+          status: "accepted",
+          runId: "run-verify",
+          childSessionKey: "agent:main:subagent:verify",
+        };
       })
       .mockImplementationOnce(async () => {
         events.push("spawn:resolve");
-        return { status: "accepted", runId: "run-resolve" };
+        return {
+          status: "accepted",
+          runId: "run-resolve",
+          childSessionKey: "agent:main:subagent:resolve",
+        };
       });
     const waitForRun = vi.fn(async ({ runId }: { runId: string }) => {
       events.push(`complete:${runId}`);
-      return { status: "ok" as const };
+      return {
+        status: "ok" as const,
+        audit: {
+          receipts:
+            runId === "run-verify" ? [{ type: "customer.verified" }] : [{ type: "case.resolved" }],
+        },
+      };
     });
     const runner = createEmbeddedLobsterRunner({
       invokeOpenClawTool: invoke,
@@ -592,6 +606,34 @@ describe("createEmbeddedLobsterRunner", () => {
         taskFlowId: "flow-case-42",
       }),
     ).rejects.toThrow("managed skill run error: customer identity did not match");
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
+  it("skips case resolution when verification records no matching receipt", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: "accepted",
+      runId: "run-verify",
+      childSessionKey: "agent:main:subagent:verify",
+    });
+    const runner = createEmbeddedLobsterRunner({
+      invokeOpenClawTool: invoke,
+      waitForOpenClawRun: vi.fn().mockResolvedValue({
+        status: "ok",
+        audit: { receipts: [{ type: "customer.verification_failed" }] },
+      }),
+    });
+
+    await expect(
+      runner.run({
+        action: "run",
+        pipeline: path.resolve("extensions/lobster/examples/support-case.lobster"),
+        argsJson: '{"case_id":"CAS-42"}',
+        cwd: process.cwd(),
+        timeoutMs: 2000,
+        maxStdoutBytes: 4096,
+        taskFlowId: "flow-case-42",
+      }),
+    ).resolves.toMatchObject({ ok: true, status: "ok" });
     expect(invoke).toHaveBeenCalledOnce();
   });
 

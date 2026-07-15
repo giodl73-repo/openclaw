@@ -33,8 +33,16 @@ export type EmbeddedOpenClawInvoke = (params: {
 
 export type EmbeddedOpenClawWaitForRun = (params: {
   runId: string;
+  sessionKey?: string;
   timeoutMs: number;
-}) => Promise<{ status: "ok" | "error" | "timeout"; error?: string }>;
+}) => Promise<{
+  status: "ok" | "error" | "timeout";
+  error?: string;
+  audit?: {
+    receipts: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  };
+}>;
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -159,7 +167,7 @@ function createSkillCommand(
       sideEffects: ["spawns_managed_skill"],
     },
     help: () =>
-      "openclaw.skill --skill <name> --task <task> [--token-budget <tokens>] [--wait-timeout-ms <ms>] [--model <model>] [--task-name <name>] [--step-id <id>]",
+      "openclaw.skill --skill <name> --task <task> [--receipt-type <type>] [--token-budget <tokens>] [--wait-timeout-ms <ms>] [--model <model>] [--task-name <name>] [--step-id <id>]",
     async run({ input, args, ctx }) {
       for await (const item of input) {
         // Skill steps are explicit and do not implicitly consume pipeline input.
@@ -178,6 +186,7 @@ function createSkillCommand(
         "openclaw.skill --token-budget",
       );
       const model = readOptionalString(args.model);
+      const receiptType = readOptionalString(args.receiptType ?? args["receipt-type"]);
       const taskName = readOptionalString(args.taskName ?? args["task-name"]);
       const waitTimeoutMs =
         readOptionalPositiveInteger(
@@ -201,15 +210,32 @@ function createSkillCommand(
         result && typeof result === "object" && !Array.isArray(result)
           ? readOptionalString((result as JsonRecord).runId)
           : undefined;
+      const childSessionKey =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? readOptionalString((result as JsonRecord).childSessionKey)
+          : undefined;
       if (!runId) {
         throw new Error("openclaw.skill sessions_spawn did not return a runId");
       }
-      const completion = await waitForRun({ runId, timeoutMs: waitTimeoutMs });
+      const completion = await waitForRun({
+        runId,
+        ...(childSessionKey ? { sessionKey: childSessionKey } : {}),
+        timeoutMs: waitTimeoutMs,
+      });
       if (completion.status !== "ok") {
         const detail = completion.error ? `: ${completion.error}` : "";
         throw new Error(`managed skill run ${completion.status}${detail}`);
       }
-      return { output: outputItems(result) };
+      const receipt = receiptType
+        ? (completion.audit?.receipts.find((candidate) => candidate.type === receiptType) ?? null)
+        : undefined;
+      return {
+        output: outputItems({
+          ...(result as JsonRecord),
+          ...(completion.audit ? { audit: completion.audit } : {}),
+          ...(receiptType ? { receipt } : {}),
+        }),
+      };
     },
   };
 }

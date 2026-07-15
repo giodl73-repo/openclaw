@@ -98,8 +98,24 @@ describe("embedded OpenClaw Lobster registry", () => {
   });
 
   it("runs a managed skill step through sessions_spawn", async () => {
-    const invoke = vi.fn().mockResolvedValue({ status: "accepted", runId: "run-child" });
-    const waitForRun = completedRunWaiter();
+    const invoke = vi.fn().mockResolvedValue({
+      status: "accepted",
+      runId: "run-child",
+      childSessionKey: "agent:main:subagent:verify",
+    });
+    const waitForRun = vi.fn().mockResolvedValue({
+      status: "ok" as const,
+      audit: {
+        auditSchema: "openclaw-audit-run",
+        receipts: [
+          {
+            type: "customer.verified",
+            data: { verificationId: "VER-42" },
+          },
+        ],
+        usage: { total: 321 },
+      },
+    });
     const command = createOpenClawLobsterRegistry(baseRegistry(), invoke, waitForRun).get(
       "openclaw.skill",
     );
@@ -113,6 +129,7 @@ describe("embedded OpenClaw Lobster registry", () => {
         model: "anthropic/claude-sonnet-4-5",
         "task-name": "verify_customer",
         "step-id": "verify",
+        "receipt-type": "customer.verified",
       },
       ctx: { env: { OPENCLAW_TASK_FLOW_ID: "flow-42" } },
     });
@@ -131,9 +148,31 @@ describe("embedded OpenClaw Lobster registry", () => {
       idempotencyKey: "lobster:flow-42:verify",
     });
     expect(await collect(result?.output ?? input())).toEqual([
-      { status: "accepted", runId: "run-child" },
+      {
+        status: "accepted",
+        runId: "run-child",
+        childSessionKey: "agent:main:subagent:verify",
+        audit: {
+          auditSchema: "openclaw-audit-run",
+          receipts: [
+            {
+              type: "customer.verified",
+              data: { verificationId: "VER-42" },
+            },
+          ],
+          usage: { total: 321 },
+        },
+        receipt: {
+          type: "customer.verified",
+          data: { verificationId: "VER-42" },
+        },
+      },
     ]);
-    expect(waitForRun).toHaveBeenCalledWith({ runId: "run-child", timeoutMs: 60_000 });
+    expect(waitForRun).toHaveBeenCalledWith({
+      runId: "run-child",
+      sessionKey: "agent:main:subagent:verify",
+      timeoutMs: 60_000,
+    });
   });
 
   it("keeps managed skill steps on the current session", async () => {

@@ -8,6 +8,7 @@ steps:
       openclaw.skill --skill verify-customer
       --task "Verify the customer for case ${case_id}"
       --task-name verify_customer --step-id verify-customer
+      --receipt-type customer.verified
       --wait-timeout-ms 60000
 
   - id: resolve_case
@@ -16,3 +17,4 @@ steps:
       --task "Resolve case ${case_id} after customer verification"
       --task-name resolve_case --step-id resolve-case
       --wait-timeout-ms 60000
+    when: $verify_customer.json.receipt.type == "customer.verified"

@@ -75,7 +75,8 @@ export function createEmbeddedOpenClawWaitForRun(api: OpenClawPluginApi) {
   if (!subagent) {
     return undefined;
   }
-  return async (params: { runId: string; timeoutMs: number }) => await subagent.waitForRun(params);
+  return async (params: { runId: string; sessionKey?: string; timeoutMs: number }) =>
+    await subagent.waitForRun(params);
 }
 
 type ManagedFlowRunParams = {
