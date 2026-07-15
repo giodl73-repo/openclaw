@@ -2,6 +2,7 @@ import { resolveStorePath } from "../../../config/sessions/paths.js";
 import { loadSessionEntry } from "../../../config/sessions/session-accessor.js";
 import { parseSqliteSessionFileMarker } from "../../../config/sessions/sqlite-marker.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
+import { resolveAgentIdFromSessionKey } from "../../../routing/session-key.js";
 import {
   collectToolAuditReceipts,
   type ObservedToolAuditResult,
@@ -13,7 +14,7 @@ import type { EmbeddedRunAttemptParams } from "./types.js";
 
 /** Collects valid receipts and snapshots the session's business association at result time. */
 export function collectAttemptToolAuditReceipts(params: {
-  agentId: string;
+  agentId?: string;
   attempt: Pick<
     EmbeddedRunAttemptParams,
     | "config"
@@ -33,6 +34,7 @@ export function collectAttemptToolAuditReceipts(params: {
   if (!sessionKey) {
     return receipts;
   }
+  const agentId = params.agentId ?? resolveAgentIdFromSessionKey(sessionKey);
   try {
     const marker = parseSqliteSessionFileMarker(
       params.attempt.trajectorySessionFile ?? params.attempt.sessionFile,
@@ -40,9 +42,9 @@ export function collectAttemptToolAuditReceipts(params: {
     const storePath =
       params.attempt.sessionTarget?.storePath ??
       marker?.storePath ??
-      resolveStorePath(params.attempt.config?.session?.store, { agentId: params.agentId });
+      resolveStorePath(params.attempt.config?.session?.store, { agentId });
     const entry = loadSessionEntry({
-      agentId: params.agentId,
+      agentId,
       readConsistency: "latest",
       sessionKey,
       storePath,

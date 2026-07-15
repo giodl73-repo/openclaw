@@ -3,7 +3,6 @@
  */
 import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
 import type { ImageContent } from "../../../llm/types.js";
-import type { createTrajectoryRuntimeRecorder } from "../../../trajectory/runtime.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import { ackPendingAgentSteeringItems } from "../../subagent-registry.js";
 import { normalizeAssistantReplayContent } from "../replay-history.js";
@@ -21,7 +20,7 @@ import {
 } from "./attempt.llm-boundary.js";
 import { wrapStreamFnWithMessageTransform } from "./message-transform-stream-wrapper.js";
 import type { RuntimeContextCustomMessage } from "./runtime-context-prompt.js";
-import type { EmbeddedRunAttemptParams } from "./types.js";
+import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptTrajectoryRecorder } from "./types.js";
 
 type PromptSubmissionSession = {
   messages: AgentMessage[];
@@ -46,8 +45,6 @@ type SteeringLease = {
   runIds: readonly string[];
 };
 
-type TrajectoryRecorder = ReturnType<typeof createTrajectoryRuntimeRecorder>;
-
 export async function submitEmbeddedAttemptPrompt(input: {
   attempt: Pick<EmbeddedRunAttemptParams, "sessionId" | "userTurnTranscriptRecorder">;
   activeSession: PromptSubmissionSession;
@@ -67,7 +64,7 @@ export async function submitEmbeddedAttemptPrompt(input: {
   toolResultAggregateMaxChars: number;
   toolResultMaxChars: number;
   toolResultPromptProjectionState: ToolResultPromptProjectionState;
-  trajectoryRecorder: TrajectoryRecorder | null;
+  trajectoryRecorder: EmbeddedRunAttemptTrajectoryRecorder | null;
   transcriptLeafId: string | null;
   transcriptPrompt: string;
 }): Promise<void> {

@@ -80,6 +80,7 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   requestedModelId?: string | null;
   /** True when this attempt is running after a model fallback decision. */
   fallbackActive?: boolean;
+  registerFallbackDecisionHandler?: import("../../../trajectory/skill-invocation.js").RegisterFallbackDecisionHandler;
   /** Concrete fallback reason that selected this attempt, when known. */
   fallbackReason?: string | null;
   /** Concrete degraded-runtime reason for this attempt, when known. */

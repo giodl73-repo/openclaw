@@ -515,7 +515,7 @@ export async function runEmbeddedAttempt(
 
     let session: AgentSession | undefined;
     let removeToolResultContextGuard: (() => void) | undefined;
-    let trajectoryRecorder: ReturnType<typeof createTrajectoryRuntimeRecorder> | null = null;
+    let trajectoryRecorder: EmbeddedRunAttemptParams["trajectoryRecorder"] = null;
     let trajectoryEndRecorded = false;
     let buildAbortSettlePromise: () => Promise<void> | null = () => null;
     let cleanupYieldAborted = false;

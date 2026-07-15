@@ -213,6 +213,7 @@ export type RunEmbeddedAgentParams = {
   fastModeAutoProgressState?: FastModeAutoProgressState;
   /** True when the outer model fallback loop has reached its final candidate. */
   isFinalFallbackAttempt?: boolean;
+  registerFallbackDecisionHandler?: import("../../../trajectory/skill-invocation.js").RegisterFallbackDecisionHandler;
   verboseLevel?: VerboseLevel;
   reasoningLevel?: ReasoningLevel;
   toolResultFormat?: ToolResultFormat;

@@ -1,7 +1,10 @@
 import { formatErrorMessage } from "../../../infra/errors.js";
 import type { ExplicitSkillInvocation } from "../../../skills/types.js";
 import { buildTrajectoryArtifacts } from "../../../trajectory/metadata.js";
-import { recordSkillInvocationCompleted } from "../../../trajectory/skill-invocation.js";
+import {
+  recordOrDeferSkillInvocationCompleted,
+  type RegisterFallbackDecisionHandler,
+} from "../../../trajectory/skill-invocation.js";
 import {
   resolveAttemptTrajectoryTerminal,
   resolveTerminalAssistantTexts,
@@ -17,7 +20,7 @@ type FinalizeEmbeddedAttemptParams = {
   hasTerminalOutput: boolean;
   silentExpected?: boolean;
   explicitSkillInvocation?: ExplicitSkillInvocation;
-  isFinalFallbackAttempt?: boolean;
+  registerFallbackDecisionHandler?: RegisterFallbackDecisionHandler;
 };
 
 /** Classifies the completed attempt and records its terminal trajectory artifacts. */
@@ -103,13 +106,12 @@ export function finalizeEmbeddedAttempt(
       lastToolError: result.lastToolError,
     }),
   );
-  if (params.isFinalFallbackAttempt !== false) {
-    recordSkillInvocationCompleted(
-      trajectoryRecorder,
-      params.explicitSkillInvocation,
-      terminal.status,
-    );
-  }
+  recordOrDeferSkillInvocationCompleted(
+    trajectoryRecorder,
+    params.explicitSkillInvocation,
+    terminal.status,
+    params.registerFallbackDecisionHandler,
+  );
   trajectoryRecorder?.recordEvent("session.ended", {
     status: terminal.status,
     aborted: result.aborted,

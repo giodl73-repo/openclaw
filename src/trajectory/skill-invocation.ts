@@ -2,7 +2,12 @@ import type { ExplicitSkillInvocation } from "../skills/types.js";
 
 type SkillInvocationRecorder = {
   recordEvent: (type: string, data?: Record<string, unknown>) => void;
+  flush?: () => Promise<void>;
 };
+
+export type RegisterFallbackDecisionHandler = (
+  handler: (decision: "continue" | "terminal") => Promise<void> | void,
+) => void;
 
 function invocationFields(invocation: ExplicitSkillInvocation) {
   const caller = invocation.parentInvocationId
@@ -38,4 +43,22 @@ export function recordSkillInvocationCompleted(
       status,
     });
   }
+}
+
+export function recordOrDeferSkillInvocationCompleted(
+  recorder: SkillInvocationRecorder | null | undefined,
+  invocation: ExplicitSkillInvocation | undefined,
+  status: "success" | "error" | "interrupted",
+  registerFallbackDecisionHandler?: RegisterFallbackDecisionHandler,
+): void {
+  if (!registerFallbackDecisionHandler) {
+    recordSkillInvocationCompleted(recorder, invocation, status);
+    return;
+  }
+  registerFallbackDecisionHandler(async (decision) => {
+    if (decision === "terminal") {
+      recordSkillInvocationCompleted(recorder, invocation, status);
+      await recorder?.flush?.();
+    }
+  });
 }
