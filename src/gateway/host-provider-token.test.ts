@@ -11,7 +11,7 @@ import {
 const PUBLIC_KEY = Buffer.from("host-provider-public-key").toString("base64url");
 const PEER_FINGERPRINT = createHash("sha256").update(PUBLIC_KEY).digest("base64url");
 const DECLARATION: HostProviderDeclaration = {
-  bindingId: "lobster/egress",
+  bindingId: "example/reverse-provider",
   interfaceVersion: "provider-request-dispatcher/v1",
   carrierVersion: "reverse-provider-dispatch/v1",
   ownerGeneration: "owner-4",

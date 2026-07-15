@@ -6,11 +6,11 @@
       "incarnationId": "incarnation-1",
       "operationId": "operation-1",
       "ownerGeneration": "owner-7",
-      "hostBundleGeneration": "lobster/host@1.0.0"
+      "hostBundleGeneration": "example/host@1.0.0"
     },
     "open": {
       "type": "operation-open",
-      "bindingId": "lobster/egress",
+      "bindingId": "example/reverse-provider",
       "deadlineMs": 30000,
       "requestByteLimit": 1024,
       "responseByteLimit": 2048,
@@ -22,8 +22,8 @@
         "headers": {
           "content-type": "application/json"
         },
-        "credentialSlotRefs": ["lobster/capi-token"],
-        "routeProfile": "lobster/managed-egress",
+        "credentialSlotRefs": ["example/provider-token"],
+        "routeProfile": "example/managed-egress",
         "networkGuard": {
           "version": "network-guard/v1",
           "target": {

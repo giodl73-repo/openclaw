@@ -2,21 +2,21 @@
   "version": "provider-request-traffic-policy-fixtures/v1",
   "registration": {
     "version": "provider-request-traffic-policy/v1",
-    "id": "lobster/enterprise-egress",
+    "id": "example/enterprise-egress",
     "generation": "policy-7",
     "required": true,
     "provenance": {
-      "source": "lobster-managed-policy",
+      "source": "example-managed-policy",
       "revision": "revision-4"
     },
     "routeProfiles": [
       {
-        "id": "lobster/managed",
+        "id": "example/managed",
         "dispatcherPolicy": {
           "mode": "explicit-proxy",
           "proxyUrl": "https://proxy.example.test"
         },
-        "dispatchBindingId": "lobster/egress"
+        "dispatchBindingId": "example/reverse-provider"
       }
     ],
     "rules": [
@@ -31,17 +31,17 @@
         }
       },
       {
-        "id": "capi",
+        "id": "example",
         "match": {
-          "providers": ["microsoft-capi"],
+          "providers": ["example-provider"],
           "capabilities": ["llm"],
           "transports": ["stream"],
           "endpointClasses": ["custom"]
         },
         "outcome": {
           "action": "allow",
-          "routeProfileId": "lobster/managed",
-          "allowedOrigins": ["https://capi.example.test"],
+          "routeProfileId": "example/managed",
+          "allowedOrigins": ["https://api.example.test"],
           "allowPrivateNetwork": false,
           "maximumTimeoutMs": 20000
         }
@@ -50,22 +50,22 @@
   },
   "cases": [
     {
-      "id": "managed-capi",
+      "id": "managed-example",
       "facts": {
-        "provider": "microsoft-capi",
+        "provider": "example-provider",
         "capability": "llm",
         "transport": "stream",
         "endpointClass": "custom",
-        "url": "https://capi.example.test/v1/messages",
+        "url": "https://api.example.test/v1/messages",
         "allowPrivateNetwork": true,
         "timeoutMs": 60000
       },
       "expected": {
         "action": "allow",
-        "policyId": "lobster/enterprise-egress",
+        "policyId": "example/enterprise-egress",
         "policyGeneration": "policy-7",
-        "routeProfileId": "lobster/managed",
-        "dispatchBindingId": "lobster/egress",
+        "routeProfileId": "example/managed",
+        "dispatchBindingId": "example/reverse-provider",
         "allowPrivateNetwork": false,
         "timeoutMs": 20000,
         "dispatcherPolicy": {
@@ -87,7 +87,7 @@
       },
       "expected": {
         "action": "deny",
-        "policyId": "lobster/enterprise-egress",
+        "policyId": "example/enterprise-egress",
         "policyGeneration": "policy-7",
         "reason": "DestinationSuspended"
       }
@@ -105,7 +105,7 @@
       },
       "expected": {
         "action": "deny",
-        "policyId": "lobster/enterprise-egress",
+        "policyId": "example/enterprise-egress",
         "policyGeneration": "policy-7",
         "reason": "RequiredPolicyNoMatch"
       }
@@ -113,7 +113,7 @@
     {
       "id": "destination-outside-policy",
       "facts": {
-        "provider": "microsoft-capi",
+        "provider": "example-provider",
         "capability": "llm",
         "transport": "stream",
         "endpointClass": "custom",
@@ -123,7 +123,7 @@
       },
       "expected": {
         "action": "deny",
-        "policyId": "lobster/enterprise-egress",
+        "policyId": "example/enterprise-egress",
         "policyGeneration": "policy-7",
         "reason": "DestinationOutsidePolicy"
       }

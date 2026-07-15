@@ -830,6 +830,11 @@ export function buildGuardedModelFetch(
         `Provider request denied by traffic policy ${trafficPolicyDecision.policyId} (${trafficPolicyDecision.reason})`,
       );
     }
+    if (trafficPolicyDecision?.action === "allow" && trafficPolicyDecision.dispatchBindingId) {
+      throw new Error(
+        `Provider request traffic policy selected unavailable dispatcher ${trafficPolicyDecision.dispatchBindingId}`,
+      );
+    }
     const validateTrafficPolicyUrl =
       trafficPolicyDecision?.action === "allow"
         ? (redirectUrl: URL) => {

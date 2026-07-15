@@ -108,15 +108,15 @@ describe("host integration bundle registration", () => {
         {
           owner: "provider-request",
           kind: "provider-request-dispatcher",
-          id: "lobster/egress",
+          id: "example/reverse-provider",
           version: "provider-request-dispatcher/v1",
           required: true,
-          readinessCriteria: ["provider.request.dispatch.lobster"],
+          readinessCriteria: ["provider.request.dispatch.example"],
           status: "resolved",
           resolvedVersion: "provider-request-dispatcher/v1",
           provenance: {
-            pluginId: "lobster-host",
-            source: "/plugins/lobster-host/openclaw.plugin.json",
+            pluginId: "example-host",
+            source: "/plugins/example-host/openclaw.plugin.json",
             origin: "config",
           },
         },
@@ -159,6 +159,11 @@ describe("host integration bundle registration", () => {
           id: PROVIDER_TOKEN_SLOT_ID,
           required: true,
           status: "missing",
+        }),
+        expect.objectContaining({
+          id: "example/reverse-provider",
+          required: true,
+          status: "resolved",
         }),
       ],
     });
@@ -252,6 +257,11 @@ describe("host integration bundle registration", () => {
           status: "incompatible",
         }),
         expect.anything(),
+        expect.objectContaining({
+          id: "example/reverse-provider",
+          required: true,
+          status: "resolved",
+        }),
       ],
     });
   });

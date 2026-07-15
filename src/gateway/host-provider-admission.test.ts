@@ -18,18 +18,19 @@ import {
 const PUBLIC_KEY = "host-provider-public-key";
 const NOW_MS = Date.UTC(2026, 0, 2);
 const DECLARATION: HostProviderDeclaration = {
-  bindingId: "lobster/egress",
+  bindingId: "example/reverse-provider",
   interfaceVersion: "provider-request-dispatcher/v1",
   carrierVersion: "reverse-provider-dispatch/v1",
   ownerGeneration: "owner-4",
-  hostBundleGeneration: "lobster/host@1.0.0",
+  hostBundleGeneration: "example/host@1.0.0",
 };
+let bundleGeneration: string;
 
 function registerCurrentBinding() {
-  registerHostIntegrationBundleV1({
+  const bundle = registerHostIntegrationBundleV1({
     manifest: {
       version: "host-integration-bundle/v1",
-      id: "lobster/host",
+      id: "example/host",
       bundleVersion: "1.0.0",
       contributions: [
         {
@@ -38,7 +39,7 @@ function registerCurrentBinding() {
           id: DECLARATION.bindingId,
           version: DECLARATION.interfaceVersion,
           required: true,
-          readinessCriteria: ["provider.request.dispatch.lobster"],
+          readinessCriteria: ["provider.request.dispatch.example"],
         },
       ],
     },
@@ -49,8 +50,8 @@ function registerCurrentBinding() {
         id: DECLARATION.bindingId,
         version: DECLARATION.interfaceVersion,
         provenance: {
-          pluginId: "lobster-host",
-          source: "/plugins/lobster-host/openclaw.plugin.json",
+          pluginId: "example-host",
+          source: "/plugins/example-host/openclaw.plugin.json",
           origin: "config",
         },
       },
@@ -61,13 +62,14 @@ function registerCurrentBinding() {
       owner: "provider-request",
       kind: "provider-request-dispatcher",
       id: DECLARATION.bindingId,
-      bundleGeneration: DECLARATION.hostBundleGeneration,
+      bundleGeneration: bundle.generation,
       ownerGeneration: DECLARATION.ownerGeneration,
       state: "ready",
       reason: "Ready",
       message: "ready",
     },
   ]);
+  bundleGeneration = bundle.generation;
 }
 
 function connect(overrides: Partial<ConnectParams> = {}): ConnectParams {
@@ -118,7 +120,10 @@ describe("host provider admission", () => {
     ).toEqual({
       ok: true,
       admission: {
-        declaration: DECLARATION,
+        declaration: {
+          ...DECLARATION,
+          hostBundleGeneration: bundleGeneration,
+        },
         credentialId: expect.any(String),
         peerKeyFingerprint: expect.any(String),
       },
@@ -132,7 +137,7 @@ describe("host provider admission", () => {
         owner: "provider-request",
         kind: "provider-request-dispatcher",
         id: DECLARATION.bindingId,
-        bundleGeneration: DECLARATION.hostBundleGeneration,
+        bundleGeneration,
         ownerGeneration: "owner-5",
         state: "ready",
         reason: "Ready",

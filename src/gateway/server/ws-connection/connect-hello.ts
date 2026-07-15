@@ -27,6 +27,7 @@ export async function sendGatewayHello(
   context: GatewayConnectPhaseContext,
   state: DeviceAuthorizedGatewayConnect,
   pluginSurfaceUrls: Record<string, string>,
+  onHelloSent?: () => void,
 ): Promise<void> {
   const {
     connId,
@@ -82,8 +83,7 @@ export async function sendGatewayHello(
     }
   }
   const helloOkAuthScopes = deviceToken ? deviceToken.scopes : scopes;
-  const controlUiTabs =
-    role === "host-provider" ? [] : listControlUiPluginTabs(helloOkAuthScopes);
+  const controlUiTabs = role === "host-provider" ? [] : listControlUiPluginTabs(helloOkAuthScopes);
   const helloOk = {
     type: "hello-ok",
     protocol: PROTOCOL_VERSION,
@@ -173,6 +173,14 @@ export async function sendGatewayHello(
     await releasePendingNodePairingCleanup();
     setCloseCause("hello-send-failed", { error: formatForLog(err) });
     close();
+    return;
+  }
+  try {
+    onHelloSent?.();
+  } catch (err) {
+    await releasePendingNodePairingCleanup();
+    setCloseCause("hello-activation-failed", { error: formatForLog(err) });
+    close(1008, "session activation failed");
     return;
   }
   let authProvided = authMethod;

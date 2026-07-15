@@ -29,19 +29,19 @@ import {
 const tempPaths: string[] = [];
 
 function registerCurrentBinding() {
-  registerHostIntegrationBundleV1({
+  const bundle = registerHostIntegrationBundleV1({
     manifest: {
       version: "host-integration-bundle/v1",
-      id: "lobster/host",
+      id: "example/host",
       bundleVersion: "1.0.0",
       contributions: [
         {
           owner: "provider-request",
           kind: "provider-request-dispatcher",
-          id: "lobster/egress",
+          id: "example/reverse-provider",
           version: "provider-request-dispatcher/v1",
           required: true,
-          readinessCriteria: ["provider.request.dispatch.lobster"],
+          readinessCriteria: ["provider.request.dispatch.example"],
         },
       ],
     },
@@ -49,11 +49,11 @@ function registerCurrentBinding() {
       {
         owner: "provider-request",
         kind: "provider-request-dispatcher",
-        id: "lobster/egress",
+        id: "example/reverse-provider",
         version: "provider-request-dispatcher/v1",
         provenance: {
-          pluginId: "lobster-host",
-          source: "/plugins/lobster-host/openclaw.plugin.json",
+          pluginId: "example-host",
+          source: "/plugins/example-host/openclaw.plugin.json",
           origin: "config",
         },
       },
@@ -63,8 +63,8 @@ function registerCurrentBinding() {
     {
       owner: "provider-request",
       kind: "provider-request-dispatcher",
-      id: "lobster/egress",
-      bundleGeneration: "lobster/host@1.0.0",
+      id: "example/reverse-provider",
+      bundleGeneration: bundle.generation,
       ownerGeneration: "owner-4",
       state: "ready",
       reason: "Ready",
@@ -96,7 +96,9 @@ describe("host provider websocket admission", () => {
       onSend: (data) => sent.push(JSON.parse(data) as Record<string, unknown>),
     });
     const hostProviderRegistry = {
-      register: vi.fn(),
+      register: vi.fn(() => {
+        expect(sent.some((frame) => frame.id === "connect-1" && frame.ok === true)).toBe(true);
+      }),
       unregister: vi.fn(),
       receiveFrame: vi.fn(),
     };
@@ -118,7 +120,7 @@ describe("host provider websocket admission", () => {
     const identity = loadOrCreateDeviceIdentity(path.join(tempPath, "device.json"));
     const publicKey = publicKeyRawBase64UrlFromPem(identity.publicKeyPem);
     const credential = issueHostProviderCredentialV1({
-      bindingId: "lobster/egress",
+      bindingId: "example/reverse-provider",
       publicKey,
       lifetimeMs: 60_000,
     });
@@ -173,7 +175,7 @@ describe("host provider websocket admission", () => {
     );
 
     await vi.waitFor(() => {
-      expect(hostProviderRegistry.register).toHaveBeenCalledTimes(1);
+      expect(sent.some((frame) => frame.id === "connect-1")).toBe(true);
     });
     const response = sent.find((frame) => frame.id === "connect-1");
     expect(response).toMatchObject({
@@ -193,6 +195,7 @@ describe("host provider websocket admission", () => {
         auth: { role: "host-provider", scopes: [] },
       },
     });
+    expect(hostProviderRegistry.register).toHaveBeenCalledTimes(1);
 
     socket.emit(
       "message",

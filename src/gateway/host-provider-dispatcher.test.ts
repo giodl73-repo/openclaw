@@ -1,0 +1,553 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  NETWORK_GUARD_PROFILE_VERSION,
+  type NetworkGuardProfileV1,
+} from "../infra/net/network-guard-profile.js";
+import {
+  REVERSE_PROVIDER_DISPATCH_VERSION,
+  type ReverseProviderDispatchFrameV1,
+  type ReverseProviderDispatchTraceResult,
+} from "../infra/net/reverse-provider-dispatch.js";
+import {
+  createHostProviderOneHopFetchDispatcherV1,
+  HostProviderDispatchError,
+} from "./host-provider-dispatcher.js";
+import type {
+  HostProviderOperation,
+  HostProviderOperationOpenInput,
+  HostProviderRegistry,
+} from "./host-provider-registry.js";
+
+type HostProviderOperationFrameInput = ReverseProviderDispatchFrameV1 extends infer TFrame
+  ? TFrame extends ReverseProviderDispatchFrameV1
+    ? Omit<
+        TFrame,
+        "version" | "incarnationId" | "operationId" | "ownerGeneration" | "hostBundleGeneration"
+      >
+    : never
+  : never;
+
+function networkGuard(): NetworkGuardProfileV1 {
+  return {
+    version: NETWORK_GUARD_PROFILE_VERSION,
+    target: {
+      protocol: "https:",
+      origin: "https://api.example.com",
+      hostname: "api.example.com",
+      port: 443,
+    },
+    route: {
+      mode: "explicit-proxy",
+      resolution: "proxy",
+      tls: "required",
+    },
+    addressPolicy: {
+      mode: "public-only",
+      trustedHostnames: [],
+      hostnameAllowlist: [],
+      allowedPrivateCidrs: [],
+      allowRfc2544BenchmarkRange: false,
+      allowIpv6UniqueLocalRange: false,
+      dnsRebinding: {
+        policy: "reject",
+        enforcement: "connection-owner-required",
+      },
+    },
+  };
+}
+
+function withBase(
+  operation: HostProviderOperation,
+  frame: HostProviderOperationFrameInput,
+): ReverseProviderDispatchFrameV1 {
+  return {
+    ...frame,
+    version: REVERSE_PROVIDER_DISPATCH_VERSION,
+    incarnationId: operation.open.incarnationId,
+    operationId: operation.open.operationId,
+    ownerGeneration: operation.open.ownerGeneration,
+    hostBundleGeneration: operation.open.hostBundleGeneration,
+  } as ReverseProviderDispatchFrameV1;
+}
+
+function fakeRegistry(params: {
+  requestCredits?: number[];
+  holdOpen?: boolean;
+  responseFrames: (
+    operation: HostProviderOperation,
+    requestBody: Uint8Array,
+  ) => ReverseProviderDispatchFrameV1[];
+}) {
+  let opened: HostProviderOperationOpenInput | undefined;
+  let requestBody = Buffer.alloc(0);
+  let requestCredit = 0;
+  const sentFrames: ReverseProviderDispatchFrameV1[] = [];
+  const openOperation = vi.fn((input: HostProviderOperationOpenInput): HostProviderOperation => {
+    opened = input;
+    let responseCredit = 0;
+    let pendingResponseFrames: ReverseProviderDispatchFrameV1[] | undefined;
+    let controller!: ReadableStreamDefaultController<ReverseProviderDispatchFrameV1>;
+    const frames = new ReadableStream<ReverseProviderDispatchFrameV1>({
+      start(next) {
+        controller = next;
+      },
+    });
+    let resolveResult!: (result: ReverseProviderDispatchTraceResult) => void;
+    const result = new Promise<ReverseProviderDispatchTraceResult>((resolve) => {
+      resolveResult = resolve;
+    });
+    const flushResponse = () => {
+      if (!pendingResponseFrames) {
+        return;
+      }
+      const terminal = pendingResponseFrames.at(-1);
+      while (pendingResponseFrames.length > 0) {
+        const responseFrame = pendingResponseFrames[0]!;
+        if (responseFrame.type === "chunk" && responseFrame.stream === "response") {
+          const bytes = Buffer.from(responseFrame.payloadBase64, "base64").byteLength;
+          if (bytes > responseCredit) {
+            return;
+          }
+          responseCredit -= bytes;
+        }
+        controller.enqueue(responseFrame);
+        pendingResponseFrames.shift();
+      }
+      if (params.holdOpen) {
+        return;
+      }
+      pendingResponseFrames = undefined;
+      controller.close();
+      resolveResult(
+        terminal?.type === "terminal" && terminal.outcome === "completed"
+          ? {
+              ok: true,
+              terminal: {
+                outcome: "completed",
+                certainty: "completed",
+              },
+              cancelled: false,
+              ignoredFrames: 0,
+            }
+          : {
+              ok: true,
+              terminal: {
+                outcome: "failed",
+                certainty:
+                  terminal?.type === "terminal" ? terminal.certainty : "started-unconfirmed",
+                failureCode:
+                  terminal?.type === "terminal" ? terminal.failureCode : "protocol-violation",
+              },
+              cancelled: false,
+              ignoredFrames: 0,
+            },
+      );
+    };
+    const operation = {
+      open: {
+        ...input,
+        version: REVERSE_PROVIDER_DISPATCH_VERSION,
+        type: "operation-open" as const,
+        incarnationId: "incarnation-1",
+        ownerGeneration: "dispatcher-owner-4",
+        hostBundleGeneration: "example/host@1.0.0",
+      },
+      frames,
+      result,
+      send(frame: ReverseProviderDispatchFrameV1) {
+        sentFrames.push(frame);
+        if (frame.type === "credit" && frame.stream === "response") {
+          responseCredit += frame.bytes;
+          flushResponse();
+        }
+        if (frame.type === "chunk" && frame.stream === "request") {
+          if (Buffer.from(frame.payloadBase64, "base64").byteLength > requestCredit) {
+            return false;
+          }
+          requestCredit -= Buffer.from(frame.payloadBase64, "base64").byteLength;
+          requestBody = Buffer.concat([requestBody, Buffer.from(frame.payloadBase64, "base64")]);
+        }
+        if (frame.type === "half-close" && frame.stream === "request") {
+          pendingResponseFrames = params.responseFrames(operation, requestBody);
+          flushResponse();
+        }
+        return true;
+      },
+    } satisfies HostProviderOperation;
+    queueMicrotask(() => {
+      for (const bytes of params.requestCredits ?? [input.requestByteLimit]) {
+        requestCredit += bytes;
+        controller.enqueue(
+          withBase(operation, {
+            type: "credit",
+            stream: "request",
+            bytes,
+          }),
+        );
+      }
+    });
+    return operation;
+  });
+  return {
+    registry: { openOperation } as unknown as HostProviderRegistry,
+    openOperation,
+    get opened() {
+      return opened;
+    },
+    get requestBody() {
+      return requestBody;
+    },
+    sentFrames,
+  };
+}
+
+describe("host provider one-hop dispatcher", () => {
+  it("streams one request and reconstructs the host response without following redirects", async () => {
+    const fake = fakeRegistry({
+      responseFrames: (operation) => [
+        withBase(operation, { type: "dispatch-started" }),
+        withBase(operation, {
+          type: "response-open",
+          status: 307,
+          statusText: "Temporary Redirect",
+          headers: { location: "https://other.example/final" },
+        }),
+        withBase(operation, {
+          type: "chunk",
+          stream: "response",
+          sequence: 0,
+          payloadBase64: Buffer.from("redi").toString("base64"),
+        }),
+        withBase(operation, {
+          type: "chunk",
+          stream: "response",
+          sequence: 1,
+          payloadBase64: Buffer.from("rect").toString("base64"),
+        }),
+        withBase(operation, { type: "half-close", stream: "response" }),
+        withBase(operation, {
+          type: "terminal",
+          outcome: "completed",
+          certainty: "completed",
+        }),
+      ],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+      maxChunkBytes: 4,
+      createAuditCorrelation: () => "audit-1",
+    });
+
+    const response = await dispatcher.dispatch({
+      url: "https://api.example.com/v1/messages",
+      init: {
+        method: "POST",
+        redirect: "manual",
+        headers: { "content-type": "application/json" },
+        body: "request-body",
+      },
+      networkGuard: networkGuard(),
+      credentialSlotRefs: ["example/provider-token"],
+    });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://other.example/final");
+    await expect(response.text()).resolves.toBe("redirect");
+    expect(fake.requestBody.toString()).toBe("request-body");
+    expect(fake.opened?.request).toMatchObject({
+      credentialSlotRefs: ["example/provider-token"],
+      routeProfile: "example/managed",
+      auditCorrelation: "audit-1",
+    });
+    const responseCredits = fake.sentFrames.flatMap((frame) =>
+      frame.type === "credit" && frame.stream === "response" ? [frame.bytes] : [],
+    );
+    expect(responseCredits.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(responseCredits)).toEqual(new Set([4]));
+  });
+
+  it.each([204, 205, 304])(
+    "returns status %i without constructing a response body",
+    async (status) => {
+      const fake = fakeRegistry({
+        responseFrames: (operation) => [
+          withBase(operation, { type: "dispatch-started" }),
+          withBase(operation, {
+            type: "response-open",
+            status,
+            statusText: "No Body",
+            headers: {},
+          }),
+          withBase(operation, { type: "half-close", stream: "response" }),
+          withBase(operation, {
+            type: "terminal",
+            outcome: "completed",
+            certainty: "completed",
+          }),
+        ],
+      });
+      const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+        registry: fake.registry,
+        bindingId: "example/reverse-provider",
+        routeProfile: "example/managed",
+      });
+
+      const response = await dispatcher.dispatch({
+        url: "https://api.example.com/v1/messages",
+        init: { method: "POST", redirect: "manual" },
+        networkGuard: networkGuard(),
+      });
+
+      expect(response.status).toBe(status);
+      expect(response.body).toBeNull();
+      await expect(response.text()).resolves.toBe("");
+    },
+  );
+
+  it("rejects response chunks after a bodyless response status", async () => {
+    const fake = fakeRegistry({
+      responseFrames: (operation) => [
+        withBase(operation, { type: "dispatch-started" }),
+        withBase(operation, {
+          type: "response-open",
+          status: 204,
+          statusText: "No Content",
+          headers: {},
+        }),
+        withBase(operation, {
+          type: "chunk",
+          stream: "response",
+          sequence: 0,
+          payloadBase64: Buffer.from("unexpected").toString("base64"),
+        }),
+      ],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        url: "https://api.example.com/v1/messages",
+        init: { method: "POST", redirect: "manual" },
+        networkGuard: networkGuard(),
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<HostProviderDispatchError>>({
+        failureCode: "protocol-violation",
+        certainty: "response-started",
+      }),
+    );
+  });
+
+  it("preserves dispatch certainty when the host fails before response headers", async () => {
+    const fake = fakeRegistry({
+      responseFrames: (operation) => [
+        withBase(operation, { type: "dispatch-started" }),
+        withBase(operation, {
+          type: "terminal",
+          outcome: "failed",
+          certainty: "started-unconfirmed",
+          failureCode: "connection-lost",
+        }),
+      ],
+    });
+
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        url: "https://api.example.com/v1/messages",
+        init: {
+          method: "POST",
+          redirect: "manual",
+          body: "request",
+        },
+        networkGuard: networkGuard(),
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<HostProviderDispatchError>>({
+        failureCode: "connection-lost",
+        certainty: "started-unconfirmed",
+      }),
+    );
+  });
+
+  it("rejects a pre-aborted request before opening a host operation", async () => {
+    const fake = fakeRegistry({
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+    });
+    const controller = new AbortController();
+    controller.abort("caller stopped");
+
+    await expect(
+      dispatcher.dispatch({
+        url: "https://api.example.com/v1/messages",
+        init: {
+          method: "POST",
+          redirect: "manual",
+          signal: controller.signal,
+        },
+        networkGuard: networkGuard(),
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fake.openOperation).not.toHaveBeenCalled();
+  });
+
+  it("rejects promptly and cancels the host operation when the caller aborts", async () => {
+    const fake = fakeRegistry({
+      holdOpen: true,
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+    });
+    const controller = new AbortController();
+
+    const response = dispatcher.dispatch({
+      url: "https://api.example.com/v1/messages",
+      init: {
+        method: "POST",
+        redirect: "manual",
+        signal: controller.signal,
+      },
+      networkGuard: networkGuard(),
+    });
+    controller.abort("caller stopped");
+
+    await expect(response).rejects.toMatchObject({ name: "AbortError" });
+    expect(fake.sentFrames).toContainEqual(
+      expect.objectContaining({
+        type: "cancel",
+        reason: "request aborted",
+      }),
+    );
+  });
+
+  it("rejects immediately when buffered request data exceeds the declared limit", async () => {
+    const fake = fakeRegistry({
+      holdOpen: true,
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+      requestByteLimit: 4,
+      maxChunkBytes: 4,
+    });
+
+    await expect(
+      dispatcher.dispatch({
+        url: "https://api.example.com/v1/messages",
+        init: {
+          method: "POST",
+          redirect: "manual",
+          body: "12345",
+        },
+        networkGuard: networkGuard(),
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<HostProviderDispatchError>>({
+        failureCode: "protocol-violation",
+        certainty: "not-started",
+      }),
+    );
+  });
+
+  it("cancels and unlocks the request source when dispatch is aborted", async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Buffer.from("request"));
+      },
+      cancel,
+    });
+    const fake = fakeRegistry({
+      holdOpen: true,
+      responseFrames: () => [],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+    });
+    const controller = new AbortController();
+    const init: RequestInit & { redirect: "manual"; duplex: "half" } = {
+      method: "POST",
+      redirect: "manual",
+      body,
+      duplex: "half",
+      signal: controller.signal,
+    };
+
+    const response = dispatcher.dispatch({
+      url: "https://api.example.com/v1/messages",
+      init,
+      networkGuard: networkGuard(),
+    });
+    await Promise.resolve();
+    controller.abort("caller stopped");
+
+    await expect(response).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalled();
+    });
+    expect(body.locked).toBe(false);
+  });
+
+  it("never sends more request bytes than the host has credited", async () => {
+    const fake = fakeRegistry({
+      requestCredits: [3, 2, 7],
+      responseFrames: (operation) => [
+        withBase(operation, { type: "dispatch-started" }),
+        withBase(operation, {
+          type: "response-open",
+          status: 200,
+          statusText: "OK",
+          headers: {},
+        }),
+        withBase(operation, { type: "half-close", stream: "response" }),
+        withBase(operation, {
+          type: "terminal",
+          outcome: "completed",
+          certainty: "completed",
+        }),
+      ],
+    });
+    const dispatcher = createHostProviderOneHopFetchDispatcherV1({
+      registry: fake.registry,
+      bindingId: "example/reverse-provider",
+      routeProfile: "example/managed",
+      maxChunkBytes: 8,
+    });
+
+    const response = await dispatcher.dispatch({
+      url: "https://api.example.com/v1/messages",
+      init: {
+        method: "POST",
+        redirect: "manual",
+        body: "request-body",
+      },
+      networkGuard: networkGuard(),
+    });
+
+    expect(response.status).toBe(200);
+    expect(fake.requestBody.toString()).toBe("request-body");
+  });
+});

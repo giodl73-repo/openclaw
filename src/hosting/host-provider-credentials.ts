@@ -37,7 +37,7 @@ export function resolveCurrentHostProviderDeclarationV1(
   if (!contribution) {
     return undefined;
   }
-  const hostBundleGeneration = `${bundle.id}@${bundle.bundleVersion}`;
+  const hostBundleGeneration = bundle.generation;
   const evidence = getCurrentHostIntegrationOwnerEvidenceV1().find(
     (entry) =>
       entry.owner === contribution.owner &&

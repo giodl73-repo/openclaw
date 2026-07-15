@@ -15,36 +15,36 @@ function registration(
 ): ProviderRequestTrafficPolicyRegistrationV1 {
   return {
     version: "provider-request-traffic-policy/v1",
-    id: "lobster/enterprise-egress",
+    id: "example/enterprise-egress",
     generation: "policy-7",
     required: true,
     provenance: {
-      source: "lobster-managed-policy",
+      source: "example-managed-policy",
       revision: "rev-4",
     },
     routeProfiles: [
       {
-        id: "lobster/managed",
+        id: "example/managed",
         dispatcherPolicy: {
           mode: "explicit-proxy",
           proxyUrl: "https://proxy.example.test",
         },
-        dispatchBindingId: "lobster/egress",
+        dispatchBindingId: "example/reverse-provider",
       },
     ],
     rules: [
       {
-        id: "capi",
+        id: "example",
         match: {
-          providers: ["microsoft-capi"],
+          providers: ["example-provider"],
           capabilities: ["llm"],
           transports: ["stream"],
           endpointClasses: ["custom"],
         },
         outcome: {
           action: "allow",
-          routeProfileId: "lobster/managed",
-          allowedOrigins: ["https://capi.example.test"],
+          routeProfileId: "example/managed",
+          allowedOrigins: ["https://api.example.test"],
           allowPrivateNetwork: false,
           maximumTimeoutMs: 20_000,
         },
@@ -56,11 +56,11 @@ function registration(
 
 function facts() {
   return {
-    provider: "microsoft-capi",
+    provider: "example-provider",
     capability: "llm" as const,
     transport: "stream" as const,
     endpointClass: "custom" as const,
-    url: "https://capi.example.test/v1/messages",
+    url: "https://api.example.test/v1/messages",
     allowPrivateNetwork: true,
     timeoutMs: 60_000,
   };
@@ -94,10 +94,10 @@ describe("provider request traffic policy", () => {
     const disposeOld = registerProviderRequestTrafficPolicyV1(registration());
     const first = getCurrentProviderRequestTrafficPolicyV1();
     expect(first).toMatchObject({
-      id: "lobster/enterprise-egress",
+      id: "example/enterprise-egress",
       generation: "policy-7",
       readiness: "ready",
-      provenance: { source: "lobster-managed-policy", revision: "rev-4" },
+      provenance: { source: "example-managed-policy", revision: "rev-4" },
     });
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first?.rules[0]?.match.providers)).toBe(true);
@@ -116,7 +116,7 @@ describe("provider request traffic policy", () => {
         }),
       ),
     ).toThrow("already registered");
-    expect(getCurrentProviderRequestTrafficPolicyV1()?.id).toBe("lobster/enterprise-egress");
+    expect(getCurrentProviderRequestTrafficPolicyV1()?.id).toBe("example/enterprise-egress");
   });
 
   it("denies explicitly and fails closed when a required policy has no match", () => {
@@ -124,8 +124,8 @@ describe("provider request traffic policy", () => {
       registration({
         rules: [
           {
-            id: "deny-capi",
-            match: { providers: ["microsoft-capi"] },
+            id: "deny-example",
+            match: { providers: ["example-provider"] },
             outcome: { action: "deny", reason: "DestinationSuspended" },
           },
         ],
@@ -153,10 +153,10 @@ describe("provider request traffic policy", () => {
     registerProviderRequestTrafficPolicyV1(registration());
     expect(evaluateCurrentProviderRequestTrafficPolicyV1(facts())).toEqual({
       action: "allow",
-      policyId: "lobster/enterprise-egress",
+      policyId: "example/enterprise-egress",
       policyGeneration: "policy-7",
-      routeProfileId: "lobster/managed",
-      dispatchBindingId: "lobster/egress",
+      routeProfileId: "example/managed",
+      dispatchBindingId: "example/reverse-provider",
       allowPrivateNetwork: false,
       timeoutMs: 20_000,
       dispatcherPolicy: {
@@ -178,11 +178,11 @@ describe("provider request traffic policy", () => {
   it("denies conflicting route selections and configured proxy replacement", () => {
     const conflictingRule = {
       id: "second-route",
-      match: { providers: ["microsoft-capi"] },
+      match: { providers: ["example-provider"] },
       outcome: {
         action: "allow" as const,
-        routeProfileId: "lobster/direct",
-        allowedOrigins: ["https://capi.example.test"],
+        routeProfileId: "example/direct",
+        allowedOrigins: ["https://api.example.test"],
         allowPrivateNetwork: false,
       },
     };
@@ -191,7 +191,7 @@ describe("provider request traffic policy", () => {
         routeProfiles: [
           ...registration().routeProfiles,
           {
-            id: "lobster/direct",
+            id: "example/direct",
             dispatcherPolicy: { mode: "direct" },
           },
         ],
@@ -238,7 +238,7 @@ describe("provider request traffic policy", () => {
         registration({
           routeProfiles: [
             {
-              id: "lobster/managed",
+              id: "example/managed",
               dispatcherPolicy: {
                 mode: "direct",
                 connect: { rejectUnauthorized: false },
@@ -255,9 +255,11 @@ describe("provider request traffic policy", () => {
           {
             ...registration().rules[0]!,
             outcome: {
-              ...registration().rules[0]!.outcome,
               action: "allow",
+              routeProfileId: "example/managed",
+              allowedOrigins: ["https://api.example.test"],
               allowPrivateNetwork: true,
+              maximumTimeoutMs: 20_000,
             },
           },
         ],
@@ -279,11 +281,11 @@ describe("provider request traffic policy", () => {
       registration({
         routeProfiles: [
           {
-            id: "lobster/managed",
+            id: "example/managed",
             dispatcherPolicy: {
               mode: "direct",
               pinnedHostname: {
-                hostname: "capi.example.test",
+                hostname: "api.example.test",
                 addresses: ["192.0.2.20", "192.0.2.30"],
               },
             },
@@ -297,7 +299,7 @@ describe("provider request traffic policy", () => {
         dispatcherPolicy: {
           mode: "direct",
           pinnedHostname: {
-            hostname: "capi.example.test",
+            hostname: "api.example.test",
             addresses: ["192.0.2.10", "192.0.2.20"],
           },
         },
@@ -307,7 +309,7 @@ describe("provider request traffic policy", () => {
       dispatcherPolicy: {
         mode: "direct",
         pinnedHostname: {
-          hostname: "capi.example.test",
+          hostname: "api.example.test",
           addresses: ["192.0.2.20"],
         },
       },
@@ -319,7 +321,7 @@ describe("provider request traffic policy", () => {
         dispatcherPolicy: {
           mode: "direct",
           pinnedHostname: {
-            hostname: "capi.example.test",
+            hostname: "api.example.test",
             addresses: ["192.0.2.10"],
           },
         },

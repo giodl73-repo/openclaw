@@ -188,11 +188,11 @@ describe("lazy protocol validators", () => {
       role: "host-provider",
       scopes: [],
       hostProvider: {
-        bindingId: "lobster/egress",
+        bindingId: "example/reverse-provider",
         interfaceVersion: "provider-request-dispatcher/v1",
         carrierVersion: "reverse-provider-dispatch/v1",
         ownerGeneration: "owner-4",
-        hostBundleGeneration: "lobster/host@1.0.0",
+        hostBundleGeneration: "example/host@1.0.0",
       },
       auth: { hostProviderToken: "credential" },
     };

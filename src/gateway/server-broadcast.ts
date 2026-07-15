@@ -68,7 +68,7 @@ const NODE_ALLOWED_EVENTS = new Set<string>(["voicewake.changed", "voicewake.rou
 
 function serializeFrameField(name: "payload" | "stateVersion", value: unknown): string {
   // Serialize one field through JSON.stringify so embedded values keep JSON
-  // escaping, then splice it into the shared per-client frame body.
+  // esexampleng, then splice it into the shared per-client frame body.
   const fieldJSON = JSON.stringify({ [name]: value });
   const keyJSON = JSON.stringify(name);
   const prefix = `{${keyJSON}:`;

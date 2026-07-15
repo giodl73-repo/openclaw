@@ -295,22 +295,16 @@ export async function attachAuthenticatedGatewayConnect(
   }
   setHandshakeState("connected");
   advanceHandshakePhase("session_attached");
+  let activateHostProviderSession: (() => void) | undefined;
   if (role === "host-provider") {
     const hostProviderRegistry = buildRequestContext().hostProviderRegistry;
     if (!hostProviderRegistry) {
       close(1011, "host provider registry unavailable");
       return;
     }
-    try {
+    activateHostProviderSession = () => {
       hostProviderRegistry.register(nextClient);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "host provider registration failed";
-      markHandshakeFailure("host-provider-registration", { reason: message });
-      sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, message);
-      close(1008, truncateCloseReason(message));
-      return;
-    }
+    };
   }
   logWs("in", "connect", {
     connId,
@@ -419,5 +413,5 @@ export async function attachAuthenticatedGatewayConnect(
     );
   }
 
-  await sendGatewayHello(context, state, pluginSurfaceUrls);
+  await sendGatewayHello(context, state, pluginSurfaceUrls, activateHostProviderSession);
 }

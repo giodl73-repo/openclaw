@@ -13,20 +13,20 @@ import {
   issueHostProviderCredentialV1,
 } from "./host-provider-credentials.js";
 
-function registerBinding(ownerGeneration = "owner-4") {
-  registerHostIntegrationBundleV1({
+function registerBundle() {
+  return registerHostIntegrationBundleV1({
     manifest: {
       version: "host-integration-bundle/v1",
-      id: "lobster/host",
+      id: "example/host",
       bundleVersion: "1.0.0",
       contributions: [
         {
           owner: "provider-request",
           kind: "provider-request-dispatcher",
-          id: "lobster/egress",
+          id: "example/reverse-provider",
           version: "provider-request-dispatcher/v1",
           required: true,
-          readinessCriteria: ["provider.request.dispatch.lobster"],
+          readinessCriteria: ["provider.request.dispatch.example"],
         },
       ],
     },
@@ -34,36 +34,43 @@ function registerBinding(ownerGeneration = "owner-4") {
       {
         owner: "provider-request",
         kind: "provider-request-dispatcher",
-        id: "lobster/egress",
+        id: "example/reverse-provider",
         version: "provider-request-dispatcher/v1",
         provenance: {
-          pluginId: "lobster-host",
-          source: "/plugins/lobster-host/openclaw.plugin.json",
+          pluginId: "example-host",
+          source: "/plugins/example-host/openclaw.plugin.json",
           origin: "config",
         },
       },
     ],
   });
+}
+
+function registerBinding(ownerGeneration = "owner-4"): string {
+  const bundle = registerBundle();
   publishHostIntegrationOwnerEvidenceV1([
     {
       owner: "provider-request",
       kind: "provider-request-dispatcher",
-      id: "lobster/egress",
-      bundleGeneration: "lobster/host@1.0.0",
+      id: "example/reverse-provider",
+      bundleGeneration: bundle.generation,
       ownerGeneration,
       state: "ready",
       reason: "Ready",
       message: "ready",
     },
   ]);
+  return bundle.generation;
 }
+
+let bundleGeneration: string;
 
 beforeEach(() => {
   resetHostProviderTokenStateForTest({
     secret: Buffer.alloc(32, 7),
     audience: "gateway-process-1",
   });
-  registerBinding();
+  bundleGeneration = registerBinding();
 });
 
 afterEach(() => {
@@ -74,7 +81,7 @@ afterEach(() => {
 describe("host provider credential issuer", () => {
   it("derives authority generations from the current trusted owner state", () => {
     const credential = issueHostProviderCredentialV1({
-      bindingId: "lobster/egress",
+      bindingId: "example/reverse-provider",
       publicKey: "peer-public-key",
       nowMs: 1_000,
       lifetimeMs: 60_000,
@@ -84,11 +91,11 @@ describe("host provider credential issuer", () => {
       version: HOST_PROVIDER_CREDENTIAL_VERSION,
       token: expect.any(String),
       declaration: {
-        bindingId: "lobster/egress",
+        bindingId: "example/reverse-provider",
         interfaceVersion: "provider-request-dispatcher/v1",
         carrierVersion: "reverse-provider-dispatch/v1",
         ownerGeneration: "owner-4",
-        hostBundleGeneration: "lobster/host@1.0.0",
+        hostBundleGeneration: bundleGeneration,
       },
       credentialId: expect.any(String),
       issuedAtMs: 1_000,
@@ -103,7 +110,19 @@ describe("host provider credential issuer", () => {
 
     expect(() =>
       issueHostProviderCredentialV1({
-        bindingId: "lobster/egress",
+        bindingId: "example/reverse-provider",
+        publicKey: "peer-public-key",
+      }),
+    ).toThrow("binding is not ready");
+  });
+
+  it("rejects owner evidence from an earlier same-version bundle incarnation", () => {
+    const nextBundle = registerBundle();
+    expect(nextBundle.generation).not.toBe(bundleGeneration);
+
+    expect(() =>
+      issueHostProviderCredentialV1({
+        bindingId: "example/reverse-provider",
         publicKey: "peer-public-key",
       }),
     ).toThrow("binding is not ready");

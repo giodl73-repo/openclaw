@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { WebSocket } from "ws";
 import { resolveCurrentHostProviderDeclarationV1 } from "../hosting/host-provider-credentials.js";
-import { evaluateReverseProviderDispatchTraceV1 } from "../infra/net/reverse-provider-dispatch-trace.js";
+import {
+  createReverseProviderDispatchTraceEvaluatorV1,
+  type ReverseProviderDispatchTraceEvaluatorV1,
+} from "../infra/net/reverse-provider-dispatch-trace.js";
 import {
   REVERSE_PROVIDER_DISPATCH_VERSION,
   assertReverseProviderDispatchFrameV1,
@@ -15,15 +18,17 @@ import type { GatewayWsClient } from "./server/ws-types.js";
 
 const MAX_ACTIVE_OPERATIONS = 64;
 const MAX_QUEUED_FRAMES = 256;
-const MAX_QUEUED_BYTES = 1024 * 1024;
+const MAX_QUEUED_BYTES = 4 * 1024 * 1024;
 const MAX_OPERATION_FRAMES = 4096;
-const MAX_OPERATION_TRACE_BYTES = 48 * 1024 * 1024;
+const MAX_OPERATION_TRACE_BYTES = 96 * 1024 * 1024;
 const MAX_TOTAL_TRACE_BYTES = 128 * 1024 * 1024;
 const SLOW_CONSUMER_CLOSE_CODE = 1008;
 const SESSION_REPLACED_CLOSE_CODE = 4001;
 
 type PendingOperation = {
   frames: ReverseProviderDispatchFrameV1[];
+  traceEvaluator: ReverseProviderDispatchTraceEvaluatorV1;
+  frameController: ReadableStreamDefaultController<ReverseProviderDispatchFrameV1>;
   resolve: (result: ReverseProviderDispatchTraceResult) => void;
   result: Promise<ReverseProviderDispatchTraceResult>;
   timer: ReturnType<typeof setTimeout>;
@@ -49,6 +54,7 @@ export type HostProviderSession = {
 
 export type HostProviderOperation = {
   open: ReverseProviderDispatchOperationOpenV1;
+  frames: ReadableStream<ReverseProviderDispatchFrameV1>;
   result: Promise<ReverseProviderDispatchTraceResult>;
   send: (frame: ReverseProviderDispatchFrameV1) => boolean;
 };
@@ -96,10 +102,7 @@ function isInboundFrame(frame: ReverseProviderDispatchFrameV1): boolean {
 function disconnectedResult(
   operation: PendingOperation,
 ): Extract<ReverseProviderDispatchTraceResult, { ok: true }> {
-  const result = evaluateReverseProviderDispatchTraceV1({
-    frames: operation.frames,
-    disconnected: true,
-  });
+  const result = operation.traceEvaluator.finalize({ disconnected: true });
   if (result.ok) {
     return result;
   }
@@ -146,6 +149,7 @@ export class HostProviderRegistry {
         current.hostBundleGeneration === session.hostBundleGeneration
       );
     },
+    private readonly createTraceEvaluator: () => ReverseProviderDispatchTraceEvaluatorV1 = createReverseProviderDispatchTraceEvaluatorV1,
   ) {}
 
   register(client: GatewayWsClient): HostProviderSession {
@@ -218,6 +222,11 @@ export class HostProviderRegistry {
     if (open.type !== "operation-open") {
       throw new Error("host provider operation-open frame is invalid");
     }
+    const traceEvaluator = this.createTraceEvaluator();
+    const initialTraceResult = traceEvaluator.append(open);
+    if (initialTraceResult.ok || initialTraceResult.code !== "incomplete-trace") {
+      throw new Error("host provider operation-open trace state is invalid");
+    }
     const openBytes = frameBytes(open);
     if (
       openBytes > MAX_OPERATION_TRACE_BYTES ||
@@ -228,6 +237,12 @@ export class HostProviderRegistry {
     let resolveResult!: (result: ReverseProviderDispatchTraceResult) => void;
     const result = new Promise<ReverseProviderDispatchTraceResult>((resolve) => {
       resolveResult = resolve;
+    });
+    let frameController!: ReadableStreamDefaultController<ReverseProviderDispatchFrameV1>;
+    const frames = new ReadableStream<ReverseProviderDispatchFrameV1>({
+      start(controller) {
+        frameController = controller;
+      },
     });
     const timer = setTimeout(
       () => {
@@ -252,6 +267,8 @@ export class HostProviderRegistry {
     timer.unref?.();
     const operation: PendingOperation = {
       frames: [open],
+      traceEvaluator,
+      frameController,
       resolve: resolveResult,
       result,
       timer,
@@ -273,6 +290,7 @@ export class HostProviderRegistry {
     }
     return {
       open,
+      frames,
       result,
       send: (frame) => this.sendOperationFrame(frame),
     };
@@ -292,7 +310,11 @@ export class HostProviderRegistry {
       throw new Error(`host provider operation is not active: ${frame.operationId}`);
     }
     this.assertSessionFrame(session, frame);
-    return this.appendAndEvaluate(frame.operationId, frame);
+    const result = this.appendAndEvaluate(frame.operationId, frame);
+    if (!result.ok && result.code === "incomplete-trace") {
+      operation.frameController.enqueue(frame);
+    }
+    return result;
   }
 
   revokeAll(reason = "host provider access revoked"): void {
@@ -400,7 +422,7 @@ export class HostProviderRegistry {
     operation.frames.push(frame);
     operation.traceBytes += nextFrameBytes;
     this.totalTraceBytes += nextFrameBytes;
-    const result = evaluateReverseProviderDispatchTraceV1({ frames: operation.frames });
+    const result = operation.traceEvaluator.append(frame);
     if (result.ok || result.code !== "incomplete-trace") {
       this.settle(operationId, result);
     }
@@ -517,6 +539,7 @@ export class HostProviderRegistry {
     this.totalTraceBytes -= operation.traceBytes;
     this.queue = this.queue.filter((entry) => entry.operationId !== operationId);
     this.queuedBytes = this.queue.reduce((total, entry) => total + entry.bytes, 0);
+    operation.frameController.close();
     operation.resolve(result);
   }
 

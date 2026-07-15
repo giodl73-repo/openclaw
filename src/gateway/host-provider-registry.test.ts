@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
+import { createReverseProviderDispatchTraceEvaluatorV1 } from "../infra/net/reverse-provider-dispatch-trace.js";
 import type { ReverseProviderDispatchFrameV1 } from "../infra/net/reverse-provider-dispatch.js";
 import {
   HostProviderRegistry,
@@ -38,21 +39,21 @@ function client(
       role: "host-provider",
       scopes: [],
       hostProvider: {
-        bindingId: "lobster/egress",
+        bindingId: "example/reverse-provider",
         interfaceVersion: "provider-request-dispatcher/v1",
         carrierVersion: "reverse-provider-dispatch/v1",
         ownerGeneration,
-        hostBundleGeneration: "lobster/host@1.0.0",
+        hostBundleGeneration: "example/host@1.0.0",
       },
     },
     internal: {
       hostProvider: {
         declaration: {
-          bindingId: "lobster/egress",
+          bindingId: "example/reverse-provider",
           interfaceVersion: "provider-request-dispatcher/v1",
           carrierVersion: "reverse-provider-dispatch/v1",
           ownerGeneration,
-          hostBundleGeneration: "lobster/host@1.0.0",
+          hostBundleGeneration: "example/host@1.0.0",
         },
         credentialId: "credential-1",
         peerKeyFingerprint: "peer-1",
@@ -64,7 +65,7 @@ function client(
 function openInput(operationId: string): HostProviderOperationOpenInput {
   return {
     operationId,
-    bindingId: "lobster/egress",
+    bindingId: "example/reverse-provider",
     deadlineMs: 30_000,
     requestByteLimit: 1024,
     responseByteLimit: 2048,
@@ -74,8 +75,8 @@ function openInput(operationId: string): HostProviderOperationOpenInput {
       method: "POST",
       url: "https://api.dispatch.test/v1",
       headers: { "content-type": "application/json" },
-      credentialSlotRefs: ["lobster/capi-token"],
-      routeProfile: "lobster/managed-egress",
+      credentialSlotRefs: ["example/provider-token"],
+      routeProfile: "example/managed-egress",
       networkGuard: {
         version: "network-guard/v1" as const,
         target: {
@@ -151,6 +152,37 @@ afterEach(() => {
 });
 
 describe("host provider registry", () => {
+  it("appends each operation frame to its trace evaluator exactly once", () => {
+    const appendedFrames: unknown[] = [];
+    const value = new HostProviderRegistry(
+      () => true,
+      () => {
+        const evaluator = createReverseProviderDispatchTraceEvaluatorV1();
+        const append = evaluator.append.bind(evaluator);
+        vi.spyOn(evaluator, "append").mockImplementation((nextFrame) => {
+          appendedFrames.push(nextFrame);
+          return append(nextFrame);
+        });
+        return evaluator;
+      },
+    );
+    registries.push(value);
+    value.register(client("conn-incremental"));
+    const operation = value.openOperation(openInput("operation-incremental"));
+    const dispatchStarted = frame(operation.open, { type: "dispatch-started" });
+    const responseOpen = frame(operation.open, {
+      type: "response-open",
+      status: 200,
+      statusText: "OK",
+      headers: {},
+    });
+
+    value.receiveFrame("conn-incremental", dispatchStarted);
+    value.receiveFrame("conn-incremental", responseOpen);
+
+    expect(appendedFrames).toEqual([operation.open, dispatchStarted, responseOpen]);
+  });
+
   it("delivers one frame per turn and completes a synthetic carrier operation", async () => {
     const providerSocket = socket();
     const value = registry();
@@ -204,6 +236,41 @@ describe("host provider registry", () => {
       cancelled: false,
       ignoredFrames: 0,
     });
+  });
+
+  it("queues a maximum-size default request chunk after envelope encoding", async () => {
+    const providerSocket = socket();
+    const value = registry();
+    value.register(client("conn-max-chunk", providerSocket));
+    const operation = value.openOperation({
+      ...openInput("operation-max-chunk"),
+      requestByteLimit: 10 * 1024 * 1024,
+      responseByteLimit: 48 * 1024 * 1024,
+      maxFrameBytes: 2 * 1024 * 1024,
+      maxChunkBytes: 1024 * 1024,
+    });
+    await nextTurn();
+    value.receiveFrame(
+      "conn-max-chunk",
+      frame(operation.open, {
+        type: "credit",
+        stream: "request",
+        bytes: 1024 * 1024,
+      }),
+    );
+
+    expect(
+      operation.send(
+        frame(operation.open, {
+          type: "chunk",
+          stream: "request",
+          sequence: 0,
+          payloadBase64: Buffer.alloc(1024 * 1024).toString("base64"),
+        }),
+      ),
+    ).toBe(true);
+    await nextTurn();
+    expect(providerSocket.send).toHaveBeenCalledTimes(2);
   });
 
   it("settles old operations without replay when a session is superseded", async () => {
@@ -336,6 +403,32 @@ describe("host provider registry", () => {
         }),
       ),
     ).toThrow("frame direction is invalid");
+  });
+
+  it("does not deliver a response-open frame rejected by trace validation", async () => {
+    const value = registry();
+    value.register(client("conn-invalid-response"));
+    const operation = value.openOperation(openInput("operation-invalid-response"));
+    const reader = operation.frames.getReader();
+
+    expect(
+      value.receiveFrame(
+        "conn-invalid-response",
+        frame(operation.open, {
+          type: "response-open",
+          status: 200,
+          statusText: "OK",
+          headers: {},
+        }),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        code: "protocol-violation",
+        certainty: "not-started",
+      }),
+    );
+    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
   });
 
   it("preserves cancellation state when an active operation times out", async () => {

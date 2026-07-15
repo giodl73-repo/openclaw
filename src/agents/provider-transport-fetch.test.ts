@@ -202,13 +202,13 @@ describe("buildGuardedModelFetch", () => {
     shouldUseEnvHttpProxyForUrlMock.mockReturnValue(true);
     registerProviderRequestTrafficPolicyV1({
       version: "provider-request-traffic-policy/v1",
-      id: "lobster/enterprise-egress",
+      id: "example/enterprise-egress",
       generation: "policy-1",
       required: true,
       provenance: { source: "test", revision: "1" },
       routeProfiles: [
         {
-          id: "lobster/direct",
+          id: "example/direct",
           dispatcherPolicy: { mode: "direct" },
         },
       ],
@@ -218,7 +218,7 @@ describe("buildGuardedModelFetch", () => {
           match: { providers: ["openai"], endpointClasses: ["custom"] },
           outcome: {
             action: "allow",
-            routeProfileId: "lobster/direct",
+            routeProfileId: "example/direct",
             allowedOrigins: ["https://api.openai.com"],
             allowPrivateNetwork: false,
             maximumTimeoutMs: 10_000,
@@ -249,6 +249,44 @@ describe("buildGuardedModelFetch", () => {
       (validateUrl as (url: URL) => void)(new URL("https://other.example/v1/responses")),
     ).toThrow("redirect denied by traffic policy");
     expect(withTrustedEnvProxyGuardedFetchModeMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when traffic policy selects an unavailable hosted dispatcher", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: false,
+      policy: { endpointClass: "custom" },
+    });
+    registerProviderRequestTrafficPolicyV1({
+      version: "provider-request-traffic-policy/v1",
+      id: "example/enterprise-egress",
+      generation: "policy-1",
+      required: true,
+      provenance: { source: "test", revision: "1" },
+      routeProfiles: [
+        {
+          id: "example/hosted",
+          dispatcherPolicy: { mode: "direct" },
+          dispatchBindingId: "example/reverse-provider",
+        },
+      ],
+      rules: [
+        {
+          id: "openai",
+          match: { providers: ["openai"], endpointClasses: ["custom"] },
+          outcome: {
+            action: "allow",
+            routeProfileId: "example/hosted",
+            allowedOrigins: ["https://api.openai.com"],
+            allowPrivateNetwork: false,
+          },
+        },
+      ],
+    });
+
+    await expect(
+      buildGuardedModelFetch(sentinelModel())("https://api.openai.com/v1/responses"),
+    ).rejects.toThrow("selected unavailable dispatcher example/reverse-provider");
+    expect(fetchWithSsrFGuardMock).not.toHaveBeenCalled();
   });
 
   it("swaps sentinels in Request-form headers", async () => {
@@ -885,13 +923,13 @@ describe("buildGuardedModelFetch", () => {
     });
     registerProviderRequestTrafficPolicyV1({
       version: "provider-request-traffic-policy/v1",
-      id: "lobster/enterprise-egress",
+      id: "example/enterprise-egress",
       generation: "policy-1",
       required: true,
       provenance: { source: "test", revision: "1" },
       routeProfiles: [
         {
-          id: "lobster/direct",
+          id: "example/direct",
           dispatcherPolicy: { mode: "direct" },
         },
       ],
@@ -901,7 +939,7 @@ describe("buildGuardedModelFetch", () => {
           match: { providers: ["lmstudio"], endpointClasses: ["custom"] },
           outcome: {
             action: "allow",
-            routeProfileId: "lobster/direct",
+            routeProfileId: "example/direct",
             allowedOrigins: ["http://10.0.0.5:1234"],
             allowPrivateNetwork: false,
           },
