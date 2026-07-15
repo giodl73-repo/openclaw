@@ -1388,6 +1388,7 @@ public struct AgentParams: Codable, Sendable {
     public let internalruntimehandoffid: String?
     public let execapprovalfollowupexpectedsessionid: String?
     public let internalevents: [[String: AnyCodable]]?
+    public let explicitskillinvocation: [String: AnyCodable]?
     public let inputprovenance: [String: AnyCodable]?
     public let suppresspromptpersistence: Bool?
     public let sessioneffects: AnyCodable?
@@ -1433,6 +1434,7 @@ public struct AgentParams: Codable, Sendable {
         internalruntimehandoffid: String? = nil,
         execapprovalfollowupexpectedsessionid: String? = nil,
         internalevents: [[String: AnyCodable]]? = nil,
+        explicitskillinvocation: [String: AnyCodable]? = nil,
         inputprovenance: [String: AnyCodable]? = nil,
         suppresspromptpersistence: Bool? = nil,
         sessioneffects: AnyCodable? = nil,
@@ -1477,6 +1479,7 @@ public struct AgentParams: Codable, Sendable {
         self.internalruntimehandoffid = internalruntimehandoffid
         self.execapprovalfollowupexpectedsessionid = execapprovalfollowupexpectedsessionid
         self.internalevents = internalevents
+        self.explicitskillinvocation = explicitskillinvocation
         self.inputprovenance = inputprovenance
         self.suppresspromptpersistence = suppresspromptpersistence
         self.sessioneffects = sessioneffects
@@ -1523,6 +1526,7 @@ public struct AgentParams: Codable, Sendable {
         case internalruntimehandoffid = "internalRuntimeHandoffId"
         case execapprovalfollowupexpectedsessionid = "execApprovalFollowupExpectedSessionId"
         case internalevents = "internalEvents"
+        case explicitskillinvocation = "explicitSkillInvocation"
         case inputprovenance = "inputProvenance"
         case suppresspromptpersistence = "suppressPromptPersistence"
         case sessioneffects = "sessionEffects"
