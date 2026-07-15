@@ -6,12 +6,20 @@ export type HostIntegrationContributionTypeV1 =
       kind: "model-provider-adapter";
     }
   | {
+      owner: "web-search-provider";
+      kind: "web-search-provider-adapter";
+    }
+  | {
       owner: "provider-request";
       kind: "credential-slot-resolver";
     }
   | {
       owner: "provider-request";
       kind: "provider-request-dispatcher";
+    }
+  | {
+      owner: "provider-request";
+      kind: "provider-request-traffic-policy";
     };
 
 export type HostIntegrationBundleContributionV1 = HostIntegrationContributionTypeV1 & {
@@ -135,12 +143,30 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
     };
   }
   if (
+    contribution.owner === "web-search-provider" &&
+    contribution.kind === "web-search-provider-adapter"
+  ) {
+    return {
+      owner: "web-search-provider",
+      kind: "web-search-provider-adapter",
+    };
+  }
+  if (
     contribution.owner === "provider-request" &&
     contribution.kind === "credential-slot-resolver"
   ) {
     return {
       owner: "provider-request",
       kind: "credential-slot-resolver",
+    };
+  }
+  if (
+    contribution.owner === "provider-request" &&
+    contribution.kind === "provider-request-traffic-policy"
+  ) {
+    return {
+      owner: "provider-request",
+      kind: "provider-request-traffic-policy",
     };
   }
   if (
@@ -454,10 +480,17 @@ export function resolveHostIntegrationContributionV1(
       "No host integration bundle is registered",
     );
   }
+  return resolveHostIntegrationContributionFromSnapshotV1(currentSnapshot, reference);
+}
+
+export function resolveHostIntegrationContributionFromSnapshotV1(
+  snapshot: HostIntegrationBundleSnapshotV1,
+  reference: HostIntegrationContributionReferenceV1,
+): HostIntegrationBundleInventoryEntryV1 {
   const type = assertContributionType(reference);
   const id = normalizeNamespacedId(reference.id, "Host integration contribution reference");
   const version = normalizeContractVersion(reference.version);
-  const entry = currentSnapshot.inventory.find(
+  const entry = snapshot.inventory.find(
     (candidate) => contributionKey(candidate) === contributionKey({ ...type, id }),
   );
   if (!entry || entry.status === "missing") {

@@ -1,0 +1,59 @@
+{
+  "request": {
+    "config": {
+      "version": "substrate-llmapi-model-provider-adapter/v1",
+      "endpoint": "https://substrate.example.com",
+      "scenarioGuid": "715b2cd4-086b-48e9-b646-11437e8d2e65",
+      "appName": "Example Host",
+      "modelCatalog": "Global",
+      "modelMap": {
+        "anthropic/claude-opus-4-6": "dev-gpt-55-chat-example"
+      },
+      "modelPath": "/chat/completions",
+      "policyId": "rai-policy-1",
+      "taxonomy": {
+        "experience": "Cowork",
+        "agent": "Scout",
+        "inferenceStep": "GenerateAssistantResponse",
+        "productionTrafficType": "Production",
+        "developmentTrafficType": "Test",
+        "extendedProperties": {
+          "Agent": "Scout",
+          "Client": "Example Host",
+          "Surface": "OpenClaw"
+        }
+      }
+    },
+    "context": {
+      "originalUrl": "https://api.anthropic.com/v1/messages",
+      "correlationId": "corr-1"
+    },
+    "method": "POST",
+    "body": "{\"model\":\"anthropic/claude-opus-4-6\",\"messages\":[]}"
+  },
+  "expected": {
+    "url": "https://substrate.example.com/chat/completions",
+    "credentialSlotRefs": ["substrate/token"],
+    "modelType": "dev-gpt-55-chat-example",
+    "headers": {
+      "content-type": "application/json",
+      "x-scenarioguid": "715b2cd4-086b-48e9-b646-11437e8d2e65",
+      "x-appname": "Example Host",
+      "x-modeltype": "dev-gpt-55-chat-example",
+      "x-modelcatalog": "Global",
+      "x-policy-id": "rai-policy-1",
+      "x-taxonomy-experience": "Cowork",
+      "x-taxonomy-agent": "Scout",
+      "x-taxonomy-inferencestep": "GenerateAssistantResponse",
+      "x-taxonomy-traffictype": "Test",
+      "x-cv": "corr-1"
+    },
+    "extendedProperties": {
+      "Agent": "Scout",
+      "Client": "Example Host",
+      "Surface": "OpenClaw",
+      "ModelPool": "dev",
+      "ModelType": "dev-gpt-55-chat-example"
+    }
+  }
+}
