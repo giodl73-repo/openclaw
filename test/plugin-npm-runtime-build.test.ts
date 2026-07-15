@@ -123,6 +123,7 @@ describe("plugin npm runtime build planning", () => {
     expect(plan.runtimeBuildOutputs).toEqual(
       expect.arrayContaining([
         "./dist/channel-plugin-api.cjs",
+        "./dist/contract-api.cjs",
         "./dist/doctor-contract-api.cjs",
         "./dist/index.cjs",
         "./dist/runtime-api.cjs",

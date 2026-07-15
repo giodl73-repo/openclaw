@@ -24,6 +24,7 @@ restart. "External plugin" channels are maintained outside the OpenClaw repo.
 - [LINE](/channels/line) - LINE Messaging API bot (official plugin).
 - [Matrix](/channels/matrix) - Matrix protocol (official plugin).
 - [Mattermost](/channels/mattermost) - Bot API + WebSocket; channels, groups, DMs (official plugin).
+- [Microsoft 365 Email](/channels/m365mail) - Hosted agent mailbox through brokered Microsoft Graph dispatch.
 - [Microsoft Teams](/channels/msteams) - Bot Framework; enterprise support (official plugin).
 - [Nextcloud Talk](/channels/nextcloud-talk) - Self-hosted chat via Nextcloud Talk (official plugin).
 - [Nostr](/channels/nostr) - Decentralized DMs via NIP-04 (official plugin).

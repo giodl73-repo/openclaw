@@ -535,6 +535,22 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Channel notes
   - H2: Related
 
+## channels/m365mail.md
+
+- Route: /channels/m365mail
+- Headings:
+  - H2: Requirements
+  - H2: Enable the channel
+  - H2: Restrict inbound senders
+  - H2: Configure the hosted environment
+  - H2: Mailbox identity and replies
+  - H2: Troubleshooting
+  - H3: The channel reports a missing mailbox identity
+  - H3: An inbound sender is rejected
+  - H3: A reply fails before reaching Graph
+  - H3: Graph accepted the request but delivery is unclear
+  - H2: Related
+
 ## channels/matrix-migration.md
 
 - Route: /channels/matrix-migration
@@ -6578,6 +6594,15 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
 - Route: /plugins/reference/longcat
 - Headings:
   - H1: LongCat plugin
+  - H2: Distribution
+  - H2: Surface
+  - H2: Related docs
+
+## plugins/reference/m365mail.md
+
+- Route: /plugins/reference/m365mail
+- Headings:
+  - H1: M365mail plugin
   - H2: Distribution
   - H2: Surface
   - H2: Related docs
