@@ -329,6 +329,7 @@ describe("sessions_spawn tool", () => {
     });
     expect(result.details).not.toHaveProperty("role");
     const spawnArgs = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawnSubagentDirect");
+    const spawnContext = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 1, "spawnSubagentDirect");
     expect(spawnArgs.task).toBe("build feature");
     expect(spawnArgs.agentId).toBe("main");
     expect(spawnArgs.model).toBe("anthropic/claude-sonnet-4-6");
@@ -338,7 +339,6 @@ describe("sessions_spawn tool", () => {
     expect(spawnArgs.thread).toBe(true);
     expect(spawnArgs.mode).toBe("session");
     expect(spawnArgs.cleanup).toBe("keep");
-    const spawnContext = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 1, "spawnSubagentDirect");
     expect(spawnContext.agentSessionKey).toBe("agent:main:main");
     expect(hoisted.spawnAcpDirectMock).not.toHaveBeenCalled();
   });
@@ -1184,7 +1184,6 @@ describe("sessions_spawn tool", () => {
     });
 
     const spawnParams = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawnSubagentDirect");
-    const spawnContext = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 1, "spawnSubagentDirect");
     expect(spawnParams.task).toContain("Use the invoice-paid skill");
     expect(spawnParams.explicitSkillInvocation).toMatchObject({
       invocationId: expect.stringMatching(/^skill_/),
