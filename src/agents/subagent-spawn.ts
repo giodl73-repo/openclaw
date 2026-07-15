@@ -62,10 +62,7 @@ import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
 import { buildSubagentInitialUserMessage } from "./subagent-initial-user-message.js";
 import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
 import { resolveSubagentRunTimerDelayMs } from "./subagent-run-timeout.js";
-import {
-  buildDirectChildSessionPatch,
-  readExactRequesterRegarding,
-} from "./subagent-session-patch.js";
+import { buildDirectChildSessionPatch } from "./subagent-session-patch.js";
 import { resolveSubagentSpawnAcceptedNote } from "./subagent-spawn-accepted-note.js";
 import { resolveSubagentSpawnOwnership } from "./subagent-spawn-ownership.js";
 import {
@@ -170,8 +167,6 @@ type SpawnSubagentParams = {
 
 type SpawnSubagentContext = {
   agentSessionKey?: string;
-  /** Exact requester conversation instance; guards inherited business context across rotation. */
-  requesterSessionId?: string;
   /** Separate key used only for completion routing, not sandbox policy. */
   completionOwnerKey?: string;
   agentChannel?: string;
@@ -1250,15 +1245,6 @@ export async function spawnSubagentDirect(
     subagentControlScope: childCapabilities.controlScope,
     ...inheritedToolAllowPatch(ctx.inheritedToolAllowlist),
     ...inheritedToolDenyPatch(ctx.inheritedToolDenylist),
-    ...(params.explicitSkillInvocation
-      ? {
-          regarding: readExactRequesterRegarding({
-            cfg,
-            requesterInternalKey,
-            requesterSessionId: ctx.requesterSessionId,
-          }),
-        }
-      : {}),
     ...plan.initialSessionPatch,
   };
 

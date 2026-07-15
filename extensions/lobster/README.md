@@ -88,7 +88,7 @@ Notes:
 ## Sequencing managed skills
 
 Lobster can provide the deterministic steps while OpenClaw keeps ownership of
-skill discovery, policy, sessions, receipts, regarding context, lineage, and
+skill discovery, policy, sessions, receipts, lineage, and
 token accounting. A root skill can declare the skills its workflow may call:
 
 ```markdown
@@ -124,8 +124,8 @@ steps:
 
 The child calls do not set their own token budgets. Because they run inside the
 managed `support-case` skill, OpenClaw validates them against `uses-skills` and
-inherits the root budget owner, parent lineage, and current session's
-`regarding` identity. Lobster contributes ordering and stable step ids; it does
+inherits the root budget owner and parent lineage. Lobster contributes ordering and stable
+step ids; it does
 not start the next step until OpenClaw reports that the prior managed run
 completed successfully. A failed or timed-out child stops the workflow. Lobster
 does not create a second receipt, CRM, or budgeting system.

@@ -1,6 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { SessionEntry } from "../config/sessions/types.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   inheritedToolAllowPatch,
   inheritedToolDenyPatch,
@@ -8,7 +7,6 @@ import {
   normalizeInheritedToolDenylist,
 } from "./inherited-tool-deny.js";
 import { splitModelRef } from "./subagent-spawn-plan.js";
-import { loadSessionEntry, resolveGatewaySessionStoreTarget } from "./subagent-spawn.runtime.js";
 
 export function buildDirectChildSessionPatch(
   patch: Record<string, unknown>,
@@ -32,17 +30,6 @@ export function buildDirectChildSessionPatch(
   }
   if (typeof patch.spawnedCwd === "string" && patch.spawnedCwd.trim()) {
     entry.spawnedCwd = patch.spawnedCwd.trim();
-  }
-  const regarding = patch.regarding;
-  if (regarding && typeof regarding === "object" && !Array.isArray(regarding)) {
-    const value = regarding as Record<string, unknown>;
-    const system = normalizeOptionalString(value.system);
-    const type = normalizeOptionalString(value.type);
-    const id = normalizeOptionalString(value.id);
-    const key = normalizeOptionalString(value.key);
-    if (system && type && id) {
-      entry.regarding = { system, type, id, ...(key ? { key } : {}) };
-    }
   }
   Object.assign(
     entry,
@@ -73,32 +60,4 @@ export function buildDirectChildSessionPatch(
     }
   }
   return entry;
-}
-
-export function readExactRequesterRegarding(params: {
-  cfg: OpenClawConfig;
-  requesterInternalKey: string;
-  requesterSessionId?: string;
-}): SessionEntry["regarding"] | undefined {
-  const requesterSessionId = normalizeOptionalString(params.requesterSessionId);
-  if (!requesterSessionId) {
-    return undefined;
-  }
-  try {
-    const target = resolveGatewaySessionStoreTarget({
-      cfg: params.cfg,
-      key: params.requesterInternalKey,
-    });
-    const entry = loadSessionEntry({
-      storePath: target.storePath,
-      sessionKey: target.canonicalKey,
-      clone: false,
-    });
-    if (entry?.sessionId !== requesterSessionId || !entry.regarding) {
-      return undefined;
-    }
-    return { ...entry.regarding };
-  } catch {
-    return undefined;
-  }
 }

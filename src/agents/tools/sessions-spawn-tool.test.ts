@@ -1143,7 +1143,6 @@ describe("sessions_spawn tool", () => {
   it("starts a validated child skill with trusted parent lineage", async () => {
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",
-      requesterSessionId: "session-parent",
       parentRunId: "run-parent",
       parentSkillInvocation: {
         invocationId: "skill-parent",
@@ -1197,7 +1196,6 @@ describe("sessions_spawn tool", () => {
       parentRunId: "run-parent",
     });
     expect(spawnParams.explicitSkillInvocation).not.toHaveProperty("skillDigest");
-    expect(spawnContext.requesterSessionId).toBe("session-parent");
   });
 
   it("rejects child skills not declared by the active parent skill", async () => {
