@@ -8,6 +8,7 @@ import { backupVerifyCommand } from "../commands/backup-verify.js";
 import { isPathWithin } from "../commands/cleanup-utils.js";
 import { publishTempArchive, writeArchiveStreamToFile } from "../infra/backup-create.js";
 import { sha256Hex } from "../infra/crypto-digest.js";
+import { ensureDurableDirectoryTree, syncDirectoryEntry } from "../infra/fs-durability.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import {
   buildContinuityArchiveCapture,
@@ -218,7 +219,7 @@ export async function createContinuityArchive(params: {
     ...params.plan.sources.workspaces,
   ];
   await assertOutputReady(outputPath, sources);
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await ensureDurableDirectoryTree(path.dirname(outputPath), { allowExistingSymlink: true });
   const staging = await stageContinuityArchivePlan({
     plan: params.plan,
     stagingParent: params.stagingParent,
@@ -226,6 +227,7 @@ export async function createContinuityArchive(params: {
   const tempArchivePath = `${outputPath}.${randomUUID()}.tmp`;
   let result: ContinuityArchiveCreateResult | undefined;
   let operationError: unknown;
+  let stagingCleaned = false;
   try {
     const nowMs = resolveDateTimestampMs(params.nowMs);
     const createdAt = new Date(nowMs).toISOString();
@@ -266,6 +268,9 @@ export async function createContinuityArchive(params: {
     ) {
       throw new Error("Packaged continuity artifact did not verify as continuity.");
     }
+    await fs.rm(staging.stagingDir, { recursive: true, force: true });
+    await syncDirectoryEntry(path.dirname(staging.stagingDir));
+    stagingCleaned = true;
     await publishTempArchive({ tempArchivePath, outputPath });
     result = {
       ok: true,
@@ -285,9 +290,11 @@ export async function createContinuityArchive(params: {
   }
 
   const cleanupErrors: unknown[] = [];
-  for (const cleanupPath of [tempArchivePath, staging.stagingDir]) {
+  const cleanupPaths = stagingCleaned ? [tempArchivePath] : [tempArchivePath, staging.stagingDir];
+  for (const cleanupPath of cleanupPaths) {
     try {
       await fs.rm(cleanupPath, { recursive: true, force: true });
+      await syncDirectoryEntry(path.dirname(cleanupPath));
     } catch (error) {
       cleanupErrors.push(error);
     }

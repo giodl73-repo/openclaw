@@ -30,6 +30,11 @@ import { resolveHomeDir, resolveUserPath } from "../utils.js";
 import { sleep } from "../utils/sleep.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
 import { isVolatileBackupPath } from "./backup-volatile-filter.js";
+import {
+  ensureDurableDirectoryTree,
+  syncDirectoryEntry,
+  syncFileContent,
+} from "./fs-durability.js";
 import { writeJson } from "./json-files.js";
 import { requireNodeSqlite } from "./node-sqlite.js";
 
@@ -210,6 +215,7 @@ export async function writeArchiveStreamToFile(params: {
     params.archiveStream,
     createWriteStream(params.archivePath, { flags: "wx", mode: 0o600 }),
   );
+  await syncFileContent(params.archivePath);
 }
 
 async function writeTarArchiveWithRetry(params: {
@@ -372,6 +378,7 @@ export async function publishTempArchive(params: {
   tempArchivePath: string;
   outputPath: string;
 }): Promise<void> {
+  let copied = false;
   try {
     await fs.link(params.tempArchivePath, params.outputPath);
   } catch (err) {
@@ -388,6 +395,8 @@ export async function publishTempArchive(params: {
     try {
       // Some backup targets support ordinary files but not hard links.
       await fs.copyFile(params.tempArchivePath, params.outputPath, fsConstants.COPYFILE_EXCL);
+      await fs.chmod(params.outputPath, 0o600);
+      copied = true;
     } catch (copyErr) {
       const copyCode = (copyErr as NodeJS.ErrnoException | undefined)?.code;
       if (copyCode !== "EEXIST") {
@@ -401,7 +410,12 @@ export async function publishTempArchive(params: {
       throw copyErr;
     }
   }
+  if (copied) {
+    await syncFileContent(params.outputPath);
+  }
+  await syncDirectoryEntry(path.dirname(params.outputPath));
   await fs.rm(params.tempArchivePath, { force: true });
+  await syncDirectoryEntry(path.dirname(params.tempArchivePath));
 }
 
 async function canonicalizePathForContainment(targetPath: string): Promise<string> {
@@ -892,7 +906,7 @@ export async function createBackupArchive(
     return result;
   }
 
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await ensureDurableDirectoryTree(path.dirname(outputPath), { allowExistingSymlink: true });
   const tempRoot = await chooseBackupTempRoot({ assets: result.assets, outputPath });
   await fs.mkdir(tempRoot, { recursive: true });
   const tempDir = await fs.mkdtemp(path.join(tempRoot, "openclaw-backup-"));

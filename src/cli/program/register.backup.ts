@@ -7,6 +7,11 @@ import {
   managedRestoreRequestFailure,
   readManagedRestoreRequestFromStdin,
 } from "../../commands/backup-activate-managed.js";
+import {
+  backupCaptureManagedCommand,
+  managedFinalCaptureRequestFailure,
+  readManagedFinalCaptureRequestFromStdin,
+} from "../../commands/backup-capture-managed.js";
 import { backupMaterializeCommand } from "../../commands/backup-materialize.js";
 import { backupPlanRestoreCommand } from "../../commands/backup-plan-restore.js";
 import { backupRetrieveCommand } from "../../commands/backup-retrieve.js";
@@ -148,6 +153,27 @@ export function registerBackupCommand(program: Command) {
           json: Boolean(opts.json),
         });
       });
+    });
+
+  backup
+    .command("capture")
+    .description("Capture a closed runtime state for continuity handoff")
+    .option("--managed", "Read a strict managed capture request from stdin")
+    .option("--json", "Output JSON", false)
+    .action(async (opts: { managed?: boolean; json?: boolean }) => {
+      if (!opts.managed || !opts.json) {
+        defaultRuntime.error("backup capture requires --managed --json.");
+        defaultRuntime.exit(1);
+        return;
+      }
+      let rawRequest: string;
+      try {
+        rawRequest = await readManagedFinalCaptureRequestFromStdin();
+      } catch (error) {
+        managedFinalCaptureRequestFailure(defaultRuntime, error, { json: opts.json });
+        return;
+      }
+      await backupCaptureManagedCommand(defaultRuntime, rawRequest, { json: true });
     });
 
   backup
