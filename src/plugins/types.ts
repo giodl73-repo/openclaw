@@ -25,6 +25,7 @@ import type { ThinkLevel } from "../auto-reply/thinking.shared.js";
 import type { ModelProviderConfig } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { SecretRef } from "../config/types.secrets.js";
+import type { ContinuityPublicationProviderV1 } from "../continuity/publication-provider.js";
 import type { OperatorScope } from "../gateway/operator-scopes.js";
 import type { GatewayRequestHandler } from "../gateway/server-methods/types.js";
 import type { InternalHookHandler } from "../hooks/internal-hook-types.js";
@@ -2819,6 +2820,8 @@ export type OpenClawPluginApi = {
    * is active. The returned disposer clears only that exact published snapshot.
    */
   registerHostIntegrationBundle: (manifest: HostIntegrationBundleManifestV1) => () => void;
+  /** Register one continuity-owned immutable publication provider. */
+  registerContinuityPublicationProvider: (provider: ContinuityPublicationProviderV1) => void;
   /**
    * Publish one compiled provider-traffic policy while the owning plugin is
    * active. The returned disposer clears only that exact generation.

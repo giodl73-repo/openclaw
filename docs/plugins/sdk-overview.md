@@ -107,7 +107,16 @@ methods:
 | `api.registerVideoGenerationProvider(...)`       | Video generation                                                                  |
 | `api.registerWebFetchProvider(...)`              | Web fetch / scrape provider                                                       |
 | `api.registerWebSearchProvider(...)`             | Web search                                                                        |
+| `api.registerContinuityPublicationProvider(...)` | Immutable continuity artifact publication and retrieval                           |
 | `api.registerCompactionProvider(...)`            | Pluggable transcript-compaction backend                                           |
+
+Continuity publication providers receive an owner-defined artifact identity and
+an `AsyncIterable<Uint8Array>` stream. They must conditionally accept an
+immutable logical publication, return the original acceptance for exact replay,
+report changed-content reuse as a conflict, and retrieve the accepted artifact
+as a stream. The caller supplies no storage URL, object key, credential, or
+arbitrary headers. Provider and host-bundle generations are checked before
+publication and retrieval.
 
 Worker providers must also declare their id in `contracts.workerProviders`.
 Core persists durable intent before `provision(profile, operationId)`. Providers validate settings before external allocation and throw `WorkerProviderError` for permanent profile rejection. `provision` must adopt the same lease when the operation id repeats.

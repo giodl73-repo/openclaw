@@ -5,6 +5,10 @@ import {
 } from "../agents/harness/registry.js";
 import type { AgentHarness } from "../agents/harness/types.js";
 import {
+  normalizeContinuityPublicationProviderV1,
+  type ContinuityPublicationProviderV1,
+} from "../continuity/publication-provider.js";
+import {
   getRegisteredEmbeddingProvider,
   registerEmbeddingProvider as registerGlobalEmbeddingProvider,
   type EmbeddingProviderAdapter,
@@ -479,6 +483,43 @@ export function createProviderRegistrars(state: PluginRegistryState) {
       ownedIds: record.migrationProviderIds,
     });
 
+  const registerContinuityPublicationProvider = (
+    record: PluginRecord,
+    provider: ContinuityPublicationProviderV1,
+  ) => {
+    const normalizedProvider = normalizeContinuityPublicationProviderV1(provider);
+    if (!normalizedProvider) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: "continuity publication provider registration is invalid",
+      });
+      return;
+    }
+    const id = normalizedProvider.id;
+    const existing = registry.continuityPublicationProviders.find(
+      (entry) => entry.provider.id === id,
+    );
+    if (existing) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `continuity publication provider already registered: ${id} (${existing.pluginId})`,
+      });
+      return;
+    }
+    registry.continuityPublicationProviders.push({
+      pluginId: record.id,
+      pluginName: record.name,
+      provider: normalizedProvider,
+      source: record.source,
+      origin: record.origin,
+      rootDir: record.rootDir,
+    });
+  };
+
   return {
     registerProvider,
     registerAgentHarness,
@@ -497,5 +538,6 @@ export function createProviderRegistrars(state: PluginRegistryState) {
     registerWebFetchProvider,
     registerWebSearchProvider,
     registerMigrationProvider,
+    registerContinuityPublicationProvider,
   };
 }

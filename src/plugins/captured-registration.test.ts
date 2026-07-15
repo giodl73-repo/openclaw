@@ -1,5 +1,6 @@
 // Covers captured plugin registration behavior in test registries.
 import { describe, expect, it } from "vitest";
+import { CONTINUITY_PUBLICATION_PROVIDER_VERSION } from "../continuity/publication-provider.js";
 import { capturePluginRegistration } from "./captured-registration.js";
 import type { AnyAgentTool, OpenClawPluginApi } from "./types.js";
 
@@ -18,6 +19,17 @@ describe("captured plugin registration", () => {
           id: "captured-provider",
           label: "Captured Provider",
           auth: [],
+        });
+        api.registerContinuityPublicationProvider({
+          id: "captured/continuity",
+          version: CONTINUITY_PUBLICATION_PROVIDER_VERSION,
+          generation: "binding-1",
+          publish: async () => {
+            throw new Error("not exercised");
+          },
+          retrieve: async () => {
+            throw new Error("not exercised");
+          },
         });
         api.registerWorkerProvider({
           id: "captured-worker",
@@ -112,6 +124,9 @@ describe("captured plugin registration", () => {
 
     expect(captured.tools.map((tool) => tool.name)).toEqual(["captured-tool"]);
     expect(captured.providers.map((provider) => provider.id)).toEqual(["captured-provider"]);
+    expect(captured.continuityPublicationProviders.map((provider) => provider.id)).toEqual([
+      "captured/continuity",
+    ]);
     expect(captured.workerProviders.map((provider) => provider.id)).toEqual(["captured-worker"]);
     expect(captured.modelCatalogProviders.map((provider) => provider.provider)).toEqual([
       "captured-provider",

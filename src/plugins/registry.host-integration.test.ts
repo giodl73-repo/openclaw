@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   clearCurrentHostIntegrationBundleSnapshotV1,
   getCurrentHostIntegrationBundleSnapshotV1,
+  type HostIntegrationBundleManifestV1,
 } from "../hosting/host-integration-bundle.js";
 import { createPluginRecord } from "./loader-records.js";
 import { createPluginRegistry } from "./registry.js";
@@ -12,7 +13,7 @@ afterEach(() => {
   clearCurrentHostIntegrationBundleSnapshotV1();
 });
 
-function manifest(id = "example/host") {
+function manifest(id = "example/host"): HostIntegrationBundleManifestV1 {
   return {
     version: "host-integration-bundle/v1" as const,
     id,

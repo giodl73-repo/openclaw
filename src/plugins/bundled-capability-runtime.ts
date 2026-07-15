@@ -1,6 +1,7 @@
 /** Loads capability providers from bundled plugin public runtime artifacts. */
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { normalizeContinuityPublicationProviderV1 } from "../continuity/publication-provider.js";
 import { openRootFileSync } from "../infra/boundary-file-read.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
@@ -321,6 +322,27 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
     try {
       const captured = createCapturedPluginRegistration();
       register(captured.api);
+      const normalizedContinuityProviders = captured.continuityPublicationProviders.map(
+        (provider) => {
+          const normalized = normalizeContinuityPublicationProviderV1(provider);
+          if (!normalized) {
+            throw new Error("continuity publication provider registration is invalid");
+          }
+          return normalized;
+        },
+      );
+      const continuityProviderIds = new Set<string>();
+      for (const provider of normalizedContinuityProviders) {
+        if (
+          continuityProviderIds.has(provider.id) ||
+          registry.continuityPublicationProviders.some(
+            (registration) => registration.provider.id === provider.id,
+          )
+        ) {
+          throw new Error(`continuity publication provider already registered: ${provider.id}`);
+        }
+        continuityProviderIds.add(provider.id);
+      }
       record.cliBackendIds.push(...captured.cliBackends.map((entry) => entry.id));
       record.providerIds.push(...captured.providers.map((entry) => entry.id));
       record.embeddingProviderIds.push(...captured.embeddingProviders.map((entry) => entry.id));
@@ -379,6 +401,16 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
           pluginName: record.name,
           provider,
           source: record.source,
+          rootDir: record.rootDir,
+        })),
+      );
+      registry.continuityPublicationProviders.push(
+        ...normalizedContinuityProviders.map((provider) => ({
+          pluginId: record.id,
+          pluginName: record.name,
+          provider,
+          source: record.source,
+          origin: record.origin,
           rootDir: record.rootDir,
         })),
       );

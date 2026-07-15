@@ -77,6 +77,7 @@ export function createPluginApiFactory(
     registerWebFetchProvider,
     registerWebSearchProvider,
     registerMigrationProvider,
+    registerContinuityPublicationProvider,
     registerGatewayMethod,
     registerSessionCatalog,
     registerService,
@@ -212,6 +213,8 @@ export function createPluginApiFactory(
               registerWebFetchProvider: (provider) => registerWebFetchProvider(record, provider),
               registerWebSearchProvider: (provider) => registerWebSearchProvider(record, provider),
               registerMigrationProvider: (provider) => registerMigrationProvider(record, provider),
+              registerContinuityPublicationProvider: (provider) =>
+                registerContinuityPublicationProvider(record, provider),
               registerGatewayMethod: (method, handler, opts) =>
                 registerGatewayMethod(record, method, handler, opts),
               registerSessionCatalog: (provider) => registerSessionCatalog(record, provider),

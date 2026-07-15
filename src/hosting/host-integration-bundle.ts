@@ -20,6 +20,10 @@ export type HostIntegrationContributionTypeV1 =
   | {
       owner: "provider-request";
       kind: "provider-request-carrier";
+    }
+  | {
+      owner: "continuity";
+      kind: "continuity-publication-provider";
     };
 
 export type HostIntegrationBundleContributionV1 = HostIntegrationContributionTypeV1 & {
@@ -95,9 +99,14 @@ const READINESS_CRITERION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const EXACT_SEMVER_RE =
   /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
-function normalizeNamespacedId(value: unknown, label: string): string {
+export function normalizeHostIntegrationNamespacedIdV1(value: unknown): string | undefined {
   const normalized = typeof value === "string" ? value.trim() : "";
-  if (!NAMESPACED_ID_RE.test(normalized)) {
+  return NAMESPACED_ID_RE.test(normalized) ? normalized : undefined;
+}
+
+function normalizeNamespacedId(value: unknown, label: string): string {
+  const normalized = normalizeHostIntegrationNamespacedIdV1(value);
+  if (!normalized) {
     throw new HostIntegrationBundleError(
       "invalid-manifest",
       `${label} must be a namespaced identifier`,
@@ -176,6 +185,15 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
     return {
       owner: "provider-request",
       kind: "provider-request-carrier",
+    };
+  }
+  if (
+    contribution.owner === "continuity" &&
+    contribution.kind === "continuity-publication-provider"
+  ) {
+    return {
+      owner: "continuity",
+      kind: "continuity-publication-provider",
     };
   }
   throw new HostIntegrationBundleError(
