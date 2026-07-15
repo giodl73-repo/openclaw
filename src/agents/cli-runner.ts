@@ -24,6 +24,7 @@ import {
   recordSkillInvocationCompleted,
   recordSkillInvocationStarted,
 } from "../trajectory/skill-invocation.js";
+import { buildAgentRunTerminalOutcome } from "./agent-run-terminal-outcome.js";
 import { isHeartbeatLifecycleRunKind } from "./bootstrap-mode.js";
 import {
   resolveCliRuntimeArtifactFingerprint,
@@ -498,10 +499,32 @@ export function runCliAgent(paramsInput: RunCliAgentParams): Promise<EmbeddedAge
     recordSkillInvocationStarted(recorder, params.explicitSkillInvocation);
     try {
       const result = await runCliAgentInternal(params);
+      const terminalOutcome = buildAgentRunTerminalOutcome({
+        status: result.meta.timeoutPhase
+          ? "timeout"
+          : result.meta.error ||
+              result.meta.failureSignal ||
+              result.meta.completion?.finishReason === "error"
+            ? "error"
+            : "ok",
+        error: result.meta.error?.message ?? result.meta.failureSignal?.message,
+        stopReason: result.meta.aborted
+          ? "aborted"
+          : (result.meta.stopReason ?? result.meta.completion?.stopReason),
+        livenessState: result.meta.livenessState,
+        timeoutPhase: result.meta.timeoutPhase,
+        providerStarted: result.meta.providerStarted,
+      });
       recordSkillInvocationCompleted(
         recorder,
         params.explicitSkillInvocation,
-        result.meta.stopReason === "error" ? "error" : "success",
+        terminalOutcome.status === "ok"
+          ? "success"
+          : terminalOutcome.status === "timeout" ||
+              terminalOutcome.reason === "aborted" ||
+              terminalOutcome.reason === "cancelled"
+            ? "interrupted"
+            : "error",
       );
       return result;
     } catch (error) {
