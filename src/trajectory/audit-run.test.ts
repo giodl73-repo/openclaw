@@ -58,7 +58,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
         runId: "run-1",
         data: {
           type: "case.updated",
-          toolName: "dynamics",
+          toolName: "support-crm",
           toolCallId: "call-1",
           subject: { type: "case", id: "case-42" },
         },
