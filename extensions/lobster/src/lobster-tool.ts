@@ -70,6 +70,14 @@ export function createEmbeddedOpenClawInvoke(
   };
 }
 
+export function createEmbeddedOpenClawWaitForRun(api: OpenClawPluginApi) {
+  const subagent = api.runtime?.subagent;
+  if (!subagent) {
+    return undefined;
+  }
+  return async (params: { runId: string; timeoutMs: number }) => await subagent.waitForRun(params);
+}
+
 type ManagedFlowRunParams = {
   controllerId: string;
   goal: string;
@@ -261,10 +269,16 @@ function resolveManagedFlowToolResult(result: ManagedLobsterFlowResult) {
 
 export function createLobsterTool(api: OpenClawPluginApi, options?: LobsterToolOptions) {
   const embeddedInvoke = createEmbeddedOpenClawInvoke(api, options?.toolContext);
+  const embeddedWaitForRun = createEmbeddedOpenClawWaitForRun(api);
   const runner =
     options?.runner ??
     createEmbeddedLobsterRunner(
-      embeddedInvoke ? { invokeOpenClawTool: embeddedInvoke } : undefined,
+      embeddedInvoke && embeddedWaitForRun
+        ? {
+            invokeOpenClawTool: embeddedInvoke,
+            waitForOpenClawRun: embeddedWaitForRun,
+          }
+        : undefined,
     );
   return {
     name: "lobster",

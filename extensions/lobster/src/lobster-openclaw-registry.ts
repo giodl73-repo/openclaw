@@ -31,6 +31,11 @@ export type EmbeddedOpenClawInvoke = (params: {
   idempotencyKey?: string;
 }) => Promise<unknown>;
 
+export type EmbeddedOpenClawWaitForRun = (params: {
+  runId: string;
+  timeoutMs: number;
+}) => Promise<{ status: "ok" | "error" | "timeout"; error?: string }>;
+
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -143,7 +148,10 @@ function createInvokeCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
   };
 }
 
-function createSkillCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
+function createSkillCommand(
+  invoke: EmbeddedOpenClawInvoke,
+  waitForRun: EmbeddedOpenClawWaitForRun,
+): LobsterCommand {
   return {
     name: "openclaw.skill",
     meta: {
@@ -151,7 +159,7 @@ function createSkillCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
       sideEffects: ["spawns_managed_skill"],
     },
     help: () =>
-      "openclaw.skill --skill <name> --task <task> [--token-budget <tokens>] [--model <model>] [--task-name <name>] [--step-id <id>]",
+      "openclaw.skill --skill <name> --task <task> [--token-budget <tokens>] [--wait-timeout-ms <ms>] [--model <model>] [--task-name <name>] [--step-id <id>]",
     async run({ input, args, ctx }) {
       for await (const item of input) {
         // Skill steps are explicit and do not implicitly consume pipeline input.
@@ -171,6 +179,11 @@ function createSkillCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
       );
       const model = readOptionalString(args.model);
       const taskName = readOptionalString(args.taskName ?? args["task-name"]);
+      const waitTimeoutMs =
+        readOptionalPositiveInteger(
+          args.waitTimeoutMs ?? args["wait-timeout-ms"],
+          "openclaw.skill --wait-timeout-ms",
+        ) ?? 60_000;
       const result = await invoke({
         tool: "sessions_spawn",
         args: {
@@ -184,6 +197,18 @@ function createSkillCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
         },
         idempotencyKey: resolveStepIdempotencyKey(args, ctx),
       });
+      const runId =
+        result && typeof result === "object" && !Array.isArray(result)
+          ? readOptionalString((result as JsonRecord).runId)
+          : undefined;
+      if (!runId) {
+        throw new Error("openclaw.skill sessions_spawn did not return a runId");
+      }
+      const completion = await waitForRun({ runId, timeoutMs: waitTimeoutMs });
+      if (completion.status !== "ok") {
+        const detail = completion.error ? `: ${completion.error}` : "";
+        throw new Error(`managed skill run ${completion.status}${detail}`);
+      }
       return { output: outputItems(result) };
     },
   };
@@ -193,9 +218,10 @@ function createSkillCommand(invoke: EmbeddedOpenClawInvoke): LobsterCommand {
 export function createOpenClawLobsterRegistry(
   base: LobsterCommandRegistry,
   invoke: EmbeddedOpenClawInvoke,
+  waitForRun: EmbeddedOpenClawWaitForRun,
 ): LobsterCommandRegistry {
   const invokeCommand = createInvokeCommand(invoke);
-  const skillCommand = createSkillCommand(invoke);
+  const skillCommand = createSkillCommand(invoke, waitForRun);
   return {
     get(name) {
       if (name === invokeCommand.name || name === "clawd.invoke") {

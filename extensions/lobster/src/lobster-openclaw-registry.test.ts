@@ -25,10 +25,14 @@ function baseRegistry(): LobsterCommandRegistry {
   };
 }
 
+function completedRunWaiter() {
+  return vi.fn().mockResolvedValue({ status: "ok" as const });
+}
+
 describe("embedded OpenClaw Lobster registry", () => {
   it("invokes a policy-filtered OpenClaw tool in the current session", async () => {
     const invoke = vi.fn().mockResolvedValue({ sent: true });
-    const registry = createOpenClawLobsterRegistry(baseRegistry(), invoke);
+    const registry = createOpenClawLobsterRegistry(baseRegistry(), invoke, completedRunWaiter());
     const command = registry.get("openclaw.invoke");
 
     const result = await command?.run({
@@ -60,7 +64,9 @@ describe("embedded OpenClaw Lobster registry", () => {
     const invoke = vi.fn(async ({ args }: { args: Record<string, unknown> }) => ({
       id: args.invoice,
     }));
-    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke).get("clawd.invoke");
+    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke, completedRunWaiter()).get(
+      "clawd.invoke",
+    );
 
     const result = await command?.run({
       input: input("INV-1", "INV-2"),
@@ -93,7 +99,10 @@ describe("embedded OpenClaw Lobster registry", () => {
 
   it("runs a managed skill step through sessions_spawn", async () => {
     const invoke = vi.fn().mockResolvedValue({ status: "accepted", runId: "run-child" });
-    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke).get("openclaw.skill");
+    const waitForRun = completedRunWaiter();
+    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke, waitForRun).get(
+      "openclaw.skill",
+    );
 
     const result = await command?.run({
       input: input(),
@@ -124,10 +133,15 @@ describe("embedded OpenClaw Lobster registry", () => {
     expect(await collect(result?.output ?? input())).toEqual([
       { status: "accepted", runId: "run-child" },
     ]);
+    expect(waitForRun).toHaveBeenCalledWith({ runId: "run-child", timeoutMs: 60_000 });
   });
 
   it("keeps managed skill steps on the current session", async () => {
-    const command = createOpenClawLobsterRegistry(baseRegistry(), vi.fn()).get("clawd.skill");
+    const command = createOpenClawLobsterRegistry(
+      baseRegistry(),
+      vi.fn(),
+      completedRunWaiter(),
+    ).get("clawd.skill");
 
     await expect(
       command?.run({
@@ -144,7 +158,9 @@ describe("embedded OpenClaw Lobster registry", () => {
 
   it("validates managed skill budgets before invoking OpenClaw", async () => {
     const invoke = vi.fn();
-    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke).get("openclaw.skill");
+    const command = createOpenClawLobsterRegistry(baseRegistry(), invoke, completedRunWaiter()).get(
+      "openclaw.skill",
+    );
 
     await expect(
       command?.run({
@@ -157,7 +173,11 @@ describe("embedded OpenClaw Lobster registry", () => {
   });
 
   it("rejects attempts to select another OpenClaw session", async () => {
-    const command = createOpenClawLobsterRegistry(baseRegistry(), vi.fn()).get("openclaw.invoke");
+    const command = createOpenClawLobsterRegistry(
+      baseRegistry(),
+      vi.fn(),
+      completedRunWaiter(),
+    ).get("openclaw.invoke");
 
     await expect(
       command?.run({
@@ -173,7 +193,11 @@ describe("embedded OpenClaw Lobster registry", () => {
   });
 
   it("prevents recursive Lobster invocation", async () => {
-    const command = createOpenClawLobsterRegistry(baseRegistry(), vi.fn()).get("openclaw.invoke");
+    const command = createOpenClawLobsterRegistry(
+      baseRegistry(),
+      vi.fn(),
+      completedRunWaiter(),
+    ).get("openclaw.invoke");
 
     await expect(
       command?.run({

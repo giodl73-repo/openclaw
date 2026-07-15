@@ -5,6 +5,7 @@ import { Readable, Writable } from "node:stream";
 import {
   createOpenClawLobsterRegistry,
   type EmbeddedOpenClawInvoke,
+  type EmbeddedOpenClawWaitForRun,
   type LobsterCommandRegistry,
 } from "./lobster-openclaw-registry.js";
 
@@ -296,6 +297,7 @@ async function loadEmbeddedToolRuntimeFromPackage(): Promise<EmbeddedToolRuntime
 export function createEmbeddedLobsterRunner(options?: {
   loadRuntime?: LoadEmbeddedToolRuntime;
   invokeOpenClawTool?: EmbeddedOpenClawInvoke;
+  waitForOpenClawRun?: EmbeddedOpenClawWaitForRun;
 }): LobsterRunner {
   const loadRuntime = options?.loadRuntime ?? loadEmbeddedToolRuntimeFromPackage;
   let runtimePromise: Promise<EmbeddedToolRuntime> | undefined;
@@ -309,10 +311,14 @@ export function createEmbeddedLobsterRunner(options?: {
             "Embedded openclaw.invoke requires a Lobster runtime with createDefaultRegistry",
           );
         }
+        if (options?.invokeOpenClawTool && !options.waitForOpenClawRun) {
+          throw new Error("Embedded openclaw.skill requires an OpenClaw run waiter");
+        }
         const registry = options?.invokeOpenClawTool
           ? createOpenClawLobsterRegistry(
               runtime.createDefaultRegistry!(),
               options.invokeOpenClawTool,
+              options.waitForOpenClawRun!,
             )
           : undefined;
         const ctx = createEmbeddedToolContext(params, signal, registry);
