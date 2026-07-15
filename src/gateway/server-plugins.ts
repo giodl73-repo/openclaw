@@ -26,13 +26,13 @@ import { createPluginRuntimeLoaderLogger } from "../plugins/runtime/load-context
 import type { PluginRuntime, RuntimeGatewayRequestOptions } from "../plugins/runtime/types.js";
 import type { PluginLogger, PluginOrigin } from "../plugins/types.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import { readTrajectoryAuditRun } from "../trajectory/audit-run-reader.js";
 import { resolveSafeTimeoutDelayMs } from "../utils/timer-delay.js";
 import { ADMIN_SCOPE, APPROVALS_SCOPE, WRITE_SCOPE } from "./method-scopes.js";
 import { normalizeOperatorScopeList, type OperatorScope } from "./operator-scopes.js";
 import type { GatewayRequestHandler, GatewayRequestOptions } from "./server-methods/types.js";
 import { getFallbackGatewayContext } from "./server-plugin-fallback-context.js";
 import { projectGatewayRuntimeNodes } from "./server-plugins-node-runtime.js";
+import * as subagentSupport from "./server-plugins-subagent-support.js";
 
 export {
   clearFallbackGatewayContext,
@@ -538,17 +538,9 @@ export async function dispatchTrustedPluginGatewayMethod<T>(
   });
 }
 
-const PLUGIN_SUBAGENT_SESSION_MESSAGES_MAX_LIMIT = 1_000;
-
 export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
   const getSessionMessages: PluginRuntime["subagent"]["getSessionMessages"] = async (params) => {
-    const limit =
-      params.limit == null || !Number.isFinite(params.limit)
-        ? undefined
-        : Math.min(
-            PLUGIN_SUBAGENT_SESSION_MESSAGES_MAX_LIMIT,
-            Math.max(1, Math.floor(params.limit)),
-          );
+    const limit = subagentSupport.normalizePluginSubagentMessageLimit(params.limit);
     const payload = await dispatchGatewayMethod<{ messages?: unknown[] }>("sessions.get", {
       key: params.sessionKey,
       ...(limit != null && { limit }),
@@ -629,17 +621,12 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
       if (status !== "ok" && status !== "error" && status !== "timeout") {
         throw new Error(`Gateway agent.wait returned unexpected status: ${payload?.status}`);
       }
-      const runtimeConfig = params.sessionKey
-        ? getFallbackGatewayContext()?.getRuntimeConfig?.()
-        : undefined;
-      const audit =
-        status === "ok" && params.sessionKey && runtimeConfig
-          ? readTrajectoryAuditRun({
-              cfg: runtimeConfig,
-              runId: params.runId,
-              sessionKey: params.sessionKey,
-            })
-          : undefined;
+      const audit = subagentSupport.readCompletedPluginSubagentAudit({
+        cfg: getFallbackGatewayContext()?.getRuntimeConfig?.(),
+        runId: params.runId,
+        sessionKey: params.sessionKey,
+        status,
+      });
       return {
         status,
         ...(audit ? { audit } : {}),

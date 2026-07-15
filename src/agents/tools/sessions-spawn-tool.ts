@@ -49,6 +49,7 @@ import {
   readStringParam,
   ToolInputError,
 } from "./common.js";
+import { summarizeSessionsSpawnError } from "./sessions-spawn-error.js";
 
 const SESSIONS_SPAWN_RUNTIMES = ["subagent", "acp"] as const;
 const SESSIONS_SPAWN_SANDBOX_MODES = ["inherit", "require"] as const;
@@ -77,16 +78,6 @@ const acpSpawnModuleLoader = createLazyImportLoader<AcpSpawnModule>(
 
 async function loadAcpSpawnModule(): Promise<AcpSpawnModule> {
   return await acpSpawnModuleLoader.load();
-}
-
-function summarizeError(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message;
-  }
-  if (typeof err === "string") {
-    return err;
-  }
-  return "error";
 }
 
 function addRoleToFailureResult<T extends { status: string }>(
@@ -533,7 +524,7 @@ export function createSessionsSpawnTool(
             await cleanupUntrackedAcpSession(childSessionKey);
             return jsonResult({
               status: "error",
-              error: `Failed to register ACP run: ${summarizeError(err)}. Cleanup was attempted, but the already-started ACP run may still finish in the background.`,
+              error: `Failed to register ACP run: ${summarizeSessionsSpawnError(err)}. Cleanup was attempted, but the already-started ACP run may still finish in the background.`,
               childSessionKey,
               runId: childRunId,
               ...roleContext,

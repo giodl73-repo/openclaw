@@ -13,6 +13,10 @@ import {
   isAgentHarnessSessionKey,
   isAgentHarnessSessionKeyOwnedBy,
 } from "../sessions/agent-harness-session-key.js";
+import {
+  PLUGIN_GATEWAY_GLOBAL_SESSION_MUTATION_METHODS,
+  PLUGIN_GATEWAY_SESSION_MUTATION_METHODS,
+} from "./registry-runtime-methods.js";
 import type { PluginRegistryState } from "./registry-state.js";
 import type { PluginRecord } from "./registry-types.js";
 import {
@@ -20,34 +24,6 @@ import {
   withPluginRuntimePluginScope,
 } from "./runtime/gateway-request-scope.js";
 import type { PluginRuntime } from "./runtime/types.js";
-
-const PLUGIN_GATEWAY_SESSION_MUTATION_METHODS = new Set([
-  "agent",
-  "chat.abort",
-  "chat.inject",
-  "chat.send",
-  "message.action",
-  "plugins.sessionAction",
-  "send",
-  "sessions.abort",
-  "sessions.compact",
-  "sessions.compaction.branch",
-  "sessions.compaction.restore",
-  "sessions.create",
-  "sessions.delete",
-  "sessions.patch",
-  "sessions.pluginPatch",
-  "sessions.reset",
-  "sessions.send",
-  "sessions.steer",
-  "wake",
-]);
-
-const PLUGIN_GATEWAY_GLOBAL_SESSION_MUTATION_METHODS = new Set([
-  "sessions.cleanup",
-  "sessions.groups.delete",
-  "sessions.groups.rename",
-]);
 
 export function createPluginRuntimeResolver(state: PluginRegistryState) {
   const { registry, registryParams } = state;
