@@ -116,6 +116,31 @@ describe("waitForAgentJob", () => {
     return waitPromise;
   }
 
+  it("retains usage carried by the terminal lifecycle event", async () => {
+    const runId = `run-usage-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const waitPromise = waitForAgentJob({ runId, timeoutMs: 1_000 });
+
+    emitAgentEvent({
+      runId,
+      stream: "lifecycle",
+      data: { phase: "start", startedAt: 100 },
+    });
+    emitAgentEvent({
+      runId,
+      stream: "lifecycle",
+      data: {
+        phase: "end",
+        endedAt: 200,
+        usage: { input: 40, output: 10, cacheWrite: 5, total: 55 },
+      },
+    });
+
+    await expect(waitPromise).resolves.toMatchObject({
+      status: "ok",
+      usage: { input: 40, output: 10, cacheWrite: 5, total: 55 },
+    });
+  });
+
   it("maps lifecycle end events with aborted=true to timeout after the retry grace window", async () => {
     vi.useFakeTimers();
     try {

@@ -684,7 +684,7 @@ describe("subagent registry steer restarts", () => {
     expect(second.generation).toBe(3);
   });
 
-  it("preserves cumulative session timing across steer replacement runs", () => {
+  it("preserves session timing without carrying prior-run usage across steer", () => {
     registerRun({
       runId: "run-runtime-old",
       childSessionKey: "agent:main:subagent:runtime",
@@ -702,6 +702,7 @@ describe("subagent registry steer restarts", () => {
     previous.endedAt = 121_000;
     previous.accumulatedRuntimeMs = 0;
     previous.outcome = { status: "ok" };
+    previous.usage = { input: 120, output: 30, total: 150 };
 
     const replaced = mod.replaceSubagentRunAfterSteer({
       previousRunId: "run-runtime-old",
@@ -716,6 +717,7 @@ describe("subagent registry steer restarts", () => {
     }
     expect(mod.getSubagentSessionStartedAt(next)).toBe(1_000);
     expect(next.accumulatedRuntimeMs).toBe(120_000);
+    expect(next.usage).toBeUndefined();
 
     if (!next.startedAt) {
       throw new Error("missing next startedAt");

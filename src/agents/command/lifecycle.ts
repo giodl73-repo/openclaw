@@ -120,6 +120,7 @@ export function createAgentCommandLifecycle(params: {
           endedAt: Date.now(),
           aborted: runResult.meta.aborted ?? false,
           stopReason,
+          usage: runResult.meta.agentMeta?.usage,
           ...resolveAgentRunAbortLifecycleFields(params.abortSignal),
         },
       });
@@ -154,6 +155,7 @@ export function createAgentCommandLifecycle(params: {
           ...(runResult.meta.replayInvalid === true ? { replayInvalid: true } : {}),
           ...(runResult.meta.yielded === true ? { yielded: true } : {}),
           ...(fallbackExhausted ? { fallbackExhaustedFailure: true } : {}),
+          usage: runResult.meta.agentMeta?.usage,
         },
       });
     },

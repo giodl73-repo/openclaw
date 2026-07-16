@@ -9,6 +9,7 @@ import type { AgentRunSessionTarget } from "./run-session-target.js";
 import type { SubagentRunOutcome } from "./subagent-announce-output.js";
 import type { SubagentLifecycleEndedReason } from "./subagent-lifecycle-events.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
+import type { AgentRunUsage } from "./usage.js";
 
 export type PendingFinalDeliveryPayload = {
   requesterSessionKey: string;
@@ -108,6 +109,8 @@ export type SubagentRunRecord = {
   taskName?: string;
   /** Exact skill identity when this child was started as a managed skill run. */
   managedSkill?: ManagedSkillInvocation;
+  /** Cumulative model usage captured from this exact terminal native run. */
+  usage?: AgentRunUsage;
   cleanup: "delete" | "keep";
   label?: string;
   model?: string;
