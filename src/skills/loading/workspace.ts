@@ -35,7 +35,11 @@ import { WORKSPACE_SKILLS_PROMPT_FORMAT_VERSION } from "../types.js";
 import { getArchivedSkillFiles } from "../workshop/curator.js";
 import { resolveBundledSkillsDir } from "./bundled-dir.js";
 import { resolveBundledAllowlist, shouldIncludeSkill } from "./config.js";
-import { resolveOpenClawMetadata, resolveSkillInvocationPolicy } from "./frontmatter.js";
+import {
+  resolveOpenClawMetadata,
+  resolveSkillExecutionHints,
+  resolveSkillInvocationPolicy,
+} from "./frontmatter.js";
 import {
   loadSkillsFromDirSafe,
   readSkillFrontmatterSafe,
@@ -1500,11 +1504,21 @@ export function buildWorkspaceSkillSnapshot(
   const skillFilter = resolveEffectiveWorkspaceSkillFilter(opts);
   return {
     prompt,
-    skills: eligible.map((entry) => ({
-      name: entry.skill.name,
-      primaryEnv: entry.metadata?.primaryEnv,
-      requiredEnv: entry.metadata?.requires?.env?.slice(),
-    })),
+    skills: eligible.map((entry) => {
+      const executionHints = resolveSkillExecutionHints(entry.frontmatter);
+      const skill: SkillSnapshot["skills"][number] = {
+        name: entry.skill.name,
+        primaryEnv: entry.metadata?.primaryEnv,
+        requiredEnv: entry.metadata?.requires?.env?.slice(),
+      };
+      if (entry.skill.contentDigest) {
+        skill.skillDigest = entry.skill.contentDigest;
+      }
+      if (executionHints) {
+        skill.executionHints = executionHints;
+      }
+      return skill;
+    }),
     ...(skillFilter === undefined ? {} : { skillFilter }),
     ...(opts?.eligibility?.nodeSkills
       ? { nodeSkillsEligibility: opts.eligibility.nodeSkills }

@@ -3,6 +3,7 @@
  *
  * Defines execution, completion, delivery, pending-delivery, and attachment state stored for child runs.
  */
+import type { ManagedSkillInvocation } from "../skills/invocation.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import type { AgentRunSessionTarget } from "./run-session-target.js";
 import type { SubagentRunOutcome } from "./subagent-announce-output.js";
@@ -105,6 +106,8 @@ export type SubagentRunRecord = {
   requesterDisplayKey: string;
   task: string;
   taskName?: string;
+  /** Exact skill identity when this child was started as a managed skill run. */
+  managedSkill?: ManagedSkillInvocation;
   cleanup: "delete" | "keep";
   label?: string;
   model?: string;

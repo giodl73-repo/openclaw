@@ -12,7 +12,11 @@ import {
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
+import { normalizeAgentId, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import { createManagedSkillInvocation } from "../../skills/invocation.js";
+import { resolveSkillTelemetrySource } from "../../skills/loading/source.js";
+import type { SkillSnapshot } from "../../skills/types.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import {
@@ -133,6 +137,9 @@ function createSessionsSpawnToolSchema(params: {
   const spawnModes = params.threadAvailable ? SUBAGENT_SPAWN_MODES : (["run"] as const);
   const schema = {
     task: Type.String(),
+    skill: Type.Optional(
+      Type.String({ description: "Available skill to execute as a managed child run." }),
+    ),
     taskName: Type.Optional(
       Type.String({
         description:
@@ -230,6 +237,10 @@ export function createSessionsSpawnTool(
     config?: OpenClawConfig;
     /** Explicit agent ID override for cron/hook sessions where session key parsing may not work. */
     requesterAgentIdOverride?: string;
+    /** Skills available to this run; managed calls must resolve exactly one entry here. */
+    skillsSnapshot?: SkillSnapshot;
+    /** Trusted identifier for the parent agent run. */
+    parentRunId?: string;
   } & VisibleSessionsSpawnDeps &
     SpawnedToolContext,
 ): AnyAgentTool {
@@ -268,6 +279,31 @@ export function createSessionsSpawnTool(
         );
       }
       const task = readStringParam(params, "task", { required: true });
+      const requestedSkillName = readStringParam(params, "skill");
+      const availableSkillNames = new Set(
+        (opts?.skillsSnapshot?.skills ?? []).map((skill) => skill.name.trim()),
+      );
+      const matchingSkills = requestedSkillName
+        ? (opts?.skillsSnapshot?.resolvedSkills ?? []).filter(
+            (skill) =>
+              skill.name.trim() === requestedSkillName &&
+              availableSkillNames.has(skill.name.trim()) &&
+              !skill.disableModelInvocation,
+          )
+        : [];
+      if (requestedSkillName && matchingSkills.length !== 1) {
+        return jsonResult({
+          status: "error",
+          error:
+            matchingSkills.length === 0
+              ? `Skill "${requestedSkillName}" is not available in this run.`
+              : `Skill "${requestedSkillName}" is ambiguous in this run.`,
+        });
+      }
+      const requestedSkill = matchingSkills[0];
+      const requestedSkillMetadata = requestedSkillName
+        ? opts?.skillsSnapshot?.skills.find((skill) => skill.name.trim() === requestedSkillName)
+        : undefined;
       const taskNameResult = normalizeSubagentTaskName(params.taskName);
       if (taskNameResult.error) {
         return jsonResult({
@@ -279,6 +315,20 @@ export function createSessionsSpawnTool(
       const label = readStringParam(params, "label") ?? "";
       const runtime = params.runtime === "acp" ? "acp" : "subagent";
       const requestedAgentId = readStringParam(params, "agentId");
+      const requesterAgentId = normalizeAgentId(
+        opts?.requesterAgentIdOverride ?? resolveAgentIdFromSessionKey(opts?.agentSessionKey),
+      );
+      if (
+        requestedSkill &&
+        requestedAgentId &&
+        normalizeAgentId(requestedAgentId) !== requesterAgentId
+      ) {
+        return jsonResult({
+          status: "error",
+          error: "Managed skill invocation currently requires the child to use the current agent.",
+          role: requestedAgentId,
+        });
+      }
       const resumeSessionId = readStringParam(params, "resumeSessionId");
       const modelOverride = normalizeToolModelOverride(readStringParam(params, "model"));
       const thinkingOverrideRaw = readStringParam(params, "thinking");
@@ -293,6 +343,24 @@ export function createSessionsSpawnTool(
       const streamTo = runtime === "acp" && params.streamTo === "parent" ? "parent" : undefined;
       const lightContext = params.lightContext === true;
       const roleContext = requestedAgentId ? { role: requestedAgentId } : {};
+      if (requestedSkill && runtime !== "subagent") {
+        return jsonResult({
+          status: "error",
+          error: 'Managed skill invocation currently requires runtime="subagent".',
+          ...roleContext,
+        });
+      }
+      if (
+        requestedSkill &&
+        (mode === "session" || params.thread === true || params.visible === true)
+      ) {
+        return jsonResult({
+          status: "error",
+          error:
+            'Managed skill invocation is one background run; omit visible and thread, and use mode="run".',
+          ...roleContext,
+        });
+      }
       const visibleResult = await maybeSpawnVisibleSession({
         raw: params,
         task,
@@ -454,9 +522,24 @@ export function createSessionsSpawnTool(
         return jsonResult(addRoleToFailureResult(result, requestedAgentId));
       }
 
+      const managedSkill = requestedSkill
+        ? createManagedSkillInvocation({
+            skillName: requestedSkill.name,
+            skillSource: resolveSkillTelemetrySource(requestedSkill),
+            skillDigest: requestedSkill.contentDigest ?? requestedSkillMetadata?.skillDigest,
+            executionHints: requestedSkillMetadata?.executionHints,
+            parentRunId: opts?.parentRunId,
+          })
+        : undefined;
+      const childTask = requestedSkill
+        ? `Use the ${requestedSkill.name} skill to complete this task:
+
+${task}`
+        : task;
       const result = await spawnSubagentDirect(
         {
-          task,
+          task: childTask,
+          managedSkill,
           taskName,
           label: label || undefined,
           agentId: requestedAgentId,

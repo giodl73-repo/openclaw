@@ -253,6 +253,12 @@ describe("spawnSubagentDirect seam flow", () => {
     const result = await spawnSubagentDirect(
       {
         task: "inspect the spawn seam",
+        managedSkill: {
+          invocationId: "skill_spawn",
+          skillName: "resolve-case",
+          skillDigest: "sha256:abc",
+          parentRunId: "run-parent",
+        },
         model: "openai/gpt-5.4",
       },
       {
@@ -267,6 +273,7 @@ describe("spawnSubagentDirect seam flow", () => {
 
     expect(result.status).toBe("accepted");
     expect(result.runId).toBe("run-1");
+    expect(result.skillInvocationId).toBe("skill_spawn");
     expect(result.mode).toBe("run");
     expect(result.modelApplied).toBe(true);
     expect(result.childSessionKey).toMatch(/^agent:main:subagent:/);
@@ -284,6 +291,12 @@ describe("spawnSubagentDirect seam flow", () => {
     expect(requesterOrigin.to).toBe("user-1");
     expect(requesterOrigin.threadId).toBe(42);
     expect(registerInput.task).toBe("inspect the spawn seam");
+    expect(registerInput.managedSkill).toEqual({
+      invocationId: "skill_spawn",
+      skillName: "resolve-case",
+      skillDigest: "sha256:abc",
+      parentRunId: "run-parent",
+    });
     expect(registerInput.cleanup).toBe("keep");
     expect(registerInput.model).toBe("openai/gpt-5.4");
     expect(registerInput.workspaceDir).toBe("/tmp/requester-workspace");

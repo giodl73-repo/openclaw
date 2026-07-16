@@ -203,6 +203,34 @@ describe("buildWorkspaceSkillSnapshot", () => {
     expect(after.prompt).toContain("If a skill's <version> differs from a previous turn");
   });
 
+  it("captures portable execution hints and exact content identity", async () => {
+    const workspaceDir = await fixtureSuite.createCaseDir("workspace-managed-metadata");
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "resolve-case"),
+      name: "resolve-case",
+      description: "Resolve a support case.",
+      frontmatterExtra: `metadata:
+  outcomes: "case.resolved customer.notified"
+  uses-skills: "verify-customer"
+  isolation: "preferred"`,
+    });
+
+    const snapshot = buildSnapshot(workspaceDir);
+
+    expect(snapshot.skills).toContainEqual({
+      name: "resolve-case",
+      primaryEnv: undefined,
+      requiredEnv: undefined,
+      skillDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+      executionHints: {
+        outcomes: ["case.resolved", "customer.notified"],
+        usesSkills: ["verify-customer"],
+        isolation: "preferred",
+      },
+    });
+    expect(snapshot.resolvedSkills?.[0]?.contentDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
   it("truncates the skills prompt when it exceeds the configured char budget", async () => {
     const workspaceDir = await cloneTemplateDir(truncationWorkspaceTemplateDir, "workspace");
 

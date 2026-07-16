@@ -1,5 +1,7 @@
 // Frontmatter helpers parse skill metadata from SKILL.md files.
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
+import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
+import JSON5 from "json5";
 import { parseFrontmatterBlockResult } from "../../../packages/markdown-core/src/frontmatter.js";
 import { validateRegistryNpmSpec } from "../../infra/npm-registry-spec.js";
 import {
@@ -19,6 +21,7 @@ import type {
   SkillEntry,
   SkillInstallSpec,
   SkillInvocationPolicy,
+  SkillExecutionHints,
 } from "../types.js";
 import type { Skill } from "./skill-contract.js";
 
@@ -221,6 +224,51 @@ export function resolveSkillInvocationPolicy(
       getFrontmatterString(frontmatter, "disable-model-invocation"),
       false,
     ),
+  };
+}
+
+function parseMetadataMap(
+  frontmatter: ParsedSkillFrontmatter,
+): Record<string, unknown> | undefined {
+  const raw = getFrontmatterString(frontmatter, "metadata");
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON5.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Parses portable, string-valued Agent Skills execution hints. */
+export function resolveSkillExecutionHints(
+  frontmatter: ParsedSkillFrontmatter,
+): SkillExecutionHints | undefined {
+  const metadata = parseMetadataMap(frontmatter);
+  const outcomes = normalizeTrimmedStringList(
+    typeof metadata?.outcomes === "string" ? metadata.outcomes.split(/\s+/) : undefined,
+  );
+  const usesSkills = normalizeTrimmedStringList(
+    typeof metadata?.["uses-skills"] === "string"
+      ? metadata["uses-skills"].split(/\s+/)
+      : undefined,
+  );
+  const isolation = metadata?.isolation;
+  const normalizedIsolation =
+    isolation === "shared" || isolation === "preferred" || isolation === "required"
+      ? isolation
+      : undefined;
+  if (outcomes.length === 0 && usesSkills.length === 0 && !normalizedIsolation) {
+    return undefined;
+  }
+  return {
+    ...(outcomes.length > 0 ? { outcomes } : {}),
+    ...(usesSkills.length > 0 ? { usesSkills } : {}),
+    ...(normalizedIsolation ? { isolation: normalizedIsolation } : {}),
   };
 }
 

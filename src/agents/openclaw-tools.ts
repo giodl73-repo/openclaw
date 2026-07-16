@@ -14,6 +14,7 @@ import { isEmbeddedMode } from "../infra/embedded-mode.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
 import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime-web-tools-state.js";
 import { isCronRunSessionKey } from "../sessions/session-key-utils.js";
+import type { SkillSnapshot } from "../skills/types.js";
 import type { SkillWorkshopRunOptions } from "../skills/workshop/types.js";
 import { resolveTranscriptsConfig } from "../transcripts/config.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
@@ -107,6 +108,8 @@ export function createOpenClawTools(
     runSessionKey?: string;
     agentChannel?: GatewayMessageChannel;
     runId?: string;
+    /** Skills available to this run for validated managed invocation. */
+    skillsSnapshot?: SkillSnapshot;
     agentAccountId?: string;
     /** Delivery target for topic/thread routing. */
     agentTo?: string;
@@ -594,6 +597,8 @@ export function createOpenClawTools(
             agentMemberRoleIds: options?.agentMemberRoleIds,
             sandboxed: options?.sandboxed,
             config: resolvedConfig,
+            skillsSnapshot: options?.skillsSnapshot,
+            parentRunId: options?.runId,
             requesterAgentIdOverride: options?.requesterAgentIdOverride,
             workspaceDir: spawnWorkspaceDir,
             inheritedToolAllowlist: options?.inheritedToolAllowlist,
