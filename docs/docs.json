@@ -1659,6 +1659,7 @@
                     "group": "Health and diagnostics",
                     "pages": [
                       "gateway/health",
+                      "gateway/hosting-profiles",
                       "gateway/heartbeat",
                       "gateway/doctor",
                       "gateway/audit",
