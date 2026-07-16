@@ -8,6 +8,21 @@ import {
 import { summarizeTrajectoryAuditRuns, type TrajectoryAuditRunSummary } from "./audit-run.js";
 import { loadSqliteTrajectoryRuntimeEventRowsSync } from "./runtime-store.sqlite.js";
 
+function toAuditRunReceipt(receipt: RecordedAuditReceipt): Record<string, unknown> {
+  return {
+    receiptId: receipt.receiptId,
+    type: receipt.receiptType,
+    ...(receipt.receiptVersion === undefined ? {} : { version: receipt.receiptVersion }),
+    ...(receipt.subject ? { subject: receipt.subject } : {}),
+    ...(receipt.data ? { data: receipt.data } : {}),
+    ...(receipt.invocationId ? { invocationId: receipt.invocationId } : {}),
+    ...(receipt.skillName ? { skillName: receipt.skillName } : {}),
+    ...(receipt.skillDigest ? { skillDigest: receipt.skillDigest } : {}),
+    toolName: receipt.toolName,
+    toolCallId: receipt.toolCallId,
+  };
+}
+
 /** Reads one run's persisted audit projection without exposing trajectory storage to plugins. */
 export function readTrajectoryAuditRun(params: {
   cfg: OpenClawConfig;
@@ -40,5 +55,23 @@ export function readTrajectoryAuditRun(params: {
     sessionId: entry.sessionId,
     storePath,
   }).map((row) => row.event);
-  return summarizeTrajectoryAuditRuns(events).find((summary) => summary.runId === params.runId);
+  const summary = summarizeTrajectoryAuditRuns(events).find(
+    (candidate) => candidate.runId === params.runId,
+  );
+  if (!summary) {
+    return undefined;
+  }
+  const filters = { runId: params.runId, sessionKey: canonicalKey };
+  const store = { cfg: params.cfg, env: params.env };
+  const receiptCount = countAuditReceipts({ filters, store });
+  if (receiptCount === 0) {
+    return summary;
+  }
+  const receipts = listAuditReceipts({ filters, limit: receiptCount, store }).toReversed();
+  return { ...summary, receipts: receipts.map(toAuditRunReceipt) };
 }
+import {
+  countAuditReceipts,
+  listAuditReceipts,
+  type RecordedAuditReceipt,
+} from "../audit/receipt-store.sqlite.js";

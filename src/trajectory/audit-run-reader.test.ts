@@ -2,6 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  closeAuditReceiptStoresForTest,
+  recordAuditReceipt,
+} from "../audit/receipt-store.sqlite.js";
 import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
@@ -23,20 +27,44 @@ describe("trajectory audit run reader", () => {
   });
 
   afterEach(() => {
+    closeAuditReceiptStoresForTest();
     closeOpenClawAgentDatabasesForTest();
     closeOpenClawStateDatabaseForTest();
     fs.rmSync(tempDir, { force: true, recursive: true });
   });
 
   it("projects receipts and token usage for one persisted run", () => {
+    const receiptStorePath = path.join(tempDir, "shared", "receipts.sqlite");
+    const cfg = {
+      session: { store: storePath },
+      audit: { receipts: { store: { type: "sqlite" as const, path: receiptStorePath } } },
+    };
+    const recorded = recordAuditReceipt(
+      {
+        receipt: {
+          type: "customer.verified",
+          subject: { type: "case", id: "CAS-42" },
+          data: { verificationId: "VER-42" },
+        },
+        receiptIndex: 0,
+        occurredAt: Date.parse("2026-07-15T00:00:00.000Z"),
+        agentId: "main",
+        sessionId: "session-verify",
+        sessionKey: "agent:main:subagent:verify",
+        runId: "run-verify",
+        toolName: "customer_lookup",
+        toolCallId: "call-verify",
+      },
+      { cfg },
+    );
     appendSqliteTrajectoryRuntimeEvents({ sessionId: "session-verify", storePath }, [
       event("model.completed", {
         usage: { input: 40, output: 10, total: 50 },
       }),
-      event("audit.receipt", {
+      event("audit.receipt.recorded", {
+        receiptId: recorded.receiptId,
         type: "customer.verified",
         subject: { type: "case", id: "CAS-42" },
-        data: { verificationId: "VER-42" },
         toolCallId: "call-verify",
         toolName: "customer_lookup",
       }),
@@ -45,7 +73,7 @@ describe("trajectory audit run reader", () => {
 
     expect(
       readTrajectoryAuditRun({
-        cfg: { session: { store: storePath } },
+        cfg,
         runId: "run-verify",
         sessionKey: "agent:main:subagent:verify",
       }),
