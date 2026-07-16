@@ -1,6 +1,6 @@
-// Raised from 5_000_000 for the plugins.uninstall + catalog install-action protocol surface;
+// Raised from 5_050_000 for the continuity publication provider v1 contract;
 // the cap exists to force a conscious decision on published declaration growth.
-export const MAX_PUBLIC_PLUGIN_SDK_DECLARATION_BYTES = 5_050_000;
+export const MAX_PUBLIC_PLUGIN_SDK_DECLARATION_BYTES = 5_055_000;
 // Private-only entrypoints reshape chunks reachable from public roots but are never published.
 // Bound that topology overhead without counting local-only declarations as package surface.
 export const MAX_PRIVATE_QA_PUBLIC_PLUGIN_SDK_DECLARATION_BYTES = 5_075_000;
