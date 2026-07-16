@@ -360,6 +360,17 @@ export type AuditConfig = {
    * unknown conversation kinds. Default: `off`.
    */
   messages?: "off" | "direct" | "all";
+  /** Durable, searchable business outcome receipts emitted by trusted tools. */
+  receipts?: {
+    /** Record new receipts. Default: true. */
+    enabled?: boolean;
+    /** Shared receipt-store selection. Version 1 supports local SQLite only. */
+    store?: {
+      type: "sqlite";
+      /** Optional database path. Defaults to the shared OpenClaw state directory. */
+      path?: string;
+    };
+  };
 };
 
 export type DiagnosticsConfig = {

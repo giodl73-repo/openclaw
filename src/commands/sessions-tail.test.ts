@@ -3,6 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  closeAuditReceiptStoresForTest,
+  recordAuditReceipt,
+} from "../audit/receipt-store.sqlite.js";
 import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import { formatSqliteSessionFileMarker } from "../config/sessions/sqlite-marker.js";
 import type { SessionEntry } from "../config/sessions/types.js";
@@ -111,6 +115,7 @@ describe("sessionsTailCommand", () => {
     }
     closeOpenClawAgentDatabasesForTest();
     closeOpenClawStateDatabaseForTest();
+    closeAuditReceiptStoresForTest();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -212,31 +217,24 @@ describe("sessionsTailCommand", () => {
 
   it("filters receipts by business type and emits their sanitized data as JSONL", async () => {
     const runtime = makeRuntime();
-    await writeSessionEntry();
-    await appendEvents([
-      makeEvent({
-        type: "audit.receipt",
-        ts: "2026-05-18T12:04:18.000Z",
-        data: {
-          type: "inventory.sent",
-          subject: { type: "shipment", id: "ship-1" },
-        },
-      }),
-      makeEvent({
-        type: "audit.receipt",
-        ts: "2026-05-18T12:04:21.000Z",
-        data: {
+    recordAuditReceipt(
+      {
+        receipt: {
           type: "payment.authorized",
           subject: { type: "invoice", id: "inv-123" },
           data: { authorizationCode: "auth-456" },
         },
-      }),
-      makeEvent({
-        type: "tool.result",
-        ts: "2026-05-18T12:04:22.000Z",
-        data: { name: "payments.authorize", success: true },
-      }),
-    ]);
+        receiptIndex: 0,
+        occurredAt: Date.parse("2026-05-18T12:04:21.000Z"),
+        agentId: "main",
+        sessionId: "session-one",
+        sessionKey,
+        runId: "run-1",
+        toolName: "payments.authorize",
+        toolCallId: "call-1",
+      },
+      { cfg: mocks.getRuntimeConfig() },
+    );
 
     await sessionsTailCommand(
       {
@@ -251,11 +249,42 @@ describe("sessionsTailCommand", () => {
 
     expect(runtime.log).toHaveBeenCalledTimes(1);
     const output = JSON.parse(String(vi.mocked(runtime.log).mock.calls[0]?.[0]));
-    expect(output.data).toEqual({
-      type: "payment.authorized",
+    expect(output).toMatchObject({
+      receiptSchema: "openclaw-audit-receipt",
+      receiptType: "payment.authorized",
       subject: { type: "invoice", id: "inv-123" },
       data: { authorizationCode: "auth-456" },
+      agentId: "main",
+      sessionKey,
+      runId: "run-1",
     });
+  });
+
+  it("counts matching receipts across agents in the shared store", async () => {
+    const runtime = makeRuntime();
+    for (const [index, agentId] of ["main", "ops"].entries()) {
+      recordAuditReceipt(
+        {
+          receipt: { type: "case.resolved" },
+          receiptIndex: 0,
+          occurredAt: Date.now() + index,
+          agentId,
+          sessionId: `${agentId}-session`,
+          sessionKey: `agent:${agentId}:email:thread:case-${index}`,
+          runId: `${agentId}-run`,
+          toolName: "resolve_case",
+          toolCallId: `${agentId}-call`,
+        },
+        { cfg: mocks.getRuntimeConfig() },
+      );
+    }
+
+    await sessionsTailCommand(
+      { allAgents: true, count: true, receiptType: "case.resolved" },
+      runtime,
+    );
+
+    expect(runtime.log).toHaveBeenCalledWith("2");
   });
 
   it("does not expose general trajectory data through JSON output", async () => {

@@ -1206,6 +1206,13 @@ Notes:
   audit: {
     enabled: true,
     messages: "off", // off | direct | all
+    receipts: {
+      enabled: true,
+      store: {
+        type: "sqlite",
+        path: "~/.openclaw/state/receipts.sqlite",
+      },
+    },
   },
 }
 ```
@@ -1234,6 +1241,14 @@ and coverage limits.
   identifiers with installation-local keyed pseudonyms where correlation is
   available. These are correlation aids rather than anonymization; the state
   database stores the derivation key, but RPC and CLI exports do not.
+- `receipts.enabled`: records new typed business outcomes emitted by trusted
+  tools (default: `true`). Existing receipts remain readable when disabled.
+- `receipts.store`: selects the shared outcome store. Version 1 supports local
+  SQLite only. The optional `path` defaults to `receipts.sqlite` in OpenClaw's
+  shared state directory. Every agent in the installation uses this store, so
+  receipt type, subject, session, run, and skill provenance can be searched and
+  counted across agents. Keep the database on storage local to the Gateway;
+  direct multi-host or network-filesystem sharing is not supported.
 
 The running Gateway captures `audit.enabled` and `audit.messages` at startup;
 restart it after changing either setting. Message coverage currently includes

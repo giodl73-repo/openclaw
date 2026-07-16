@@ -100,6 +100,23 @@ and tool result bodies are not printed. Tool calls show the tool name with
 `{...redacted...}`; tool results show status such as `ok`, `error`, or `done`;
 model completion lines show provider/model and terminal status.
 
+### Find recorded outcomes
+
+Trusted tools can attach typed outcome receipts to successful results. OpenClaw
+stores those receipts in the configured shared receipt database, independently
+of session rotation, so every local agent can query the same outcome history.
+
+```bash
+openclaw sessions tail --receipt-type case.resolved
+openclaw sessions tail --receipt-type payment.authorized --json
+openclaw sessions --all-agents tail --receipt-type invoice.paid --count
+```
+
+`--receipt-type` is an exact match. Add `--session-key` or an agent selector to
+narrow the shared query. `--tail` limits returned receipts. `--count` reports
+only the number of matches. Receipt queries are snapshots and do not support
+`--follow`.
+
 ## Export a trajectory bundle
 
 ```bash

@@ -77,13 +77,13 @@ describe("isTrajectoryAuditReceipt", () => {
     schemaVersion: 1,
     traceId: "trace-1",
     source: "runtime",
-    type: "audit.receipt",
+    type: "audit.receipt.recorded",
     ts: "2026-07-13T12:00:00.000Z",
     seq: 1,
     sessionId: "session-1",
     data: {
       type: "payment.authorized",
-      data: { authorizationCode: "auth-456" },
+      receiptId: "rcpt-1",
     },
   };
 

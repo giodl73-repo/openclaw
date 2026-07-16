@@ -21,6 +21,7 @@ type SessionsListCliOptions = {
   active?: string;
   limit?: string;
 };
+type ParentSessionsOptions = Pick<SessionsListCliOptions, "store" | "agent" | "allAgents" | "json">;
 
 function createModuleLoader<T>(load: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | undefined;
@@ -261,14 +262,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
         ])}`,
     )
     .action(async (opts, command) => {
-      const parentOpts = command.parent?.opts() as
-        | {
-            store?: string;
-            agent?: string;
-            allAgents?: boolean;
-            json?: boolean;
-          }
-        | undefined;
+      const parentOpts = command.parent?.opts() as ParentSessionsOptions | undefined;
       await runCommandWithRuntime(defaultRuntime, async () => {
         const { sessionsCleanupCommand } = await import("../../commands/sessions-cleanup.js");
         await sessionsCleanupCommand(
@@ -294,6 +288,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     .option("--session-key <key>", "Session key to tail (default: active sessions or latest)")
     .option("--tail <count>", "Number of existing trajectory events to show", "80")
     .option("--receipt-type <type>", "Only show audit receipts of this business type")
+    .option("--count", "Count matching audit receipts", false)
     .option("--json", "Output matching trajectory events as JSONL", false)
     .option("--follow", "Continue following for new trajectory events", false)
     .option("--store <path>", "Path to session store (default: resolved from config)")
@@ -318,6 +313,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
             allAgents: Boolean(opts.allAgents || parentOpts?.allAgents),
             follow: Boolean(opts.follow),
             json: Boolean(opts.json || parentOpts?.json),
+            count: Boolean(opts.count),
             receiptType: opts.receiptType as string | undefined,
             tail: opts.tail as string | undefined,
           },

@@ -1,4 +1,9 @@
+import {
+  isAuditReceiptStoreEnabled,
+  recordAuditReceipt,
+} from "../../../audit/receipt-store.sqlite.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
+import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../../routing/session-key.js";
 /**
  * Dispatches embedded attempts to native harness or OpenClaw backend execution.
  */
@@ -18,8 +23,42 @@ export async function runEmbeddedAttemptWithBackend(
     return await runAgentHarnessAttempt({
       ...params,
       onAgentToolResult: (event) => {
-        for (const receipt of collectAttemptToolAuditReceipts({ event })) {
-          params.trajectoryRecorder?.recordEvent("audit.receipt", { ...receipt });
+        const occurredAt = Date.now();
+        if (!isAuditReceiptStoreEnabled(params.config)) {
+          onAgentToolResult?.(event);
+          return;
+        }
+        for (const [receiptIndex, receipt] of collectAttemptToolAuditReceipts({
+          event,
+        }).entries()) {
+          try {
+            const recorded = recordAuditReceipt(
+              {
+                receipt,
+                receiptIndex,
+                occurredAt,
+                agentId: normalizeAgentId(params.agentId ?? DEFAULT_AGENT_ID),
+                sessionId: params.sessionId,
+                ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+                runId: params.runId,
+                toolName: receipt.toolName,
+                toolCallId: receipt.toolCallId,
+              },
+              { cfg: params.config },
+            );
+            params.trajectoryRecorder?.recordEvent("audit.receipt.recorded", {
+              receiptId: recorded.receiptId,
+              type: recorded.receiptType,
+              ...(recorded.receiptVersion === undefined
+                ? {}
+                : { version: recorded.receiptVersion }),
+              ...(recorded.subject ? { subject: recorded.subject } : {}),
+              toolName: recorded.toolName,
+              toolCallId: recorded.toolCallId,
+            });
+          } catch (error) {
+            log.warn(`failed to record audit receipt: ${formatErrorMessage(error)}`);
+          }
         }
         onAgentToolResult?.(event);
       },

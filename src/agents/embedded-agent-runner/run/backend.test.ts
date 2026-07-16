@@ -4,7 +4,13 @@ import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types
 
 const mocks = vi.hoisted(() => ({
   collectAttemptToolAuditReceipts: vi.fn(),
+  recordAuditReceipt: vi.fn(),
   runAgentHarnessAttempt: vi.fn(),
+}));
+
+vi.mock("../../../audit/receipt-store.sqlite.js", () => ({
+  isAuditReceiptStoreEnabled: vi.fn(() => true),
+  recordAuditReceipt: mocks.recordAuditReceipt,
 }));
 
 vi.mock("../../harness/selection.js", () => ({
@@ -29,17 +35,30 @@ describe("runEmbeddedAttemptWithBackend", () => {
       result: { details: { audit: [] } },
       isError: false,
     };
-    const receipt = { type: "invoice.sent" } as TrajectoryAuditReceipt;
+    const receipt = {
+      type: "invoice.sent",
+      toolName: "send_invoice",
+      toolCallId: "call-1",
+    } as TrajectoryAuditReceipt;
     const recordEvent = vi.fn();
     const flush = vi.fn();
     const onAgentToolResult = vi.fn();
     const result = {} as EmbeddedRunAttemptResult;
     const params = {
       agentId: "support",
+      sessionId: "session-1",
+      sessionKey: "agent:support:email:thread:case-1",
+      runId: "run-1",
       onAgentToolResult,
       trajectoryRecorder: { recordEvent, flush },
     } as unknown as EmbeddedRunAttemptParams;
     mocks.collectAttemptToolAuditReceipts.mockReturnValue([receipt]);
+    mocks.recordAuditReceipt.mockReturnValue({
+      receiptId: "rcpt-1",
+      receiptType: "invoice.sent",
+      toolName: "send_invoice",
+      toolCallId: "call-1",
+    });
     mocks.runAgentHarnessAttempt.mockImplementation(
       async (attemptParams: EmbeddedRunAttemptParams) => {
         attemptParams.onAgentToolResult?.(event);
@@ -50,7 +69,23 @@ describe("runEmbeddedAttemptWithBackend", () => {
     await expect(runEmbeddedAttemptWithBackend(params)).resolves.toBe(result);
 
     expect(mocks.collectAttemptToolAuditReceipts).toHaveBeenCalledWith({ event });
-    expect(recordEvent).toHaveBeenCalledWith("audit.receipt", { ...receipt });
+    expect(mocks.recordAuditReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        receipt,
+        receiptIndex: 0,
+        agentId: "support",
+        sessionId: "session-1",
+        sessionKey: "agent:support:email:thread:case-1",
+        runId: "run-1",
+      }),
+      { cfg: undefined },
+    );
+    expect(recordEvent).toHaveBeenCalledWith("audit.receipt.recorded", {
+      receiptId: "rcpt-1",
+      type: "invoice.sent",
+      toolName: "send_invoice",
+      toolCallId: "call-1",
+    });
     expect(flush).toHaveBeenCalledOnce();
     expect(onAgentToolResult).toHaveBeenCalledWith(event);
   });

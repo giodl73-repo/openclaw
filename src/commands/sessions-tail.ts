@@ -19,7 +19,6 @@ import { parseStrictNonNegativeInteger } from "../infra/parse-finite-number.js";
 import { readRegularFileSync } from "../infra/regular-file.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { isTrajectoryAuditReceipt } from "../trajectory/audit.js";
 import {
   resolveTrajectoryFilePath,
   TRAJECTORY_RUNTIME_FILE_MAX_BYTES,
@@ -28,6 +27,7 @@ import { resolveTrajectoryRuntimeFile } from "../trajectory/runtime-file.js";
 import { loadSqliteTrajectoryRuntimeEventRowsSync } from "../trajectory/runtime-store.sqlite.js";
 import type { TrajectoryEvent } from "../trajectory/types.js";
 import { resolveSessionStoreTargetsOrExit } from "./session-store-targets.js";
+import { handleSessionsTailReceiptQuery } from "./sessions-tail-receipts.js";
 import { shortenText } from "./text-format.js";
 
 type SessionsTailOptions = {
@@ -37,6 +37,7 @@ type SessionsTailOptions = {
   sessionKey?: string;
   follow?: boolean;
   json?: boolean;
+  count?: boolean;
   receiptType?: string;
   tail?: string | number;
 };
@@ -280,7 +281,7 @@ function safePreview(event: TrajectoryEvent): string {
       return `${toolName(data)} timeout`;
     case "tool.result":
       return `${toolName(data)} ${resultStatus(data)}`;
-    case "audit.receipt": {
+    case "audit.receipt.recorded": {
       const receiptType = toOptionalString(data?.type);
       return receiptType ?? "receipt";
     }
@@ -351,7 +352,7 @@ function readTailSnapshot(selection: TailSelection): TrajectorySnapshot {
     : readTrajectorySnapshot(selection.source.path);
 }
 
-type TailRenderOptions = Pick<SessionsTailOptions, "json" | "receiptType">;
+type TailRenderOptions = Pick<SessionsTailOptions, "json">;
 
 function renderEvents(
   events: TrajectoryEvent[],
@@ -361,9 +362,6 @@ function renderEvents(
   let cursor: TrajectoryCursor | null = null;
   for (const event of events) {
     cursor = maxCursor(cursor, event);
-    if (options.receiptType && !isTrajectoryAuditReceipt(event, options.receiptType)) {
-      continue;
-    }
     runtime.log(options.json ? JSON.stringify(event) : formatProgressLine(event));
   }
   return cursor;
@@ -664,18 +662,7 @@ export async function sessionsTailCommand(
     return;
   }
 
-  const receiptType = opts.receiptType?.trim();
-  if (opts.receiptType !== undefined && !receiptType) {
-    runtime.error("--receipt-type must be a non-empty business type.");
-    runtime.exit(1);
-    return;
-  }
-  if (opts.json && !receiptType) {
-    runtime.error("--json requires --receipt-type so only sanitized audit receipts are emitted.");
-    runtime.exit(1);
-    return;
-  }
-  const renderOptions: TailRenderOptions = { json: opts.json, receiptType };
+  const renderOptions: TailRenderOptions = { json: opts.json };
 
   const cfg = getRuntimeConfig();
   const targets = resolveSessionStoreTargetsOrExit({
@@ -688,6 +675,10 @@ export async function sessionsTailCommand(
     runtime,
   });
   if (!targets) {
+    return;
+  }
+
+  if (handleSessionsTailReceiptQuery({ cfg, targets, options: opts, tailCount, runtime })) {
     return;
   }
 
@@ -719,10 +710,7 @@ export async function sessionsTailCommand(
   for (const selection of selected) {
     const snapshot = readTailSnapshot(selection);
     followSnapshots.set(selection, snapshot);
-    const outputEvents = receiptType
-      ? snapshot.events.filter((event) => isTrajectoryAuditReceipt(event, receiptType))
-      : snapshot.events;
-    renderEvents(tailCount > 0 ? outputEvents.slice(-tailCount) : [], runtime, renderOptions);
+    renderEvents(tailCount > 0 ? snapshot.events.slice(-tailCount) : [], runtime, renderOptions);
   }
 
   if (opts.follow) {

@@ -48,9 +48,9 @@ function normalizeAuditRecord(value: unknown): AgentToolAuditRecord | undefined 
   };
 }
 
-/** Returns whether a trajectory event is a receipt, optionally of an exact business type. */
+/** Returns whether a trajectory event references a recorded receipt of an optional exact type. */
 export function isTrajectoryAuditReceipt(event: TrajectoryEvent, receiptType?: string): boolean {
-  if (event.type !== "audit.receipt") {
+  if (event.type !== "audit.receipt.recorded") {
     return false;
   }
   const eventReceiptType = typeof event.data?.type === "string" ? event.data.type.trim() : "";
