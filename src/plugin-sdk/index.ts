@@ -101,7 +101,7 @@ export {
   CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION,
   CONTINUITY_PUBLICATION_PROVIDER_VERSION,
   CONTINUITY_PUBLICATION_RETRIEVAL_VERSION,
-} from "../continuity/publication-provider-contract.js";
+} from "../continuity/publication-provider.js";
 export type {
   ContinuityPublicationAcceptanceReceiptV1,
   ContinuityPublicationIdentityV1,
