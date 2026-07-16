@@ -153,3 +153,54 @@ export async function startPluginServices(params: {
     },
   };
 }
+
+/** Start managed-operation services with strict startup, rollback, and shutdown failures. */
+export async function startPluginServicesStrict(params: {
+  registry: PluginRegistry;
+  config: OpenClawConfig;
+  workspaceDir?: string;
+}): Promise<PluginServicesHandle> {
+  const running: Array<{ stop?: () => void | Promise<void> }> = [];
+  try {
+    for (const entry of params.registry.services) {
+      const service = entry.service;
+      const serviceContext = createServiceContext({
+        config: params.config,
+        workspaceDir: params.workspaceDir,
+        service: entry,
+      });
+      await withPluginHttpRouteRegistry(params.registry, () => service.start(serviceContext));
+      running.push({
+        stop: service.stop ? () => service.stop?.(serviceContext) : undefined,
+      });
+    }
+  } catch (error) {
+    const cleanupErrors: unknown[] = [];
+    for (const entry of running.toReversed()) {
+      try {
+        await withPluginHttpRouteRegistry(params.registry, () => entry.stop?.());
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+    }
+    throw cleanupErrors.length > 0
+      ? new AggregateError([error, ...cleanupErrors], "Plugin service startup and rollback failed")
+      : error;
+  }
+
+  return {
+    stop: async () => {
+      const errors: unknown[] = [];
+      for (const entry of running.toReversed()) {
+        try {
+          await withPluginHttpRouteRegistry(params.registry, () => entry.stop?.());
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, "Plugin service shutdown failed");
+      }
+    },
+  };
+}

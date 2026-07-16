@@ -1,0 +1,16 @@
+{
+  "id": "continuity-publication-fixture",
+  "name": "Continuity Publication Fixture",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["publicationRoot", "generation"],
+    "properties": {
+      "publicationRoot": { "type": "string", "minLength": 1 },
+      "generation": { "type": "string", "minLength": 1 }
+    }
+  },
+  "contracts": {
+    "continuityPublicationProviders": ["fixture/continuity"]
+  }
+}

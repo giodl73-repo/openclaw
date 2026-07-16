@@ -107,6 +107,7 @@ function createCandidate(rootDir: string, pluginId = "demo"): PluginCandidate {
       contracts: {
         tools: [`${pluginId}-tool`],
         webSearchProviders: [`${pluginId}-search`],
+        continuityPublicationProviders: [`${pluginId}/continuity`],
       },
       configContracts: {
         compatibilityRuntimePaths: [`tools.web.search.${pluginId}-search.apiKey`],
@@ -279,6 +280,13 @@ describe("plugin registry facade", () => {
         index,
         contract: "webSearchProviders",
         value: "demo-search",
+      }),
+    ).toBe("demo");
+    expect(
+      resolveManifestContractOwnerPluginId({
+        index,
+        contract: "continuityPublicationProviders",
+        value: "demo/continuity",
       }),
     ).toBe("demo");
     expect(

@@ -53,6 +53,7 @@ export type BuildPluginApiParams = {
       | "registerMusicGenerationProvider"
       | "registerWebFetchProvider"
       | "registerWebSearchProvider"
+      | "registerContinuityPublicationProvider"
       | "registerInteractiveHandler"
       | "onConversationBindingResolved"
       | "registerCommand"
@@ -133,6 +134,8 @@ const noopRegisterMusicGenerationProvider: OpenClawPluginApi["registerMusicGener
   () => {};
 const noopRegisterWebFetchProvider: OpenClawPluginApi["registerWebFetchProvider"] = () => {};
 const noopRegisterWebSearchProvider: OpenClawPluginApi["registerWebSearchProvider"] = () => {};
+const noopRegisterContinuityPublicationProvider: OpenClawPluginApi["registerContinuityPublicationProvider"] =
+  () => {};
 const noopRegisterInteractiveHandler: OpenClawPluginApi["registerInteractiveHandler"] = () => {};
 const noopOnConversationBindingResolved: OpenClawPluginApi["onConversationBindingResolved"] =
   () => {};
@@ -248,6 +251,8 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
       handlers.registerMusicGenerationProvider ?? noopRegisterMusicGenerationProvider,
     registerWebFetchProvider: handlers.registerWebFetchProvider ?? noopRegisterWebFetchProvider,
     registerWebSearchProvider: handlers.registerWebSearchProvider ?? noopRegisterWebSearchProvider,
+    registerContinuityPublicationProvider:
+      handlers.registerContinuityPublicationProvider ?? noopRegisterContinuityPublicationProvider,
     registerInteractiveHandler:
       handlers.registerInteractiveHandler ?? noopRegisterInteractiveHandler,
     onConversationBindingResolved:

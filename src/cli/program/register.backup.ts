@@ -14,6 +14,12 @@ import {
 } from "../../commands/backup-capture-managed.js";
 import { backupMaterializeCommand } from "../../commands/backup-materialize.js";
 import { backupPlanRestoreCommand } from "../../commands/backup-plan-restore.js";
+import {
+  backupPublishManagedCommand,
+  backupPublishManagedRetrievalCommand,
+  managedPublicationRequestFailure,
+  readManagedPublicationRequestFromStdin,
+} from "../../commands/backup-publish-managed.js";
 import { backupRetrieveCommand } from "../../commands/backup-retrieve.js";
 import { backupVerifyCommand } from "../../commands/backup-verify.js";
 import { backupCreateCommand } from "../../commands/backup.js";
@@ -152,6 +158,42 @@ export function registerBackupCommand(program: Command) {
           destination: opts.destination as string,
           json: Boolean(opts.json),
         });
+      });
+    });
+
+  backup
+    .command("publish")
+    .description("Publish and freshly verify one managed continuity handoff")
+    .requiredOption("--managed", "Read a strict managed publication request from stdin")
+    .requiredOption("--json", "Emit the typed publication result as JSON")
+    .action(async () => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        let request: string;
+        try {
+          request = await readManagedPublicationRequestFromStdin();
+        } catch (error) {
+          managedPublicationRequestFailure(defaultRuntime, error);
+          return;
+        }
+        await backupPublishManagedCommand(defaultRuntime, request);
+      });
+    });
+
+  backup
+    .command("publish-retrieve", { hidden: true })
+    .description("Internal fresh-process continuity publication retrieval")
+    .requiredOption("--managed", "Read a strict managed retrieval request from stdin")
+    .requiredOption("--json", "Emit the typed retrieval result as JSON")
+    .action(async () => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        let request: string;
+        try {
+          request = await readManagedPublicationRequestFromStdin();
+        } catch (error) {
+          managedPublicationRequestFailure(defaultRuntime, error);
+          return;
+        }
+        await backupPublishManagedRetrievalCommand(defaultRuntime, request);
       });
     });
 

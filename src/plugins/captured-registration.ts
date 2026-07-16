@@ -1,6 +1,7 @@
 // Captures plugin registrations for controlled registry assembly.
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { ContinuityPublicationProviderV1 } from "../continuity/publication-provider.js";
 import type {
   AgentToolResultMiddleware,
   AgentToolResultMiddlewareOptions,
@@ -57,6 +58,7 @@ type CapturedPluginCliRegistration = {
 export type CapturedPluginRegistration = {
   api: OpenClawPluginApi;
   providers: ProviderPlugin[];
+  continuityPublicationProviders: ContinuityPublicationProviderV1[];
   agentHarnesses: AgentHarness[];
   cliRegistrars: CapturedPluginCliRegistration[];
   cliBackends: CliBackendPlugin[];
@@ -98,6 +100,7 @@ export function createCapturedPluginRegistration(params?: {
   source?: string;
 }): CapturedPluginRegistration {
   const providers: ProviderPlugin[] = [];
+  const continuityPublicationProviders: ContinuityPublicationProviderV1[] = [];
   const agentHarnesses: AgentHarness[] = [];
   const cliRegistrars: CapturedPluginCliRegistration[] = [];
   const cliBackends: CliBackendPlugin[] = [];
@@ -142,6 +145,7 @@ export function createCapturedPluginRegistration(params?: {
 
   return {
     providers,
+    continuityPublicationProviders,
     agentHarnesses,
     cliRegistrars,
     cliBackends,
@@ -208,6 +212,9 @@ export function createCapturedPluginRegistration(params?: {
         },
         registerProvider(provider: ProviderPlugin) {
           providers.push(provider);
+        },
+        registerContinuityPublicationProvider(provider: ContinuityPublicationProviderV1) {
+          continuityPublicationProviders.push(provider);
         },
         registerModelCatalogProvider(provider: UnifiedModelCatalogProviderPlugin) {
           modelCatalogProviders.push(provider);

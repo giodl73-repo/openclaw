@@ -481,18 +481,30 @@ export function resolveManifestContractPluginIdsByCompatibilityRuntimePath(
     .toSorted((left, right) => left.localeCompare(right));
 }
 
+export function resolveManifestContractOwnerPluginIds(
+  params: ResolveManifestContractOwnerPluginIdParams,
+): string[] {
+  const normalizedValue = normalizeContributionId(params.value ?? "").toLowerCase();
+  if (!normalizedValue) {
+    return [];
+  }
+  const index = loadPluginRegistrySnapshot(params);
+  const enabledPluginIds = new Set(resolveContributionPluginIds({ index, config: params.config }));
+  return loadManifestContractRegistry(params)
+    .plugins.filter(
+      (plugin) =>
+        enabledPluginIds.has(plugin.id) &&
+        (!params.origin || plugin.origin === params.origin) &&
+        listManifestContractValues(plugin, params.contract).some(
+          (candidate) => normalizeContributionId(candidate).toLowerCase() === normalizedValue,
+        ),
+    )
+    .map((plugin) => plugin.id);
+}
+
 export function resolveManifestContractOwnerPluginId(
   params: ResolveManifestContractOwnerPluginIdParams,
 ): string | undefined {
-  const normalizedValue = normalizeContributionId(params.value ?? "").toLowerCase();
-  if (!normalizedValue) {
-    return undefined;
-  }
-  return loadManifestContractRegistry(params).plugins.find(
-    (plugin) =>
-      (!params.origin || plugin.origin === params.origin) &&
-      listManifestContractValues(plugin, params.contract).some(
-        (candidate) => normalizeContributionId(candidate).toLowerCase() === normalizedValue,
-      ),
-  )?.id;
+  const owners = resolveManifestContractOwnerPluginIds(params);
+  return owners.length === 1 ? owners[0] : undefined;
 }
