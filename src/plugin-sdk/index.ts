@@ -101,7 +101,7 @@ export {
   CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION,
   CONTINUITY_PUBLICATION_PROVIDER_VERSION,
   CONTINUITY_PUBLICATION_RETRIEVAL_VERSION,
-} from "../continuity/publication-provider.js";
+} from "../continuity/publication-provider-contract.js";
 export type {
   ContinuityPublicationAcceptanceReceiptV1,
   ContinuityPublicationIdentityV1,
@@ -111,7 +111,7 @@ export type {
   ContinuityPublicationProviderReferenceV1,
   ContinuityPublicationProviderV1,
   ContinuityPublicationRetrievalV1,
-} from "../continuity/publication-provider.js";
+} from "../continuity/publication-provider-contract.js";
 /** @deprecated Use OpenClawConfig instead */
 export type { OpenClawConfig as ClawdbotConfig } from "../config/config.js";
 /** @deprecated Use OpenClawConfig instead */

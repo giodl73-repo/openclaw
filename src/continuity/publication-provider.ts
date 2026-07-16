@@ -1,66 +1,34 @@
 import { createHash } from "node:crypto";
 import type { PluginRegistry } from "../plugins/registry-types.js";
+import {
+  CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION,
+  CONTINUITY_PUBLICATION_PROVIDER_VERSION,
+  CONTINUITY_PUBLICATION_RETRIEVAL_VERSION,
+  type ContinuityPublicationAcceptanceReceiptV1,
+  type ContinuityPublicationIdentityV1,
+  type ContinuityPublicationProviderAcceptanceV1,
+  type ContinuityPublicationProviderFailureCode,
+  type ContinuityPublicationProviderFailureV1,
+  type ContinuityPublicationProviderReferenceV1,
+  type ContinuityPublicationProviderV1,
+  type ContinuityPublicationRetrievalV1,
+} from "./publication-provider-contract.js";
 
-export const CONTINUITY_PUBLICATION_PROVIDER_VERSION =
-  "continuity-publication-provider/v1" as const;
-export const CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION =
-  "continuity-publication-acceptance/v1" as const;
-export const CONTINUITY_PUBLICATION_RETRIEVAL_VERSION =
-  "continuity-publication-retrieval/v1" as const;
-
-export type ContinuityPublicationIdentityV1 = {
-  ownerId: string;
-  sourceRuntimeGeneration: string;
-  handoffId: string;
-  captureId: string;
-  archiveSha256: string;
-  manifestSha256: string;
-  archiveSize: number;
-};
-
-export type ContinuityPublicationProviderReferenceV1 = {
-  pluginId: string;
-  id: string;
-  version: typeof CONTINUITY_PUBLICATION_PROVIDER_VERSION;
-  generation: string;
-};
-
-export type ContinuityPublicationProviderAcceptanceV1 = {
-  version: typeof CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION;
-  publicationId: string;
-  identity: ContinuityPublicationIdentityV1;
-  durabilityClass: "immutable";
-  acceptedAt: string;
-};
-
-export type ContinuityPublicationAcceptanceReceiptV1 = ContinuityPublicationProviderAcceptanceV1 & {
-  publicationPluginId: string;
-  publicationBindingId: string;
-  publicationBindingVersion: typeof CONTINUITY_PUBLICATION_PROVIDER_VERSION;
-  publicationBindingGeneration: string;
-};
-
-export type ContinuityPublicationRetrievalV1 = {
-  version: typeof CONTINUITY_PUBLICATION_RETRIEVAL_VERSION;
-  publicationId: string;
-  identity: ContinuityPublicationIdentityV1;
-  content: AsyncIterable<Uint8Array>;
-};
-
-export type ContinuityPublicationProviderV1 = {
-  id: string;
-  version: typeof CONTINUITY_PUBLICATION_PROVIDER_VERSION;
-  generation: string;
-  publish: (params: {
-    identity: ContinuityPublicationIdentityV1;
-    content: AsyncIterable<Uint8Array>;
-    signal: AbortSignal;
-  }) => Promise<ContinuityPublicationProviderAcceptanceV1>;
-  retrieve: (params: {
-    receipt: ContinuityPublicationAcceptanceReceiptV1;
-    signal: AbortSignal;
-  }) => Promise<ContinuityPublicationRetrievalV1>;
-};
+export {
+  CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION,
+  CONTINUITY_PUBLICATION_PROVIDER_VERSION,
+  CONTINUITY_PUBLICATION_RETRIEVAL_VERSION,
+} from "./publication-provider-contract.js";
+export type {
+  ContinuityPublicationAcceptanceReceiptV1,
+  ContinuityPublicationIdentityV1,
+  ContinuityPublicationProviderAcceptanceV1,
+  ContinuityPublicationProviderFailureCode,
+  ContinuityPublicationProviderFailureV1,
+  ContinuityPublicationProviderReferenceV1,
+  ContinuityPublicationProviderV1,
+  ContinuityPublicationRetrievalV1,
+} from "./publication-provider-contract.js";
 
 export type ContinuityPublicationProviderRegistration = {
   pluginId: string;
@@ -79,19 +47,6 @@ export type ContinuityPublicationFailureCode =
   | "stale-provider-generation"
   | "invalid-acceptance"
   | "invalid-retrieval";
-
-export type ContinuityPublicationProviderFailureCode =
-  | "retryable-before-commit"
-  | "outcome-unknown"
-  | "conflict"
-  | "corrupt-retrieval"
-  | "unavailable"
-  | "cancelled";
-
-export type ContinuityPublicationProviderFailureV1 = {
-  code: ContinuityPublicationProviderFailureCode;
-  message: string;
-};
 
 export class ContinuityPublicationError extends Error {
   readonly code: ContinuityPublicationFailureCode;
