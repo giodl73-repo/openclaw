@@ -105,6 +105,11 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: false,
   },
   {
+    name: "receipts",
+    description: "Find and count durable typed outcomes recorded by trusted tools",
+    hasSubcommands: false,
+  },
+  {
     name: "sessions",
     description: "List stored conversation sessions",
     hasSubcommands: true,

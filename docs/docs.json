@@ -1787,6 +1787,7 @@
                       "cli/agent",
                       "cli/agents",
                       "cli/audit",
+                      "cli/receipts",
                       "cli/hooks",
                       "cli/infer",
                       "cli/memory",

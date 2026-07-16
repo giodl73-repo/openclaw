@@ -1052,6 +1052,7 @@ describe("handleToolExecutionEnd private result observer", () => {
     );
 
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "tool-memory-search",
       toolName: "memory_search",
       result,
       isError: false,
@@ -2444,6 +2445,7 @@ describe("handleToolExecutionEnd exec approval prompts", () => {
     expect(text).not.toContain("Host:");
     expect(text).not.toContain("CWD:");
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "tool-exec-unavailable",
       toolName: "exec",
       result: expect.objectContaining({
         details: expect.objectContaining({ status: "approval-unavailable" }),

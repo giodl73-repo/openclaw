@@ -1513,6 +1513,7 @@ describe("createCopilotToolBridge tool conversion", () => {
 
     expect(result).toEqual({ resultType: "success", textResultForLlm: "hello" });
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "tool-a",
       result: sourceResult,
       isError: false,
@@ -1557,6 +1558,7 @@ describe("createCopilotToolBridge tool conversion", () => {
     await runSdkTool(sdkTool, {});
 
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "tool-a",
       result: {
         content: [
@@ -1653,6 +1655,7 @@ describe("createCopilotToolBridge tool conversion", () => {
 
     expect(result).toMatchObject({ resultType: "success" });
     expect(onAgentToolResult).toHaveBeenCalledWith({
+      toolCallId: "call-1",
       toolName: "tool-a",
       result: sourceResult,
       isError: true,
