@@ -1,5 +1,6 @@
 /** Shared registration types that make up the in-memory plugin registry. */
 import type { AgentHarness } from "../agents/harness/types.js";
+import type { ContinuityPublicationProviderV1 } from "../continuity/publication-provider.js";
 import type { GatewayMethodDescriptor } from "../gateway/methods/descriptor.js";
 import type { GatewayRequestHandlers } from "../gateway/server-methods/types.js";
 import type { HookEntry } from "../hooks/types.js";
@@ -217,6 +218,8 @@ export type PluginWebFetchProviderRegistration =
   PluginOwnedProviderRegistration<WebFetchProviderPlugin>;
 export type PluginWebSearchProviderRegistration =
   PluginOwnedProviderRegistration<WebSearchProviderPlugin>;
+export type PluginContinuityPublicationProviderRegistration =
+  PluginOwnedProviderRegistration<ContinuityPublicationProviderV1>;
 export type PluginWorkerProviderRegistration = PluginOwnedProviderRegistration<WorkerProvider>;
 export type PluginMigrationProviderRegistration =
   PluginOwnedProviderRegistration<MigrationProviderPlugin>;
@@ -481,6 +484,7 @@ export type PluginRegistry = {
   webSearchProviders: PluginWebSearchProviderRegistration[];
   workerProviders: Map<string, PluginWorkerProviderRegistration>;
   migrationProviders: PluginMigrationProviderRegistration[];
+  continuityPublicationProviders: PluginContinuityPublicationProviderRegistration[];
   codexAppServerExtensionFactories: PluginCodexAppServerExtensionFactoryRegistration[];
   agentToolResultMiddlewares: PluginAgentToolResultMiddlewareRegistration[];
   memoryEmbeddingProviders: PluginMemoryEmbeddingProviderRegistration[];

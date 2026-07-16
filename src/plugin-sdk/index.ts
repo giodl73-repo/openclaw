@@ -97,6 +97,21 @@ export type {
   TaskRunView,
 } from "../plugins/runtime/task-domain-types.js";
 export type { OpenClawConfig } from "../config/config.js";
+export {
+  CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION,
+  CONTINUITY_PUBLICATION_PROVIDER_VERSION,
+  CONTINUITY_PUBLICATION_RETRIEVAL_VERSION,
+} from "../continuity/publication-provider.js";
+export type {
+  ContinuityPublicationAcceptanceReceiptV1,
+  ContinuityPublicationIdentityV1,
+  ContinuityPublicationProviderAcceptanceV1,
+  ContinuityPublicationProviderFailureCode,
+  ContinuityPublicationProviderFailureV1,
+  ContinuityPublicationProviderReferenceV1,
+  ContinuityPublicationProviderV1,
+  ContinuityPublicationRetrievalV1,
+} from "../continuity/publication-provider.js";
 /** @deprecated Use OpenClawConfig instead */
 export type { OpenClawConfig as ClawdbotConfig } from "../config/config.js";
 /** @deprecated Use OpenClawConfig instead */

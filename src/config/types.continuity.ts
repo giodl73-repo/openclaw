@@ -5,4 +5,6 @@ export type ContinuityLevel = "conventional" | "archived" | "portable" | "elasti
 export type ContinuityConfig = {
   /** Minimum complete continuity guarantee requested for this runtime. */
   level?: ContinuityLevel;
+  /** Manifest-declared provider selected for Portable publication and retrieval. */
+  publicationProvider?: string;
 };

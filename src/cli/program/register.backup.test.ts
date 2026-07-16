@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   backupCaptureManagedCommand: vi.fn(),
   managedFinalCaptureRequestFailure: vi.fn(),
   readManagedFinalCaptureRequestFromStdin: vi.fn(),
+  backupPublishManagedCommand: vi.fn(),
+  backupPublishManagedRetrievalCommand: vi.fn(),
+  managedPublicationRequestFailure: vi.fn(),
+  readManagedPublicationRequestFromStdin: vi.fn(),
   backupCreateCommand: vi.fn(),
   backupMaterializeCommand: vi.fn(),
   backupPlanRestoreCommand: vi.fn(),
@@ -36,6 +40,13 @@ vi.mock("../../commands/backup-capture-managed.js", () => ({
   backupCaptureManagedCommand: mocks.backupCaptureManagedCommand,
   managedFinalCaptureRequestFailure: mocks.managedFinalCaptureRequestFailure,
   readManagedFinalCaptureRequestFromStdin: mocks.readManagedFinalCaptureRequestFromStdin,
+}));
+
+vi.mock("../../commands/backup-publish-managed.js", () => ({
+  backupPublishManagedCommand: mocks.backupPublishManagedCommand,
+  backupPublishManagedRetrievalCommand: mocks.backupPublishManagedRetrievalCommand,
+  managedPublicationRequestFailure: mocks.managedPublicationRequestFailure,
+  readManagedPublicationRequestFromStdin: mocks.readManagedPublicationRequestFromStdin,
 }));
 
 vi.mock("../../commands/backup.js", () => ({
@@ -75,6 +86,9 @@ describe("registerBackupCommand", () => {
     mocks.readManagedRestoreRequestFromStdin.mockResolvedValue('{"version":"test"}');
     mocks.backupCaptureManagedCommand.mockResolvedValue(undefined);
     mocks.readManagedFinalCaptureRequestFromStdin.mockResolvedValue('{"version":"capture-test"}');
+    mocks.backupPublishManagedCommand.mockResolvedValue(undefined);
+    mocks.backupPublishManagedRetrievalCommand.mockResolvedValue(undefined);
+    mocks.readManagedPublicationRequestFromStdin.mockResolvedValue('{"version":"publish-test"}');
     backupCreateCommand.mockResolvedValue(undefined);
     mocks.backupMaterializeCommand.mockResolvedValue(undefined);
     mocks.backupPlanRestoreCommand.mockResolvedValue(undefined);
@@ -187,6 +201,36 @@ describe("registerBackupCommand", () => {
       runtime,
       '{"version":"capture-test"}',
       { json: true },
+    );
+  });
+
+  it("runs managed publication from a strict stdin request", async () => {
+    await runCli(["backup", "publish", "--managed", "--json"]);
+
+    expect(mocks.readManagedPublicationRequestFromStdin).toHaveBeenCalledTimes(1);
+    expect(mocks.backupPublishManagedCommand).toHaveBeenCalledWith(
+      runtime,
+      '{"version":"publish-test"}',
+    );
+  });
+
+  it("returns a typed failure when the managed publication request cannot be read", async () => {
+    const error = new Error("request too large");
+    mocks.readManagedPublicationRequestFromStdin.mockRejectedValue(error);
+
+    await runCli(["backup", "publish", "--managed", "--json"]);
+
+    expect(mocks.managedPublicationRequestFailure).toHaveBeenCalledWith(runtime, error);
+    expect(mocks.backupPublishManagedCommand).not.toHaveBeenCalled();
+  });
+
+  it("runs internal fresh-process retrieval from a strict stdin request", async () => {
+    await runCli(["backup", "publish-retrieve", "--managed", "--json"]);
+
+    expect(mocks.readManagedPublicationRequestFromStdin).toHaveBeenCalledTimes(1);
+    expect(mocks.backupPublishManagedRetrievalCommand).toHaveBeenCalledWith(
+      runtime,
+      '{"version":"publish-test"}',
     );
   });
 
