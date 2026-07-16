@@ -53,7 +53,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
         data: { skillName: "customer-support", skillSource: "workspace", activation: "read" },
       }),
       event({
-        type: "audit.receipt",
+        type: "audit.receipt.recorded",
         seq: 4,
         runId: "run-1",
         data: {
@@ -124,7 +124,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
     const summaries = summarizeTrajectoryAuditRuns(
       [
         event({
-          type: "audit.receipt",
+          type: "audit.receipt.recorded",
           seq: 1,
           runId: "run-1",
           data: {
@@ -133,7 +133,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
           },
         }),
         event({
-          type: "audit.receipt",
+          type: "audit.receipt.recorded",
           seq: 2,
           runId: "run-1",
           data: {
@@ -142,7 +142,7 @@ describe("summarizeTrajectoryAuditRuns", () => {
           },
         }),
         event({
-          type: "audit.receipt",
+          type: "audit.receipt.recorded",
           seq: 3,
           runId: "run-2",
           data: {
@@ -248,7 +248,11 @@ describe("summarizeTrajectoryAuditRuns", () => {
   it("ignores events without a run id and runs without auditable facts", () => {
     expect(
       summarizeTrajectoryAuditRuns([
-        event({ type: "audit.receipt", seq: 1, data: { type: "case.updated" } }),
+        event({
+          type: "audit.receipt.recorded",
+          seq: 1,
+          data: { receiptId: "rcpt_case_updated", type: "case.updated" },
+        }),
         event({ type: "session.started", seq: 2, runId: "run-2" }),
       ]),
     ).toEqual([]);

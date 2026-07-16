@@ -41,6 +41,15 @@ export async function runEmbeddedAttemptWithBackend(
                 sessionId: params.sessionId,
                 ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
                 runId: params.runId,
+                ...(params.explicitSkillInvocation
+                  ? {
+                      invocationId: params.explicitSkillInvocation.invocationId,
+                      skillName: params.explicitSkillInvocation.skillName,
+                      ...(params.explicitSkillInvocation.skillDigest
+                        ? { skillDigest: params.explicitSkillInvocation.skillDigest }
+                        : {}),
+                    }
+                  : {}),
                 toolName: receipt.toolName,
                 toolCallId: receipt.toolCallId,
               },
@@ -55,6 +64,9 @@ export async function runEmbeddedAttemptWithBackend(
               ...(recorded.subject ? { subject: recorded.subject } : {}),
               toolName: recorded.toolName,
               toolCallId: recorded.toolCallId,
+              ...(recorded.invocationId ? { invocationId: recorded.invocationId } : {}),
+              ...(recorded.skillName ? { skillName: recorded.skillName } : {}),
+              ...(recorded.skillDigest ? { skillDigest: recorded.skillDigest } : {}),
             });
           } catch (error) {
             log.warn(`failed to record audit receipt: ${formatErrorMessage(error)}`);

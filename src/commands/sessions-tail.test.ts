@@ -285,6 +285,8 @@ describe("sessionsTailCommand", () => {
     );
 
     expect(runtime.log).toHaveBeenCalledWith("2");
+  });
+
   it("renders run-level audit summaries after applying receipt filters", async () => {
     const runtime = makeRuntime();
     await writeSessionEntry();

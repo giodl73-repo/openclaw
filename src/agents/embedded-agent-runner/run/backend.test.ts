@@ -49,6 +49,12 @@ describe("runEmbeddedAttemptWithBackend", () => {
       sessionId: "session-1",
       sessionKey: "agent:support:email:thread:case-1",
       runId: "run-1",
+      explicitSkillInvocation: {
+        invocationId: "invocation-1",
+        commandName: "invoice-customer",
+        skillName: "customer-billing",
+        skillDigest: `sha256:${"a".repeat(64)}`,
+      },
       onAgentToolResult,
       trajectoryRecorder: { recordEvent, flush },
     } as unknown as EmbeddedRunAttemptParams;
@@ -58,6 +64,9 @@ describe("runEmbeddedAttemptWithBackend", () => {
       receiptType: "invoice.sent",
       toolName: "send_invoice",
       toolCallId: "call-1",
+      invocationId: "invocation-1",
+      skillName: "customer-billing",
+      skillDigest: `sha256:${"a".repeat(64)}`,
     });
     mocks.runAgentHarnessAttempt.mockImplementation(
       async (attemptParams: EmbeddedRunAttemptParams) => {
@@ -77,6 +86,9 @@ describe("runEmbeddedAttemptWithBackend", () => {
         sessionId: "session-1",
         sessionKey: "agent:support:email:thread:case-1",
         runId: "run-1",
+        invocationId: "invocation-1",
+        skillName: "customer-billing",
+        skillDigest: `sha256:${"a".repeat(64)}`,
       }),
       { cfg: undefined },
     );
@@ -85,6 +97,9 @@ describe("runEmbeddedAttemptWithBackend", () => {
       type: "invoice.sent",
       toolName: "send_invoice",
       toolCallId: "call-1",
+      invocationId: "invocation-1",
+      skillName: "customer-billing",
+      skillDigest: `sha256:${"a".repeat(64)}`,
     });
     expect(flush).toHaveBeenCalledOnce();
     expect(onAgentToolResult).toHaveBeenCalledWith(event);
