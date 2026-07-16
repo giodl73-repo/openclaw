@@ -22,15 +22,31 @@ import {
 import { buildSubagentList } from "../subagent-list.js";
 import type { SubagentRunRecord } from "../subagent-registry.types.js";
 import type { AnyAgentTool } from "./common.js";
-import { jsonResult, readPositiveIntegerParam, readStringParam } from "./common.js";
+import {
+  jsonResult,
+  readPositiveIntegerParam,
+  readStringArrayParam,
+  readStringParam,
+} from "./common.js";
 
-const SUBAGENT_ACTIONS = ["list", "result", "cancel"] as const;
+const SUBAGENT_ACTIONS = ["list", "result", "usage", "cancel"] as const;
 type SubagentAction = (typeof SUBAGENT_ACTIONS)[number];
+const MAX_USAGE_RUNS = 100;
 
 const SubagentsToolSchema = Type.Object({
   action: optionalStringEnum(SUBAGENT_ACTIONS),
   recentMinutes: optionalPositiveIntegerSchema(),
   runId: Type.Optional(Type.String({ description: "Managed subagent run id" })),
+  runIds: Type.Optional(
+    Type.Array(Type.String({ minLength: 1 }), {
+      description: "Managed subagent run ids to account once each",
+      minItems: 1,
+      maxItems: MAX_USAGE_RUNS,
+    }),
+  ),
+  maxTokens: Type.Optional(
+    Type.Integer({ description: "Optional token ceiling for the selected runs", minimum: 1 }),
+  ),
   taskId: Type.Optional(Type.String({ description: "Task id" })),
 });
 
@@ -101,12 +117,26 @@ function mapTask(task: TaskRecord) {
   };
 }
 
+function addRunUsage(
+  total: NonNullable<SubagentRunRecord["usage"]>,
+  usage: NonNullable<SubagentRunRecord["usage"]>,
+  runTotal: number,
+) {
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "reasoningTokens"] as const) {
+    const value = usage[key];
+    if (value !== undefined) {
+      total[key] = (total[key] ?? 0) + value;
+    }
+  }
+  total.total = (total.total ?? 0) + runTotal;
+}
+
 /** Creates the subagents list tool scoped to the caller's controlled session tree. */
 export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTool {
   return {
     label: "Subagents",
     name: "subagents",
-    description: "Background work: subagents, media gen, cron runs. list/result/cancel.",
+    description: "Background work: subagents, media gen, cron runs. list/result/usage/cancel.",
     parameters: SubagentsToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -152,6 +182,75 @@ export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTo
           result: resolution.result,
           ...(memoryPage.nextCursor !== undefined
             ? { memoriesTruncated: true, nextMemoryCursor: memoryPage.nextCursor }
+            : {}),
+        });
+      }
+
+      if (action === "usage") {
+        const requestedRunIds = readStringArrayParam(params, "runIds", { required: true });
+        const runIds = Array.from(new Set(requestedRunIds));
+        if (runIds.length > MAX_USAGE_RUNS) {
+          return jsonResult({
+            status: "error",
+            action: "usage",
+            error: `At most ${MAX_USAGE_RUNS} run ids may be accounted at once.`,
+          });
+        }
+        const usage: NonNullable<SubagentRunRecord["usage"]> = {};
+        for (const runId of runIds) {
+          const run = (opts.getRun ?? getVisibleSubagentRunById)(
+            controller.controllerSessionKey,
+            runId,
+          );
+          if (!run) {
+            return jsonResult({ status: "forbidden", error: "Run outside session tree." });
+          }
+          if (!run.managedSkill) {
+            return jsonResult({
+              status: "accounting_unavailable",
+              action: "usage",
+              runId,
+              reason: "managed_identity_unavailable",
+            });
+          }
+          if (run.endedAt === undefined) {
+            return jsonResult({
+              status: "accounting_unavailable",
+              action: "usage",
+              runId,
+              reason: "run_not_terminal",
+            });
+          }
+          const runTotal =
+            run.usage?.total ??
+            (run.usage?.input !== undefined || run.usage?.output !== undefined
+              ? (run.usage.input ?? 0) + (run.usage.output ?? 0)
+              : undefined);
+          if (!run.usage || runTotal === undefined) {
+            return jsonResult({
+              status: "accounting_unavailable",
+              action: "usage",
+              runId,
+              reason: "usage_unavailable",
+            });
+          }
+          addRunUsage(usage, run.usage, runTotal);
+        }
+        const maxTokens = readPositiveIntegerParam(params, "maxTokens");
+        const totalTokens = usage.total ?? 0;
+        return jsonResult({
+          status: "ok",
+          action: "usage",
+          runIds,
+          usage,
+          ...(maxTokens !== undefined
+            ? {
+                budget: {
+                  maxTokens,
+                  remainingTokens: Math.max(0, maxTokens - totalTokens),
+                  decision: totalTokens >= maxTokens ? "limit_reached" : "within_limit",
+                },
+              }
             : {}),
         });
       }
