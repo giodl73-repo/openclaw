@@ -1,6 +1,8 @@
-// Subagents tool tests cover requester-scoped task listing and cancellation.
+// Subagents tool tests cover requester-scoped task listing, results, and cancellation.
 import { describe, expect, it, vi } from "vitest";
+import type { RecordedAuditReceipt } from "../../audit/receipt-store.sqlite.js";
 import type { TaskRecord, TaskRuntime, TaskStatus } from "../../tasks/task-registry.types.js";
+import type { SubagentRunRecord } from "../subagent-registry.types.js";
 import { createSubagentsTool } from "./subagents-tool.js";
 
 function task(params: {
@@ -37,7 +39,75 @@ describe("subagents tool", () => {
   it("advertises the unified task ledger", () => {
     const tool = createSubagentsTool();
 
-    expect(tool.description).toBe("Background work: subagents, media gen, cron runs. list/cancel.");
+    expect(tool.description).toBe(
+      "Background work: subagents, media gen, cron runs. list/result/cancel.",
+    );
+  });
+
+  it("returns a managed run result with durable receipts", async () => {
+    const run: SubagentRunRecord = {
+      runId: "run-1",
+      childSessionKey: "agent:main:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "agent:main:main",
+      task: "Resolve the case",
+      cleanup: "keep",
+      createdAt: 100,
+      endedAt: 200,
+      outcome: { status: "ok" },
+      managedSkill: { invocationId: "skill-1", skillName: "resolve-case" },
+    };
+    const receipt: RecordedAuditReceipt = {
+      receiptSchema: "openclaw-audit-receipt",
+      schemaVersion: 1,
+      sequence: 1,
+      receiptId: "receipt-1",
+      type: "case.resolved",
+      occurredAt: 190,
+      agentId: "main",
+      sessionId: "child",
+      runId: "run-1",
+      invocationId: "skill-1",
+      skillName: "resolve-case",
+      toolName: "case.resolve",
+      toolCallId: "call-1",
+    };
+    const tool = createSubagentsTool({
+      agentSessionKey: "agent:main:main",
+      config: {},
+      getRun: () => run,
+      listReceipts: () => ({ receipts: [receipt] }),
+      listTasks: () => [],
+    });
+
+    const response = await tool.execute("result", { action: "result", runId: "run-1" });
+
+    expect(response.details).toMatchObject({
+      status: "ok",
+      action: "result",
+      result: {
+        runId: "run-1",
+        status: "completed",
+        managedSkill: { skillName: "resolve-case" },
+        receipts: [{ type: "case.resolved" }],
+      },
+    });
+  });
+
+  it("does not expose results outside the caller session tree", async () => {
+    const listReceipts = vi.fn(() => ({ receipts: [] }));
+    const tool = createSubagentsTool({
+      agentSessionKey: "agent:main:main",
+      config: {},
+      getRun: () => null,
+      listReceipts,
+      listTasks: () => [],
+    });
+
+    const response = await tool.execute("result", { action: "result", runId: "run-other" });
+
+    expect(response.details).toMatchObject({ status: "forbidden" });
+    expect(listReceipts).not.toHaveBeenCalled();
   });
 
   it("lists cross-runtime tasks in the caller session tree", async () => {
