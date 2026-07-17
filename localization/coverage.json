@@ -279,7 +279,7 @@
     "cli": {
       "owner": "cli",
       "artifactId": "openclaw-cli",
-      "catalogRevision": "sha256:72cc77aa1cc050363a561e5ecef3476305f57d6d78a772e2a5ad0dff52dc6dbc",
+      "catalogRevision": "sha256:ec054232bf44e21100399d03e2c7746f6f0967afb6d409941dcf007a7ec2545d",
       "source": "src/cli/i18n/locales/en.ts",
       "catalogs": "src/cli/i18n/locales",
       "contentClasses": [

@@ -2505,6 +2505,8 @@ describe("update-cli", () => {
     expect(output).toContain("更新试运行");
     expect(output).toContain("未应用任何更改");
     expect(output).toContain("计划操作：");
+    expect(output).toContain("安装类型: Git");
+    expect(output).not.toContain("安装类型: git");
     expect(output).toContain("更新通道: beta");
     expect(output).toContain("软件包管理器");
     expect(output).toContain("openclaw@");
@@ -3103,6 +3105,38 @@ describe("update-cli", () => {
     expect(serviceStop).not.toHaveBeenCalled();
     expect(runGatewayUpdate).not.toHaveBeenCalled();
     expect(packageInstallCommandCall()).toBeUndefined();
+  });
+
+  it("localizes inherited gateway service update blocking while preserving the command", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    mockPackageInstallStatus(createCaseDir("openclaw-update"));
+    serviceReadCommand.mockResolvedValue({
+      programArguments: ["openclaw", "gateway", "run"],
+      environment: {
+        OPENCLAW_SERVICE_MARKER: "openclaw",
+        OPENCLAW_SERVICE_KIND: "gateway",
+      },
+    });
+    serviceLoaded.mockResolvedValue(true);
+
+    await withEnvAsync(
+      {
+        OPENCLAW_SERVICE_MARKER: "openclaw",
+        OPENCLAW_SERVICE_KIND: "gateway",
+      },
+      async () => {
+        await updateCommand({ yes: true, restart: false });
+      },
+    );
+
+    const error = vi
+      .mocked(defaultRuntime.error)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(error).toContain("软件包更新无法在网关服务进程内运行");
+    expect(error).toContain("openclaw update");
+    expect(error).not.toContain("Package updates cannot run");
+    expect(defaultRuntime.exit).toHaveBeenCalledWith(1);
   });
 
   it.each([
@@ -7553,6 +7587,39 @@ describe("update-cli", () => {
 
     const logLines = vi.mocked(defaultRuntime.log).mock.calls.map((call) => String(call[0]));
     expect(logLines).toContain("更新完成。");
+  });
+
+  it("localizes skipped service restart guidance while preserving commands", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    vi.mocked(runGatewayUpdate).mockResolvedValue(makeOkUpdateResult());
+    vi.mocked(defaultRuntime.log).mockClear();
+
+    await updateCommand({ restart: false });
+
+    const output = vi
+      .mocked(defaultRuntime.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(output).toContain("网关：已跳过重启（--no-restart）。");
+    expect(output).toContain("openclaw gateway restart");
+    expect(output).not.toContain("Gateway: restart skipped");
+  });
+
+  it("localizes service restart failures while preserving raw errors and commands", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    vi.mocked(runGatewayUpdate).mockResolvedValue(makeOkUpdateResult());
+    vi.mocked(runDaemonRestart).mockRejectedValueOnce(new Error("restart unavailable"));
+    vi.mocked(defaultRuntime.log).mockClear();
+
+    await updateCommand({});
+
+    const output = vi
+      .mocked(defaultRuntime.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(output).toContain("网关：重启失败：Error: restart unavailable");
+    expect(output).toContain("openclaw gateway restart");
+    expect(output).not.toContain("Gateway: restart failed");
   });
 
   it("marks the whole update command as update-in-progress", async () => {
