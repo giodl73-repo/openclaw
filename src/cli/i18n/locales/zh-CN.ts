@@ -1,0 +1,92 @@
+import type { LocalizationCatalog } from "@openclaw/localization-core";
+
+export const CLI_ZH_CN_CATALOG = {
+  "cli.acp.provenance.invalid": '无效的 --provenance。请使用 "off"、"meta" 或 "meta+receipt"。',
+  "cli.acp.bridge.failed": "ACP 桥接失败：{error}",
+  "cli.capability.unknown": "未知的能力 ID：{capabilityId}",
+  "cli.gatewayStatus.requireRpcNeedsProbe":
+    "网关状态失败：--require-rpc 需要启用探测。请移除 --no-probe 或不使用 --require-rpc。",
+  "cli.gatewayStatus.failed": "网关状态失败：{error}",
+  "cli.update.timeout.invalid": "--timeout 必须是正整数（秒）。",
+  "cli.update.wizard.ttyRequired":
+    "更新向导需要 TTY。请改用 `openclaw update --channel <stable|extended-stable|beta|dev>`。",
+  "cli.updateStatus.heading": "OpenClaw 更新状态",
+  "cli.updateStatus.header.item": "项目",
+  "cli.updateStatus.header.value": "值",
+  "cli.updateStatus.row.install": "安装",
+  "cli.updateStatus.row.channel": "更新通道",
+  "cli.updateStatus.row.git": "Git",
+  "cli.updateStatus.row.update": "更新",
+  "cli.updateStatus.available": "可用",
+  "cli.updateStatus.unknown": "未知",
+  "cli.updateStatus.git.detached": "分离状态",
+  "cli.updateStatus.git.tag": "标签 {tag}",
+  "cli.updateStatus.channel.config": "{channel}（配置）",
+  "cli.updateStatus.channel.gitTag": "{channel}（{tag}）",
+  "cli.updateStatus.channel.tag": "{channel}（标签）",
+  "cli.updateStatus.channel.gitBranch": "{channel}（{branch}）",
+  "cli.updateStatus.channel.branch": "{channel}（分支）",
+  "cli.updateStatus.channel.installedVersion": "{channel}（已安装版本）",
+  "cli.updateStatus.channel.default": "{channel}（默认）",
+  "cli.updateStatus.summary.label": "更新",
+  "cli.updateStatus.summary.dirty": "有未提交更改",
+  "cli.updateStatus.summary.upToDate": "已是最新",
+  "cli.updateStatus.summary.behind": "落后 {count}",
+  "cli.updateStatus.summary.ahead": "领先 {count}",
+  "cli.updateStatus.summary.diverged": "已分叉（领先 {ahead}，落后 {behind}）",
+  "cli.updateStatus.summary.fetchFailed": "获取失败",
+  "cli.updateStatus.summary.taggedRegistryUpdate": "{registryLabel} 可更新至 {version}",
+  "cli.updateStatus.summary.npmUpdate": "npm 可更新至 {version}",
+  "cli.updateStatus.summary.aheadOfExtendedStable": "高于 extended-stable（{version}）",
+  "cli.updateStatus.summary.localNewer": "{registryLabel} {version}（本地版本较新）",
+  "cli.updateStatus.summary.extendedStableRequiresPackage": "extended-stable 需要软件包安装方式",
+  "cli.updateStatus.summary.extendedStableSelectorMissing": "缺少 npm extended-stable 选择器",
+  "cli.updateStatus.summary.extendedStableQueryFailed": "npm extended-stable 查询失败",
+  "cli.updateStatus.summary.extendedStableVerificationFailed":
+    "npm extended-stable 精确软件包验证失败",
+  "cli.updateStatus.summary.registryUnknown": "{registryLabel} 未知",
+  "cli.updateStatus.summary.depsOk": "依赖正常",
+  "cli.updateStatus.summary.depsMissing": "缺少依赖",
+  "cli.updateStatus.summary.depsStale": "依赖已过期",
+  "cli.updateStatus.hint.gitBehind": "git 落后 {count}",
+  "cli.updateStatus.hint.available": "有可用更新（{details}）。运行：{command}",
+  "cli.validation.timeout.positiveMilliseconds": "--timeout 必须是正整数（毫秒）。",
+  "cli.tasks.audit.limit.invalid": "--limit 必须是正整数，例如 --limit 25。",
+  "cli.sessions.compact.parentOptionUnsupported":
+    "`sessions compact` 不支持父级 `sessions` 选项 {options}；网关会根据 <key> 和 --agent 解析目标存储。",
+  "cli.sessions.compact.parentOptionsUnsupported":
+    "`sessions compact` 不支持父级 `sessions` 选项 {options}；网关会根据 <key> 和 --agent 解析目标存储。",
+  "cli.sessions.compact.maxLines.invalid": "--max-lines 必须是正整数。",
+  "cli.sessions.compact.timeout.invalid": "--timeout 必须是正整数（毫秒）。",
+  "cli.agent.message.missing": "缺少消息。请使用 {inlineCommand} 或 {fileCommand}。",
+  "cli.agent.messageFile.notFound": "找不到消息文件：{path}",
+  "cli.agent.messageFile.isDirectory": "消息文件是目录：{path}",
+  "cli.agent.messageFile.readFailure": "无法读取消息文件 {path}：{error}",
+  "cli.agent.messageFile.invalidUtf8": "消息文件必须是有效的 UTF-8：{path}",
+  "cli.agent.messageFile.conflict": "--message 和 --message-file 只能使用其中一个。",
+  "cli.agent.messageFile.emptyOption": "--message-file 不能为空。",
+  "cli.agent.messageFile.empty": "消息文件为空：{path}",
+  "cli.agent.timeout.invalid":
+    "无效的 --timeout。请使用非负整数秒数，例如 --timeout 600。使用 --timeout 0 可禁用超时。",
+  "cli.agent.sessionKey.invalid":
+    '无效的 --session-key "{sessionKey}"。以 agent: 开头的会话键必须使用 agent:<agent-id>:<session-key>。',
+  "cli.agent.sessionKey.agentMismatch":
+    '代理 ID "{agentId}" 与会话键中的代理 "{sessionAgentId}" 不匹配。',
+  "cli.agent.target.missing":
+    "未选择目标会话。请使用 --agent <id>、--session-key <key>、--session-id <id> 或 --to <E.164>。运行 {agentsListCommand} 查看代理。",
+  "cli.agent.agentId.unknown":
+    '未知的代理 ID "{agentId}"。请使用 "{agentsListCommand}" 查看已配置的代理。',
+  "cli.agent.progress.waiting": "正在等待代理回复…",
+  "cli.agent.response.inFlight": "代理运行 {runId} 已在进行中；不会启动重复运行。",
+  "cli.agent.response.inFlightUnknown": "代理运行已在进行中；不会启动重复运行。",
+  "cli.agent.response.attachment": "附件：{url}",
+  "cli.agent.response.noReply": "代理没有回复。",
+  "cli.agent.response.retrying":
+    "网关代理连接在握手期间关闭；将在 {retryDelayMs} 毫秒后重试，然后再回退到嵌入式代理。",
+  "cli.agent.response.retryExhausted": "网关代理重试循环意外耗尽。",
+  "cli.agent.fallback.timeout":
+    "EMBEDDED FALLBACK: 网关代理超时；正在使用新会话 {sessionId} 运行嵌入式代理：{error}",
+  "cli.agent.fallback.failed": "EMBEDDED FALLBACK: 网关代理失败；正在运行嵌入式代理：{error}",
+  "cli.agent.compact.unsupported":
+    "无法通过 CLI 的 --message 执行斜杠命令。请使用：{compactCommand}",
+} as const satisfies LocalizationCatalog;

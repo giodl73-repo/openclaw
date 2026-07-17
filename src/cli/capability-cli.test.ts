@@ -582,6 +582,33 @@ describe("capability cli", () => {
     }) as never);
   });
 
+  it("localizes unknown capability errors without changing the capability id", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+
+    await expect(
+      runRegisteredCli({
+        register: registerCapabilityCli as (program: Command) => void,
+        argv: ["capability", "inspect", "--name", "future.transport"],
+      }),
+    ).rejects.toThrow("exit 1");
+
+    expect(mocks.runtime.error).toHaveBeenCalledWith("Error: 未知的能力 ID：future.transport");
+    expect(mocks.runtime.writeJson).not.toHaveBeenCalled();
+  });
+
+  it("preserves the reviewed English unknown capability error", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "en");
+
+    await expect(
+      runRegisteredCli({
+        register: registerCapabilityCli as (program: Command) => void,
+        argv: ["capability", "inspect", "--name", "future.transport"],
+      }),
+    ).rejects.toThrow("exit 1");
+
+    expect(mocks.runtime.error).toHaveBeenCalledWith("Error: Unknown capability: future.transport");
+  });
+
   async function runModelRunWithModel(model: string, transport: "local" | "gateway") {
     await runRegisteredCli({
       register: registerCapabilityCli as (program: Command) => void,

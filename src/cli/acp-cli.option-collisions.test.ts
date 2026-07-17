@@ -1,6 +1,6 @@
 // ACP CLI option collision tests cover ACP command flag registration boundaries.
 import { Command } from "commander";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runRegisteredCli } from "../test-utils/command-runner.js";
 import { withTempSecretFiles } from "../test-utils/secret-file-fixture.js";
 import { registerAcpCli } from "./acp-cli.js";
@@ -44,6 +44,10 @@ vi.mock("../runtime.js", () => ({
 }));
 
 describe("acp cli option collisions", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   function createAcpProgram() {
     const program = new Command();
     registerAcpCli(program);
@@ -109,6 +113,24 @@ describe("acp cli option collisions", () => {
       prefixCwd?: boolean;
     };
     expect(gatewayOptions?.prefixCwd).toBe(true);
+  });
+
+  it("localizes invalid provenance while preserving accepted mode tokens", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+
+    await parseAcp(["--provenance", "full"]);
+
+    expectCliError(/ACP 桥接失败：无效的 --provenance。请使用 "off"、"meta" 或 "meta\+receipt"。/);
+  });
+
+  it("preserves the reviewed English provenance error", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "en");
+
+    await parseAcp(["--provenance", "full"]);
+
+    expectCliError(
+      /ACP bridge failed: Invalid --provenance. Use "off", "meta", or "meta\+receipt"./,
+    );
   });
 
   it("loads gateway token/password from files", async () => {

@@ -26,6 +26,7 @@ import { runCommandWithTimeout } from "../../process/exec.js";
 import { defaultRuntime } from "../../runtime.js";
 import { pathExists } from "../../utils.js";
 import { COMPLETION_SKIP_PLUGIN_COMMANDS_ENV } from "../completion-runtime.js";
+import { createCliLocalization, type CliLocalization } from "../i18n/runtime.js";
 
 export type UpdateCommandOptions = {
   json?: boolean;
@@ -56,18 +57,20 @@ export type UpdateWizardOptions = {
   timeout?: string;
 };
 
-const INVALID_TIMEOUT_ERROR = "--timeout must be a positive integer (seconds)";
 const MAX_SAFE_TIMEOUT_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1000);
 
 /** Parse a CLI timeout in seconds, exiting through the runtime on invalid input. */
-export function parseTimeoutMsOrExit(timeout?: string): number | undefined | null {
+export function parseTimeoutMsOrExit(
+  timeout?: string,
+  localization: CliLocalization = createCliLocalization(),
+): number | undefined | null {
   if (timeout === undefined) {
     return undefined;
   }
   const trimmed = timeout.trim();
   const seconds = parseStrictPositiveInteger(trimmed);
   if (seconds === undefined || seconds > MAX_SAFE_TIMEOUT_SECONDS) {
-    defaultRuntime.error(INVALID_TIMEOUT_ERROR);
+    defaultRuntime.error(localization.t("cli.update.timeout.invalid"));
     defaultRuntime.exit(1);
     return null;
   }

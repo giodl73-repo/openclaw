@@ -62,7 +62,14 @@ const SURFACE_SEEDS: Record<LocalizationSurfaceId, SurfaceSeed> = {
     contentClasses: ["general", "authentication", "recovery"],
     translatedLocales: ["zh-CN", "zh-TW"],
   },
-  cli: unmigrated("cli", "openclaw-cli", "src/cli", ["general", "recovery"]),
+  cli: {
+    owner: "cli",
+    artifactId: "openclaw-cli",
+    source: "src/cli/i18n/locales/en.ts",
+    catalogs: "src/cli/i18n/locales",
+    contentClasses: ["general", "recovery"],
+    translatedLocales: ["zh-CN"],
+  },
   tui: unmigrated("tui", "openclaw-cli", "src/tui", ["general", "recovery"]),
   runtime: unmigrated("core-runtime", "openclaw-runtime", "src", [
     "general",
