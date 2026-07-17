@@ -156,6 +156,16 @@ describe("localization catalogs", () => {
     ).toEqual(["placeholder-mismatch", "forbidden-bidi-control"]);
   });
 
+  it("rejects bidi controls in the English source catalog", () => {
+    expect(
+      validateCatalog({
+        namespace: "core",
+        source: { "core.path": "Open {path}\u202e" },
+        candidate: { "core.path": "Open {path}" },
+      }).map((issue) => issue.code),
+    ).toEqual(["forbidden-bidi-control"]);
+  });
+
   it("rejects missing selector fallback cases", () => {
     const missingOtherCase = {
       kind: "plural",

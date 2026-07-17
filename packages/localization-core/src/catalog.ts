@@ -258,12 +258,15 @@ function validateEntry(
     }
   }
 
-  for (const value of Object.values(candidateCases.values)) {
+  for (const value of [
+    ...Object.values(sourceCases.values),
+    ...Object.values(candidateCases.values),
+  ]) {
     if (FORBIDDEN_BIDI_CONTROL_PATTERN.test(value)) {
       issues.push({
         code: "forbidden-bidi-control",
         key,
-        detail: "Catalog text contains a forbidden bidi control.",
+        detail: "Source or candidate catalog text contains a forbidden bidi control.",
       });
       break;
     }

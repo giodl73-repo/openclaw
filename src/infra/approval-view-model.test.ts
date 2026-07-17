@@ -1,10 +1,168 @@
+import {
+  createCatalogSnapshot,
+  createLocalizationContext,
+  validateCatalog,
+} from "@openclaw/localization-core";
 // Tests approval view model formatting for prompts and decisions.
 import { describe, expect, it } from "vitest";
-import { buildPendingApprovalView, resolveApprovalRequestKind } from "./approval-view-model.js";
+import { createApprovalMessageRenderer } from "./approval-localization.js";
+import {
+  buildExpiredApprovalView,
+  buildPendingApprovalView,
+  buildResolvedApprovalView,
+  resolveApprovalRequestKind,
+} from "./approval-view-model.js";
 import type { ExecApprovalRequest } from "./exec-approvals.js";
 import type { PluginApprovalRequest } from "./plugin-approvals.js";
 
 describe("buildPendingApprovalView", () => {
+  it("preserves the current English approval presentation by default", () => {
+    const request: ExecApprovalRequest = {
+      id: "approval-id",
+      createdAtMs: 1,
+      expiresAtMs: 2,
+      request: {
+        command: "echo hello",
+        agentId: "main",
+        cwd: "/workspace",
+        host: "gateway",
+      },
+    };
+
+    const view = buildPendingApprovalView(request);
+
+    expect(view).toMatchObject({
+      title: "Exec Approval Required",
+      description: "A command needs your approval.",
+      metadata: [
+        { label: "Agent", value: "main" },
+        { label: "CWD", value: "/workspace" },
+        { label: "Host", value: "gateway" },
+      ],
+    });
+    expect(
+      view.actions.map(({ label, command, decision }) => ({ label, command, decision })),
+    ).toEqual([
+      {
+        label: "Allow Once",
+        command: "/approve approval-id allow-once",
+        decision: "allow-once",
+      },
+      {
+        label: "Allow Always",
+        command: "/approve approval-id allow-always",
+        decision: "allow-always",
+      },
+      {
+        label: "Deny",
+        command: "/approve approval-id deny",
+        decision: "deny",
+      },
+    ]);
+  });
+
+  it("localizes product-owned labels without changing approval literals or actions", () => {
+    const source = {
+      "approval.exec.title.pending": "Exec Approval Required",
+      "approval.exec.title.resolved": "Exec Approval",
+      "approval.exec.title.expired": "Exec Approval",
+      "approval.exec.description.pending": "A command needs your approval.",
+      "approval.metadata.agent": "Agent",
+      "approval.metadata.cwd": "CWD",
+      "approval.metadata.host": "Host",
+      "approval.metadata.envOverrides": "Env Overrides",
+      "approval.metadata.severity": "Severity",
+      "approval.metadata.tool": "Tool",
+      "approval.metadata.plugin": "Plugin",
+      "approval.severity.critical": "Critical",
+      "approval.severity.info": "Info",
+      "approval.severity.warning": "Warning",
+      "approval.action.allowOnce": "Allow Once",
+      "approval.action.allowAlways": "Allow Always",
+      "approval.action.deny": "Deny",
+    } as const;
+    const candidate = {
+      ...source,
+      "approval.exec.title.pending": "需要执行批准",
+      "approval.exec.description.pending": "一个命令需要你的批准。",
+      "approval.metadata.agent": "代理",
+      "approval.metadata.cwd": "工作目录",
+      "approval.metadata.host": "主机",
+      "approval.action.allowOnce": "允许一次",
+      "approval.action.allowAlways": "始终允许",
+      "approval.action.deny": "拒绝",
+    } as const;
+    expect(validateCatalog({ namespace: "approval", source, candidate })).toEqual([]);
+    const renderMessage = createApprovalMessageRenderer({
+      context: createLocalizationContext({
+        locale: "zh-CN",
+        source: "explicit-recipient",
+        audience: "operator",
+      }),
+      snapshot: createCatalogSnapshot({
+        catalogRevision: "approval-test:zh-CN",
+        catalogs: { en: source, "zh-CN": candidate },
+      }),
+    });
+    const request: ExecApprovalRequest = {
+      id: "approval-id",
+      createdAtMs: 1,
+      expiresAtMs: 2,
+      request: {
+        command: "rm -rf /tmp/example",
+        agentId: "main",
+        cwd: "/workspace",
+        host: "gateway",
+      },
+    };
+
+    const view = buildPendingApprovalView(request, { renderMessage });
+
+    if (view.approvalKind !== "exec") {
+      throw new Error("expected exec approval view");
+    }
+    expect(view.title).toBe("需要执行批准");
+    expect(view.description).toBe("一个命令需要你的批准。");
+    expect(view.metadata).toEqual([
+      { label: "代理", value: "main" },
+      { label: "工作目录", value: "/workspace" },
+      { label: "主机", value: "gateway" },
+    ]);
+    expect(view.commandText).toBe("rm -rf /tmp/example");
+    expect(view.actions.map(({ label, command, action }) => ({ label, command, action }))).toEqual([
+      {
+        label: "允许一次",
+        command: "/approve approval-id allow-once",
+        action: {
+          type: "approval",
+          approvalId: "approval-id",
+          approvalKind: "exec",
+          decision: "allow-once",
+        },
+      },
+      {
+        label: "始终允许",
+        command: "/approve approval-id allow-always",
+        action: {
+          type: "approval",
+          approvalId: "approval-id",
+          approvalKind: "exec",
+          decision: "allow-always",
+        },
+      },
+      {
+        label: "拒绝",
+        command: "/approve approval-id deny",
+        action: {
+          type: "approval",
+          approvalId: "approval-id",
+          approvalKind: "exec",
+          decision: "deny",
+        },
+      },
+    ]);
+  });
+
   it("passes command analysis through exec approval views", () => {
     const request: ExecApprovalRequest = {
       id: "approval-id",
@@ -36,6 +194,158 @@ describe("buildPendingApprovalView", () => {
       approvalKind: "exec",
       decision: "allow-once",
     });
+  });
+
+  it("uses phase-specific keys while preserving exact resolution values", () => {
+    const source = {
+      "approval.exec.title.pending": "Exec Approval Required",
+      "approval.exec.title.resolved": "Exec Approval",
+      "approval.exec.title.expired": "Exec Approval",
+      "approval.exec.description.pending": "A command needs your approval.",
+      "approval.metadata.agent": "Agent",
+      "approval.metadata.cwd": "CWD",
+      "approval.metadata.host": "Host",
+      "approval.metadata.envOverrides": "Env Overrides",
+      "approval.metadata.severity": "Severity",
+      "approval.metadata.tool": "Tool",
+      "approval.metadata.plugin": "Plugin",
+      "approval.severity.critical": "Critical",
+      "approval.severity.info": "Info",
+      "approval.severity.warning": "Warning",
+      "approval.action.allowOnce": "Allow Once",
+      "approval.action.allowAlways": "Allow Always",
+      "approval.action.deny": "Deny",
+    } as const;
+    const candidate = {
+      ...source,
+      "approval.exec.title.resolved": "تم حسم الموافقة",
+      "approval.exec.title.expired": "انتهت صلاحية الموافقة",
+    } as const;
+    const renderMessage = createApprovalMessageRenderer({
+      context: createLocalizationContext({
+        locale: "ar",
+        source: "explicit-recipient",
+        audience: "operator",
+      }),
+      snapshot: createCatalogSnapshot({
+        catalogRevision: "approval-test:ar",
+        catalogs: { en: source, ar: candidate },
+      }),
+    });
+    const request: ExecApprovalRequest = {
+      id: "approval-123",
+      createdAtMs: 1,
+      expiresAtMs: 2,
+      request: {
+        command: "cat /srv/مهم/file.txt",
+        cwd: "/srv/مهم",
+      },
+    };
+
+    const resolved = buildResolvedApprovalView(
+      request,
+      {
+        id: request.id,
+        decision: "allow-once",
+        ts: 3,
+        resolvedBy: "operator-7",
+      },
+      { renderMessage },
+    );
+    const expired = buildExpiredApprovalView(request, { renderMessage });
+
+    if (resolved.approvalKind !== "exec" || expired.approvalKind !== "exec") {
+      throw new Error("expected exec approval views");
+    }
+    expect(resolved.title).toBe("تم حسم الموافقة");
+    expect(resolved.decision).toBe("allow-once");
+    expect(resolved.resolvedBy).toBe("operator-7");
+    expect(resolved.approvalId).toBe("approval-123");
+    expect(resolved.commandText).toBe("cat /srv/مهم/file.txt");
+    expect(resolved.cwd).toBe("/srv/مهم");
+    expect(expired.title).toBe("انتهت صلاحية الموافقة");
+    expect(expired.approvalId).toBe("approval-123");
+  });
+
+  it("uses reviewed English as the emergency fallback for missing catalog entries", () => {
+    const renderMessage = createApprovalMessageRenderer({
+      context: createLocalizationContext({
+        locale: "ar",
+        source: "explicit-recipient",
+        audience: "operator",
+      }),
+      snapshot: createCatalogSnapshot({
+        catalogRevision: "approval-test:missing",
+        catalogs: { en: {}, ar: {} },
+      }),
+    });
+    const request: ExecApprovalRequest = {
+      id: "approval-id",
+      createdAtMs: 1,
+      expiresAtMs: 2,
+      request: { command: "echo safe" },
+    };
+
+    const view = buildPendingApprovalView(request, { renderMessage });
+
+    expect(view.title).toBe("Exec Approval Required");
+    expect(view.description).toBe("A command needs your approval.");
+    expect(view.actions.map((action) => action.label)).toEqual([
+      "Allow Once",
+      "Allow Always",
+      "Deny",
+    ]);
+  });
+
+  it("uses one English snapshot for an incomplete safety catalog", () => {
+    const renderMessage = createApprovalMessageRenderer({
+      context: createLocalizationContext({
+        locale: "zh-CN",
+        source: "explicit-recipient",
+        audience: "operator",
+      }),
+      snapshot: createCatalogSnapshot({
+        catalogRevision: "approval-test:partial",
+        catalogs: {
+          en: {},
+          "zh-CN": {
+            "approval.exec.title.pending": "需要执行批准",
+          },
+        },
+      }),
+    });
+    const request: ExecApprovalRequest = {
+      id: "approval-id",
+      createdAtMs: 1,
+      expiresAtMs: 2,
+      request: { command: "echo safe" },
+    };
+
+    const view = buildPendingApprovalView(request, { renderMessage });
+
+    expect(view.title).toBe("Exec Approval Required");
+    expect(view.description).toBe("A command needs your approval.");
+    expect(view.actions.map((action) => action.label)).toEqual([
+      "Allow Once",
+      "Allow Always",
+      "Deny",
+    ]);
+  });
+
+  it("rejects translator-authored bidi controls in approval catalogs", () => {
+    const source = {
+      "approval.exec.title.pending": "Exec Approval Required",
+    };
+    const candidate = {
+      "approval.exec.title.pending": "Exec \u202EApproval",
+    };
+
+    expect(validateCatalog({ namespace: "approval", source, candidate })).toEqual([
+      expect.objectContaining({
+        code: "forbidden-bidi-control",
+        key: "approval.exec.title.pending",
+      }),
+    ]);
   });
 
   it("uses the typed request owner instead of approval id spelling", () => {
