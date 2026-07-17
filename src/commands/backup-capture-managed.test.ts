@@ -101,7 +101,13 @@ describe("managed final continuity capture", () => {
           oauthExcluded: true,
         },
       },
+      continuityWake: {
+        version: "continuity-wake-descriptor/v1",
+        nextRequiredAt: null,
+        reasonClass: "none",
+      },
     });
+    expect(result.continuityWake.schedulerGeneration).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(
       verified.manifest.assets.some((entry) => entry.archivePath.includes("credentials")),
     ).toBe(false);
@@ -117,6 +123,92 @@ describe("managed final continuity capture", () => {
     const replay = await executeManagedFinalCapture(request, hooks);
 
     expect(replay).toStrictEqual(first);
+  });
+
+  it("commits the exact closed scheduler wake descriptor", async () => {
+    const { plan, request } = await createFixture();
+    const continuityWake = {
+      version: "continuity-wake-descriptor/v1" as const,
+      schedulerGeneration: `sha256:${"4".repeat(64)}`,
+      nextRequiredAt: "2026-07-17T03:00:00.000Z",
+      reasonClass: "cron" as const,
+    };
+
+    const first = await executeManagedFinalCapture(request, {
+      resolvePlan: async () => plan,
+      resolveWakeDescriptor: async () => continuityWake,
+    });
+    const replay = await executeManagedFinalCapture(request, {
+      resolvePlan: async () => {
+        throw new Error("live plan must not be consulted");
+      },
+      resolveWakeDescriptor: async () => {
+        throw new Error("live scheduler must not be consulted");
+      },
+    });
+
+    expect(first.continuityWake).toStrictEqual(continuityWake);
+    expect(replay).toStrictEqual(first);
+    const journalDir = path.join(request.journalRoot, sha256Hex(request.authority.captureIdentity));
+    const intent = JSON.parse(await fs.readFile(path.join(journalDir, "intent.json"), "utf8"));
+    expect(intent.continuityWake).toStrictEqual(continuityWake);
+  });
+
+  it("quarantines a committed result with a malformed wake descriptor", async () => {
+    const { plan, request } = await createFixture();
+    const first = await executeManagedFinalCapture(request, {
+      resolvePlan: async () => plan,
+    });
+    const journalDir = path.join(request.journalRoot, sha256Hex(request.authority.captureIdentity));
+    await fs.writeFile(
+      path.join(journalDir, "result.json"),
+      JSON.stringify({
+        ...first,
+        continuityWake: {
+          ...first.continuityWake,
+          nextRequiredAt: "not-a-date",
+          reasonClass: "cron",
+        },
+      }),
+    );
+
+    await expect(
+      executeManagedFinalCapture(request, {
+        resolvePlan: async () => {
+          throw new Error("live config must not be consulted");
+        },
+      }),
+    ).rejects.toMatchObject({
+      phase: "journal",
+      code: "continuity.capture.journal_conflict",
+      disposition: "quarantine",
+    });
+  });
+
+  it("reuses the journaled wake descriptor after an interrupted capture", async () => {
+    const { plan, request } = await createFixture();
+    const frozenWake = {
+      version: "continuity-wake-descriptor/v1" as const,
+      schedulerGeneration: `sha256:${"4".repeat(64)}`,
+      nextRequiredAt: "2026-07-17T03:00:00.000Z",
+      reasonClass: "cron" as const,
+    };
+    await executeManagedFinalCapture(request, {
+      resolvePlan: async () => plan,
+      resolveWakeDescriptor: async () => frozenWake,
+    });
+    const journalDir = path.join(request.journalRoot, sha256Hex(request.authority.captureIdentity));
+    await fs.rm(path.join(journalDir, "result.json"));
+    await fs.rm(request.capture.outputPath);
+
+    const retry = await executeManagedFinalCapture(request, {
+      resolvePlan: async () => plan,
+      resolveWakeDescriptor: async () => {
+        throw new Error("live scheduler must not be consulted");
+      },
+    });
+
+    expect(retry.continuityWake).toStrictEqual(frozenWake);
   });
 
   it("replays a committed result without resolving live configuration again", async () => {
