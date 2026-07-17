@@ -10,6 +10,98 @@ export const CLI_ENGLISH_CATALOG = {
   "cli.update.timeout.invalid": "--timeout must be a positive integer (seconds)",
   "cli.update.wizard.ttyRequired":
     "Update wizard requires a TTY. Use `openclaw update --channel <stable|extended-stable|beta|dev>` instead.",
+  "cli.update.heading": "Updating OpenClaw...",
+  "cli.update.complete": "Update complete.",
+  "cli.update.dryRun.heading": "Update dry-run",
+  "cli.update.dryRun.noChanges": "No changes were applied.",
+  "cli.update.dryRun.root": "Root",
+  "cli.update.dryRun.installKind": "Install kind",
+  "cli.update.dryRun.mode": "Mode",
+  "cli.update.dryRun.channel": "Channel",
+  "cli.update.dryRun.tagSpec": "Tag/spec",
+  "cli.update.dryRun.currentVersion": "Current version",
+  "cli.update.dryRun.targetVersion": "Target version",
+  "cli.update.dryRun.downgradeWarning": "Downgrade confirmation would be required in a real run.",
+  "cli.update.dryRun.plannedActions": "Planned actions:",
+  "cli.update.dryRun.notes": "Notes:",
+  "cli.update.dryRun.action.persistChannel": "Persist update.channel={channel} in config",
+  "cli.update.dryRun.action.switchToGit":
+    "Switch install mode from package to git checkout (dev channel)",
+  "cli.update.dryRun.action.switchToPackage":
+    "Switch install mode from git to package manager ({mode})",
+  "cli.update.dryRun.action.gitUpdate":
+    "Run git update flow on channel {channel} (fetch/rebase/build/doctor)",
+  "cli.update.dryRun.action.refreshPackage":
+    "Refresh package install with spec {spec}; current version already matches {version}",
+  "cli.update.dryRun.action.packageUpdate": "Run global package manager update with spec {spec}",
+  "cli.update.dryRun.action.plugins": "Run plugin update sync after core update",
+  "cli.update.dryRun.action.completion": "Refresh shell completion cache (if needed)",
+  "cli.update.dryRun.action.restart": "Restart gateway service and run doctor checks",
+  "cli.update.dryRun.action.noRestart": "Skip restart (because --no-restart is set)",
+  "cli.update.dryRun.note.gitTag": "--tag applies to npm installs only; git updates ignore it.",
+  "cli.update.dryRun.note.betaFallback": "Beta channel resolves to latest for this run (fallback).",
+  "cli.update.dryRun.note.managedRoot":
+    "Package update targets managed service root {root} instead of invoking root {previousRoot}.",
+  "cli.update.dryRun.note.nonRegistry":
+    "Non-registry package specs skip npm version lookup and downgrade previews.",
+  "cli.update.progress.cleanCheck": "Working directory is clean",
+  "cli.update.progress.upstreamCheck": "Upstream branch exists",
+  "cli.update.progress.gitFetch": "Fetching latest changes",
+  "cli.update.progress.gitRebase": "Rebasing onto target commit",
+  "cli.update.progress.resolveUpstream": "Resolving upstream commit",
+  "cli.update.progress.enumerateCommits": "Enumerating candidate commits",
+  "cli.update.progress.gitClone": "Cloning git checkout",
+  "cli.update.progress.preflightWorktree": "Preparing preflight worktree",
+  "cli.update.progress.preflightCleanup": "Cleaning preflight worktree",
+  "cli.update.progress.depsInstall": "Installing dependencies",
+  "cli.update.progress.build": "Building",
+  "cli.update.progress.uiBuild": "Building UI assets",
+  "cli.update.progress.uiRestore": "Restoring missing UI assets",
+  "cli.update.progress.uiVerify": "Validating UI assets",
+  "cli.update.progress.doctorEntry": "Checking doctor entrypoint",
+  "cli.update.progress.doctor": "Running doctor checks",
+  "cli.update.progress.verify": "Verifying update",
+  "cli.update.progress.globalUpdate": "Updating via package manager",
+  "cli.update.progress.globalUpdateOmitOptional": "Retrying update without optional deps",
+  "cli.update.progress.globalInstallStage": "Preparing staged package install",
+  "cli.update.progress.globalInstallVerify": "Verifying global package",
+  "cli.update.progress.globalInstallSwap": "Activating global package",
+  "cli.update.progress.globalInstall": "Installing global package",
+  "cli.update.result.heading": "Update Result:",
+  "cli.update.result.root": "Root",
+  "cli.update.result.reason": "Reason",
+  "cli.update.result.before": "Before",
+  "cli.update.result.after": "After",
+  "cli.update.result.steps": "Steps:",
+  "cli.update.result.recoveryHints": "Recovery hints:",
+  "cli.update.result.totalTime": "Total time",
+  "cli.update.recovery.corepackMissing":
+    "This pnpm checkout could not auto-enable pnpm because corepack is missing.",
+  "cli.update.recovery.installPnpmOrCorepack":
+    "Install pnpm manually or install Node with corepack available, then rerun the update command.",
+  "cli.update.recovery.corepackEnableFailed":
+    "This pnpm checkout could not auto-enable pnpm via corepack.",
+  "cli.update.recovery.enableCorepackOrInstallPnpm":
+    "Run `corepack enable` manually or install pnpm manually, then rerun the update command.",
+  "cli.update.recovery.pnpmBootstrapFailed":
+    "This pnpm checkout could not bootstrap pnpm from npm automatically.",
+  "cli.update.recovery.installPnpm": "Install pnpm manually, then rerun the update command.",
+  "cli.update.recovery.managerUnavailable":
+    "This checkout requires its declared package manager and the updater could not find it.",
+  "cli.update.recovery.installManager":
+    "Install the missing package manager manually, then rerun the update command.",
+  "cli.update.recovery.permission":
+    "Detected permission failure (EACCES). Re-run with a writable global prefix or sudo (for system-managed Node installs).",
+  "cli.update.recovery.stopGateway":
+    "If you recover with sudo/manual package install on a managed Gateway, stop the Gateway first so it does not load files while the package tree is being replaced.",
+  "cli.update.recovery.permissionExample":
+    "Example: npm config set prefix ~/.local && npm i -g openclaw@latest",
+  "cli.update.recovery.systemInstallOutline":
+    "System install outline: openclaw gateway stop -> sudo <system-npm> i -g openclaw@latest -> openclaw gateway install --force -> openclaw gateway restart.",
+  "cli.update.recovery.optionalDependency":
+    "Detected native optional dependency build failure. The updater retries with --omit=optional automatically.",
+  "cli.update.recovery.optionalDependencyCommand":
+    "If it still fails: npm i -g openclaw@latest --omit=optional",
   "cli.updateStatus.heading": "OpenClaw update status",
   "cli.updateStatus.header.item": "Item",
   "cli.updateStatus.header.value": "Value",
