@@ -4,6 +4,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultRuntime } from "../../runtime.js";
 import { withTempDir } from "../../test-helpers/temp-dir.js";
+import { createCliLocalization } from "../i18n/runtime.js";
 import { createGlobalCommandRunner, parseTimeoutMsOrExit, resolveUpdateRoot } from "./shared.js";
 
 const runCommandWithTimeout = vi.hoisted(() => vi.fn());
@@ -88,6 +89,22 @@ describe("createGlobalCommandRunner", () => {
       expect(parseTimeoutMsOrExit()).toBeUndefined();
       expect(error).not.toHaveBeenCalled();
       expect(exit).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+      exit.mockRestore();
+    }
+  });
+
+  it("localizes invalid timeout guidance while preserving the flag and unit", () => {
+    const error = vi.spyOn(defaultRuntime, "error").mockImplementation(() => undefined);
+    const exit = vi.spyOn(defaultRuntime, "exit").mockImplementation(() => undefined as never);
+
+    try {
+      expect(
+        parseTimeoutMsOrExit("invalid", createCliLocalization({ locale: "zh-CN" })),
+      ).toBeNull();
+      expect(error).toHaveBeenCalledWith("--timeout 必须是正整数（秒）。");
+      expect(exit).toHaveBeenCalledWith(1);
     } finally {
       error.mockRestore();
       exit.mockRestore();

@@ -13,6 +13,7 @@ import {
 import { checkUpdateStatus } from "../../infra/update-check.js";
 import { defaultRuntime } from "../../runtime.js";
 import { pathExists } from "../../utils.js";
+import { createCliLocalization } from "../i18n/runtime.js";
 import {
   isEmptyDir,
   isGitCheckout,
@@ -25,15 +26,14 @@ import { updateCommand } from "./update-command.js";
 
 /** Run the TTY-only update wizard and preserve `updateCommand` as the single update executor. */
 export async function updateWizardCommand(opts: UpdateWizardOptions = {}): Promise<void> {
+  const localization = createCliLocalization();
   if (!process.stdin.isTTY) {
-    defaultRuntime.error(
-      "Update wizard requires a TTY. Use `openclaw update --channel <stable|extended-stable|beta|dev>` instead.",
-    );
+    defaultRuntime.error(localization.t("cli.update.wizard.ttyRequired"));
     defaultRuntime.exit(1);
     return;
   }
 
-  const timeoutMs = parseTimeoutMsOrExit(opts.timeout);
+  const timeoutMs = parseTimeoutMsOrExit(opts.timeout, localization);
   if (timeoutMs === null) {
     return;
   }

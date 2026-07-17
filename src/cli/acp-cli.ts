@@ -9,6 +9,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { defaultRuntime } from "../runtime.js";
 import { inheritOptionFromParent } from "./command-options.js";
 import { resolveGatewayAuthOptions } from "./gateway-secret-options.js";
+import { createCliLocalization } from "./i18n/runtime.js";
 
 export function registerAcpCli(program: Command) {
   const acp = program.command("acp").description("Run an ACP bridge backed by the Gateway");
@@ -31,11 +32,12 @@ export function registerAcpCli(program: Command) {
       () => `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/acp", "docs.openclaw.ai/cli/acp")}\n`,
     )
     .action(async (opts) => {
+      const localization = createCliLocalization();
       try {
         const { gatewayToken, gatewayPassword } = resolveGatewayAuthOptions(opts);
         const provenanceMode = normalizeAcpProvenanceMode(opts.provenance as string | undefined);
         if (opts.provenance && !provenanceMode) {
-          throw new Error('Invalid --provenance. Use "off", "meta", or "meta+receipt".');
+          throw new Error(localization.t("cli.acp.provenance.invalid"));
         }
         await serveAcpGateway({
           gatewayUrl: opts.url as string | undefined,
@@ -50,7 +52,9 @@ export function registerAcpCli(program: Command) {
           verbose: Boolean(opts.verbose),
         });
       } catch (err) {
-        defaultRuntime.error(`ACP bridge failed: ${formatErrorMessage(err)}`);
+        defaultRuntime.error(
+          localization.t("cli.acp.bridge.failed", { error: formatErrorMessage(err) }),
+        );
         defaultRuntime.exit(1);
       }
     });

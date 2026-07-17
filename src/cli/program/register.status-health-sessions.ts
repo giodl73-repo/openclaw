@@ -6,6 +6,7 @@ import { setVerbose } from "../../globals.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
+import { createCliLocalization, type CliLocalization } from "../i18n/runtime.js";
 import { parsePositiveIntOrUndefined, parseStrictPositiveIntOrUndefined } from "./helpers.js";
 
 function resolveVerbose(opts: { verbose?: boolean; debug?: boolean }): boolean {
@@ -73,20 +74,26 @@ async function runSessionsListCli(opts: SessionsListCliOptions): Promise<void> {
   );
 }
 
-function parseTimeoutMs(timeout: unknown): number | null | undefined {
+function parseTimeoutMs(
+  timeout: unknown,
+  localization: CliLocalization,
+): number | null | undefined {
   const parsed = parsePositiveIntOrUndefined(timeout);
   if (timeout !== undefined && parsed === undefined) {
-    defaultRuntime.error("--timeout must be a positive integer (milliseconds)");
+    defaultRuntime.error(localization.t("cli.validation.timeout.positiveMilliseconds"));
     defaultRuntime.exit(1);
     return null;
   }
   return parsed;
 }
 
-function parseTasksAuditLimit(limit: unknown): number | null | undefined {
+function parseTasksAuditLimit(
+  limit: unknown,
+  localization: CliLocalization,
+): number | null | undefined {
   const parsed = parseStrictPositiveIntOrUndefined(limit);
   if (limit !== undefined && parsed === undefined) {
-    defaultRuntime.error("--limit must be a positive integer, for example --limit 25.");
+    defaultRuntime.error(localization.t("cli.tasks.audit.limit.invalid"));
     defaultRuntime.exit(1);
     return null;
   }
@@ -97,9 +104,10 @@ async function runWithVerboseAndTimeout(
   opts: { verbose?: boolean; debug?: boolean; timeout?: unknown },
   action: (params: { verbose: boolean; timeoutMs: number | undefined }) => Promise<void>,
 ): Promise<void> {
+  const localization = createCliLocalization();
   const verbose = resolveVerbose(opts);
   setVerbose(verbose);
-  const timeoutMs = parseTimeoutMs(opts.timeout);
+  const timeoutMs = parseTimeoutMs(opts.timeout, localization);
   if (timeoutMs === null) {
     return;
   }
@@ -390,6 +398,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
         )}`,
     )
     .action(async (key: string, opts, command) => {
+      const localization = createCliLocalization();
       // Sibling `sessions` subcommands inherit parent options (see list/cleanup
       // above): `--agent`/`--json` may be supplied on the parent `sessions`
       // command, e.g. `openclaw sessions --agent work compact <key>`. Merge those
@@ -422,22 +431,26 @@ export function registerStatusHealthSessionsCommands(program: Command) {
         parentOpts?.verbose ? "--verbose" : undefined,
       ].filter((flag): flag is string => flag !== undefined);
       if (unsupportedParentOptions.length > 0) {
-        const plural = unsupportedParentOptions.length > 1 ? "options" : "option";
         defaultRuntime.error(
-          `\`sessions compact\` does not support the parent \`sessions\` ${plural} ${unsupportedParentOptions.join(", ")}; the gateway resolves the target store from <key> and --agent.`,
+          localization.t(
+            unsupportedParentOptions.length > 1
+              ? "cli.sessions.compact.parentOptionsUnsupported"
+              : "cli.sessions.compact.parentOptionUnsupported",
+            { options: unsupportedParentOptions.join(", ") },
+          ),
         );
         defaultRuntime.exit(1);
         return;
       }
       const maxLines = parseStrictPositiveIntOrUndefined(opts.maxLines);
       if (opts.maxLines !== undefined && maxLines === undefined) {
-        defaultRuntime.error("--max-lines must be a positive integer.");
+        defaultRuntime.error(localization.t("cli.sessions.compact.maxLines.invalid"));
         defaultRuntime.exit(1);
         return;
       }
       const timeoutMs = parseStrictPositiveIntOrUndefined(opts.timeout);
       if (opts.timeout !== undefined && timeoutMs === undefined) {
-        defaultRuntime.error("--timeout must be a positive integer (milliseconds).");
+        defaultRuntime.error(localization.t("cli.sessions.compact.timeout.invalid"));
         defaultRuntime.exit(1);
         return;
       }
@@ -600,8 +613,9 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     )
     .option("--limit <n>", "Limit displayed findings")
     .action(async (opts, command) => {
+      const localization = createCliLocalization();
       const parentOpts = command.parent?.opts() as { json?: boolean } | undefined;
-      const limit = parseTasksAuditLimit(opts.limit);
+      const limit = parseTasksAuditLimit(opts.limit, localization);
       if (limit === null) {
         return;
       }

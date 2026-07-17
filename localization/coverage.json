@@ -36,7 +36,7 @@
     "control-ui": {
       "owner": "control-ui",
       "artifactId": "control-ui-web",
-      "catalogRevision": "sha256:2c6d4249ba83882c18216aab61ae59bdcb5a2f1cb76e63741aac3b806706921b",
+      "catalogRevision": "sha256:d123d4768e1b5bac24a72bbf93d212c30d6e4f68121d1a32b2556315641358e7",
       "source": "ui/src/i18n/locales/en.ts",
       "catalogs": "ui/src/i18n/locales",
       "contentClasses": [
@@ -279,8 +279,9 @@
     "cli": {
       "owner": "cli",
       "artifactId": "openclaw-cli",
-      "catalogRevision": "none",
-      "source": "src/cli",
+      "catalogRevision": "sha256:927c66c7c34ef0c5104d98d4995064c2e3fc8a6f90f742fd8bb980e93012e9ae",
+      "source": "src/cli/i18n/locales/en.ts",
+      "catalogs": "src/cli/i18n/locales",
       "contentClasses": [
         "general",
         "recovery"
@@ -291,7 +292,7 @@
           "maturity": "source"
         },
         "zh-CN": {
-          "maturity": "unsupported"
+          "maturity": "partial"
         },
         "zh-TW": {
           "maturity": "unsupported"

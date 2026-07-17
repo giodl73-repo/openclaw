@@ -6,6 +6,7 @@ import {
   formatUpdateAvailableHint,
   formatUpdateOneLiner,
   resolveUpdateAvailability,
+  type UpdateStatusText,
 } from "./status.update.js";
 
 function buildUpdate(partial: Partial<UpdateCheckResult>): UpdateCheckResult {
@@ -25,6 +26,30 @@ function nextMajorVersion(version: string): string {
   }
   return "999999.0.0";
 }
+
+const localizedText = {
+  updateLabel: "更新",
+  dirty: "有未提交更改",
+  upToDate: "已是最新",
+  behind: (count) => `落后 ${count}`,
+  ahead: (count) => `领先 ${count}`,
+  diverged: (ahead, behind) => `已分叉（领先 ${ahead}，落后 ${behind}）`,
+  fetchFailed: "获取失败",
+  taggedRegistryUpdate: (registryLabel, version) => `${registryLabel} 可更新至 ${version}`,
+  npmUpdate: (version) => `npm 可更新至 ${version}`,
+  aheadOfExtendedStable: (version) => `高于 extended-stable（${version}）`,
+  localNewer: (registryLabel, version) => `${registryLabel} ${version}（本地版本较新）`,
+  extendedStableRequiresPackage: "extended-stable 需要软件包安装方式",
+  extendedStableSelectorMissing: "缺少 npm extended-stable 选择器",
+  extendedStableQueryFailed: "npm extended-stable 查询失败",
+  extendedStableVerificationFailed: "npm extended-stable 精确软件包验证失败",
+  registryUnknown: (registryLabel) => `${registryLabel} 未知`,
+  depsOk: "依赖正常",
+  depsMissing: "缺少依赖",
+  depsStale: "依赖已过期",
+  gitBehind: (count) => `git 落后 ${count}`,
+  updateAvailableHint: (details, command) => `有可用更新（${details}）。运行：${command}`,
+} satisfies UpdateStatusText;
 
 describe("resolveUpdateAvailability", () => {
   it("flags git update when behind upstream", () => {
@@ -199,6 +224,35 @@ describe("formatUpdateOneLiner", () => {
 
     expect(formatUpdateOneLiner(update)).toBe("Update: npm · npm latest unknown · deps missing");
   });
+
+  it("uses injected localized text without translating refs or versions", () => {
+    const latestVersion = nextMajorVersion(VERSION);
+    const update = buildUpdate({
+      installKind: "git",
+      git: {
+        root: "/tmp/repo",
+        sha: "abc123456789",
+        tag: null,
+        branch: "main",
+        upstream: "origin/main",
+        dirty: true,
+        ahead: 0,
+        behind: 2,
+        fetchOk: true,
+      },
+      registry: { latestVersion },
+      deps: {
+        manager: "pnpm",
+        status: "ok",
+        lockfilePath: "pnpm-lock.yaml",
+        markerPath: "node_modules/.modules.yaml",
+      },
+    });
+
+    expect(formatUpdateOneLiner(update, localizedText)).toBe(
+      `更新: git main · ↔ origin/main · 有未提交更改 · 落后 2 · npm 可更新至 ${latestVersion} · 依赖正常`,
+    );
+  });
 });
 
 describe("formatUpdateAvailableHint", () => {
@@ -232,6 +286,29 @@ describe("formatUpdateAvailableHint", () => {
 
     expect(formatUpdateAvailableHint(update)).toBe(
       `Update available (git behind 2 · npm ${latestVersion}). Run: openclaw update`,
+    );
+  });
+
+  it("uses injected localized hint text while preserving the command", () => {
+    const latestVersion = nextMajorVersion(VERSION);
+    const update = buildUpdate({
+      installKind: "git",
+      git: {
+        root: "/tmp/repo",
+        sha: null,
+        tag: null,
+        branch: "main",
+        upstream: "origin/main",
+        dirty: false,
+        ahead: 0,
+        behind: 2,
+        fetchOk: true,
+      },
+      registry: { latestVersion },
+    });
+
+    expect(formatUpdateAvailableHint(update, localizedText)).toBe(
+      `有可用更新（git 落后 2 · npm ${latestVersion}）。运行：openclaw update`,
     );
   });
 });

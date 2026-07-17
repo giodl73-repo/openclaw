@@ -11,6 +11,7 @@ import {
 import { listAgentIds, resolveDefaultAgentId } from "../agents/agent-scope-config.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { CliDeps } from "../cli/deps.types.js";
+import { createCliLocalization, type CliLocalization } from "../cli/i18n/runtime.js";
 import { withProgress } from "../cli/progress.js";
 import {
   readGatewayDispatchConfig,
@@ -100,6 +101,7 @@ type AgentCliProcessLike = {
   off(signal: AgentCliSignal, handler: () => void): unknown;
 };
 type AgentCliDeps = CliDeps & {
+  localization?: CliLocalization;
   process?: AgentCliProcessLike;
 };
 type AgentGatewayCallIdentity = Pick<
@@ -176,72 +178,89 @@ function protectJsonStdout(opts: Pick<AgentCliOpts, "json">): void {
   }
 }
 
-function missingAgentMessageError(): Error {
+function missingAgentMessageError(localization: CliLocalization): Error {
   return new Error(
-    `Missing message. Use ${formatCliCommand('openclaw agent --message "..." --agent <id>')} or ${formatCliCommand("openclaw agent --message-file <path> --agent <id>")}.`,
+    localization.t("cli.agent.message.missing", {
+      inlineCommand: formatCliCommand('openclaw agent --message "..." --agent <id>'),
+      fileCommand: formatCliCommand("openclaw agent --message-file <path> --agent <id>"),
+    }),
   );
 }
 
-function formatMessageFileReadFailure(messageFile: string, err: unknown): string {
+function formatMessageFileReadFailure(
+  messageFile: string,
+  err: unknown,
+  localization: CliLocalization,
+): string {
   const code =
     typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : "";
   if (code === "ENOENT") {
-    return `Message file not found: ${messageFile}`;
+    return localization.t("cli.agent.messageFile.notFound", { path: messageFile });
   }
   if (code === "EISDIR") {
-    return `Message file is a directory: ${messageFile}`;
+    return localization.t("cli.agent.messageFile.isDirectory", { path: messageFile });
   }
   const message = err instanceof Error ? err.message : String(err);
-  return `Unable to read message file ${messageFile}: ${message}`;
+  return localization.t("cli.agent.messageFile.readFailure", {
+    path: messageFile,
+    error: message,
+  });
 }
 
-async function readAgentMessageFile(messageFile: string): Promise<string> {
+async function readAgentMessageFile(
+  messageFile: string,
+  localization: CliLocalization,
+): Promise<string> {
   let buffer: Buffer;
   try {
     buffer = await readFile(messageFile);
   } catch (err) {
-    throw new Error(formatMessageFileReadFailure(messageFile, err), { cause: err });
+    throw new Error(formatMessageFileReadFailure(messageFile, err, localization), { cause: err });
   }
   try {
     return MESSAGE_FILE_DECODER.decode(buffer).replace(/^\uFEFF/, "");
   } catch {
-    throw new Error(`Message file must be valid UTF-8: ${messageFile}`);
+    throw new Error(localization.t("cli.agent.messageFile.invalidUtf8", { path: messageFile }));
   }
 }
 
-async function resolveAgentMessageOpts(opts: AgentCliOpts): Promise<AgentDispatchOpts> {
+async function resolveAgentMessageOpts(
+  opts: AgentCliOpts,
+  localization: CliLocalization,
+): Promise<AgentDispatchOpts> {
   const { messageFile: rawMessageFile, ...rest } = opts;
   const messageFile = rawMessageFile?.trim();
   const hasInlineMessage = opts.message !== undefined;
   if (hasInlineMessage && messageFile) {
-    throw new Error("Use either --message or --message-file, not both.");
+    throw new Error(localization.t("cli.agent.messageFile.conflict"));
   }
   if (rawMessageFile !== undefined && !messageFile) {
-    throw new Error("--message-file must not be empty.");
+    throw new Error(localization.t("cli.agent.messageFile.emptyOption"));
   }
   if (messageFile) {
-    const message = await readAgentMessageFile(messageFile);
+    const message = await readAgentMessageFile(messageFile, localization);
     if (!message.trim()) {
-      throw new Error(`Message file is empty: ${messageFile}`);
+      throw new Error(localization.t("cli.agent.messageFile.empty", { path: messageFile }));
     }
     return { ...rest, message };
   }
   const message = opts.message ?? "";
   if (!message.trim()) {
-    throw missingAgentMessageError();
+    throw missingAgentMessageError(localization);
   }
   return { ...rest, message };
 }
 
-function parseTimeoutSeconds(opts: { cfg: OpenClawConfig; timeout?: string }) {
+function parseTimeoutSeconds(
+  opts: { cfg: OpenClawConfig; timeout?: string },
+  localization: CliLocalization,
+) {
   const raw =
     opts.timeout !== undefined
       ? parseStrictNonNegativeInteger(opts.timeout)
       : (opts.cfg.agents?.defaults?.timeoutSeconds ?? 600);
   if (raw === undefined) {
-    throw new Error(
-      `Invalid --timeout. Use seconds as a non-negative integer, for example --timeout 600. Use --timeout 0 to disable the timeout.`,
-    );
+    throw new Error(localization.t("cli.agent.timeout.invalid"));
   }
   return raw;
 }
@@ -264,11 +283,14 @@ async function getGatewayDispatchConfig(options?: {
   return readGatewayDispatchConfig();
 }
 
-async function formatPayloadForLog(payload: {
-  text?: string;
-  mediaUrls?: string[];
-  mediaUrl?: string | null;
-}) {
+async function formatPayloadForLog(
+  payload: {
+    text?: string;
+    mediaUrls?: string[];
+    mediaUrl?: string | null;
+  },
+  localization: CliLocalization,
+) {
   const { resolveSendableOutboundReplyParts } = await loadReplyPayloadModule();
   const parts = resolveSendableOutboundReplyParts({
     text: payload.text,
@@ -280,7 +302,7 @@ async function formatPayloadForLog(payload: {
     lines.push(parts.text.trimEnd());
   }
   for (const url of parts.mediaUrls) {
-    lines.push(`Attachment: ${url}`);
+    lines.push(localization.t("cli.agent.response.attachment", { url }));
   }
   return lines.join("\n").trimEnd();
 }
@@ -323,6 +345,7 @@ function isTransientGatewayAgentConnectClose(err: unknown): boolean {
 
 function validateExplicitSessionKeyForDispatch(
   opts: Pick<AgentCliOpts, "agent" | "sessionKey">,
+  localization: CliLocalization,
 ): void {
   const sessionKey = opts.sessionKey?.trim();
   if (!sessionKey) {
@@ -330,9 +353,7 @@ function validateExplicitSessionKeyForDispatch(
   }
 
   if (classifySessionKeyShape(sessionKey) === "malformed_agent") {
-    throw new Error(
-      `Invalid --session-key "${sessionKey}". Agent-prefixed session keys must use agent:<agent-id>:<session-key>.`,
-    );
+    throw new Error(localization.t("cli.agent.sessionKey.invalid", { sessionKey }));
   }
 
   const agentIdRaw = opts.agent?.trim() || undefined;
@@ -343,7 +364,10 @@ function validateExplicitSessionKeyForDispatch(
   const sessionAgentId = resolveAgentIdFromSessionKey(sessionKey);
   if (sessionAgentId !== agentId) {
     throw new Error(
-      `Agent id "${agentIdRaw}" does not match session key agent "${sessionAgentId}".`,
+      localization.t("cli.agent.sessionKey.agentMismatch", {
+        agentId: agentIdRaw,
+        sessionAgentId,
+      }),
     );
   }
 }
@@ -673,26 +697,32 @@ function isInFlightGatewayAgentResponse(response: GatewayAgentResponse): boolean
   return response.status === "in_flight";
 }
 
-function formatInFlightGatewayAgentMessage(response: GatewayAgentResponse): string {
+function formatInFlightGatewayAgentMessage(
+  response: GatewayAgentResponse,
+  localization: CliLocalization,
+): string {
   return response.runId
-    ? `Agent run ${response.runId} is already in flight; not starting a duplicate run.`
-    : "Agent run is already in flight; not starting a duplicate run.";
+    ? localization.t("cli.agent.response.inFlight", { runId: response.runId })
+    : localization.t("cli.agent.response.inFlightUnknown");
 }
 
 async function agentViaGatewayCommand(
   opts: AgentDispatchOpts,
   runtime: RuntimeEnv,
   signalBridge: ReturnType<typeof createAgentCliSignalBridge>,
+  localization: CliLocalization,
 ) {
   protectJsonStdout(opts);
   const body = opts.message;
   const explicitSessionKey = opts.sessionKey?.trim();
   if (!body.trim()) {
-    throw missingAgentMessageError();
+    throw missingAgentMessageError(localization);
   }
   if (!opts.to && !opts.sessionId && !opts.agent && !explicitSessionKey) {
     throw new Error(
-      `No target session selected. Use --agent <id>, --session-key <key>, --session-id <id>, or --to <E.164>. Run ${formatCliCommand("openclaw agents list")} to see agents.`,
+      localization.t("cli.agent.target.missing", {
+        agentsListCommand: formatCliCommand("openclaw agents list"),
+      }),
     );
   }
 
@@ -703,11 +733,14 @@ async function agentViaGatewayCommand(
     const knownAgents = listAgentIds(cfg);
     if (!knownAgents.includes(agentId)) {
       throw new Error(
-        `Unknown agent id "${agentIdRaw}". Use "${formatCliCommand("openclaw agents list")}" to see configured agents.`,
+        localization.t("cli.agent.agentId.unknown", {
+          agentId: agentIdRaw ?? agentId,
+          agentsListCommand: formatCliCommand("openclaw agents list"),
+        }),
       );
     }
   }
-  const timeoutSeconds = parseTimeoutSeconds({ cfg, timeout: opts.timeout });
+  const timeoutSeconds = parseTimeoutSeconds({ cfg, timeout: opts.timeout }, localization);
   const gatewayTimeoutMs = resolveGatewayAgentTimeoutMs(timeoutSeconds);
   const channel = normalizeMessageChannel(opts.channel);
   const deferExplicitRecipientSession = Boolean(
@@ -764,7 +797,7 @@ async function agentViaGatewayCommand(
   const dispatchGatewayAgentCall = async (activeCfg: OpenClawConfig) =>
     await withProgress(
       {
-        label: "Waiting for agent reply…",
+        label: localization.t("cli.agent.progress.waiting"),
         indeterminate: true,
         enabled: opts.json !== true,
       },
@@ -860,19 +893,21 @@ async function agentViaGatewayCommand(
   const payloads = result?.payloads ?? [];
 
   if (isInFlightGatewayAgentResponse(response)) {
-    runtime.error?.(formatInFlightGatewayAgentMessage(response));
+    runtime.error?.(formatInFlightGatewayAgentMessage(response, localization));
     return response;
   }
 
   if (payloads.length === 0) {
     if (response?.status !== "ok") {
-      runtime.log(response?.summary ? response.summary : "No reply from agent.");
+      runtime.log(
+        response?.summary ? response.summary : localization.t("cli.agent.response.noReply"),
+      );
     }
     return response;
   }
 
   for (const payload of payloads) {
-    const out = await formatPayloadForLog(payload);
+    const out = await formatPayloadForLog(payload, localization);
     if (out) {
       runtime.log(out);
     }
@@ -885,13 +920,14 @@ async function agentViaGatewayCommandWithTransientRetries(
   opts: AgentDispatchOpts,
   runtime: RuntimeEnv,
   signalBridge: ReturnType<typeof createAgentCliSignalBridge>,
+  localization: CliLocalization,
 ) {
   for (const [attempt, retryDelayMs] of [
     ...GATEWAY_TRANSIENT_CONNECT_RETRY_DELAYS_MS,
     0,
   ].entries()) {
     try {
-      return await agentViaGatewayCommand(opts, runtime, signalBridge);
+      return await agentViaGatewayCommand(opts, runtime, signalBridge, localization);
     } catch (err) {
       if (isAbortError(err)) {
         throw err;
@@ -900,13 +936,11 @@ async function agentViaGatewayCommandWithTransientRetries(
       if (isFinalAttempt || !isTransientGatewayAgentConnectClose(err)) {
         throw err;
       }
-      runtime.error?.(
-        `Gateway agent connection closed during handshake; retrying in ${retryDelayMs}ms before embedded fallback.`,
-      );
+      runtime.error?.(localization.t("cli.agent.response.retrying", { retryDelayMs }));
       await delayMs(retryDelayMs, signalBridge.signal);
     }
   }
-  throw new Error("Gateway agent retry loop exhausted unexpectedly.");
+  throw new Error(localization.t("cli.agent.response.retryExhausted"));
 }
 
 export async function agentCliCommand(
@@ -915,20 +949,23 @@ export async function agentCliCommand(
   deps?: AgentCliDeps,
 ) {
   protectJsonStdout(opts);
-  const messageOpts = await resolveAgentMessageOpts(opts);
+  const localization = deps?.localization ?? createCliLocalization();
+  const messageOpts = await resolveAgentMessageOpts(opts, localization);
   // `/compact` cannot run as a plain CLI agent turn: the slash-command handler
   // rejects CLI-originated senders, so the message would fall through to a
   // normal turn and exit 0 without compacting anything (issue #90640 Gap B).
   // Fail loudly and point at the first-class command instead of no-opping.
   if (isCompactControlCommand(messageOpts.message)) {
     runtime.error?.(
-      "Slash commands cannot be executed via --message from the CLI. Use: openclaw sessions compact <key>",
+      localization.t("cli.agent.compact.unsupported", {
+        compactCommand: formatCliCommand("openclaw sessions compact <key>"),
+      }),
     );
     runtime.exit(1);
     return undefined;
   }
   const dispatchOpts = await normalizeSessionKeyOptsForDispatch(messageOpts);
-  validateExplicitSessionKeyForDispatch(dispatchOpts);
+  validateExplicitSessionKeyForDispatch(dispatchOpts, localization);
   const gatewayDispatchOpts = dispatchOpts.runId
     ? dispatchOpts
     : { ...dispatchOpts, runId: randomIdempotencyKey() };
@@ -954,6 +991,7 @@ export async function agentCliCommand(
         gatewayDispatchOpts,
         runtime,
         signalBridge,
+        localization,
       );
       return returnAfterSignalExit(result, signalBridge.getReceivedSignal(), runtime);
     } catch (err) {
@@ -967,7 +1005,10 @@ export async function agentCliCommand(
         const fallbackAgentId = await resolveAgentIdForGatewayTimeoutFallback(dispatchOpts);
         const fallbackSession = createGatewayTimeoutFallbackSession(fallbackAgentId);
         runtime.error?.(
-          `EMBEDDED FALLBACK: Gateway agent timed out; running embedded agent with fresh session ${fallbackSession.sessionId}: ${String(err)}`,
+          localization.t("cli.agent.fallback.timeout", {
+            sessionId: fallbackSession.sessionId,
+            error: String(err),
+          }),
         );
         const agentCommand = await loadEmbeddedAgentCommand();
         const result = await agentCommand(
@@ -993,9 +1034,7 @@ export async function agentCliCommand(
         throw err;
       }
 
-      runtime.error?.(
-        `EMBEDDED FALLBACK: Gateway agent failed; running embedded agent: ${String(err)}`,
-      );
+      runtime.error?.(localization.t("cli.agent.fallback.failed", { error: String(err) }));
       const agentCommand = await loadEmbeddedAgentCommand();
       const result = await agentCommand(
         {

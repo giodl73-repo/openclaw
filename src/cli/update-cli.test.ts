@@ -1043,6 +1043,7 @@ describe("update-cli", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     if (tempDirsToCleanup.size === 0) {
       return;
     }
@@ -2517,6 +2518,75 @@ describe("update-cli", () => {
       },
     },
   ] as const)("updateStatusCommand rendering: $name", runUpdateCliScenario);
+
+  it("localizes update status table output while preserving literal values", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    vi.mocked(checkUpdateStatus).mockResolvedValue({
+      root: "/test/path",
+      installKind: "git",
+      packageManager: "pnpm",
+      git: {
+        root: "/test/path",
+        sha: "abcdef1234567890",
+        tag: "v1.2.3",
+        branch: "main",
+        upstream: "origin/main",
+        dirty: true,
+        ahead: 0,
+        behind: 2,
+        fetchOk: true,
+      },
+      deps: {
+        manager: "pnpm",
+        status: "ok",
+        lockfilePath: "/test/path/pnpm-lock.yaml",
+        markerPath: "/test/path/node_modules",
+      },
+      registry: {
+        latestVersion: "9999.0.0",
+      },
+    });
+
+    await updateStatusCommand({ json: false });
+
+    const output = vi
+      .mocked(defaultRuntime.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(output).toContain("OpenClaw 更新状态");
+    expect(output).toContain("项目");
+    expect(output).toContain("值");
+    expect(output).toContain("安装");
+    expect(output).toContain("更新通道");
+    expect(output).toContain("更新");
+    expect(output).toContain("可用");
+    expect(output).toContain("有未提交更改");
+    expect(output).toContain("落后 2");
+    expect(output).toContain("依赖正常");
+    expect(output).toContain("有可用更新");
+    expect(output).toContain("/test/path");
+    expect(output).toContain("main");
+    expect(output).toContain("origin/main");
+    expect(output).toContain("v1.2.3");
+    expect(output).toContain("abcdef12");
+    expect(output).toContain("9999.0.0");
+    expect(output).toContain("openclaw update");
+  });
+
+  it("keeps update status JSON unchanged under a localized process locale", async () => {
+    await updateStatusCommand({ json: true });
+    const englishOutput = structuredClone(
+      requireValue(lastWriteJsonCall(), "English update status JSON output"),
+    );
+
+    vi.mocked(defaultRuntime.writeJson).mockClear();
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    await updateStatusCommand({ json: true });
+
+    expect(requireValue(lastWriteJsonCall(), "localized update status JSON output")).toEqual(
+      englishOutput,
+    );
+  });
 
   it("renders update status when unrelated config validation would fail", async () => {
     vi.mocked(readConfigFileSnapshot).mockResolvedValue({
@@ -7722,32 +7792,52 @@ describe("update-cli", () => {
   it.each([
     {
       name: "update command invalid timeout",
+      locale: "en",
       run: async () => await updateCommand({ timeout: "invalid" }),
       requireTty: false,
       expectedError: "--timeout must be a positive integer (seconds)",
     },
     {
       name: "update status command invalid timeout",
+      locale: "en",
       run: async () => await updateStatusCommand({ timeout: "invalid" }),
       requireTty: false,
       expectedError: "--timeout must be a positive integer (seconds)",
     },
     {
       name: "update wizard invalid timeout",
+      locale: "en",
       run: async () => await updateWizardCommand({ timeout: "invalid" }),
       requireTty: true,
       expectedError: "--timeout must be a positive integer (seconds)",
     },
     {
       name: "update wizard requires a TTY",
+      locale: "en",
       run: async () => await updateWizardCommand({}),
       requireTty: false,
       expectedError:
         "Update wizard requires a TTY. Use `openclaw update --channel <stable|extended-stable|beta|dev>` instead.",
     },
+    {
+      name: "localized update status invalid timeout",
+      locale: "zh-CN",
+      run: async () => await updateStatusCommand({ timeout: "invalid" }),
+      requireTty: false,
+      expectedError: "--timeout 必须是正整数（秒）。",
+    },
+    {
+      name: "localized update wizard requires a TTY",
+      locale: "zh-CN",
+      run: async () => await updateWizardCommand({}),
+      requireTty: false,
+      expectedError:
+        "更新向导需要 TTY。请改用 `openclaw update --channel <stable|extended-stable|beta|dev>`。",
+    },
   ] as const)(
     "validates update command invocation errors: $name",
-    async ({ run, requireTty, expectedError, name }) => {
+    async ({ run, requireTty, expectedError, name, locale }) => {
+      vi.stubEnv("OPENCLAW_LOCALE", locale);
       setTty(requireTty);
       vi.mocked(defaultRuntime.error).mockClear();
       vi.mocked(defaultRuntime.exit).mockClear();

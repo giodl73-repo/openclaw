@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCliLocalization } from "../cli/i18n/runtime.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { loggingState } from "../logging/state.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -289,6 +290,19 @@ describe("agentCliCommand", () => {
       await expect(
         agentCliCommand({ message: "hi", to: "+1555", timeout: "10s" }, runtime),
       ).rejects.toThrow("Invalid --timeout");
+      expect(callGateway).not.toHaveBeenCalled();
+    });
+  });
+
+  it("localizes human validation while preserving CLI tokens", async () => {
+    await withTempStore(async () => {
+      await expect(
+        agentCliCommand({ message: "hi", to: "+1555", timeout: "10s" }, runtime, {
+          localization: createCliLocalization({ locale: "zh-CN" }),
+        }),
+      ).rejects.toThrow(
+        "无效的 --timeout。请使用非负整数秒数，例如 --timeout 600。使用 --timeout 0 可禁用超时。",
+      );
       expect(callGateway).not.toHaveBeenCalled();
     });
   });
@@ -1516,6 +1530,29 @@ describe("agentCliCommand", () => {
     });
   });
 
+  it("localizes attachment labels without changing attachment URLs", async () => {
+    await withTempStore(async () => {
+      callGateway.mockResolvedValue({
+        runId: "idem-1",
+        status: "ok",
+        result: {
+          payloads: [
+            {
+              text: "hello",
+              mediaUrls: ["https://example.test/report.pdf"],
+            },
+          ],
+        },
+      });
+
+      await agentCliCommand({ message: "hi", to: "+1555" }, runtime, {
+        localization: createCliLocalization({ locale: "zh-CN" }),
+      });
+
+      expect(runtime.log).toHaveBeenCalledWith("hello\n附件：https://example.test/report.pdf");
+    });
+  });
+
   it("passes model overrides through gateway requests", async () => {
     await withTempStore(async () => {
       mockGatewaySuccessReply();
@@ -1547,7 +1584,9 @@ describe("agentCliCommand", () => {
         return response;
       });
 
-      await agentCliCommand({ message: "hi", to: "+1555", json: true }, jsonRuntime);
+      await agentCliCommand({ message: "hi", to: "+1555", json: true }, jsonRuntime, {
+        localization: createCliLocalization({ locale: "zh-CN" }),
+      });
 
       expect(jsonRuntime.writeJson).toHaveBeenCalledWith(response, 2);
       expect(jsonRuntime.log).not.toHaveBeenCalled();
@@ -1612,6 +1651,23 @@ describe("agentCliCommand", () => {
         ),
       ).toBe(true);
       expect(runtime.log).toHaveBeenCalledWith("local");
+    });
+  });
+
+  it("localizes embedded fallback guidance while preserving its machine marker", async () => {
+    await withTempStore(async () => {
+      callGateway.mockRejectedValue(createGatewayClosedError());
+      mockLocalAgentReply();
+
+      await agentCliCommand({ message: "hi", to: "+1555" }, runtime, {
+        localization: createCliLocalization({ locale: "zh-CN" }),
+      });
+
+      expect(
+        mockMessages(runtime.error).some((message) =>
+          message.startsWith("EMBEDDED FALLBACK: 网关代理失败；正在运行嵌入式代理："),
+        ),
+      ).toBe(true);
     });
   });
 
@@ -2094,6 +2150,20 @@ describe("agentCliCommand", () => {
       expect(errorMessages.some((m) => m.includes("EMBEDDED FALLBACK"))).toBe(false);
     });
   }
+
+  it("localizes compact guidance while preserving active profile command formatting", async () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "ops");
+
+    await agentCliCommand({ message: "/compact", sessionId: "locked-session" }, runtime, {
+      localization: createCliLocalization({ locale: "zh-CN" }),
+    });
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      "无法通过 CLI 的 --message 执行斜杠命令。请使用：openclaw --profile ops sessions compact <key>",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(callGateway).not.toHaveBeenCalled();
+  });
 
   it("rejects /compact from --message-file before any gateway or embedded turn", async () => {
     await withTempStore(async ({ dir }) => {

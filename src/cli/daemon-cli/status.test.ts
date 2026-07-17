@@ -1,5 +1,5 @@
 // Daemon status tests cover service status gathering and CLI responses.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCliRuntimeCapture } from "../test-runtime-capture.js";
 import type { DaemonStatus } from "./status.gather.js";
 
@@ -43,7 +43,12 @@ vi.mock("./status.print.js", () => ({
 const { runDaemonStatus } = await import("./status.js");
 
 describe("runDaemonStatus", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
+    vi.stubEnv("OPENCLAW_LOCALE", "en");
     gatherDaemonStatus.mockClear();
     printDaemonStatus.mockClear();
     resetRuntimeCapture();
@@ -111,5 +116,38 @@ describe("runDaemonStatus", () => {
     expect(runtimeErrors[0]).toBe(
       "Gateway status failed: --require-rpc needs probing enabled. Remove --no-probe or drop --require-rpc.",
     );
+  });
+
+  it("localizes require-rpc guidance while preserving flags", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+
+    await expect(
+      runDaemonStatus({
+        rpc: {},
+        probe: false,
+        requireRpc: true,
+        json: false,
+      }),
+    ).rejects.toThrow("__exit__:1");
+
+    expect(runtimeErrors[0]).toBe(
+      "网关状态失败：--require-rpc 需要启用探测。请移除 --no-probe 或不使用 --require-rpc。",
+    );
+  });
+
+  it("localizes the failure wrapper while preserving upstream error text", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    gatherDaemonStatus.mockRejectedValueOnce(new Error("connection refused"));
+
+    await expect(
+      runDaemonStatus({
+        rpc: {},
+        probe: true,
+        requireRpc: false,
+        json: false,
+      }),
+    ).rejects.toThrow("__exit__:1");
+
+    expect(runtimeErrors[0]).toBe("网关状态失败：Error: connection refused");
   });
 });
