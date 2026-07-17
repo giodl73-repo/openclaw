@@ -2,7 +2,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
 import { defaultRuntime } from "../../runtime.js";
-import { printResult } from "./progress.js";
+import { createCliLocalization } from "../i18n/runtime.js";
+import { createUpdateProgress, printResult } from "./progress.js";
+
+const promptMocks = vi.hoisted(() => ({
+  start: vi.fn(),
+  stop: vi.fn(),
+}));
+
+vi.mock("@clack/prompts", () => ({
+  spinner: () => ({
+    start: promptMocks.start,
+    stop: promptMocks.stop,
+  }),
+}));
 
 function makeResult(
   stepName: string,
@@ -36,9 +49,20 @@ function renderResult(result: UpdateRunResult): string {
   return lines.join("\n");
 }
 
+function renderLocalizedResult(result: UpdateRunResult): string {
+  const lines: string[] = [];
+  vi.spyOn(defaultRuntime, "log").mockImplementation((...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  });
+  printResult(result, { hideSteps: true }, createCliLocalization({ locale: "zh-CN" }));
+  return lines.join("\n");
+}
+
 describe("update failure hints", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    promptMocks.start.mockReset();
+    promptMocks.stop.mockReset();
   });
 
   it("returns a package-manager bootstrap hint for pnpm npm-bootstrap failures", () => {
@@ -110,5 +134,52 @@ describe("update failure hints", () => {
     const output = renderResult(result);
     expect(output).not.toContain("Recovery hints:");
     expect(output).not.toContain("npm config set prefix ~/.local");
+  });
+
+  it("localizes result and recovery labels while preserving operational tokens", () => {
+    const result = makeResult(
+      "global update",
+      "npm ERR! code EACCES\nnpm ERR! Error: EACCES: permission denied",
+    );
+
+    const output = renderLocalizedResult(result);
+
+    expect(output).toContain("更新结果：");
+    expect(output).toContain("原因: global update");
+    expect(output).toContain("恢复提示：");
+    expect(output).toContain("权限失败（EACCES）");
+    expect(output).toContain("npm config set prefix ~/.local");
+    expect(output).toContain("openclaw gateway install --force");
+    expect(output).toContain("总耗时");
+  });
+
+  it("localizes known progress labels and preserves unknown step names", () => {
+    const localization = createCliLocalization({ locale: "zh-CN" });
+    const { progress } = createUpdateProgress(true, localization);
+
+    progress.onStepStart?.({
+      name: "git fetch",
+      command: "git fetch",
+      index: 0,
+      total: 1,
+    });
+    expect(promptMocks.start).toHaveBeenCalledWith("正在获取最新更改");
+
+    progress.onStepComplete?.({
+      name: "git fetch",
+      command: "git fetch",
+      index: 0,
+      total: 1,
+      durationMs: 1,
+      exitCode: 0,
+    });
+
+    progress.onStepStart?.({
+      name: "provider-defined step",
+      command: "provider-command",
+      index: 0,
+      total: 1,
+    });
+    expect(promptMocks.start).toHaveBeenLastCalledWith("provider-defined step");
   });
 });

@@ -74,6 +74,7 @@ import { defaultRuntime } from "../../runtime.js";
 import { VERSION } from "../../version.js";
 import { replaceCliName, resolveCliName } from "../cli-name.js";
 import { formatCliCommand } from "../command-format.js";
+import { createCliLocalization, type CliLocalization } from "../i18n/runtime.js";
 import { createUpdateProgress, printResult } from "./progress.js";
 import { prepareRestartScript } from "./restart-helper.js";
 import {
@@ -172,7 +173,10 @@ const UPDATE_QUIPS = [
   "Version bump! Same chaos energy, fewer crashes (probably).",
 ];
 
-function pickUpdateQuip(): string {
+function pickUpdateQuip(localization: CliLocalization): string {
+  if (localization.context.locale === "zh-CN") {
+    return localization.t("cli.update.complete");
+  }
   return UPDATE_QUIPS[Math.floor(Math.random() * UPDATE_QUIPS.length)] ?? "Update complete.";
 }
 type UpdateDryRunPreview = {
@@ -195,40 +199,60 @@ type UpdateDryRunPreview = {
   notes: string[];
 };
 
-function printDryRunPreview(preview: UpdateDryRunPreview, jsonMode: boolean): void {
+function printDryRunPreview(
+  preview: UpdateDryRunPreview,
+  jsonMode: boolean,
+  localization: CliLocalization,
+  humanActions: readonly string[],
+  humanNotes: readonly string[],
+): void {
   if (jsonMode) {
     defaultRuntime.writeJson(preview);
     return;
   }
 
-  defaultRuntime.log(theme.heading("Update dry-run"));
-  defaultRuntime.log(theme.muted("No changes were applied."));
+  defaultRuntime.log(theme.heading(localization.t("cli.update.dryRun.heading")));
+  defaultRuntime.log(theme.muted(localization.t("cli.update.dryRun.noChanges")));
   defaultRuntime.log("");
-  defaultRuntime.log(`  Root: ${theme.muted(preview.root)}`);
-  defaultRuntime.log(`  Install kind: ${theme.muted(preview.installKind)}`);
-  defaultRuntime.log(`  Mode: ${theme.muted(preview.mode)}`);
-  defaultRuntime.log(`  Channel: ${theme.muted(preview.effectiveChannel)}`);
-  defaultRuntime.log(`  Tag/spec: ${theme.muted(preview.tag)}`);
+  defaultRuntime.log(`  ${localization.t("cli.update.dryRun.root")}: ${theme.muted(preview.root)}`);
+  defaultRuntime.log(
+    `  ${localization.t("cli.update.dryRun.installKind")}: ${theme.muted(preview.installKind)}`,
+  );
+  defaultRuntime.log(`  ${localization.t("cli.update.dryRun.mode")}: ${theme.muted(preview.mode)}`);
+  defaultRuntime.log(
+    `  ${localization.t("cli.update.dryRun.channel")}: ${theme.muted(preview.effectiveChannel)}`,
+  );
+  defaultRuntime.log(
+    `  ${localization.t("cli.update.dryRun.tagSpec")}: ${theme.muted(preview.tag)}`,
+  );
   if (preview.currentVersion) {
-    defaultRuntime.log(`  Current version: ${theme.muted(preview.currentVersion)}`);
+    defaultRuntime.log(
+      `  ${localization.t("cli.update.dryRun.currentVersion")}: ${theme.muted(
+        preview.currentVersion,
+      )}`,
+    );
   }
   if (preview.targetVersion) {
-    defaultRuntime.log(`  Target version: ${theme.muted(preview.targetVersion)}`);
+    defaultRuntime.log(
+      `  ${localization.t("cli.update.dryRun.targetVersion")}: ${theme.muted(
+        preview.targetVersion,
+      )}`,
+    );
   }
   if (preview.downgradeRisk) {
-    defaultRuntime.log(theme.warn("  Downgrade confirmation would be required in a real run."));
+    defaultRuntime.log(theme.warn(`  ${localization.t("cli.update.dryRun.downgradeWarning")}`));
   }
 
   defaultRuntime.log("");
-  defaultRuntime.log(theme.heading("Planned actions:"));
-  for (const action of preview.actions) {
+  defaultRuntime.log(theme.heading(localization.t("cli.update.dryRun.plannedActions")));
+  for (const action of humanActions) {
     defaultRuntime.log(`  - ${action}`);
   }
 
-  if (preview.notes.length > 0) {
+  if (humanNotes.length > 0) {
     defaultRuntime.log("");
-    defaultRuntime.log(theme.heading("Notes:"));
-    for (const note of preview.notes) {
+    defaultRuntime.log(theme.heading(localization.t("cli.update.dryRun.notes")));
+    for (const note of humanNotes) {
       defaultRuntime.log(`  - ${theme.muted(note)}`);
     }
   }
@@ -251,6 +275,7 @@ async function runPackageInstallUpdate(params: {
   nodeRunner?: string;
   installEnv?: NodeJS.ProcessEnv;
   installTarget?: ResolvedGlobalInstallTarget;
+  localization: CliLocalization;
 }): Promise<UpdateRunResult> {
   const installEnv = params.installEnv ?? (await createGlobalInstallEnv());
   const runCommand = createGlobalCommandRunner();
@@ -416,6 +441,7 @@ async function runGitUpdate(params: {
   } | void>;
   allowGatewayServiceRepair: boolean;
   allowGatewayActivation: boolean;
+  localization: CliLocalization;
 }): Promise<UpdateRunResult> {
   const updateRoot = params.switchToGit ? resolveGitInstallDir() : params.root;
   const effectiveTimeout = params.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS;
@@ -440,7 +466,7 @@ async function runGitUpdate(params: {
       durationMs: Date.now() - params.startedAt,
     };
     params.stop();
-    printResult(result, { ...params.opts, hideSteps: params.showProgress });
+    printResult(result, { ...params.opts, hideSteps: params.showProgress }, params.localization);
     defaultRuntime.exit(1);
     return result;
   }
@@ -517,9 +543,10 @@ async function withUpdateInProgressEnv<T>(run: () => Promise<T>): Promise<T> {
 
 export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
   const recoveryState: UpdateCommandRecoveryState = {};
+  const localization = createCliLocalization();
   return await withUpdateInProgressEnv(async () => {
     try {
-      await updateCommandInternal(opts, recoveryState);
+      await updateCommandInternal(opts, recoveryState, localization);
     } finally {
       try {
         await recoveryState.windowsTaskAutoStartRecovery?.restore();
@@ -533,6 +560,7 @@ export async function updateCommand(opts: UpdateCommandOptions): Promise<void> {
 async function updateCommandInternal(
   opts: UpdateCommandOptions,
   recoveryState: UpdateCommandRecoveryState,
+  localization: CliLocalization,
 ): Promise<void> {
   suppressDeprecations();
   await cleanupStaleManagedServiceUpdateHandoffs().catch(() => undefined);
@@ -543,7 +571,7 @@ async function updateCommandInternal(
     process.env[POST_CORE_UPDATE_REQUESTED_CHANNEL_ENV]?.trim() ?? "";
   const postCoreInstallRecordsPath = process.env[POST_CORE_UPDATE_INSTALL_RECORDS_PATH_ENV];
 
-  const timeoutMs = parseTimeoutMsOrExit(opts.timeout);
+  const timeoutMs = parseTimeoutMsOrExit(opts.timeout, localization);
   const shouldRestart = opts.restart !== false;
   if (timeoutMs === null) {
     return;
@@ -671,6 +699,7 @@ async function updateCommandInternal(
       reason: "unsupported_git_channel",
       opts,
       controlPlaneUpdateSentinelMeta,
+      localization,
     });
     return;
   }
@@ -705,6 +734,7 @@ async function updateCommandInternal(
       reason: "unsupported_git_channel",
       opts,
       controlPlaneUpdateSentinelMeta,
+      localization,
     });
     return;
   }
@@ -726,6 +756,7 @@ async function updateCommandInternal(
       reason: EXTENDED_STABLE_TAG_UNSUPPORTED_REASON,
       opts,
       controlPlaneUpdateSentinelMeta,
+      localization,
     });
     return;
   }
@@ -830,6 +861,7 @@ async function updateCommandInternal(
           reason: extendedStable.reason,
           opts,
           controlPlaneUpdateSentinelMeta,
+          localization,
         });
         return;
       }
@@ -895,44 +927,81 @@ async function updateCommandInternal(
     }
 
     const actions: string[] = [];
+    const humanActions: string[] = [];
     if (requestedChannel && requestedChannel !== storedChannel) {
       actions.push(`Persist update.channel=${requestedChannel} in config`);
+      humanActions.push(
+        localization.t("cli.update.dryRun.action.persistChannel", {
+          channel: requestedChannel,
+        }),
+      );
     }
     if (switchToGit) {
       actions.push("Switch install mode from package to git checkout (dev channel)");
+      humanActions.push(localization.t("cli.update.dryRun.action.switchToGit"));
     } else if (switchToPackage) {
       actions.push(`Switch install mode from git to package manager (${mode})`);
+      humanActions.push(localization.t("cli.update.dryRun.action.switchToPackage", { mode }));
     } else if (updateInstallKind === "git") {
       actions.push(`Run git update flow on channel ${channel} (fetch/rebase/build/doctor)`);
+      humanActions.push(localization.t("cli.update.dryRun.action.gitUpdate", { channel }));
     } else if (packageAlreadyCurrent) {
       actions.push(
         `Refresh package install with spec ${packageInstallSpec ?? tag}; current version already matches ${targetVersion}`,
       );
+      humanActions.push(
+        localization.t("cli.update.dryRun.action.refreshPackage", {
+          spec: packageInstallSpec ?? tag,
+          version: targetVersion ?? "",
+        }),
+      );
     } else {
       actions.push(`Run global package manager update with spec ${packageInstallSpec ?? tag}`);
+      humanActions.push(
+        localization.t("cli.update.dryRun.action.packageUpdate", {
+          spec: packageInstallSpec ?? tag,
+        }),
+      );
     }
     actions.push("Run plugin update sync after core update");
+    humanActions.push(localization.t("cli.update.dryRun.action.plugins"));
     actions.push("Refresh shell completion cache (if needed)");
+    humanActions.push(localization.t("cli.update.dryRun.action.completion"));
     actions.push(
       shouldRestart
         ? "Restart gateway service and run doctor checks"
         : "Skip restart (because --no-restart is set)",
     );
+    humanActions.push(
+      localization.t(
+        shouldRestart ? "cli.update.dryRun.action.restart" : "cli.update.dryRun.action.noRestart",
+      ),
+    );
 
     const notes: string[] = [];
+    const humanNotes: string[] = [];
     if (opts.tag && updateInstallKind === "git") {
       notes.push("--tag applies to npm installs only; git updates ignore it.");
+      humanNotes.push(localization.t("cli.update.dryRun.note.gitTag"));
     }
     if (fallbackToLatest) {
       notes.push("Beta channel resolves to latest for this run (fallback).");
+      humanNotes.push(localization.t("cli.update.dryRun.note.betaFallback"));
     }
     if (managedServiceRootRedirect) {
       notes.push(
         `Package update targets managed service root ${managedServiceRootRedirect.root} instead of invoking root ${managedServiceRootRedirect.previousRoot}.`,
       );
+      humanNotes.push(
+        localization.t("cli.update.dryRun.note.managedRoot", {
+          root: managedServiceRootRedirect.root,
+          previousRoot: managedServiceRootRedirect.previousRoot,
+        }),
+      );
     }
     if (explicitTag && !canResolveRegistryVersionForPackageTarget(tag)) {
       notes.push("Non-registry package specs skip npm version lookup and downgrade previews.");
+      humanNotes.push(localization.t("cli.update.dryRun.note.nonRegistry"));
     }
 
     printDryRunPreview(
@@ -956,6 +1025,9 @@ async function updateCommandInternal(
         notes,
       },
       Boolean(opts.json),
+      localization,
+      humanActions,
+      humanNotes,
     );
     return;
   }
@@ -1035,11 +1107,11 @@ async function updateCommandInternal(
 
   const showProgress = !opts.json && process.stdout.isTTY;
   if (!opts.json) {
-    defaultRuntime.log(theme.heading("Updating OpenClaw..."));
+    defaultRuntime.log(theme.heading(localization.t("cli.update.heading")));
     defaultRuntime.log("");
   }
 
-  const { progress, stop } = createUpdateProgress(showProgress);
+  const { progress, stop } = createUpdateProgress(showProgress, localization);
   const startedAt = Date.now();
   const preUpdatePluginInstallRecords = await loadInstalledPluginIndexInstallRecords();
 
@@ -1144,6 +1216,7 @@ async function updateCommandInternal(
             nodeRunner: packageUpdateNodeRunner,
             installEnv: packageInstallEnv,
             installTarget: packageInstallTarget,
+            localization,
           })
         : await runGitUpdate({
             root,
@@ -1176,6 +1249,7 @@ async function updateCommandInternal(
                 : undefined,
             allowGatewayServiceRepair: false,
             allowGatewayActivation: false,
+            localization,
           });
   } catch (err) {
     stop();
@@ -1202,7 +1276,7 @@ async function updateCommandInternal(
 
   stop();
   if (!opts.json || result.status !== "ok") {
-    printResult(result, { ...opts, hideSteps: showProgress });
+    printResult(result, { ...opts, hideSteps: showProgress }, localization);
   }
 
   if (result.status === "error") {
@@ -1531,7 +1605,7 @@ async function updateCommandInternal(
   });
 
   if (!opts.json) {
-    defaultRuntime.log(theme.muted(pickUpdateQuip()));
+    defaultRuntime.log(theme.muted(pickUpdateQuip(localization)));
   } else {
     defaultRuntime.writeJson(resultWithPostUpdate);
   }

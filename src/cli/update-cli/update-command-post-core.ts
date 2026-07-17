@@ -50,6 +50,7 @@ import {
 import { runExec } from "../../process/exec.js";
 import { defaultRuntime } from "../../runtime.js";
 import { VERSION } from "../../version.js";
+import type { CliLocalization } from "../i18n/runtime.js";
 import { printResult } from "./progress.js";
 import {
   parseTimeoutMsOrExit,
@@ -95,6 +96,7 @@ export async function reportPreMutationUpdateFailure(params: {
   reason: ExtendedStableFailureReason | typeof EXTENDED_STABLE_TAG_UNSUPPORTED_REASON;
   opts: UpdateCommandOptions;
   controlPlaneUpdateSentinelMeta: ControlPlaneUpdateSentinelMetaFile["meta"] | null;
+  localization?: CliLocalization;
 }): Promise<void> {
   const result: UpdateRunResult = {
     status: "error",
@@ -109,7 +111,7 @@ export async function reportPreMutationUpdateFailure(params: {
     result,
     jsonMode: Boolean(params.opts.json),
   });
-  printResult(result, params.opts);
+  printResult(result, params.opts, params.localization);
   defaultRuntime.exit(1);
 }
 

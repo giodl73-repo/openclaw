@@ -2492,6 +2492,41 @@ describe("update-cli", () => {
     },
   ] as const)("updateCommand dry-run behavior: $name", runUpdateCliScenario);
 
+  it("localizes update dry-run output while preserving operational values", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    vi.mocked(defaultRuntime.log).mockClear();
+
+    await updateCommand({ dryRun: true, channel: "beta", restart: false });
+
+    const output = vi
+      .mocked(defaultRuntime.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(output).toContain("更新试运行");
+    expect(output).toContain("未应用任何更改");
+    expect(output).toContain("计划操作：");
+    expect(output).toContain("更新通道: beta");
+    expect(output).toContain("软件包管理器");
+    expect(output).toContain("openclaw@");
+    expect(output).toContain("--no-restart");
+    expect(output).not.toContain("Update dry-run");
+  });
+
+  it("keeps update dry-run JSON unchanged under a localized process locale", async () => {
+    await updateCommand({ dryRun: true, json: true, channel: "beta", restart: false });
+    const englishOutput = structuredClone(
+      requireValue(lastWriteJsonCall(), "English update dry-run JSON output"),
+    );
+
+    vi.mocked(defaultRuntime.writeJson).mockClear();
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    await updateCommand({ dryRun: true, json: true, channel: "beta", restart: false });
+
+    expect(requireValue(lastWriteJsonCall(), "localized update dry-run JSON output")).toEqual(
+      englishOutput,
+    );
+  });
+
   it.each([
     {
       name: "table output",
@@ -7505,6 +7540,19 @@ describe("update-cli", () => {
     } finally {
       randomSpy.mockRestore();
     }
+  });
+
+  it("uses localized completion copy for a successful update", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    vi.mocked(runGatewayUpdate).mockResolvedValue(makeOkUpdateResult());
+    vi.mocked(runDaemonRestart).mockResolvedValue(true);
+    vi.mocked(doctorCommand).mockResolvedValue(undefined);
+    vi.mocked(defaultRuntime.log).mockClear();
+
+    await updateCommand({});
+
+    const logLines = vi.mocked(defaultRuntime.log).mock.calls.map((call) => String(call[0]));
+    expect(logLines).toContain("更新完成。");
   });
 
   it("marks the whole update command as update-in-progress", async () => {

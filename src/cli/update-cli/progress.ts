@@ -10,36 +10,39 @@ import type {
   UpdateStepProgress,
 } from "../../infra/update-runner.js";
 import { defaultRuntime } from "../../runtime.js";
+import type { CliMessageKey } from "../i18n/locales/en.js";
+import { createCliLocalization, type CliLocalization } from "../i18n/runtime.js";
 import type { UpdateCommandOptions } from "./shared.js";
 
-const STEP_LABELS: Record<string, string> = {
-  "clean check": "Working directory is clean",
-  "upstream check": "Upstream branch exists",
-  "git fetch": "Fetching latest changes",
-  "git rebase": "Rebasing onto target commit",
-  "git rev-parse @{upstream}": "Resolving upstream commit",
-  "git rev-list": "Enumerating candidate commits",
-  "git clone": "Cloning git checkout",
-  "preflight worktree": "Preparing preflight worktree",
-  "preflight cleanup": "Cleaning preflight worktree",
-  "deps install": "Installing dependencies",
-  build: "Building",
-  "ui:build": "Building UI assets",
-  "ui:build (post-doctor repair)": "Restoring missing UI assets",
-  "ui assets verify": "Validating UI assets",
-  "openclaw doctor entry": "Checking doctor entrypoint",
-  "openclaw doctor": "Running doctor checks",
-  "git rev-parse HEAD (after)": "Verifying update",
-  "global update": "Updating via package manager",
-  "global update (omit optional)": "Retrying update without optional deps",
-  "global install stage": "Preparing staged package install",
-  "global install verify": "Verifying global package",
-  "global install swap": "Activating global package",
-  "global install": "Installing global package",
+const STEP_LABEL_KEYS: Record<string, CliMessageKey> = {
+  "clean check": "cli.update.progress.cleanCheck",
+  "upstream check": "cli.update.progress.upstreamCheck",
+  "git fetch": "cli.update.progress.gitFetch",
+  "git rebase": "cli.update.progress.gitRebase",
+  "git rev-parse @{upstream}": "cli.update.progress.resolveUpstream",
+  "git rev-list": "cli.update.progress.enumerateCommits",
+  "git clone": "cli.update.progress.gitClone",
+  "preflight worktree": "cli.update.progress.preflightWorktree",
+  "preflight cleanup": "cli.update.progress.preflightCleanup",
+  "deps install": "cli.update.progress.depsInstall",
+  build: "cli.update.progress.build",
+  "ui:build": "cli.update.progress.uiBuild",
+  "ui:build (post-doctor repair)": "cli.update.progress.uiRestore",
+  "ui assets verify": "cli.update.progress.uiVerify",
+  "openclaw doctor entry": "cli.update.progress.doctorEntry",
+  "openclaw doctor": "cli.update.progress.doctor",
+  "git rev-parse HEAD (after)": "cli.update.progress.verify",
+  "global update": "cli.update.progress.globalUpdate",
+  "global update (omit optional)": "cli.update.progress.globalUpdateOmitOptional",
+  "global install stage": "cli.update.progress.globalInstallStage",
+  "global install verify": "cli.update.progress.globalInstallVerify",
+  "global install swap": "cli.update.progress.globalInstallSwap",
+  "global install": "cli.update.progress.globalInstall",
 };
 
-function getStepLabel(step: Pick<UpdateStepInfo, "name">): string {
-  return STEP_LABELS[step.name] ?? step.name;
+function getStepLabel(step: Pick<UpdateStepInfo, "name">, localization: CliLocalization): string {
+  const key = STEP_LABEL_KEYS[step.name];
+  return key ? localization.t(key) : step.name;
 }
 
 function isAdvisoryStep(step: { advisory?: UpdateStepAdvisory }): boolean {
@@ -47,32 +50,32 @@ function isAdvisoryStep(step: { advisory?: UpdateStepAdvisory }): boolean {
 }
 
 /** Convert updater failure reasons and stderr tails into operator-facing recovery hints. */
-function inferUpdateFailureHints(result: UpdateRunResult): string[] {
+function inferUpdateFailureHints(result: UpdateRunResult, localization: CliLocalization): string[] {
   if (result.status !== "error") {
     return [];
   }
   if (result.reason === "pnpm-corepack-missing") {
     return [
-      "This pnpm checkout could not auto-enable pnpm because corepack is missing.",
-      "Install pnpm manually or install Node with corepack available, then rerun the update command.",
+      localization.t("cli.update.recovery.corepackMissing"),
+      localization.t("cli.update.recovery.installPnpmOrCorepack"),
     ];
   }
   if (result.reason === "pnpm-corepack-enable-failed") {
     return [
-      "This pnpm checkout could not auto-enable pnpm via corepack.",
-      "Run `corepack enable` manually or install pnpm manually, then rerun the update command.",
+      localization.t("cli.update.recovery.corepackEnableFailed"),
+      localization.t("cli.update.recovery.enableCorepackOrInstallPnpm"),
     ];
   }
   if (result.reason === "pnpm-npm-bootstrap-failed") {
     return [
-      "This pnpm checkout could not bootstrap pnpm from npm automatically.",
-      "Install pnpm manually, then rerun the update command.",
+      localization.t("cli.update.recovery.pnpmBootstrapFailed"),
+      localization.t("cli.update.recovery.installPnpm"),
     ];
   }
   if (result.reason === "preferred-manager-unavailable") {
     return [
-      "This checkout requires its declared package manager and the updater could not find it.",
-      "Install the missing package manager manually, then rerun the update command.",
+      localization.t("cli.update.recovery.managerUnavailable"),
+      localization.t("cli.update.recovery.installManager"),
     ];
   }
   if (result.mode !== "npm") {
@@ -89,26 +92,18 @@ function inferUpdateFailureHints(result: UpdateRunResult): string[] {
     failedStep.name.startsWith("global update") || failedStep.name.startsWith("global install");
 
   if (isGlobalPackageInstallStep && stderr.includes("eacces")) {
-    hints.push(
-      "Detected permission failure (EACCES). Re-run with a writable global prefix or sudo (for system-managed Node installs).",
-    );
-    hints.push(
-      "If you recover with sudo/manual package install on a managed Gateway, stop the Gateway first so it does not load files while the package tree is being replaced.",
-    );
-    hints.push("Example: npm config set prefix ~/.local && npm i -g openclaw@latest");
-    hints.push(
-      "System install outline: openclaw gateway stop -> sudo <system-npm> i -g openclaw@latest -> openclaw gateway install --force -> openclaw gateway restart.",
-    );
+    hints.push(localization.t("cli.update.recovery.permission"));
+    hints.push(localization.t("cli.update.recovery.stopGateway"));
+    hints.push(localization.t("cli.update.recovery.permissionExample"));
+    hints.push(localization.t("cli.update.recovery.systemInstallOutline"));
   }
 
   if (
     failedStep.name.startsWith("global update") &&
     (stderr.includes("node-gyp") || stderr.includes("prebuild"))
   ) {
-    hints.push(
-      "Detected native optional dependency build failure. The updater retries with --omit=optional automatically.",
-    );
-    hints.push("If it still fails: npm i -g openclaw@latest --omit=optional");
+    hints.push(localization.t("cli.update.recovery.optionalDependency"));
+    hints.push(localization.t("cli.update.recovery.optionalDependencyCommand"));
   }
 
   return hints;
@@ -121,7 +116,10 @@ type ProgressController = {
 };
 
 /** Create a progress adapter for the updater runner without coupling runner code to terminal UI. */
-export function createUpdateProgress(enabled: boolean): ProgressController {
+export function createUpdateProgress(
+  enabled: boolean,
+  localization: CliLocalization = createCliLocalization(),
+): ProgressController {
   if (!enabled) {
     return {
       progress: {},
@@ -134,14 +132,14 @@ export function createUpdateProgress(enabled: boolean): ProgressController {
   const progress: UpdateStepProgress = {
     onStepStart: (step) => {
       currentSpinner = spinner();
-      currentSpinner.start(theme.accent(getStepLabel(step)));
+      currentSpinner.start(theme.accent(getStepLabel(step, localization)));
     },
     onStepComplete: (step) => {
       if (!currentSpinner) {
         return;
       }
 
-      const label = getStepLabel(step);
+      const label = getStepLabel(step, localization);
       const duration = theme.muted(`(${formatDurationPrecise(step.durationMs)})`);
       const icon = formatStepStatus(step);
 
@@ -198,7 +196,11 @@ type PrintResultOptions = UpdateCommandOptions & {
 };
 
 /** Render a completed updater run as JSON or terminal output. */
-export function printResult(result: UpdateRunResult, opts: PrintResultOptions): void {
+export function printResult(
+  result: UpdateRunResult,
+  opts: PrintResultOptions,
+  localization: CliLocalization = createCliLocalization(),
+): void {
   if (opts.json) {
     defaultRuntime.writeJson(result);
     return;
@@ -209,27 +211,33 @@ export function printResult(result: UpdateRunResult, opts: PrintResultOptions): 
 
   defaultRuntime.log("");
   defaultRuntime.log(
-    `${theme.heading("Update Result:")} ${statusColor(result.status.toUpperCase())}`,
+    `${theme.heading(localization.t("cli.update.result.heading"))} ${statusColor(
+      result.status.toUpperCase(),
+    )}`,
   );
   if (result.root) {
-    defaultRuntime.log(`  Root: ${theme.muted(result.root)}`);
+    defaultRuntime.log(
+      `  ${localization.t("cli.update.result.root")}: ${theme.muted(result.root)}`,
+    );
   }
   if (result.reason) {
-    defaultRuntime.log(`  Reason: ${theme.muted(result.reason)}`);
+    defaultRuntime.log(
+      `  ${localization.t("cli.update.result.reason")}: ${theme.muted(result.reason)}`,
+    );
   }
 
   if (result.before?.version || result.before?.sha) {
     const before = result.before.version ?? result.before.sha?.slice(0, 8) ?? "";
-    defaultRuntime.log(`  Before: ${theme.muted(before)}`);
+    defaultRuntime.log(`  ${localization.t("cli.update.result.before")}: ${theme.muted(before)}`);
   }
   if (result.after?.version || result.after?.sha) {
     const after = result.after.version ?? result.after.sha?.slice(0, 8) ?? "";
-    defaultRuntime.log(`  After: ${theme.muted(after)}`);
+    defaultRuntime.log(`  ${localization.t("cli.update.result.after")}: ${theme.muted(after)}`);
   }
 
   if (!opts.hideSteps && result.steps.length > 0) {
     defaultRuntime.log("");
-    defaultRuntime.log(theme.heading("Steps:"));
+    defaultRuntime.log(theme.heading(localization.t("cli.update.result.steps")));
     for (const step of result.steps) {
       const status = formatStepStatus(step);
       const duration = theme.muted(`(${formatDurationPrecise(step.durationMs)})`);
@@ -253,15 +261,19 @@ export function printResult(result: UpdateRunResult, opts: PrintResultOptions): 
     }
   }
 
-  const hints = inferUpdateFailureHints(result);
+  const hints = inferUpdateFailureHints(result, localization);
   if (hints.length > 0) {
     defaultRuntime.log("");
-    defaultRuntime.log(theme.heading("Recovery hints:"));
+    defaultRuntime.log(theme.heading(localization.t("cli.update.result.recoveryHints")));
     for (const hint of hints) {
       defaultRuntime.log(`  - ${theme.warn(hint)}`);
     }
   }
 
   defaultRuntime.log("");
-  defaultRuntime.log(`Total time: ${theme.muted(formatDurationPrecise(result.durationMs))}`);
+  defaultRuntime.log(
+    `${localization.t("cli.update.result.totalTime")}: ${theme.muted(
+      formatDurationPrecise(result.durationMs),
+    )}`,
+  );
 }
