@@ -3,6 +3,11 @@ import type { TranslationMap } from "../lib/types.ts";
 import * as agentEn from "./en-agents.ts";
 
 export const en: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "Unknown or expired approval ID.",
+    },
+  },
   common: {
     health: "Health",
     ok: "OK",

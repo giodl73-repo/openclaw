@@ -1,3 +1,8 @@
+import {
+  DEFAULT_APPROVAL_MESSAGE_RENDERER,
+  type ApprovalMessageKey,
+  type ApprovalMessageRenderer,
+} from "./approval-localization.js";
 // Builds approval prompt view models from request and resolution events.
 import { resolveApprovalRequestKind } from "./approval-types.js";
 import type {
@@ -23,54 +28,130 @@ type ApprovalPhase = "pending" | "resolved" | "expired";
 
 export { resolveApprovalRequestKind } from "./approval-types.js";
 
-function buildExecMetadata(request: ExecApprovalRequest): ApprovalMetadataView[] {
+type ApprovalViewOptions = {
+  // Production callers intentionally preserve English until the recipient
+  // locale owner is defined; localization is injected only at this final edge.
+  renderMessage?: ApprovalMessageRenderer;
+};
+
+function renderApprovalMessage(
+  options: ApprovalViewOptions | undefined,
+  key: ApprovalMessageKey,
+  params?: Parameters<ApprovalMessageRenderer>[1],
+): string {
+  return (options?.renderMessage ?? DEFAULT_APPROVAL_MESSAGE_RENDERER)(key, params);
+}
+
+function buildExecMetadata(
+  request: ExecApprovalRequest,
+  options?: ApprovalViewOptions,
+): ApprovalMetadataView[] {
   const metadata: ApprovalMetadataView[] = [];
   if (request.request.agentId) {
-    metadata.push({ label: "Agent", value: request.request.agentId });
+    metadata.push({
+      label: renderApprovalMessage(options, "approval.metadata.agent"),
+      value: request.request.agentId,
+    });
   }
   if (request.request.cwd) {
-    metadata.push({ label: "CWD", value: request.request.cwd });
+    metadata.push({
+      label: renderApprovalMessage(options, "approval.metadata.cwd"),
+      value: request.request.cwd,
+    });
   }
   if (request.request.host) {
-    metadata.push({ label: "Host", value: request.request.host });
+    metadata.push({
+      label: renderApprovalMessage(options, "approval.metadata.host"),
+      value: request.request.host,
+    });
   }
   if (Array.isArray(request.request.envKeys) && request.request.envKeys.length > 0) {
-    metadata.push({ label: "Env Overrides", value: request.request.envKeys.join(", ") });
+    metadata.push({
+      label: renderApprovalMessage(options, "approval.metadata.envOverrides"),
+      value: request.request.envKeys.join(", "),
+    });
   }
   return metadata;
 }
 
-function buildPluginMetadata(request: PluginApprovalRequest): ApprovalMetadataView[] {
+function buildPluginMetadata(
+  request: PluginApprovalRequest,
+  options?: ApprovalViewOptions,
+): ApprovalMetadataView[] {
   const metadata: ApprovalMetadataView[] = [];
   const severity = request.request.severity ?? "warning";
   metadata.push({
-    label: "Severity",
-    value: severity === "critical" ? "Critical" : severity === "info" ? "Info" : "Warning",
+    label: renderApprovalMessage(options, "approval.metadata.severity"),
+    value: renderApprovalMessage(
+      options,
+      severity === "critical"
+        ? "approval.severity.critical"
+        : severity === "info"
+          ? "approval.severity.info"
+          : "approval.severity.warning",
+    ),
   });
   if (request.request.toolName) {
-    metadata.push({ label: "Tool", value: request.request.toolName });
+    metadata.push({
+      label: renderApprovalMessage(options, "approval.metadata.tool"),
+      value: request.request.toolName,
+    });
   }
   if (request.request.pluginId) {
-    metadata.push({ label: "Plugin", value: request.request.pluginId });
+    metadata.push({
+      label: renderApprovalMessage(options, "approval.metadata.plugin"),
+      value: request.request.pluginId,
+    });
   }
   if (request.request.agentId) {
-    metadata.push({ label: "Agent", value: request.request.agentId });
+    metadata.push({
+      label: renderApprovalMessage(options, "approval.metadata.agent"),
+      value: request.request.agentId,
+    });
   }
   return metadata;
+}
+
+function localizeActions<T extends { decision: string; label: string }>(
+  actions: readonly T[],
+  options?: ApprovalViewOptions,
+): T[] {
+  return actions.map((action) => ({
+    ...action,
+    label: renderApprovalMessage(
+      options,
+      action.decision === "allow-once"
+        ? "approval.action.allowOnce"
+        : action.decision === "allow-always"
+          ? "approval.action.allowAlways"
+          : "approval.action.deny",
+    ),
+  }));
 }
 
 function buildExecViewBase<TPhase extends ApprovalPhase>(
   request: ExecApprovalRequest,
   phase: TPhase,
+  options?: ApprovalViewOptions,
 ): ExecApprovalViewBase & { phase: TPhase } {
   const { commandText, commandPreview } = resolveExecApprovalCommandDisplay(request.request);
   return {
     approvalId: request.id,
     approvalKind: "exec",
     phase,
-    title: phase === "pending" ? "Exec Approval Required" : "Exec Approval",
-    description: phase === "pending" ? "A command needs your approval." : null,
-    metadata: buildExecMetadata(request),
+    title: renderApprovalMessage(
+      options,
+      phase === "pending"
+        ? "approval.exec.title.pending"
+        : phase === "resolved"
+          ? "approval.exec.title.resolved"
+          : "approval.exec.title.expired",
+    ),
+    description:
+      phase === "pending"
+        ? renderApprovalMessage(options, "approval.exec.description.pending")
+        : null,
+    metadata: buildExecMetadata(request, options),
     ask: request.request.ask ?? null,
     agentId: request.request.agentId ?? null,
     warningText: request.request.warningText ?? null,
@@ -88,6 +169,7 @@ function buildExecViewBase<TPhase extends ApprovalPhase>(
 function buildPluginViewBase<TPhase extends ApprovalPhase>(
   request: PluginApprovalRequest,
   phase: TPhase,
+  options?: ApprovalViewOptions,
 ): PluginApprovalViewBase & { phase: TPhase } {
   return {
     approvalId: request.id,
@@ -95,7 +177,7 @@ function buildPluginViewBase<TPhase extends ApprovalPhase>(
     phase,
     title: request.request.title,
     description: request.request.description ?? null,
-    metadata: buildPluginMetadata(request),
+    metadata: buildPluginMetadata(request, options),
     agentId: request.request.agentId ?? null,
     pluginId: request.request.pluginId ?? null,
     toolName: request.request.toolName ?? null,
@@ -104,31 +186,40 @@ function buildPluginViewBase<TPhase extends ApprovalPhase>(
 }
 
 /** Builds the presentation model for an unresolved exec or plugin approval. */
-export function buildPendingApprovalView(request: ApprovalRequest): PendingApprovalView {
+export function buildPendingApprovalView(
+  request: ApprovalRequest,
+  options?: ApprovalViewOptions,
+): PendingApprovalView {
   const approvalKind = resolveApprovalRequestKind(request);
   if (approvalKind === "plugin") {
     const pluginRequest = request as PluginApprovalRequest;
     return {
-      ...buildPluginViewBase(pluginRequest, "pending"),
-      actions: buildTypedApprovalActionDescriptors({
-        approvalCommandId: pluginRequest.id,
-        approvalKind,
-        allowedDecisions: resolveCanonicalPluginApprovalRequestAllowedDecisions(
-          pluginRequest.request,
-        ),
-      }),
+      ...buildPluginViewBase(pluginRequest, "pending", options),
+      actions: localizeActions(
+        buildTypedApprovalActionDescriptors({
+          approvalCommandId: pluginRequest.id,
+          approvalKind,
+          allowedDecisions: resolveCanonicalPluginApprovalRequestAllowedDecisions(
+            pluginRequest.request,
+          ),
+        }),
+        options,
+      ),
       expiresAtMs: pluginRequest.expiresAtMs,
     };
   }
   const execRequest = request as ExecApprovalRequest;
   return {
-    ...buildExecViewBase(execRequest, "pending"),
-    actions: buildTypedApprovalActionDescriptors({
-      approvalCommandId: execRequest.id,
-      approvalKind,
-      ask: execRequest.request.ask,
-      allowedDecisions: resolveExecApprovalRequestAllowedDecisions(execRequest.request),
-    }),
+    ...buildExecViewBase(execRequest, "pending", options),
+    actions: localizeActions(
+      buildTypedApprovalActionDescriptors({
+        approvalCommandId: execRequest.id,
+        approvalKind,
+        ask: execRequest.request.ask,
+        allowedDecisions: resolveExecApprovalRequestAllowedDecisions(execRequest.request),
+      }),
+      options,
+    ),
     expiresAtMs: execRequest.expiresAtMs,
   };
 }
@@ -137,29 +228,33 @@ export function buildPendingApprovalView(request: ApprovalRequest): PendingAppro
 export function buildResolvedApprovalView(
   request: ApprovalRequest,
   resolved: ApprovalResolved,
+  options?: ApprovalViewOptions,
 ): ResolvedApprovalView {
   const approvalKind = resolveApprovalRequestKind(request);
   if (approvalKind === "plugin") {
     const pluginRequest = request as PluginApprovalRequest;
     return {
-      ...buildPluginViewBase(pluginRequest, "resolved"),
+      ...buildPluginViewBase(pluginRequest, "resolved", options),
       decision: resolved.decision,
       resolvedBy: resolved.resolvedBy,
     };
   }
   const execRequest = request as ExecApprovalRequest;
   return {
-    ...buildExecViewBase(execRequest, "resolved"),
+    ...buildExecViewBase(execRequest, "resolved", options),
     decision: resolved.decision,
     resolvedBy: resolved.resolvedBy,
   };
 }
 
 /** Builds the presentation model shown when an approval can no longer be acted on. */
-export function buildExpiredApprovalView(request: ApprovalRequest): ExpiredApprovalView {
+export function buildExpiredApprovalView(
+  request: ApprovalRequest,
+  options?: ApprovalViewOptions,
+): ExpiredApprovalView {
   const approvalKind = resolveApprovalRequestKind(request);
   if (approvalKind === "plugin") {
-    return buildPluginViewBase(request as PluginApprovalRequest, "expired");
+    return buildPluginViewBase(request as PluginApprovalRequest, "expired", options);
   }
-  return buildExecViewBase(request as ExecApprovalRequest, "expired");
+  return buildExecViewBase(request as ExecApprovalRequest, "expired", options);
 }

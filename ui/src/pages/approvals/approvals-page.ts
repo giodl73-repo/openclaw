@@ -21,6 +21,7 @@ import {
 import { renderSettingsPage } from "../../components/settings-ui.ts";
 import { renderSettingsWorkspace } from "../../components/settings-workspace.ts";
 import { i18n, t } from "../../i18n/index.ts";
+import { resolveGatewayErrorMessage } from "../../lib/gateway-error-localization.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
 
@@ -228,7 +229,7 @@ class ApprovalsPage extends OpenClawLightDomElement {
       this.hasLoaded = true;
     } catch (error) {
       if (isCurrent()) {
-        this.error = String(error);
+        this.error = resolveGatewayErrorMessage(error);
         this.hasLoaded = true;
       }
     } finally {
