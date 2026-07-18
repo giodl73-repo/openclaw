@@ -70,6 +70,7 @@ type NativeLocaleSyncOptions = {
 type NativeI18nCommand = {
   command: "check" | "sync";
   locale?: string;
+  summaryOnly?: true;
   write: boolean;
 };
 
@@ -1248,6 +1249,7 @@ function render(entries: NativeI18nEntry[]): string {
 
 async function syncNativeI18n(options: {
   checkOnly: boolean;
+  summaryOnly?: boolean;
   write: boolean;
 }): Promise<NativeI18nEntry[]> {
   const currentInventory = await readNativeI18nInventory();
@@ -1256,8 +1258,10 @@ async function syncNativeI18n(options: {
   const current = currentInventory.raw;
   if (options.checkOnly) {
     const findings = await checkNativeLocaleArtifacts(currentInventory.entries);
-    for (const finding of findings) {
-      process.stdout.write(`native-app-i18n: advisory=${JSON.stringify(finding)}\n`);
+    if (!options.summaryOnly) {
+      for (const finding of findings) {
+        process.stdout.write(`native-app-i18n: advisory=${JSON.stringify(finding)}\n`);
+      }
     }
     process.stdout.write(
       `native-app-i18n: locale-artifacts=${NATIVE_I18N_LOCALES.length} advisories=${findings.length}\n`,
@@ -1589,15 +1593,20 @@ export function parseNativeI18nCommand(argv: string[]): NativeI18nCommand {
   const [command, ...args] = argv;
   if (command !== "check" && command !== "sync") {
     throw new Error(
-      "usage: node --import tsx scripts/native-app-i18n.ts check|sync [--write] [--locale <code>]",
+      "usage: node --import tsx scripts/native-app-i18n.ts check|sync [--summary] [--write] [--locale <code>]",
     );
   }
   let locale: string | undefined;
+  let summaryOnly = false;
   let write = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--write") {
       write = true;
+      continue;
+    }
+    if (argument === "--summary") {
+      summaryOnly = true;
       continue;
     }
     if (argument === "--locale") {
@@ -1627,13 +1636,17 @@ export function parseNativeI18nCommand(argv: string[]): NativeI18nCommand {
   if (command === "check" && write) {
     throw new Error("native i18n check does not accept `--write`");
   }
-  return { command, locale, write };
+  if (command === "sync" && summaryOnly) {
+    throw new Error("native i18n sync does not accept `--summary`");
+  }
+  return { command, locale, ...(summaryOnly ? { summaryOnly: true as const } : {}), write };
 }
 
 async function main() {
   const parsed = parseNativeI18nCommand(process.argv.slice(2));
   const entries = await syncNativeI18n({
     checkOnly: parsed.command === "check",
+    summaryOnly: parsed.summaryOnly,
     write: parsed.command === "sync" && parsed.write,
   });
   if (parsed.locale) {

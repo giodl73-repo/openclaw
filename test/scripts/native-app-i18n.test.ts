@@ -1173,5 +1173,13 @@ describe("native app i18n inventory", () => {
     expect(() => parseNativeI18nCommand(["check", "--locale", "sv"])).toThrow(
       "requires `sync --write",
     );
+    expect(parseNativeI18nCommand(["check", "--summary"])).toEqual({
+      command: "check",
+      summaryOnly: true,
+      write: false,
+    });
+    expect(() => parseNativeI18nCommand(["sync", "--summary"])).toThrow(
+      "sync does not accept `--summary`",
+    );
   });
 });

@@ -8665,6 +8665,23 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Evidence to keep
   - H2: Workflow files
 
+## reference/localization.md
+
+- Route: /reference/localization
+- Headings:
+  - H1: Localize product-owned text
+  - H2: Before you begin
+  - H2: Choose the owning workflow
+  - H2: Add a string
+  - H2: Change an existing string
+  - H2: Add a locale
+  - H2: Troubleshoot localization checks
+  - H3: Coverage manifest is stale
+  - H3: Placeholder validation fails
+  - H3: A generated catalog changed unexpectedly
+  - H3: A translated message contains English fragments
+  - H2: See also
+
 ## reference/memory-config.md
 
 - Route: /reference/memory-config
