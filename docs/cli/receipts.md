@@ -52,3 +52,13 @@ The SQLite profile is single-host. Do not place the database on a network
 filesystem or share it directly between Gateway hosts. Receipt data has its own
 backup, access, and retention boundary and is not a payment ledger or compliance
 attestation.
+
+Receipt `data` can contain authorization codes and other sensitive business
+evidence. Any operating-system user who can read the configured database can
+read that evidence. Restrict access to the OpenClaw service account and protect
+database snapshots and exports with the same policy as direct receipt queries.
+
+The initial profile does not automate retention, backup/export, or corruption
+repair. Establish those operations before treating the store as production
+evidence storage; use a consistent SQLite snapshot mechanism instead of copying
+a live database file.

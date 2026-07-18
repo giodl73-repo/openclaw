@@ -1250,6 +1250,14 @@ and coverage limits.
   The default is `~/.openclaw/state/receipts.sqlite`. Keep the database on local
   storage; network-filesystem and multi-host SQLite sharing are not supported.
 
+Receipt recording admits at most 16 candidates from one successful tool result
+and commits the accepted batch under one bounded SQLite write lock. Excess
+candidates are ignored with a warning. Full receipt data can contain sensitive
+business evidence; local users who can read the configured database can read
+that evidence. Restrict file, snapshot, and export access accordingly. The
+initial profile does not automate retention, backup/export, health repair, or
+corruption recovery.
+
 The running Gateway captures `audit.enabled` and `audit.messages` at startup;
 restart it after changing either setting. Message coverage currently includes
 accepted inbound messages that reach core dispatch and one terminal row per

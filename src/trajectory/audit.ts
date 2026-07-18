@@ -16,6 +16,12 @@ export type TrajectoryAuditReceipt = AgentToolReceipt & {
 const RECEIPT_TYPE_MAX_CHARS = 256;
 const RECEIPT_SUBJECT_TYPE_MAX_CHARS = 256;
 const RECEIPT_SUBJECT_ID_MAX_CHARS = 2_048;
+export const MAX_AUDIT_RECEIPTS_PER_TOOL_RESULT = 16;
+
+export type CollectedToolAuditReceipts = {
+  receipts: TrajectoryAuditReceipt[];
+  omittedCandidateCount: number;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -83,12 +89,15 @@ export function isTrajectoryAuditReceipt(event: TrajectoryEvent, receiptType?: s
  * Reads typed audit records from a successful, already-sanitized tool observation.
  * Session, run, model, and timestamp correlation are added by the trajectory recorder.
  */
-export function collectToolAuditReceipts(event: ObservedToolAuditResult): TrajectoryAuditReceipt[] {
+export function collectToolAuditReceipts(
+  event: ObservedToolAuditResult,
+): CollectedToolAuditReceipts {
   if (event.isError || !isRecord(event.result) || !Array.isArray(event.result.receipts)) {
-    return [];
+    return { receipts: [], omittedCandidateCount: 0 };
   }
   const receipts: TrajectoryAuditReceipt[] = [];
-  for (const candidate of event.result.receipts) {
+  const candidates = event.result.receipts.slice(0, MAX_AUDIT_RECEIPTS_PER_TOOL_RESULT);
+  for (const candidate of candidates) {
     const record = normalizeAuditRecord(candidate);
     if (!record) {
       continue;
@@ -99,5 +108,8 @@ export function collectToolAuditReceipts(event: ObservedToolAuditResult): Trajec
       toolName: event.toolName,
     });
   }
-  return receipts;
+  return {
+    receipts,
+    omittedCandidateCount: Math.max(0, event.result.receipts.length - candidates.length),
+  };
 }

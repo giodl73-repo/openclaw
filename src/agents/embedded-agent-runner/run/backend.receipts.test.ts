@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../../audit/receipt-store.sqlite.js", () => ({
   isAuditReceiptStoreEnabled: mocks.enabled,
-  recordAuditReceipt: mocks.record,
+  recordAuditReceiptBatch: mocks.record,
 }));
 vi.mock("../../harness/selection.js", () => ({
   runAgentHarnessAttempt: mocks.runAttempt,
@@ -51,7 +51,7 @@ describe("embedded backend receipt composition", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enabled.mockReturnValue(true);
-    mocks.record.mockReturnValue(recordedPayment);
+    mocks.record.mockReturnValue([recordedPayment]);
     mocks.runAttempt.mockImplementation(async (params: EmbeddedRunAttemptParams) => {
       params.onAgentToolResult?.({
         toolCallId: "call-payment",
@@ -79,15 +79,17 @@ describe("embedded backend receipt composition", () => {
     await runEmbeddedAttemptWithBackend(createParams({ trajectoryRecorder }));
 
     expect(mocks.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: "billing",
-        sessionId: "session-billing",
-        sessionKey: "agent:billing:email:thread:42",
-        runId: "run-billing",
-        toolName: "authorize_payment",
-        toolCallId: "call-payment",
-        receipt: expect.objectContaining({ type: "payment.authorized" }),
-      }),
+      [
+        expect.objectContaining({
+          agentId: "billing",
+          sessionId: "session-billing",
+          sessionKey: "agent:billing:email:thread:42",
+          runId: "run-billing",
+          toolName: "authorize_payment",
+          toolCallId: "call-payment",
+          receipt: expect.objectContaining({ type: "payment.authorized" }),
+        }),
+      ],
       { cfg: {} },
     );
     expect(trajectoryRecorder.recordEvent).toHaveBeenCalledWith(
@@ -107,5 +109,28 @@ describe("embedded backend receipt composition", () => {
 
     expect(onAgentToolResult).toHaveBeenCalledOnce();
     expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("store locked"));
+  });
+
+  it("records at most one bounded batch and reports overflow", async () => {
+    mocks.record.mockReturnValue([]);
+    mocks.runAttempt.mockImplementation(async (params: EmbeddedRunAttemptParams) => {
+      params.onAgentToolResult?.({
+        toolCallId: "call-many",
+        toolName: "authorize_payment",
+        result: {
+          receipts: Array.from({ length: 19 }, (_, index) => ({
+            type: `payment.authorized.${index}`,
+          })),
+        },
+        isError: false,
+      });
+      return {} as never;
+    });
+
+    await runEmbeddedAttemptWithBackend(createParams());
+
+    expect(mocks.record.mock.calls[0]?.[0]).toHaveLength(16);
+    expect(mocks.record).toHaveBeenCalledOnce();
+    expect(mocks.warn).toHaveBeenCalledWith(expect.stringContaining("ignored 3"));
   });
 });

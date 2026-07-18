@@ -3,7 +3,7 @@
  */
 import {
   isAuditReceiptStoreEnabled,
-  recordAuditReceipt,
+  recordAuditReceiptBatch,
 } from "../../../audit/receipt-store.sqlite.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../../routing/session-key.js";
@@ -23,27 +23,37 @@ export async function runEmbeddedAttemptWithBackend(
     ...params,
     onAgentToolResult: (event) => {
       if (isAuditReceiptStoreEnabled(params.config)) {
-        for (const [receiptIndex, receipt] of collectToolAuditReceipts(event).entries()) {
-          let recorded;
-          try {
-            recorded = recordAuditReceipt(
-              {
-                receipt,
-                receiptIndex,
-                occurredAt: Date.now(),
-                agentId: normalizeAgentId(params.agentId ?? DEFAULT_AGENT_ID),
-                sessionId: params.sessionId,
-                ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
-                runId: params.runId,
-                toolName: receipt.toolName,
-                toolCallId: receipt.toolCallId,
-              },
-              { cfg: params.config },
-            );
-          } catch (error) {
-            log.warn(`failed to record audit receipt: ${formatErrorMessage(error)}`);
-            continue;
-          }
+        const collected = collectToolAuditReceipts(event);
+        if (collected.omittedCandidateCount > 0) {
+          log.warn(
+            `ignored ${collected.omittedCandidateCount} audit receipt candidates above the per-tool-result limit`,
+          );
+        }
+        let recordedReceipts: ReturnType<typeof recordAuditReceiptBatch> = [];
+        try {
+          const occurredAt = Date.now();
+          recordedReceipts = recordAuditReceiptBatch(
+            collected.receipts.map((receipt, receiptIndex) =>
+              Object.assign(
+                {
+                  receipt,
+                  receiptIndex,
+                  occurredAt,
+                  agentId: normalizeAgentId(params.agentId ?? DEFAULT_AGENT_ID),
+                  sessionId: params.sessionId,
+                  runId: params.runId,
+                  toolName: receipt.toolName,
+                  toolCallId: receipt.toolCallId,
+                },
+                params.sessionKey ? { sessionKey: params.sessionKey } : {},
+              ),
+            ),
+            { cfg: params.config },
+          );
+        } catch (error) {
+          log.warn(`failed to record audit receipt batch: ${formatErrorMessage(error)}`);
+        }
+        for (const recorded of recordedReceipts) {
           try {
             params.trajectoryRecorder?.recordEvent("audit.receipt.recorded", {
               receiptId: recorded.receiptId,

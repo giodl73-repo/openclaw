@@ -8,6 +8,7 @@ import {
   getAuditReceipt,
   listAuditReceipts,
   recordAuditReceipt,
+  recordAuditReceiptBatch,
   resolveAuditReceiptStorePath,
 } from "./receipt-store.sqlite.js";
 
@@ -143,6 +144,51 @@ describe("shared audit receipt store", () => {
     expect(() => record({ agentId: "support", receiptType: "case.closed" })).toThrow(
       "source identity was reused with different content",
     );
+  });
+
+  it("records a tool-result batch atomically", () => {
+    record({ agentId: "support", receiptIndex: 0, receiptType: "case.resolved" });
+    const base = {
+      occurredAt: 1_700_000_000_100,
+      agentId: "support",
+      sessionId: "session-support",
+      sessionKey: "agent:support:email:thread:customer-1",
+      runId: "run-support",
+      toolName: "business_action",
+      toolCallId: "call-support",
+    };
+
+    expect(() =>
+      recordAuditReceiptBatch(
+        [
+          { ...base, receipt: { type: "customer.notified" }, receiptIndex: 1 },
+          { ...base, receipt: { type: "case.closed" }, receiptIndex: 0 },
+        ],
+        { path: databasePath },
+      ),
+    ).toThrow("source identity was reused with different content");
+    expect(countAuditReceipts({ store: { path: databasePath } })).toBe(1);
+  });
+
+  it("rejects oversized batch payloads before opening the database", () => {
+    expect(() =>
+      recordAuditReceiptBatch(
+        [
+          {
+            receipt: { type: "case.resolved", data: { evidence: "x".repeat(256 * 1024) } },
+            receiptIndex: 0,
+            occurredAt: 1_700_000_000_000,
+            agentId: "support",
+            sessionId: "session-support",
+            runId: "run-support",
+            toolName: "business_action",
+            toolCallId: "call-support",
+          },
+        ],
+        { path: databasePath },
+      ),
+    ).toThrow("audit receipt data exceeds");
+    expect(fs.existsSync(databasePath)).toBe(false);
   });
 
   it("resolves an operator-configured SQLite path", () => {

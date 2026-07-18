@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { collectToolAuditReceipts, isTrajectoryAuditReceipt } from "./audit.js";
+import {
+  collectToolAuditReceipts,
+  isTrajectoryAuditReceipt,
+  MAX_AUDIT_RECEIPTS_PER_TOOL_RESULT,
+} from "./audit.js";
 import type { TrajectoryEvent } from "./types.js";
 
 describe("collectToolAuditReceipts", () => {
   it("collects successful receipts that can be filtered by business type", () => {
-    const receipts = collectToolAuditReceipts({
+    const { receipts } = collectToolAuditReceipts({
       toolCallId: "call-1",
       toolName: "payments.authorize",
       isError: false,
@@ -44,7 +48,7 @@ describe("collectToolAuditReceipts", () => {
         isError: true,
         result: { receipts: [{ type: "payment.authorized" }] },
       }),
-    ).toEqual([]);
+    ).toEqual({ receipts: [], omittedCandidateCount: 0 });
   });
 
   it("drops an entire receipt when any producer field is malformed", () => {
@@ -61,7 +65,23 @@ describe("collectToolAuditReceipts", () => {
           ],
         },
       }),
-    ).toEqual([]);
+    ).toEqual({ receipts: [], omittedCandidateCount: 0 });
+  });
+
+  it("bounds receipt candidates admitted from one tool result", () => {
+    const collected = collectToolAuditReceipts({
+      toolCallId: "call-many",
+      toolName: "inventory.send",
+      isError: false,
+      result: {
+        receipts: Array.from({ length: MAX_AUDIT_RECEIPTS_PER_TOOL_RESULT + 3 }, (_, index) => ({
+          type: `inventory.sent.${index}`,
+        })),
+      },
+    });
+
+    expect(collected.receipts).toHaveLength(MAX_AUDIT_RECEIPTS_PER_TOOL_RESULT);
+    expect(collected.omittedCandidateCount).toBe(3);
   });
 });
 

@@ -157,8 +157,11 @@ function ensureReceiptSchema(db: DatabaseSync, databasePath: string): void {
       `OpenClaw receipt database ${databasePath} uses schema version ${version}; this runtime supports up to ${RECEIPT_STORE_SCHEMA_VERSION}.`,
     );
   }
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS receipts (
+  runSqliteImmediateTransactionSync(
+    db,
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS receipts (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
       receipt_id TEXT NOT NULL UNIQUE,
       source_id TEXT NOT NULL UNIQUE,
@@ -197,8 +200,15 @@ function ensureReceiptSchema(db: DatabaseSync, databasePath: string): void {
     CREATE INDEX IF NOT EXISTS idx_receipts_skill_time
       ON receipts(skill_name, skill_digest, occurred_at DESC, sequence DESC)
       WHERE skill_name IS NOT NULL;
-    PRAGMA user_version = ${RECEIPT_STORE_SCHEMA_VERSION};
-  `);
+        PRAGMA user_version = ${RECEIPT_STORE_SCHEMA_VERSION};
+      `);
+    },
+    {
+      busyTimeoutMs: RECEIPT_STORE_BUSY_TIMEOUT_MS,
+      databaseLabel: "audit-receipts",
+      operationLabel: "schema",
+    },
+  );
 }
 
 function openAuditReceiptDatabase(options: ReceiptStoreOptions = {}): OpenReceiptDatabase {
@@ -292,11 +302,15 @@ function receiptDataJson(receipt: AgentToolReceipt): string | null {
   return json;
 }
 
-/** Records one trusted tool outcome idempotently in the configured shared store. */
-export function recordAuditReceipt(
-  input: RecordAuditReceiptInput,
-  options: ReceiptStoreOptions = {},
-): RecordedAuditReceipt {
+type PreparedAuditReceipt = {
+  dataJson: string | null;
+  input: RecordAuditReceiptInput;
+  payloadSha256: string;
+  receiptId: string;
+  sourceId: string;
+};
+
+function prepareAuditReceipt(input: RecordAuditReceiptInput): PreparedAuditReceipt {
   if (!Number.isInteger(input.receiptIndex) || input.receiptIndex < 0) {
     throw new Error("audit receipt index must be a non-negative integer");
   }
@@ -309,59 +323,98 @@ export function recordAuditReceipt(
       input.receiptIndex,
     ]),
   );
-  const payloadSha256 = sha256Hex(normalizedPayload(input));
-  const receiptId = `rcpt_${sourceId}`;
-  const dataJson = receiptDataJson(input.receipt);
+  return {
+    dataJson: receiptDataJson(input.receipt),
+    input,
+    payloadSha256: sha256Hex(normalizedPayload(input)),
+    receiptId: `rcpt_${sourceId}`,
+    sourceId,
+  };
+}
+
+function insertPreparedAuditReceipt(
+  database: OpenReceiptDatabase,
+  prepared: PreparedAuditReceipt,
+): RecordedAuditReceipt {
+  const { dataJson, input, payloadSha256, receiptId, sourceId } = prepared;
+  const db = getNodeSqliteKysely<ReceiptDatabase>(database.db);
+  const values: Insertable<ReceiptTable> = {
+    receipt_id: receiptId,
+    source_id: sourceId,
+    payload_sha256: payloadSha256,
+    schema_version: 1,
+    receipt_type: input.receipt.type,
+    receipt_version: input.receipt.version ?? null,
+    occurred_at: input.occurredAt,
+    agent_id: input.agentId,
+    session_id: input.sessionId,
+    session_key: input.sessionKey ?? null,
+    run_id: input.runId,
+    invocation_id: input.invocationId ?? null,
+    skill_name: input.skillName ?? null,
+    skill_digest: input.skillDigest ?? null,
+    tool_name: input.toolName,
+    tool_call_id: input.toolCallId,
+    receipt_index: input.receiptIndex,
+    subject_type: input.receipt.subject?.type ?? null,
+    subject_id: input.receipt.subject?.id ?? null,
+    data_json: dataJson,
+  };
+  executeSqliteQuerySync(
+    database.db,
+    db
+      .insertInto("receipts")
+      .values(values)
+      .onConflict((conflict) => conflict.column("source_id").doNothing()),
+  );
+  const row = executeSqliteQueryTakeFirstSync(
+    database.db,
+    db.selectFrom("receipts").selectAll().where("source_id", "=", sourceId),
+  );
+  if (!row) {
+    throw new Error("audit receipt insert did not produce a durable row");
+  }
+  if (row.payload_sha256 !== payloadSha256) {
+    throw new Error("audit receipt source identity was reused with different content");
+  }
+  return rowToRecordedReceipt(row);
+}
+
+/** Records one trusted tool outcome idempotently in the configured shared store. */
+export function recordAuditReceipt(
+  input: RecordAuditReceiptInput,
+  options: ReceiptStoreOptions = {},
+): RecordedAuditReceipt {
+  const prepared = prepareAuditReceipt(input);
   const database = openAuditReceiptDatabase(options);
   return runSqliteImmediateTransactionSync(
     database.db,
-    () => {
-      const db = getNodeSqliteKysely<ReceiptDatabase>(database.db);
-      const values: Insertable<ReceiptTable> = {
-        receipt_id: receiptId,
-        source_id: sourceId,
-        payload_sha256: payloadSha256,
-        schema_version: 1,
-        receipt_type: input.receipt.type,
-        receipt_version: input.receipt.version ?? null,
-        occurred_at: input.occurredAt,
-        agent_id: input.agentId,
-        session_id: input.sessionId,
-        session_key: input.sessionKey ?? null,
-        run_id: input.runId,
-        invocation_id: input.invocationId ?? null,
-        skill_name: input.skillName ?? null,
-        skill_digest: input.skillDigest ?? null,
-        tool_name: input.toolName,
-        tool_call_id: input.toolCallId,
-        receipt_index: input.receiptIndex,
-        subject_type: input.receipt.subject?.type ?? null,
-        subject_id: input.receipt.subject?.id ?? null,
-        data_json: dataJson,
-      };
-      executeSqliteQuerySync(
-        database.db,
-        db
-          .insertInto("receipts")
-          .values(values)
-          .onConflict((conflict) => conflict.column("source_id").doNothing()),
-      );
-      const row = executeSqliteQueryTakeFirstSync(
-        database.db,
-        db.selectFrom("receipts").selectAll().where("source_id", "=", sourceId),
-      );
-      if (!row) {
-        throw new Error("audit receipt insert did not produce a durable row");
-      }
-      if (row.payload_sha256 !== payloadSha256) {
-        throw new Error("audit receipt source identity was reused with different content");
-      }
-      return rowToRecordedReceipt(row);
-    },
+    () => insertPreparedAuditReceipt(database, prepared),
     {
       busyTimeoutMs: RECEIPT_STORE_BUSY_TIMEOUT_MS,
       databaseLabel: "audit-receipts",
       operationLabel: "record",
+    },
+  );
+}
+
+/** Records one bounded tool-result batch under a single SQLite write lock. */
+export function recordAuditReceiptBatch(
+  inputs: RecordAuditReceiptInput[],
+  options: ReceiptStoreOptions = {},
+): RecordedAuditReceipt[] {
+  if (inputs.length === 0) {
+    return [];
+  }
+  const prepared = inputs.map(prepareAuditReceipt);
+  const database = openAuditReceiptDatabase(options);
+  return runSqliteImmediateTransactionSync(
+    database.db,
+    () => prepared.map((receipt) => insertPreparedAuditReceipt(database, receipt)),
+    {
+      busyTimeoutMs: RECEIPT_STORE_BUSY_TIMEOUT_MS,
+      databaseLabel: "audit-receipts",
+      operationLabel: "record-batch",
     },
   );
 }
