@@ -3,6 +3,7 @@
 import type { OverlayHandle } from "@earendil-works/pi-tui";
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
+import { createTuiLocalization, type TuiLocalization } from "./i18n/runtime.js";
 import { createCommandHandlers } from "./tui-command-handlers.js";
 import {
   TUI_RECENT_SESSIONS_ACTIVE_MINUTES,
@@ -111,6 +112,7 @@ function createHarness(params?: {
   consumeCompletedRunForPendingSend?: ConsumeCompletedRunMock;
   isRunObserved?: (runId: string) => boolean;
   flushPendingHistoryRefreshIfIdle?: FlushPendingHistoryRefreshMock;
+  localization?: TuiLocalization;
 }) {
   const sendChat =
     params?.sendChat ??
@@ -191,6 +193,7 @@ function createHarness(params?: {
     tui: { requestRender } as never,
     opts: params?.opts ?? {},
     state: state as never,
+    localization: params?.localization,
     deliverDefault: false,
     openOverlay,
     closeOverlay,
@@ -255,6 +258,35 @@ function createHarness(params?: {
 }
 
 describe("tui command handlers", () => {
+  it("uses the injected localization for slash help without changing command syntax", async () => {
+    const { handleCommand, addSystem } = createHarness({
+      localization: createTuiLocalization({ locale: "zh-CN" }),
+    });
+
+    await handleCommand("/help");
+
+    expect(addSystem).toHaveBeenCalledWith(expect.stringContaining("斜杠命令："));
+    expect(addSystem).toHaveBeenCalledWith(expect.stringContaining("/model <provider/model>"));
+  });
+
+  it("localizes command presentation while preserving commands, model IDs, and raw errors", async () => {
+    const patchSession = vi.fn().mockResolvedValue({});
+    const listModels = vi.fn().mockRejectedValue(new Error("UPSTREAM_MODEL_ERR"));
+    const { handleCommand, addSystem } = createHarness({
+      localization: createTuiLocalization({ locale: "zh-CN" }),
+      patchSession,
+      listModels,
+    });
+
+    await handleCommand("/model literal-provider/literal-model");
+    await handleCommand("/verbose");
+    await handleCommand("/models");
+
+    expect(addSystem).toHaveBeenCalledWith("模型已设为 literal-provider/literal-model");
+    expect(addSystem).toHaveBeenCalledWith("用法：/verbose <on|off>");
+    expect(addSystem).toHaveBeenCalledWith("列出模型失败：Error: UPSTREAM_MODEL_ERR");
+  });
+
   it("bounds session picker hydration to recent TUI sessions", async () => {
     const listSessions = vi.fn().mockResolvedValue({
       sessions: [

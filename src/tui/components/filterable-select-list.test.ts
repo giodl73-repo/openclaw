@@ -35,6 +35,17 @@ describe("FilterableSelectList", () => {
     }
   }
 
+  it("renders injected localized filter chrome while preserving selection values", () => {
+    const list = new FilterableSelectList(testItems, 5, mockTheme, {
+      filterPrompt: "筛选：",
+    });
+
+    typeInput(list, "beta");
+
+    expect(list.render(80).join("\n")).toContain("筛选：");
+    expect(list.getSelectedItem()?.value).toBe("session-2");
+  });
+
   it("clears the active filter before cancelling", () => {
     const list = new FilterableSelectList(testItems, 5, mockTheme);
     let cancelled = false;

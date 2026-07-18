@@ -1,6 +1,7 @@
 // Covers TUI session action routing and backend calls.
 import { describe, expect, it, vi } from "vitest";
 import type { ChatLog } from "./components/chat-log.js";
+import { createTuiLocalization } from "./i18n/runtime.js";
 import type { TuiBackend } from "./tui-backend.js";
 import { createSessionActions } from "./tui-session-actions.js";
 import { TUI_SESSION_LOOKUP_LIMIT } from "./tui-session-list-policy.js";
@@ -103,6 +104,21 @@ describe("tui session actions", () => {
       setActivityStatus: vi.fn(),
       ...overrides,
     });
+
+  it("localizes session-owned failures while preserving raw backend errors", async () => {
+    const addSystem = vi.fn();
+    const { refreshAgents } = createTestSessionActions({
+      localization: createTuiLocalization({ locale: "zh-CN" }),
+      client: {
+        listAgents: vi.fn().mockRejectedValue(new Error("RAW_AGENT_LIST_ERROR")),
+      } as unknown as TuiBackend,
+      chatLog: { addSystem } as unknown as ChatLog,
+    });
+
+    await refreshAgents();
+
+    expect(addSystem).toHaveBeenCalledWith("列出代理失败：Error: RAW_AGENT_LIST_ERROR");
+  });
 
   it("queues session refreshes and applies the latest result", async () => {
     let resolveFirst: ((value: unknown) => void) | undefined;

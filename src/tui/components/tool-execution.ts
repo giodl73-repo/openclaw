@@ -1,6 +1,7 @@
 // Tool execution component renders tool call status and output in the TUI.
 import { Box, Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { formatToolDetail, resolveToolDisplay } from "../../agents/tool-display.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "../i18n/runtime.js";
 import { markdownTheme, theme } from "../theme/theme.js";
 import { sanitizeRenderableText } from "../tui-formatters.js";
 
@@ -38,7 +39,7 @@ function formatArgs(toolName: string, args: unknown): string {
 }
 
 // Extracts visible text and compact media placeholders from tool result payloads.
-function extractText(result?: ToolResult): string {
+function extractText(result: ToolResult | undefined, localization: TuiLocalization): string {
   if (!result?.content) {
     return "";
   }
@@ -49,8 +50,11 @@ function extractText(result?: ToolResult): string {
     } else if (entry.type === "image") {
       const mime = entry.mimeType ?? "image";
       const size = entry.bytes ? ` ${Math.round(entry.bytes / 1024)}kb` : "";
-      const omitted = entry.omitted ? " (omitted)" : "";
-      lines.push(`[${mime}${size}${omitted}]`);
+      lines.push(
+        entry.omitted
+          ? localization.t("tui.tool.imageOmitted", { mime, size })
+          : `[${mime}${size}]`,
+      );
     }
   }
   return lines.join("\n").trim();
@@ -68,11 +72,17 @@ export class ToolExecutionComponent extends Container {
   private expanded = false;
   private isError = false;
   private isPartial = true;
+  private readonly localization: TuiLocalization;
 
-  constructor(toolName: string, args: unknown) {
+  constructor(
+    toolName: string,
+    args: unknown,
+    localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+  ) {
     super();
     this.toolName = toolName;
     this.args = args;
+    this.localization = localization;
     this.box = new Box(1, 1, (line) => theme.toolPendingBg(line));
     this.header = new Text("", 0, 0);
     this.argsLine = new Text("", 0, 0);
@@ -126,13 +136,14 @@ export class ToolExecutionComponent extends Container {
       name: this.toolName,
       args: this.args,
     });
-    const title = `${display.emoji} ${display.label}${this.isPartial ? " (running)" : ""}`;
+    const label = `${display.emoji} ${display.label}`;
+    const title = this.isPartial ? this.localization.t("tui.tool.running", { label }) : label;
     this.header.setText(theme.toolTitle(theme.bold(title)));
 
     const argLine = formatArgs(this.toolName, this.args);
     this.argsLine.setText(argLine ? theme.dim(argLine) : theme.dim(" "));
 
-    const raw = extractText(this.result);
+    const raw = extractText(this.result, this.localization);
     const text = raw || (this.isPartial ? "…" : "");
     if (!this.expanded && text) {
       const lines = text.split("\n");

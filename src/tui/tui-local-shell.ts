@@ -5,6 +5,7 @@ import type { Component, OverlayHandle, SelectItem } from "@earendil-works/pi-tu
 import { sliceUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { tryProcessCwd } from "../infra/safe-cwd.js";
 import { createSearchableSelectList } from "./components/selectors.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 
 type LocalShellDeps = {
   chatLog: {
@@ -26,12 +27,17 @@ type LocalShellDeps = {
   getCwd?: () => string | undefined;
   env?: NodeJS.ProcessEnv;
   maxOutputChars?: number;
+  localization?: TuiLocalization;
 };
 
 export function createLocalShellRunner(deps: LocalShellDeps) {
+  const localization = deps.localization ?? TUI_ENGLISH_LOCALIZATION;
   let localExecAsked = false;
   let localExecAllowed = false;
-  const createSelector = deps.createSelector ?? createSearchableSelectList;
+  const createSelector =
+    deps.createSelector ??
+    ((items: SelectItem[], maxVisible: number) =>
+      createSearchableSelectList(items, maxVisible, localization));
   const spawnCommand = deps.spawnCommand ?? spawn;
   const getCwd = deps.getCwd ?? tryProcessCwd;
   const env = deps.env ?? process.env;
@@ -47,15 +53,13 @@ export function createLocalShellRunner(deps: LocalShellDeps) {
     localExecAsked = true;
 
     return await new Promise<boolean>((resolve) => {
-      deps.chatLog.addSystem("Allow local shell commands for this session?");
-      deps.chatLog.addSystem(
-        "This runs commands on YOUR machine (not the gateway) and may delete files or reveal secrets.",
-      );
-      deps.chatLog.addSystem("Select Yes/No (arrows + Enter), Esc to cancel.");
+      deps.chatLog.addSystem(localization.t("tui.localShell.allow"));
+      deps.chatLog.addSystem(localization.t("tui.localShell.warning"));
+      deps.chatLog.addSystem(localization.t("tui.localShell.instructions"));
       const selector = createSelector(
         [
-          { value: "no", label: "No" },
-          { value: "yes", label: "Yes" },
+          { value: "no", label: localization.t("tui.localShell.no") },
+          { value: "yes", label: localization.t("tui.localShell.yes") },
         ],
         2,
       );
@@ -63,17 +67,17 @@ export function createLocalShellRunner(deps: LocalShellDeps) {
         deps.closeOverlay(overlayHandle);
         if (item.value === "yes") {
           localExecAllowed = true;
-          deps.chatLog.addSystem("local shell: enabled for this session");
+          deps.chatLog.addSystem(localization.t("tui.localShell.enabled"));
           resolve(true);
         } else {
-          deps.chatLog.addSystem("local shell: not enabled");
+          deps.chatLog.addSystem(localization.t("tui.localShell.notEnabled"));
           resolve(false);
         }
         deps.tui.requestRender();
       };
       selector.onCancel = () => {
         deps.closeOverlay(overlayHandle);
-        deps.chatLog.addSystem("local shell: cancelled");
+        deps.chatLog.addSystem(localization.t("tui.localShell.cancelled"));
         deps.tui.requestRender();
         resolve(false);
       };
@@ -91,7 +95,7 @@ export function createLocalShellRunner(deps: LocalShellDeps) {
     }
 
     if (localExecAsked && !localExecAllowed) {
-      deps.chatLog.addSystem("local shell: not enabled for this session");
+      deps.chatLog.addSystem(localization.t("tui.localShell.notEnabledForSession"));
       deps.tui.requestRender();
       return;
     }
@@ -104,9 +108,7 @@ export function createLocalShellRunner(deps: LocalShellDeps) {
     // A shell command's meaning depends on its directory; never retarget it implicitly.
     const cwd = getCwd();
     if (!cwd) {
-      deps.chatLog.addSystem(
-        "local shell: working directory was deleted; cd to an existing directory first",
-      );
+      deps.chatLog.addSystem(localization.t("tui.localShell.cwdDeleted"));
       deps.tui.requestRender();
       return;
     }
@@ -159,13 +161,20 @@ export function createLocalShellRunner(deps: LocalShellDeps) {
             deps.chatLog.addSystem(`[local] ${lineLocal}`);
           }
         }
-        deps.chatLog.addSystem(`[local] exit ${code ?? "?"}${signal ? ` (signal ${signal})` : ""}`);
+        deps.chatLog.addSystem(
+          signal
+            ? localization.t("tui.localShell.exitSignal", {
+                code: code ?? "?",
+                signal,
+              })
+            : localization.t("tui.localShell.exit", { code: code ?? "?" }),
+        );
         deps.tui.requestRender();
         resolve();
       });
 
       child.on("error", (err) => {
-        deps.chatLog.addSystem(`[local] error: ${String(err)}`);
+        deps.chatLog.addSystem(localization.t("tui.localShell.error", { error: String(err) }));
         deps.tui.requestRender();
         resolve();
       });

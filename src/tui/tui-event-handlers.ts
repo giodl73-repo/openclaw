@@ -4,6 +4,7 @@ import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { classifyFailoverReason, isAuthErrorMessage } from "../agents/embedded-agent-helpers.js";
 import { parseAgentSessionKey } from "../sessions/session-key-utils.js";
 import { formatRawAssistantErrorForUi } from "../shared/assistant-error-format.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 import {
   asString,
   extractTextFromMessage,
@@ -22,6 +23,7 @@ import type {
   BtwEvent,
   ChatEvent,
   SessionChangedEvent,
+  TuiActivityStatus,
   TuiHistoryLoadResult,
   TuiStateAccess,
 } from "./tui-types.js";
@@ -69,7 +71,8 @@ type EventHandlerContext = {
   btw: EventHandlerBtwPresenter;
   tui: EventHandlerTui;
   state: TuiStateAccess;
-  setActivityStatus: (text: string) => void;
+  localization?: TuiLocalization;
+  setActivityStatus: (status: TuiActivityStatus) => void;
   refreshSessionInfo?: () => Promise<void>;
   loadHistory?: () => Promise<TuiHistoryLoadResult>;
   noteLocalRunId?: (runId: string) => void;
@@ -86,15 +89,13 @@ type EventHandlerContext = {
 
 const DEFAULT_STREAMING_WATCHDOG_MS = 30_000;
 const LIFECYCLE_ERROR_RETRY_GRACE_MS = 15_000;
-const STREAMING_WATCHDOG_USER_MESSAGE =
-  "This response is taking longer than expected. Still waiting for the current run.";
-
 export function createEventHandlers(context: EventHandlerContext) {
   const {
     chatLog,
     btw,
     tui,
     state,
+    localization = TUI_ENGLISH_LOCALIZATION,
     setActivityStatus,
     refreshSessionInfo,
     loadHistory,
@@ -249,7 +250,7 @@ export function createEventHandlers(context: EventHandlerContext) {
         tui.requestRender();
         return;
       }
-      chatLog.addPendingSystem(runId, STREAMING_WATCHDOG_USER_MESSAGE);
+      chatLog.addPendingSystem(runId, localization.t("tui.event.streamingWatchdog"));
       tui.requestRender();
     }, streamingWatchdogMs);
     const maybeUnref = (streamingWatchdogTimer as { unref?: () => void }).unref;
@@ -305,8 +306,8 @@ export function createEventHandlers(context: EventHandlerContext) {
       return undefined;
     }
     return provider
-      ? `auth or provider access failed for ${provider}. Run /auth ${provider} to refresh credentials; if you already re-authed, switch models/providers because this account may still be blocked for inference.`
-      : "auth or provider access failed for the current provider. Run /auth to refresh credentials; if you already re-authed, switch models/providers because this account may still be blocked for inference.";
+      ? localization.t("tui.event.authFailedProvider", { provider })
+      : localization.t("tui.event.authFailedCurrent");
   };
 
   const parseProviderModelRef = (
@@ -499,7 +500,9 @@ export function createEventHandlers(context: EventHandlerContext) {
     }
     const renderedError = formatRawAssistantErrorForUi(errorMessage);
     chatLog.dismissPendingSystem(runId);
-    const displayMessage = resolveAuthErrorHint(errorMessage) ?? `run error: ${renderedError}`;
+    const displayMessage =
+      resolveAuthErrorHint(errorMessage) ??
+      localization.t("tui.event.runError", { error: renderedError });
     liveTerminalErrorMessages.set(runId, displayMessage);
     chatLog.addSystem(displayMessage);
     noteFinalizedRun(runId, { displayedFinal: true });
@@ -795,7 +798,11 @@ export function createEventHandlers(context: EventHandlerContext) {
       forgetLocalBtwRunId?.(evt.runId);
       const wasActiveRun = state.activeChatRunId === evt.runId;
       const diagnostic = formatAbortDiagnostic(evt.errorMessage);
-      chatLog.addSystem(diagnostic ? `run aborted: ${diagnostic}` : "run aborted");
+      chatLog.addSystem(
+        diagnostic
+          ? localization.t("tui.event.runAbortedWithDiagnostic", { diagnostic })
+          : localization.t("tui.event.runAborted"),
+      );
       terminateRun({ runId: evt.runId, wasActiveRun, status: "aborted" });
       maybeRefreshHistoryForRun(evt.runId);
     }

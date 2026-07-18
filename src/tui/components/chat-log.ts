@@ -1,6 +1,7 @@
 // Chat log component lays out conversation messages for the TUI viewport.
 import type { Component } from "@earendil-works/pi-tui";
 import { Container, Spacer, Text } from "@earendil-works/pi-tui";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "../i18n/runtime.js";
 import { theme } from "../theme/theme.js";
 import { AssistantMessageComponent } from "./assistant-message.js";
 import { BtwInlineMessage } from "./btw-inline-message.js";
@@ -34,10 +35,12 @@ export class ChatLog extends Container {
   private btwMessage: BtwInlineMessage | null = null;
   private toolsExpanded = false;
   private repeatableSystemMessage: RepeatableSystemMessage | null = null;
+  private readonly localization: TuiLocalization;
 
-  constructor(maxComponents = 180) {
+  constructor(maxComponents = 180, localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION) {
     super();
     this.maxComponents = Math.max(20, Math.floor(maxComponents));
+    this.localization = localization;
   }
 
   // Pruning must clear side maps so future stream/tool updates do not target detached components.
@@ -332,7 +335,7 @@ export class ChatLog extends Container {
       }
       return this.btwMessage;
     }
-    const component = new BtwInlineMessage(params);
+    const component = new BtwInlineMessage(params, this.localization);
     this.btwMessage = component;
     this.appendNonSystem(component);
     return component;
@@ -356,7 +359,7 @@ export class ChatLog extends Container {
       existing.setArgs(args);
       return existing;
     }
-    const component = new ToolExecutionComponent(toolName, args);
+    const component = new ToolExecutionComponent(toolName, args, this.localization);
     component.setExpanded(this.toolsExpanded);
     this.toolById.set(toolCallId, component);
     this.appendNonSystem(component);

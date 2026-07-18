@@ -27,6 +27,7 @@ import { redactSensitiveLines, resolveRedactOptions } from "../logging/redact.js
 import { formatTimestamp } from "../logging/timestamps.js";
 import { formatCliCommand } from "./command-format.js";
 import { addGatewayClientOptions, callGatewayFromCli } from "./gateway-rpc.js";
+import { createCliLocalization, type CliLocalization } from "./i18n/runtime.js";
 
 type LogsTailPayload = {
   file?: string;
@@ -94,20 +95,27 @@ type LogsCliOptions = {
   expectFinal?: boolean;
 };
 
-const LOCAL_FALLBACK_NOTICE = "Local Gateway RPC unavailable; reading configured file log instead.";
-const JOURNAL_FALLBACK_NOTICE =
-  "Local Gateway RPC unavailable; reading active systemd gateway journal instead.";
+const JSON_GATEWAY_UNREACHABLE = "Gateway not reachable. Is it running and accessible?";
+const JSON_GATEWAY_RECONNECTING = "[logs] gateway disconnected, reconnecting in {seconds}s...";
+const JSON_GATEWAY_RECONNECTED = "[logs] gateway reconnected";
+const JSON_LOG_TRUNCATED = "Log tail truncated (increase --max-bytes).";
+const JSON_LOG_CURSOR_RESET = "Log cursor reset (file rotated).";
 const JOURNAL_CURSOR_PREFIX = "-- cursor: ";
 const JOURNAL_MAX_LIMIT = 5000;
 const JOURNAL_MAX_BYTES = 1_000_000;
 
-function parsePositiveInt(value: string | undefined, fallback: number, flag: string): number {
+function parsePositiveInt(
+  value: string | undefined,
+  fallback: number,
+  flag: string,
+  localization: CliLocalization,
+): number {
   if (!value) {
     return fallback;
   }
   const parsed = parseStrictPositiveInteger(value);
   if (parsed === undefined) {
-    throw new Error(`${flag} must be a positive integer.`);
+    throw new Error(localization.t("cli.logs.positiveInteger", { flag }));
   }
   return parsed;
 }
@@ -458,14 +466,14 @@ function formatLogLine(
   return [head, messageValue].filter(Boolean).join(" ").trim();
 }
 
-function createLogWriters(onOutputClosed?: () => void) {
+function createLogWriters(localization: CliLocalization, onOutputClosed?: () => void) {
   const writer = createSafeStreamWriter({
     beforeWrite: () => clearActiveProgressLine(),
     onBrokenPipe: (err, stream) => {
       onOutputClosed?.();
       const code = err.code ?? "EPIPE";
       const target = stream === process.stdout ? "stdout" : "stderr";
-      const message = `openclaw logs: output ${target} closed (${code}). Stopping tail.`;
+      const message = localization.t("cli.logs.outputClosed", { target, code });
       try {
         clearActiveProgressLine();
         process.stderr.write(`${message}\n`);
@@ -490,9 +498,15 @@ async function emitGatewayError(
   rich: boolean,
   emitJsonLine: (payload: Record<string, unknown>, toStdErr?: boolean) => boolean,
   errorLine: (text: string) => boolean,
+  localization: CliLocalization,
 ) {
-  const message = "Gateway not reachable. Is it running and accessible?";
-  const hint = `Hint: run \`${formatCliCommand("openclaw doctor")}\`.`;
+  const doctorCommand = formatCliCommand("openclaw doctor");
+  const message =
+    mode === "json" ? JSON_GATEWAY_UNREACHABLE : localization.t("cli.logs.gatewayUnreachable");
+  const hint =
+    mode === "json"
+      ? `Hint: run \`${doctorCommand}\`.`
+      : localization.t("cli.logs.doctorHint", { command: doctorCommand });
   const errorText = formatErrorMessage(err);
 
   const details = buildGatewayConnectionDetails({ url: opts.url });
@@ -545,6 +559,7 @@ export function registerLogsCli(program: Command) {
   addGatewayClientOptions(logs);
 
   logs.action(async (opts: LogsCliOptions) => {
+    const localization = createCliLocalization();
     let gatewayRecovery: GatewayRecoveryState = { kind: "idle" };
     const abortGatewayRecoveryProbe = () => {
       if (gatewayRecovery.kind === "probing") {
@@ -564,10 +579,13 @@ export function registerLogsCli(program: Command) {
         gatewayRecovery = { kind: "idle" };
       }
     };
-    const { logLine, errorLine, emitJsonLine } = createLogWriters(abortGatewayRecoveryProbe);
-    const interval = parsePositiveInt(opts.interval, 1000, "--interval");
-    const limit = parsePositiveInt(opts.limit, 200, "--limit");
-    const maxBytes = parsePositiveInt(opts.maxBytes, 250_000, "--max-bytes");
+    const { logLine, errorLine, emitJsonLine } = createLogWriters(
+      localization,
+      abortGatewayRecoveryProbe,
+    );
+    const interval = parsePositiveInt(opts.interval, 1000, "--interval", localization);
+    const limit = parsePositiveInt(opts.limit, 200, "--limit", localization);
+    const maxBytes = parsePositiveInt(opts.maxBytes, 250_000, "--max-bytes", localization);
     let gatewayCursor: number | undefined;
     let journalCursor: string | undefined;
     let journalSince: string | undefined;
@@ -663,7 +681,10 @@ export function registerLogsCli(program: Command) {
         if (opts.follow && followRetryAttempt < MAX_FOLLOW_RETRIES && isTransientFollowError(err)) {
           followRetryAttempt += 1;
           const backoffMs = computeBackoff(FOLLOW_BACKOFF_POLICY, followRetryAttempt);
-          const message = `[logs] gateway disconnected, reconnecting in ${Math.round(backoffMs / 1_000)}s...`;
+          const seconds = Math.round(backoffMs / 1_000);
+          const message = jsonMode
+            ? JSON_GATEWAY_RECONNECTING.replace("{seconds}", String(seconds))
+            : localization.t("cli.logs.gatewayDisconnected", { seconds });
           if (jsonMode) {
             if (!emitJsonLine({ type: "notice", message }, true)) {
               return;
@@ -681,12 +702,15 @@ export function registerLogsCli(program: Command) {
           rich,
           emitJsonLine,
           errorLine,
+          localization,
         );
         process.exit(1);
         return;
       }
       if (followRetryAttempt > 0) {
-        const message = "[logs] gateway reconnected";
+        const message = jsonMode
+          ? JSON_GATEWAY_RECONNECTED
+          : localization.t("cli.logs.gatewayReconnected");
         if (jsonMode) {
           if (!emitJsonLine({ type: "notice", message }, true)) {
             return;
@@ -721,7 +745,7 @@ export function registerLogsCli(program: Command) {
           if (
             !emitJsonLine({
               type: "notice",
-              message: "Log tail truncated (increase --max-bytes).",
+              message: JSON_LOG_TRUNCATED,
             })
           ) {
             return;
@@ -731,7 +755,7 @@ export function registerLogsCli(program: Command) {
           if (
             !emitJsonLine({
               type: "notice",
-              message: "Log cursor reset (file rotated).",
+              message: JSON_LOG_CURSOR_RESET,
             })
           ) {
             return;
@@ -740,28 +764,35 @@ export function registerLogsCli(program: Command) {
       } else {
         if (shouldEmitSourceMetadata && payload.localFallback === true) {
           const notice =
-            payload.sourceKind === "journal" ? JOURNAL_FALLBACK_NOTICE : LOCAL_FALLBACK_NOTICE;
+            payload.sourceKind === "journal"
+              ? localization.t("cli.logs.journalFallback")
+              : localization.t("cli.logs.localFallback");
           if (!errorLine(colorize(rich, theme.warn, notice))) {
             return;
           }
         }
         if (shouldEmitSourceMetadata) {
           if (payload.sourceKind === "journal" && payload.source) {
-            const prefix = pretty ? colorize(rich, theme.muted, "Log source:") : "Log source:";
+            const sourceLabel = localization.t("cli.logs.source");
+            const prefix = pretty ? colorize(rich, theme.muted, sourceLabel) : sourceLabel;
             if (!logLine(`${prefix} ${payload.source}`)) {
               return;
             }
             if (
               payload.service?.pid !== undefined &&
-              !logLine(`Service PID: ${payload.service.pid}`)
+              !logLine(`${localization.t("cli.logs.servicePid")} ${payload.service.pid}`)
             ) {
               return;
             }
-            if (payload.service?.unit && !logLine(`Service Unit: ${payload.service.unit}`)) {
+            if (
+              payload.service?.unit &&
+              !logLine(`${localization.t("cli.logs.serviceUnit")} ${payload.service.unit}`)
+            ) {
               return;
             }
           } else if (payload.file) {
-            const prefix = pretty ? colorize(rich, theme.muted, "Log file:") : "Log file:";
+            const fileLabel = localization.t("cli.logs.file");
+            const prefix = pretty ? colorize(rich, theme.muted, fileLabel) : fileLabel;
             if (!logLine(`${prefix} ${payload.file}`)) {
               return;
             }
@@ -781,12 +812,12 @@ export function registerLogsCli(program: Command) {
           }
         }
         if (payload.truncated) {
-          if (!errorLine("Log tail truncated (increase --max-bytes).")) {
+          if (!errorLine(localization.t("cli.logs.truncated"))) {
             return;
           }
         }
         if (payload.reset) {
-          if (!errorLine("Log cursor reset (file rotated).")) {
+          if (!errorLine(localization.t("cli.logs.cursorReset"))) {
             return;
           }
         }

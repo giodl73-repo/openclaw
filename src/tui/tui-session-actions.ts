@@ -11,11 +11,18 @@ import {
   parseAgentSessionKey,
 } from "../routing/session-key.js";
 import type { ChatLog } from "./components/chat-log.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 import type { TuiAgentsList, TuiBackend, TuiSessionMutationResult } from "./tui-backend.js";
 import { asString, extractTextFromMessage, isCommandMessage } from "./tui-formatters.js";
 import { TUI_SESSION_LOOKUP_LIMIT } from "./tui-session-list-policy.js";
 import * as submit from "./tui-submit-state.js";
-import type { SessionInfo, TuiHistoryLoadResult, TuiOptions, TuiStateAccess } from "./tui-types.js";
+import type {
+  SessionInfo,
+  TuiActivityStatus,
+  TuiHistoryLoadResult,
+  TuiOptions,
+  TuiStateAccess,
+} from "./tui-types.js";
 
 type SessionActionBtwPresenter = {
   clear: () => void;
@@ -28,6 +35,7 @@ type SessionActionContext = {
   tui: TUI;
   opts: TuiOptions;
   state: TuiStateAccess;
+  localization?: TuiLocalization;
   agentNames: Map<string, string>;
   initialSessionInput: string;
   initialSessionAgentId: string | null;
@@ -35,7 +43,7 @@ type SessionActionContext = {
   updateHeader: () => void;
   updateFooter: () => void;
   updateAutocompleteProvider: () => void;
-  setActivityStatus: (text: string) => void;
+  setActivityStatus: (status: TuiActivityStatus) => void;
   clearLocalRunIds?: () => void;
   rememberSessionKey?: (sessionKey: string) => void | Promise<void>;
 };
@@ -119,6 +127,7 @@ export function createSessionActions(context: SessionActionContext) {
     tui,
     opts,
     state,
+    localization = TUI_ENGLISH_LOCALIZATION,
     agentNames,
     initialSessionInput,
     initialSessionAgentId,
@@ -185,7 +194,7 @@ export function createSessionActions(context: SessionActionContext) {
       const result = await client.listAgents();
       applyAgentsResult(result);
     } catch (err) {
-      chatLog.addSystem(`agents list failed: ${String(err)}`);
+      chatLog.addSystem(localization.t("tui.session.agentsListFailed", { error: String(err) }));
     }
   };
 
@@ -381,7 +390,7 @@ export function createSessionActions(context: SessionActionContext) {
       if (!isCurrentRefresh()) {
         return;
       }
-      chatLog.addSystem(`sessions list failed: ${String(err)}`);
+      chatLog.addSystem(localization.t("tui.session.sessionsListFailed", { error: String(err) }));
     }
   };
 
@@ -434,7 +443,7 @@ export function createSessionActions(context: SessionActionContext) {
   const clearDisplayedSession = (key = state.currentSessionKey) => {
     chatLog.clearAll();
     btw.clear();
-    chatLog.addSystem(`session ${key}`);
+    chatLog.addSystem(localization.t("tui.session.marker", { session: key }));
     state.historyLoaded = true;
     void rememberSessionKey?.(key);
     tui.requestRender(true);
@@ -523,7 +532,7 @@ export function createSessionActions(context: SessionActionContext) {
       const historyUsers: Array<{ text: string; timestamp?: number | null }> = [];
       chatLog.clearAll({ preservePendingUsers: true });
       btw.clear();
-      chatLog.addSystem(`session ${state.currentSessionKey}`);
+      chatLog.addSystem(localization.t("tui.session.marker", { session: state.currentSessionKey }));
       for (const entry of record.messages ?? []) {
         if (!entry || typeof entry !== "object") {
           continue;
@@ -561,7 +570,7 @@ export function createSessionActions(context: SessionActionContext) {
             continue;
           }
           const toolCallId = asString(message.toolCallId, "");
-          const toolName = asString(message.toolName, "tool");
+          const toolName = asString(message.toolName, localization.t("tui.session.toolFallback"));
           const component = chatLog.startTool(toolCallId, toolName, {});
           component.setResult(
             {
@@ -600,7 +609,9 @@ export function createSessionActions(context: SessionActionContext) {
       state.historyLoaded = true;
       if (record.runtimePluginsPrewarm?.status === "failed") {
         chatLog.addSystem(
-          `runtime prewarm failed: ${record.runtimePluginsPrewarm.error ?? "unknown"}`,
+          localization.t("tui.session.runtimePrewarmFailed", {
+            error: record.runtimePluginsPrewarm.error ?? localization.t("tui.status.unknown"),
+          }),
         );
       }
       void rememberSessionKey?.(state.currentSessionKey);
@@ -610,7 +621,7 @@ export function createSessionActions(context: SessionActionContext) {
       if (!isCurrentLoad()) {
         return { loaded: false };
       }
-      chatLog.addSystem(`history failed: ${String(err)}`);
+      chatLog.addSystem(localization.t("tui.session.historyFailed", { error: String(err) }));
       tui.requestRender(true);
       return { loaded: false };
     }
@@ -643,7 +654,7 @@ export function createSessionActions(context: SessionActionContext) {
       !params?.preferActive &&
       !submit.getPendingSubmitAcceptedRunId(state)
     ) {
-      chatLog.addSystem("agent is finishing context; wait for it to finish before aborting");
+      chatLog.addSystem(localization.t("tui.session.finishingContextAbort"));
       tui.requestRender();
       return;
     }
@@ -660,7 +671,9 @@ export function createSessionActions(context: SessionActionContext) {
       // ids may no longer exist in local UI state.
       const result = await client.abortChat(sessionAbortParams);
       if (!result.aborted) {
-        chatLog.addSystem("no active run", { coalesceConsecutive: true });
+        chatLog.addSystem(localization.t("tui.session.noActiveRun"), {
+          coalesceConsecutive: true,
+        });
         tui.requestRender();
         return;
       }
@@ -683,7 +696,7 @@ export function createSessionActions(context: SessionActionContext) {
       }
       setActivityStatus("aborted");
     } catch (err) {
-      chatLog.addSystem(`abort failed: ${String(err)}`);
+      chatLog.addSystem(localization.t("tui.session.abortFailed", { error: String(err) }));
       setActivityStatus("abort failed");
     }
     tui.requestRender();

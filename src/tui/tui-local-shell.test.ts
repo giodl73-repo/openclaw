@@ -2,6 +2,7 @@
 import { EventEmitter } from "node:events";
 import type { OverlayHandle } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
+import { createTuiLocalization, type TuiLocalization } from "./i18n/runtime.js";
 import { createLocalShellRunner } from "./tui-local-shell.js";
 
 const createSelector = () => {
@@ -30,6 +31,7 @@ function createShellHarness(params?: {
   getCwd?: () => string | undefined;
   env?: Record<string, string>;
   maxOutputChars?: number;
+  localization?: TuiLocalization;
 }) {
   const messages: string[] = [];
   const chatLog = {
@@ -42,10 +44,12 @@ function createShellHarness(params?: {
   const openOverlay = vi.fn(() => overlayHandle);
   const closeOverlay = vi.fn();
   let lastSelector: ReturnType<typeof createSelector> | null = null;
-  const createSelectorSpy = vi.fn(() => {
-    lastSelector = createSelector();
-    return lastSelector;
-  });
+  const createSelectorSpy = vi.fn(
+    (_items: Array<{ value: string; label?: string }>, _maxVisible: number) => {
+      lastSelector = createSelector();
+      return lastSelector;
+    },
+  );
   const spawnCommand = params?.spawnCommand ?? vi.fn();
   const { runLocalShellLine } = createLocalShellRunner({
     chatLog,
@@ -54,6 +58,7 @@ function createShellHarness(params?: {
     closeOverlay,
     createSelector: createSelectorSpy,
     spawnCommand,
+    localization: params?.localization,
     ...(params?.getCwd ? { getCwd: params.getCwd } : {}),
     ...(params?.env ? { env: params.env } : {}),
     ...(params?.maxOutputChars !== undefined ? { maxOutputChars: params.maxOutputChars } : {}),
@@ -81,6 +86,25 @@ function requireSpawnOptions(spawnCommand: ReturnType<typeof vi.fn>): {
 }
 
 describe("createLocalShellRunner", () => {
+  it("localizes approval chrome while preserving stable yes/no values", async () => {
+    const harness = createShellHarness({
+      localization: createTuiLocalization({ locale: "zh-CN" }),
+    });
+
+    const run = harness.runLocalShellLine("!pwd");
+    const items = harness.createSelectorSpy.mock.calls[0]?.[0] as
+      | Array<{ value: string; label: string }>
+      | undefined;
+
+    expect(harness.messages).toContain("是否允许此会话执行本地 shell 命令？");
+    expect(items).toEqual([
+      { value: "no", label: "否" },
+      { value: "yes", label: "是" },
+    ]);
+    harness.getLastSelector()?.onSelect?.({ value: "no", label: "否" });
+    await run;
+  });
+
   it("logs denial on subsequent ! attempts without re-prompting", async () => {
     const harness = createShellHarness();
 

@@ -1,3 +1,4 @@
+import type { OpenClawLocale } from "@openclaw/localization-core";
 import type { FastMode } from "@openclaw/normalization-core/string-coerce";
 // Defines shared TUI state, backend, and event types.
 import type { SessionGoal } from "../config/sessions/types.js";
@@ -16,6 +17,8 @@ export type TuiOptions = {
   timeoutMs?: number;
   historyLimit?: number;
   message?: string;
+  /** Explicit TUI locale override, primarily for embedding and tests. */
+  locale?: OpenClawLocale;
   /**
    * Internal CLI guard: after the standalone TUI returns, force the child
    * process out if imported runtime handles keep the event loop alive.
@@ -77,6 +80,25 @@ export type AgentEvent = {
 };
 
 export type ResponseUsageMode = "on" | "off" | "tokens" | "full";
+
+export type TuiActivityStatus =
+  | "idle"
+  | "waiting"
+  | "streaming"
+  | "running"
+  | "finishing context"
+  | "starting up"
+  | "auth"
+  | "error"
+  | "disconnected"
+  | "sending"
+  | "aborted"
+  | "abort failed"
+  | "tools expanded"
+  | "tools collapsed"
+  | "cleared input; press ctrl+c again to exit"
+  | "press ctrl+c again to exit"
+  | "device approval needed: preview latest request";
 
 export type SessionInfo = {
   thinkingLevel?: string;
@@ -179,7 +201,7 @@ export type TuiStateAccess = {
   toolsExpanded: boolean;
   showThinking: boolean;
   connectionStatus: string;
-  activityStatus: string;
+  activityStatus: TuiActivityStatus;
   statusTimeout: ReturnType<typeof setTimeout> | null;
   lastCtrlCAt: number;
 };

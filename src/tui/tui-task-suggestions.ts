@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { TaskSuggestion } from "../../packages/gateway-protocol/src/index.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 import { selectListTheme, theme } from "./theme/theme.js";
 import type { TuiBackend } from "./tui-backend.js";
 import { sanitizeRenderableText } from "./tui-formatters.js";
@@ -34,6 +35,7 @@ type TaskSuggestionControllerDeps = {
   closeOverlay: (handle?: OverlayHandle) => void;
   requestRender: () => void;
   onAccepted: (sessionKey: string) => Promise<void> | void;
+  localization?: TuiLocalization;
   createSelector?: (items: SelectItem[]) => TaskSelector;
 };
 
@@ -43,18 +45,20 @@ const TASK_DETAIL_PAGE_LINES = TASK_DETAIL_VIEWPORT_LINES - 1;
 const PAGE_UP_INPUT = "\u001b[5~";
 const PAGE_DOWN_INPUT = "\u001b[6~";
 
-const TASK_ACTIONS = [
-  {
-    value: "accept",
-    label: "Start in worktree",
-    description: "Create an isolated session and begin this task",
-  },
-  {
-    value: "dismiss",
-    label: "Dismiss",
-    description: "Leave the repository untouched",
-  },
-] satisfies SelectItem[];
+function taskActions(localization: TuiLocalization): SelectItem[] {
+  return [
+    {
+      value: "accept",
+      label: localization.t("tui.task.start"),
+      description: localization.t("tui.task.startDescription"),
+    },
+    {
+      value: "dismiss",
+      label: localization.t("tui.task.dismiss"),
+      description: localization.t("tui.task.dismissDescription"),
+    },
+  ];
+}
 
 function clean(text: string): string {
   return sanitizeTaskText(text.replace(/\s+/g, " ").trim());
@@ -98,7 +102,7 @@ class TaskPrompt implements Component {
   private readonly title: Text;
   private readonly metadata: Text;
   private readonly summary: Text;
-  private readonly instructionLabel = new Text(theme.system("Instructions:"));
+  private readonly instructionLabel: Text;
   private readonly instructions: Text;
   private readonly detailPosition = new Text();
   private readonly confirmation = new Text();
@@ -109,10 +113,20 @@ class TaskPrompt implements Component {
     suggestion: TaskSuggestion,
     private readonly selector: TaskSelector,
     private readonly requestRender: () => void,
+    private readonly localization: TuiLocalization,
   ) {
-    this.title = new Text(theme.header(`Suggested follow-up: ${clean(suggestion.title)}`));
-    this.metadata = new Text(theme.dim(`Project: ${clean(suggestion.cwd)}`));
-    this.summary = new Text(theme.system(`Why: ${clean(suggestion.tldr)}`));
+    this.title = new Text(
+      theme.header(
+        localization.t("tui.task.suggestedFollowUp", { title: clean(suggestion.title) }),
+      ),
+    );
+    this.metadata = new Text(
+      theme.dim(localization.t("tui.task.project", { path: clean(suggestion.cwd) })),
+    );
+    this.summary = new Text(
+      theme.system(localization.t("tui.task.why", { summary: clean(suggestion.tldr) })),
+    );
+    this.instructionLabel = new Text(theme.system(localization.t("tui.task.instructions")));
     this.instructions = new Text(theme.system(sanitizeTaskText(suggestion.prompt.trim())));
   }
 
@@ -155,7 +169,11 @@ class TaskPrompt implements Component {
       const visibleEnd = this.detailOffset + visibleDetails.length;
       this.detailPosition.setText(
         theme.dim(
-          `Details ${this.detailOffset + 1}-${visibleEnd} of ${detailLines.length} · PgUp/PgDn to inspect`,
+          this.localization.t("tui.task.detailsPosition", {
+            start: this.detailOffset + 1,
+            end: visibleEnd,
+            total: detailLines.length,
+          }),
         ),
       );
     } else {
@@ -194,6 +212,8 @@ class TaskPrompt implements Component {
 
 /** Coordinates Gateway task-suggestion events with the active TUI overlay. */
 export function createTuiTaskSuggestionController(deps: TaskSuggestionControllerDeps) {
+  const localization = deps.localization ?? TUI_ENGLISH_LOCALIZATION;
+  const actionsForLocale = taskActions(localization);
   const createSelector =
     deps.createSelector ??
     ((items: SelectItem[]) => new SelectList(items, items.length, selectListTheme));
@@ -236,7 +256,7 @@ export function createTuiTaskSuggestionController(deps: TaskSuggestionController
       canAccept: Boolean(deps.client.acceptTaskSuggestion),
       canDismiss: Boolean(deps.client.dismissTaskSuggestion),
     };
-    return TASK_ACTIONS.filter((action) =>
+    return actionsForLocale.filter((action) =>
       action.value === "accept" ? capabilities.canAccept : capabilities.canDismiss,
     );
   };
@@ -283,31 +303,35 @@ export function createTuiTaskSuggestionController(deps: TaskSuggestionController
       try {
         if (action === "accept") {
           if (!deps.client.acceptTaskSuggestion) {
-            throw new Error("task suggestion acceptance is unavailable");
+            throw new Error(localization.t("tui.task.acceptanceUnavailable"));
           }
           const result = await deps.client.acceptTaskSuggestion(suggestion.id);
           remove(suggestion.id);
-          deps.chatLog.addSystem(`follow-up task started in ${result.key}`);
+          deps.chatLog.addSystem(localization.t("tui.task.started", { session: result.key }));
           if (matchesSession(suggestion)) {
             await deps.onAccepted(result.key);
           }
         } else {
           if (!deps.client.dismissTaskSuggestion) {
-            throw new Error("task suggestion dismissal is unavailable");
+            throw new Error(localization.t("tui.task.dismissalUnavailable"));
           }
           const result = await deps.client.dismissTaskSuggestion(suggestion.id);
           if (!result.dismissed) {
-            throw new Error("task suggestion is no longer pending");
+            throw new Error(localization.t("tui.task.noLongerPending"));
           }
           remove(suggestion.id);
-          deps.chatLog.addSystem("follow-up task dismissed");
+          deps.chatLog.addSystem(localization.t("tui.task.dismissed"));
         }
       } catch (error) {
         hiddenIds.delete(suggestion.id);
-        deps.chatLog.addSystem(`follow-up task failed: ${formatErrorMessage(error)}`);
+        deps.chatLog.addSystem(
+          localization.t("tui.task.failed", { error: formatErrorMessage(error) }),
+        );
         void refresh().catch((refreshError: unknown) => {
           deps.chatLog.addSystem(
-            `task suggestion refresh failed: ${formatErrorMessage(refreshError)}`,
+            localization.t("tui.task.refreshFailed", {
+              error: formatErrorMessage(refreshError),
+            }),
           );
         });
       }
@@ -343,7 +367,7 @@ export function createTuiTaskSuggestionController(deps: TaskSuggestionController
         return;
       }
       acceptArmed = true;
-      prompt?.setConfirmation("Press Enter again to start this task in a worktree.");
+      prompt?.setConfirmation(localization.t("tui.task.confirm"));
       deps.requestRender();
     };
     selector.onCancel = () => {
@@ -352,11 +376,11 @@ export function createTuiTaskSuggestionController(deps: TaskSuggestionController
       }
       hiddenIds.add(suggestion.id);
       closeActive();
-      deps.chatLog.addSystem("follow-up task hidden; suggestion remains pending");
+      deps.chatLog.addSystem(localization.t("tui.task.hidden"));
       presentNext();
       deps.requestRender();
     };
-    prompt = new TaskPrompt(suggestion, selector, deps.requestRender);
+    prompt = new TaskPrompt(suggestion, selector, deps.requestRender, localization);
     activeOverlay = deps.openOverlay(prompt);
     deps.requestRender();
   };

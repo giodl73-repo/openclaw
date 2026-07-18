@@ -18,6 +18,7 @@ import {
   type OpenClawLocale,
 } from "../packages/localization-core/src/locale-registry.js";
 import { CLI_SUPPORTED_LOCALES } from "../src/cli/i18n/runtime.js";
+import { TUI_SUPPORTED_LOCALES } from "../src/tui/i18n/runtime.js";
 import { WIZARD_LOCALES } from "../src/wizard/i18n/index.js";
 import { SUPPORTED_LOCALES as CONTROL_UI_LOCALES } from "../ui/src/i18n/lib/registry.js";
 import { APPLE_I18N_LOCALES } from "./apple-app-i18n.js";
@@ -88,12 +89,23 @@ const SURFACE_SEEDS: Record<LocalizationSurfaceId, SurfaceSeed> = {
     source: "src/cli/i18n/locales/en.ts",
     catalogs: "src/cli/i18n/locales",
     migration: "migrated",
-    validationCommand: "node scripts/run-vitest.mjs run src/cli/i18n/runtime.test.ts",
+    validationCommand:
+      "node scripts/run-vitest.mjs run src/cli/i18n/runtime.test.ts src/cli/logs-cli.test.ts",
     contentClasses: ["general", "recovery"],
     localeArtifact: catalogFile("src/cli/i18n/locales"),
     supportedLocales: CLI_SUPPORTED_LOCALES,
   },
-  tui: unmigrated("tui", "openclaw-cli", "src/tui", ["general", "recovery"]),
+  tui: {
+    owner: "tui",
+    artifactId: "openclaw-cli",
+    source: "src/tui/i18n/locales/en.ts",
+    catalogs: "src/tui/i18n/locales",
+    migration: "migrated",
+    validationCommand: "pnpm tui:localization:check",
+    contentClasses: ["general", "recovery"],
+    localeArtifact: catalogFile("src/tui/i18n/locales"),
+    supportedLocales: TUI_SUPPORTED_LOCALES,
+  },
   runtime: unmigrated("core-runtime", "openclaw-runtime", "src", [
     "general",
     "safety",

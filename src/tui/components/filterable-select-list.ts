@@ -9,11 +9,16 @@ import {
   type SelectListTheme,
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
+import { TUI_ENGLISH_LOCALIZATION } from "../i18n/runtime.js";
 
 export interface FilterableSelectItem extends SelectItem {
   /** Additional searchable fields beyond label */
   searchText?: string;
 }
+
+export type FilterableSelectListCopy = {
+  filterPrompt: string;
+};
 
 interface FilterableSelectListTheme extends SelectListTheme {
   filterLabel: (text: string) => string;
@@ -34,7 +39,14 @@ export class FilterableSelectList implements Component {
   onSelect?: (item: SelectItem) => void;
   onCancel?: () => void;
 
-  constructor(items: FilterableSelectItem[], maxVisible: number, theme: FilterableSelectListTheme) {
+  constructor(
+    items: FilterableSelectItem[],
+    maxVisible: number,
+    theme: FilterableSelectListTheme,
+    private readonly copy: FilterableSelectListCopy = {
+      filterPrompt: TUI_ENGLISH_LOCALIZATION.t("tui.selector.filterPrompt"),
+    },
+  ) {
     this.allItems = items;
     this.maxVisible = maxVisible;
     this.theme = theme;
@@ -62,7 +74,7 @@ export class FilterableSelectList implements Component {
     const lines: string[] = [];
 
     // Filter input row
-    const filterLabel = this.theme.filterLabel("Filter: ");
+    const filterLabel = this.theme.filterLabel(this.copy.filterPrompt);
     const inputLines = this.input.render(width - 8);
     const inputText = inputLines[0] ?? "";
     lines.push(filterLabel + inputText);

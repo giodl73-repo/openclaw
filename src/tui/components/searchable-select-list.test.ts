@@ -42,6 +42,18 @@ const testItems = [
 ];
 
 describe("SearchableSelectList", () => {
+  it("renders injected localized chrome without changing item values", () => {
+    const list = new SearchableSelectList(testItems, 5, mockTheme, {
+      searchPrompt: "搜索：",
+      noMatches: "  无匹配项",
+    });
+
+    expect(list.render(80).join("\n")).toContain("搜索：");
+    list.handleInput("z");
+    expect(list.render(80).join("\n")).toContain("无匹配项");
+    expect(testItems[0]?.value).toBe("anthropic/claude-3-opus");
+  });
+
   function typeInput(list: SearchableSelectList, text: string) {
     for (const ch of text) {
       list.handleInput(ch);
