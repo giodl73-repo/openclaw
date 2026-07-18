@@ -39,6 +39,8 @@
       "catalogRevision": "sha256:d123d4768e1b5bac24a72bbf93d212c30d6e4f68121d1a32b2556315641358e7",
       "source": "ui/src/i18n/locales/en.ts",
       "catalogs": "ui/src/i18n/locales",
+      "migration": "migrated",
+      "validationCommand": "pnpm ui:i18n:verify",
       "contentClasses": [
         "general",
         "authentication",
@@ -112,7 +114,10 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage"
+      ]
     },
     "cli-onboarding": {
       "owner": "cli",
@@ -120,6 +125,8 @@
       "catalogRevision": "sha256:439eda80d3aaf66e52d17e21d7f2e4d8f9d2d5e44c6fcdd11e6d6ceff46181d7",
       "source": "src/wizard/i18n/locales/en.ts",
       "catalogs": "src/wizard/i18n/locales",
+      "migration": "migrated",
+      "validationCommand": "node scripts/run-vitest.mjs run src/wizard/i18n/index.test.ts",
       "contentClasses": [
         "general",
         "authentication",
@@ -193,7 +200,10 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage"
+      ]
     },
     "channel-plugin-setup": {
       "owner": "channels",
@@ -201,6 +211,8 @@
       "catalogRevision": "sha256:439eda80d3aaf66e52d17e21d7f2e4d8f9d2d5e44c6fcdd11e6d6ceff46181d7",
       "source": "src/wizard/i18n/locales/en.ts",
       "catalogs": "src/wizard/i18n/locales",
+      "migration": "migrated",
+      "validationCommand": "node scripts/run-vitest.mjs run src/wizard/i18n/index.test.ts",
       "contentClasses": [
         "general",
         "authentication",
@@ -274,7 +286,10 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage"
+      ]
     },
     "cli": {
       "owner": "cli",
@@ -282,6 +297,8 @@
       "catalogRevision": "sha256:674f18a04aa0a90e4ab28600b382ad24f2b81a15dca94502f864e83bc1ec6213",
       "source": "src/cli/i18n/locales/en.ts",
       "catalogs": "src/cli/i18n/locales",
+      "migration": "migrated",
+      "validationCommand": "node scripts/run-vitest.mjs run src/cli/i18n/runtime.test.ts",
       "contentClasses": [
         "general",
         "recovery"
@@ -354,13 +371,18 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage"
+      ]
     },
     "tui": {
       "owner": "tui",
       "artifactId": "openclaw-cli",
       "catalogRevision": "none",
       "source": "src/tui",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general",
         "recovery"
@@ -433,13 +455,19 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "runtime": {
       "owner": "core-runtime",
       "artifactId": "openclaw-runtime",
       "catalogRevision": "none",
       "source": "src",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general",
         "safety",
@@ -518,13 +546,19 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "gateway-errors": {
       "owner": "gateway",
       "artifactId": "openclaw-gateway",
       "catalogRevision": "none",
       "source": "packages/gateway-protocol/src/schema/error-codes.ts",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general",
         "authentication",
@@ -599,13 +633,19 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "server-rendered-channels": {
       "owner": "channels",
       "artifactId": "openclaw-runtime",
       "catalogRevision": "none",
       "source": "src/infra",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general",
         "safety",
@@ -680,13 +720,19 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "command-metadata": {
       "owner": "command-catalog",
       "artifactId": "openclaw-runtime",
       "catalogRevision": "none",
       "source": "src/commands",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general"
       ],
@@ -758,13 +804,19 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "telegram-command-menu": {
       "owner": "telegram",
       "artifactId": "openclaw-plugin-telegram",
       "catalogRevision": "none",
       "source": "extensions/telegram",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general"
       ],
@@ -836,13 +888,19 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "discord-command-menu": {
       "owner": "discord",
       "artifactId": "openclaw-plugin-discord",
       "catalogRevision": "none",
       "source": "extensions/discord",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general"
       ],
@@ -914,13 +972,19 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "skill-metadata": {
       "owner": "skills",
       "artifactId": "openclaw-runtime",
       "catalogRevision": "none",
-      "source": "src/agents/skills",
+      "source": "src/skills",
+      "migration": "unmigrated",
+      "validationCommand": "pnpm localization:coverage:check",
       "contentClasses": [
         "general"
       ],
@@ -992,7 +1056,11 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage",
+        "surface-not-migrated"
+      ]
     },
     "android": {
       "owner": "android",
@@ -1000,6 +1068,8 @@
       "catalogRevision": "sha256:ff247ac0c5141229e32d352bd51e3cf25df4c8a57d868883ccb3ddc4f564e205",
       "source": "apps/.i18n/native-source.json",
       "catalogs": "apps/.i18n/native",
+      "migration": "migrated",
+      "validationCommand": "pnpm android:i18n:check",
       "contentClasses": [
         "general",
         "safety",
@@ -1076,7 +1146,10 @@
         "sv": {
           "maturity": "partial"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage"
+      ]
     },
     "apple": {
       "owner": "apple",
@@ -1084,6 +1157,8 @@
       "catalogRevision": "sha256:ff247ac0c5141229e32d352bd51e3cf25df4c8a57d868883ccb3ddc4f564e205",
       "source": "apps/.i18n/native-source.json",
       "catalogs": "apps/.i18n/native",
+      "migration": "migrated",
+      "validationCommand": "pnpm apple:i18n:check",
       "contentClasses": [
         "general",
         "safety",
@@ -1160,7 +1235,10 @@
         "sv": {
           "maturity": "partial"
         }
-      }
+      },
+      "promotionBlockers": [
+        "incomplete-locale-coverage"
+      ]
     },
     "docs": {
       "owner": "docs",
@@ -1168,6 +1246,8 @@
       "catalogRevision": "sha256:1d0e502e49da9aaca575744d30e71d68e997b0ee79b27998ea05e69a6f77284a",
       "source": "docs",
       "catalogs": "docs/.i18n",
+      "migration": "external",
+      "validationCommand": "pnpm docs:check-i18n-glossary",
       "contentClasses": [
         "general",
         "security",
@@ -1243,7 +1323,11 @@
         "sv": {
           "maturity": "unsupported"
         }
-      }
+      },
+      "promotionBlockers": [
+        "external-artifact-unverified",
+        "incomplete-locale-coverage"
+      ]
     }
   }
 }

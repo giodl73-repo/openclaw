@@ -43,6 +43,18 @@ export const LOCALIZATION_CHECKS = [
 
 export type LocalizationCheck = (typeof LOCALIZATION_CHECKS)[number];
 
+export const LOCALIZATION_MIGRATION_STATES = ["migrated", "external", "unmigrated"] as const;
+
+export type LocalizationMigrationState = (typeof LOCALIZATION_MIGRATION_STATES)[number];
+
+export const LOCALIZATION_PROMOTION_BLOCKERS = [
+  "surface-not-migrated",
+  "external-artifact-unverified",
+  "incomplete-locale-coverage",
+] as const;
+
+export type LocalizationPromotionBlocker = (typeof LOCALIZATION_PROMOTION_BLOCKERS)[number];
+
 export const REQUIRED_LOCALIZATION_SURFACES = [
   "control-ui",
   "cli-onboarding",
@@ -74,8 +86,11 @@ export type LocalizationCoverageSurface = {
   catalogRevision: string;
   source: string;
   catalogs?: string;
+  migration: LocalizationMigrationState;
+  validationCommand: string;
   contentClasses: readonly LocalizationContentClass[];
   checks: readonly LocalizationCheck[];
+  promotionBlockers: readonly LocalizationPromotionBlocker[];
   locales: Readonly<Record<OpenClawLocale, LocalizationLocaleState>>;
 };
 
@@ -101,6 +116,8 @@ export type LocalizationCoverageIssue = {
 const MATURITY_STATES = new Set<string>(LOCALIZATION_MATURITY_STATES);
 const CONTENT_CLASSES = new Set<string>(LOCALIZATION_CONTENT_CLASSES);
 const CHECKS = new Set<string>(LOCALIZATION_CHECKS);
+const MIGRATION_STATES = new Set<string>(LOCALIZATION_MIGRATION_STATES);
+const PROMOTION_BLOCKERS = new Set<string>(LOCALIZATION_PROMOTION_BLOCKERS);
 const SENSITIVE_CONTENT_CLASSES = new Set<LocalizationContentClass>([
   "safety",
   "security",
@@ -166,6 +183,29 @@ export function requiredChecksForSurface(
   return [...required].toSorted();
 }
 
+export function requiredPromotionBlockersForSurface(
+  surface: Pick<LocalizationCoverageSurface, "migration" | "locales">,
+): readonly LocalizationPromotionBlocker[] {
+  const required = new Set<LocalizationPromotionBlocker>();
+  if (surface.migration === "unmigrated") {
+    required.add("surface-not-migrated");
+  }
+  if (surface.migration === "external") {
+    required.add("external-artifact-unverified");
+  }
+  const hasIncompleteLocale = OPENCLAW_LOCALES.some((locale) => {
+    if (locale === "en") {
+      return false;
+    }
+    const state = surface.locales[locale];
+    return !isRecord(state) || state.maturity !== "complete";
+  });
+  if (hasIncompleteLocale) {
+    required.add("incomplete-locale-coverage");
+  }
+  return [...required].toSorted();
+}
+
 function validateFixtures(value: unknown, issues: LocalizationCoverageIssue[]): void {
   if (!isRecord(value)) {
     issues.push(issue("testFixtures", "Test fixtures must be an object."));
@@ -217,10 +257,19 @@ function validateSurface(
   surface: Record<string, unknown>,
   issues: LocalizationCoverageIssue[],
 ): void {
-  for (const field of ["owner", "artifactId", "catalogRevision", "source"] as const) {
+  for (const field of [
+    "owner",
+    "artifactId",
+    "catalogRevision",
+    "source",
+    "validationCommand",
+  ] as const) {
     if (typeof surface[field] !== "string" || !surface[field].trim()) {
       issues.push(issue(`${path}.${field}`, `${field} is required.`));
     }
+  }
+  if (!MIGRATION_STATES.has(String(surface.migration))) {
+    issues.push(issue(`${path}.migration`, "Unknown migration state."));
   }
 
   const contentClasses = validateStringSet(
@@ -230,6 +279,12 @@ function validateSurface(
     issues,
   ) as LocalizationContentClass[];
   const checks = validateStringSet(`${path}.checks`, surface.checks, CHECKS, issues);
+  const promotionBlockers = validateStringSet(
+    `${path}.promotionBlockers`,
+    surface.promotionBlockers,
+    PROMOTION_BLOCKERS,
+    issues,
+  );
   const locales = surface.locales;
   if (!isRecord(locales)) {
     issues.push(issue(`${path}.locales`, "Locale rows must be an object."));
@@ -267,6 +322,32 @@ function validateSurface(
     }
   }
 
+  if (surface.migration === "unmigrated") {
+    if (surface.catalogRevision !== "none") {
+      issues.push(
+        issue(`${path}.catalogRevision`, "Unmigrated surfaces must use catalogRevision none."),
+      );
+    }
+    for (const locale of OPENCLAW_LOCALES) {
+      if (
+        locale !== "en" &&
+        isRecord(locales[locale]) &&
+        locales[locale].maturity !== "unsupported"
+      ) {
+        issues.push(
+          issue(
+            `${path}.locales.${locale}.maturity`,
+            "Unmigrated surfaces cannot claim translated locale support.",
+          ),
+        );
+      }
+    }
+  } else if (surface.catalogRevision === "none") {
+    issues.push(
+      issue(`${path}.catalogRevision`, "Migrated and external surfaces require a revision."),
+    );
+  }
+
   if (contentClasses.length > 0) {
     const required = requiredChecksForSurface({
       contentClasses,
@@ -275,6 +356,27 @@ function validateSurface(
     for (const check of required) {
       if (!checks.includes(check)) {
         issues.push(issue(`${path}.checks`, `Missing derived check: ${check}.`));
+      }
+    }
+  }
+
+  if (MIGRATION_STATES.has(String(surface.migration))) {
+    const required = requiredPromotionBlockersForSurface({
+      migration: surface.migration as LocalizationMigrationState,
+      locales: locales as Record<OpenClawLocale, LocalizationLocaleState>,
+    });
+    for (const blocker of required) {
+      if (!promotionBlockers.includes(blocker)) {
+        issues.push(
+          issue(`${path}.promotionBlockers`, `Missing derived promotion blocker: ${blocker}.`),
+        );
+      }
+    }
+    for (const blocker of promotionBlockers) {
+      if (!required.includes(blocker as LocalizationPromotionBlocker)) {
+        issues.push(
+          issue(`${path}.promotionBlockers`, `Unexpected promotion blocker: ${blocker}.`),
+        );
       }
     }
   }

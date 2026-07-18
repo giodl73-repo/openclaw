@@ -3,11 +3,13 @@ import path from "node:path";
 import {
   REQUIRED_LOCALIZATION_SURFACES,
   requiredChecksForSurface,
+  requiredPromotionBlockersForSurface,
   validateLocalizationCoverageManifest,
   type LocalizationContentClass,
   type LocalizationCoverageManifest,
   type LocalizationLocaleState,
   type LocalizationMaturity,
+  type LocalizationMigrationState,
   type LocalizationSurfaceId,
 } from "../packages/localization-core/src/coverage.js";
 import {
@@ -15,7 +17,12 @@ import {
   OPENCLAW_LOCALE_REGISTRY_REVISION,
   type OpenClawLocale,
 } from "../packages/localization-core/src/locale-registry.js";
+import { CLI_SUPPORTED_LOCALES } from "../src/cli/i18n/runtime.js";
+import { WIZARD_LOCALES } from "../src/wizard/i18n/index.js";
+import { SUPPORTED_LOCALES as CONTROL_UI_LOCALES } from "../ui/src/i18n/lib/registry.js";
+import { APPLE_I18N_LOCALES } from "./apple-app-i18n.js";
 import { computeLocalizationCatalogRevision } from "./lib/localization-catalog-revision.js";
+import { NATIVE_I18N_LOCALES } from "./native-app-i18n.js";
 
 type SurfaceSeed = {
   owner: string;
@@ -23,19 +30,23 @@ type SurfaceSeed = {
   catalogRevision?: "none";
   source: string;
   catalogs?: string;
+  migration: LocalizationMigrationState;
+  validationCommand: string;
   contentClasses: readonly LocalizationContentClass[];
-  translatedLocales?: readonly OpenClawLocale[];
   completeLocales?: readonly OpenClawLocale[];
   platformConstrainedLocales?: readonly OpenClawLocale[];
+  localeArtifact?: (locale: Exclude<OpenClawLocale, "en">) => string;
+  supportedLocales?: readonly OpenClawLocale[];
   revisionPaths?: readonly string[];
 };
 
-const translatedWithoutSwedish = OPENCLAW_LOCALES.filter(
-  (locale): locale is Exclude<OpenClawLocale, "en" | "sv"> => locale !== "en" && locale !== "sv",
-);
-const allTranslationLocales = OPENCLAW_LOCALES.filter(
-  (locale): locale is Exclude<OpenClawLocale, "en"> => locale !== "en",
-);
+const ROOT = path.resolve(import.meta.dirname, "..");
+const catalogFile =
+  (directory: string, extension = ".ts") =>
+  (locale: Exclude<OpenClawLocale, "en">): string =>
+    path.join(directory, `${locale}${extension}`);
+const docsGlossary = (locale: Exclude<OpenClawLocale, "en">): string =>
+  path.join("docs/.i18n", `glossary.${locale}.json`);
 
 const SURFACE_SEEDS: Record<LocalizationSurfaceId, SurfaceSeed> = {
   "control-ui": {
@@ -43,32 +54,44 @@ const SURFACE_SEEDS: Record<LocalizationSurfaceId, SurfaceSeed> = {
     artifactId: "control-ui-web",
     source: "ui/src/i18n/locales/en.ts",
     catalogs: "ui/src/i18n/locales",
+    migration: "migrated",
+    validationCommand: "pnpm ui:i18n:verify",
     contentClasses: ["general", "authentication", "recovery"],
-    translatedLocales: translatedWithoutSwedish,
+    localeArtifact: catalogFile("ui/src/i18n/locales"),
+    supportedLocales: CONTROL_UI_LOCALES,
   },
   "cli-onboarding": {
     owner: "cli",
     artifactId: "openclaw-cli",
     source: "src/wizard/i18n/locales/en.ts",
     catalogs: "src/wizard/i18n/locales",
+    migration: "migrated",
+    validationCommand: "node scripts/run-vitest.mjs run src/wizard/i18n/index.test.ts",
     contentClasses: ["general", "authentication", "recovery"],
-    translatedLocales: ["zh-CN", "zh-TW"],
+    localeArtifact: catalogFile("src/wizard/i18n/locales"),
+    supportedLocales: WIZARD_LOCALES,
   },
   "channel-plugin-setup": {
     owner: "channels",
     artifactId: "openclaw-cli",
     source: "src/wizard/i18n/locales/en.ts",
     catalogs: "src/wizard/i18n/locales",
+    migration: "migrated",
+    validationCommand: "node scripts/run-vitest.mjs run src/wizard/i18n/index.test.ts",
     contentClasses: ["general", "authentication", "recovery"],
-    translatedLocales: ["zh-CN", "zh-TW"],
+    localeArtifact: catalogFile("src/wizard/i18n/locales"),
+    supportedLocales: WIZARD_LOCALES,
   },
   cli: {
     owner: "cli",
     artifactId: "openclaw-cli",
     source: "src/cli/i18n/locales/en.ts",
     catalogs: "src/cli/i18n/locales",
+    migration: "migrated",
+    validationCommand: "node scripts/run-vitest.mjs run src/cli/i18n/runtime.test.ts",
     contentClasses: ["general", "recovery"],
-    translatedLocales: ["zh-CN"],
+    localeArtifact: catalogFile("src/cli/i18n/locales"),
+    supportedLocales: CLI_SUPPORTED_LOCALES,
   },
   tui: unmigrated("tui", "openclaw-cli", "src/tui", ["general", "recovery"]),
   runtime: unmigrated("core-runtime", "openclaw-runtime", "src", [
@@ -105,31 +128,39 @@ const SURFACE_SEEDS: Record<LocalizationSurfaceId, SurfaceSeed> = {
   "discord-command-menu": unmigrated("discord", "openclaw-plugin-discord", "extensions/discord", [
     "general",
   ]),
-  "skill-metadata": unmigrated("skills", "openclaw-runtime", "src/agents/skills", ["general"]),
+  "skill-metadata": unmigrated("skills", "openclaw-runtime", "src/skills", ["general"]),
   android: {
     owner: "android",
     artifactId: "openclaw-android",
     source: "apps/.i18n/native-source.json",
     catalogs: "apps/.i18n/native",
+    migration: "migrated",
+    validationCommand: "pnpm android:i18n:check",
     contentClasses: ["general", "safety", "security", "authentication", "recovery", "generated"],
-    translatedLocales: allTranslationLocales,
+    localeArtifact: catalogFile("apps/.i18n/native", ".json"),
+    supportedLocales: ["en", ...NATIVE_I18N_LOCALES],
   },
   apple: {
     owner: "apple",
     artifactId: "openclaw-apple",
     source: "apps/.i18n/native-source.json",
     catalogs: "apps/.i18n/native",
+    migration: "migrated",
+    validationCommand: "pnpm apple:i18n:check",
     contentClasses: ["general", "safety", "security", "authentication", "recovery", "generated"],
-    translatedLocales: allTranslationLocales,
+    localeArtifact: catalogFile("apps/.i18n/native", ".json"),
+    supportedLocales: ["en", ...APPLE_I18N_LOCALES],
   },
   docs: {
     owner: "docs",
     artifactId: "openclaw-docs",
     source: "docs",
     catalogs: "docs/.i18n",
+    migration: "external",
+    validationCommand: "pnpm docs:check-i18n-glossary",
     revisionPaths: ["docs/.i18n"],
     contentClasses: ["general", "security", "authentication", "recovery", "generated"],
-    translatedLocales: translatedWithoutSwedish,
+    localeArtifact: docsGlossary,
   },
 };
 
@@ -154,16 +185,23 @@ function createManifest(): LocalizationCoverageManifest {
   const surfaces = Object.fromEntries(
     REQUIRED_LOCALIZATION_SURFACES.map((surfaceId) => {
       const seed = SURFACE_SEEDS[surfaceId];
+      validateSeedPaths(surfaceId, seed);
       const locales = createLocaleRows(seed);
-      const surface = {
+      const surfaceWithoutBlockers = {
         owner: seed.owner,
         artifactId: seed.artifactId,
         catalogRevision: catalogRevision(seed),
         source: seed.source,
         ...(seed.catalogs ? { catalogs: seed.catalogs } : {}),
+        migration: seed.migration,
+        validationCommand: seed.validationCommand,
         contentClasses: seed.contentClasses,
         checks: requiredChecksForSurface({ contentClasses: seed.contentClasses, locales }),
         locales,
+      };
+      const surface = {
+        ...surfaceWithoutBlockers,
+        promotionBlockers: requiredPromotionBlockersForSurface(surfaceWithoutBlockers),
       };
       return [surfaceId, surface];
     }),
@@ -215,7 +253,9 @@ function maturityForLocale(seed: SurfaceSeed, locale: OpenClawLocale): Localizat
   if (seed.platformConstrainedLocales?.includes(locale)) {
     return "platform-constrained";
   }
-  if (seed.translatedLocales?.includes(locale)) {
+  const artifact = seed.localeArtifact?.(locale);
+  const supported = seed.supportedLocales?.includes(locale) ?? Boolean(artifact);
+  if (supported && artifact && fs.existsSync(path.resolve(ROOT, artifact))) {
     return "partial";
   }
   return "unsupported";
@@ -232,6 +272,8 @@ function unmigrated(
     artifactId,
     catalogRevision: "none",
     source,
+    migration: "unmigrated",
+    validationCommand: "pnpm localization:coverage:check",
     contentClasses,
   };
 }
@@ -241,8 +283,28 @@ function catalogRevision(seed: SurfaceSeed): string {
     return "none";
   }
   return computeLocalizationCatalogRevision(
-    path.resolve(import.meta.dirname, ".."),
+    ROOT,
     seed.revisionPaths ??
       [seed.source, seed.catalogs].filter((value): value is string => Boolean(value)),
   );
+}
+
+function validateSeedPaths(surfaceId: LocalizationSurfaceId, seed: SurfaceSeed): void {
+  const declaredPaths = new Set([seed.source, seed.catalogs, ...(seed.revisionPaths ?? [])]);
+  for (const candidate of declaredPaths) {
+    if (candidate && !fs.existsSync(path.resolve(ROOT, candidate))) {
+      throw new Error(`localization surface ${surfaceId} references missing path: ${candidate}`);
+    }
+  }
+  for (const locale of seed.supportedLocales ?? []) {
+    if (locale === "en") {
+      continue;
+    }
+    const artifact = seed.localeArtifact?.(locale);
+    if (!artifact || !fs.existsSync(path.resolve(ROOT, artifact))) {
+      throw new Error(
+        `localization surface ${surfaceId} is missing its ${locale} catalog artifact`,
+      );
+    }
+  }
 }

@@ -11,7 +11,7 @@ import {
 import { CLI_ENGLISH_CATALOG, type CliMessageKey } from "./locales/en.js";
 import { CLI_ZH_CN_CATALOG } from "./locales/zh-CN.js";
 
-const CLI_SUPPORTED_LOCALES = ["en", "zh-CN"] as const;
+export const CLI_SUPPORTED_LOCALES = ["en", "zh-CN"] as const;
 
 const validationIssues = validateCatalog({
   namespace: "cli",

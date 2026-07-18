@@ -31,7 +31,7 @@ const LOCALES: Record<WizardLocale, WizardTranslationMap> = {
 };
 
 const WIZARD_DEFAULT_LOCALE: WizardLocale = "en";
-const WIZARD_LOCALES = ["en", "zh-CN", "zh-TW"] as const;
+export const WIZARD_LOCALES = ["en", "zh-CN", "zh-TW"] as const;
 const WIZARD_CATALOG_SNAPSHOT = createCatalogSnapshot({
   catalogRevision: "wizard:1",
   catalogs: {
