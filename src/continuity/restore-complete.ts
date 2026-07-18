@@ -5,7 +5,10 @@ import path from "node:path";
 import type { ManagedRestoreSuccess } from "../commands/backup-activate-managed.js";
 import { ensureDurableDirectoryTree, syncDirectoryEntry } from "../infra/fs-durability.js";
 import { isRecord } from "../utils.js";
-import type { ContinuityArchiveObligations } from "./archive-obligations.js";
+import {
+  parseContinuityArchiveObligations,
+  type ContinuityArchiveObligations,
+} from "./archive-obligations.js";
 import type { ContinuityWakeDescriptor } from "./wake-descriptor.js";
 
 const RESTORE_COMPLETE_VERSION = "continuity-restore-complete/v1";
@@ -192,6 +195,110 @@ function requireString(value: unknown, label: string, pattern = IDENTIFIER_PATTE
       `${label} is invalid.`,
     );
   }
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requireExactFields(
+  value: Record<string, unknown>,
+  label: string,
+  fields: readonly string[],
+): void {
+  const expected = new Set(fields);
+  const actual = Object.keys(value);
+  if (actual.length !== fields.length || actual.some((field) => !expected.has(field))) {
+    throw new Error(`${label} fields are invalid.`);
+  }
+}
+
+function readEvidenceString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string.`);
+  }
+  return value;
+}
+
+export function parseContinuityRestoreCompleteEvidence(
+  value: unknown,
+): ContinuityRestoreCompleteEvidence {
+  const parsed = requireRecord(value, "Restore-complete evidence");
+  requireExactFields(parsed, "Restore-complete evidence", [
+    "startupMode",
+    "operationId",
+    "ownerId",
+    "destinationRuntimeGeneration",
+    "acceptedRecoveryPoint",
+    "preparationIdentity",
+    "admissionIdentity",
+    "expectedPlanId",
+    "continuityObligations",
+    "restore",
+  ]);
+  if (parsed.startupMode !== "restored") {
+    throw new Error("Restore-complete startup mode must be restored.");
+  }
+  const accepted = requireRecord(parsed.acceptedRecoveryPoint, "Accepted recovery point");
+  requireExactFields(accepted, "Accepted recovery point", [
+    "recoveryPointId",
+    "publicationIdentity",
+    "manifestSha256",
+  ]);
+  const restore = requireRecord(parsed.restore, "Committed restore evidence");
+  requireExactFields(restore, "Committed restore evidence", [
+    "version",
+    "ok",
+    "ownerGeneration",
+    "restoreIdentity",
+    "planId",
+    "receiptIdentity",
+    "committedRecordIdentity",
+  ]);
+  if (restore.ok !== true) {
+    throw new Error("Committed restore evidence must be successful.");
+  }
+  if (restore.version !== "continuity-restore-execution-result/v1") {
+    throw new Error("Committed restore version is invalid.");
+  }
+  const evidence: ContinuityRestoreCompleteEvidence = {
+    startupMode: "restored",
+    operationId: readEvidenceString(parsed.operationId, "Restore-complete operation identity"),
+    ownerId: readEvidenceString(parsed.ownerId, "Owner identity"),
+    destinationRuntimeGeneration: readEvidenceString(
+      parsed.destinationRuntimeGeneration,
+      "Destination runtime generation",
+    ),
+    acceptedRecoveryPoint: {
+      recoveryPointId: readEvidenceString(accepted.recoveryPointId, "Recovery-point identity"),
+      publicationIdentity: readEvidenceString(accepted.publicationIdentity, "Publication identity"),
+      manifestSha256: readEvidenceString(accepted.manifestSha256, "Manifest digest"),
+    },
+    preparationIdentity: readEvidenceString(parsed.preparationIdentity, "Preparation identity"),
+    admissionIdentity: readEvidenceString(parsed.admissionIdentity, "Admission identity"),
+    expectedPlanId: readEvidenceString(parsed.expectedPlanId, "Expected restore plan identity"),
+    continuityObligations: parseContinuityArchiveObligations(parsed.continuityObligations),
+    restore: {
+      version: "continuity-restore-execution-result/v1",
+      ok: true,
+      ownerGeneration: readEvidenceString(
+        restore.ownerGeneration,
+        "Committed destination generation",
+      ),
+      restoreIdentity: readEvidenceString(restore.restoreIdentity, "Restore identity"),
+      planId: readEvidenceString(restore.planId, "Committed restore plan identity"),
+      receiptIdentity: readEvidenceString(restore.receiptIdentity, "Restore receipt identity"),
+      committedRecordIdentity: readEvidenceString(
+        restore.committedRecordIdentity,
+        "Committed restore record identity",
+      ),
+    },
+  };
+  validateStaticEvidence(evidence);
+  return evidence;
 }
 
 function validateStaticEvidence(evidence: ContinuityRestoreCompleteEvidence): void {
