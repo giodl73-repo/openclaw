@@ -200,6 +200,135 @@ describe("managed continuity publication", () => {
     expect(mocks.verifyBackupArchive).toHaveBeenCalledTimes(2);
   });
 
+  it("writes one verified retrieval to a caller-selected exact path", async () => {
+    const { request, bytes } = await createRequest();
+    const fixture = createHooks(bytes);
+    const destinationPath = path.join(path.dirname(request.receipt.archivePath), "prepared.tar.gz");
+    const identity = {
+      ownerId: request.receipt.ownerId,
+      sourceRuntimeGeneration: request.receipt.ownerGeneration,
+      handoffId: request.receipt.handoffIdentity,
+      captureId: request.receipt.captureIdentity,
+      archiveSha256: request.receipt.archiveSha256,
+      archiveSize: request.receipt.archiveSize,
+      manifestSha256: request.receipt.manifestSha256,
+    };
+    const acceptance = {
+      version: CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION,
+      publicationId: "publication/handoff-7",
+      identity,
+      durabilityClass: "immutable" as const,
+      acceptedAt: "2026-07-15T00:00:00.000Z",
+      publicationPluginId: request.provider.pluginId,
+      publicationBindingId: request.provider.id,
+      publicationBindingVersion: request.provider.version,
+      publicationBindingGeneration: request.provider.generation,
+    };
+    fixture.hooks.retrieve = vi.fn(async () => ({
+      version: CONTINUITY_PUBLICATION_RETRIEVAL_VERSION,
+      publicationId: acceptance.publicationId,
+      identity,
+      content: (async function* () {
+        yield bytes;
+      })(),
+    }));
+    mocks.verifyBackupArchive.mockResolvedValueOnce({
+      result: {
+        archiveSha256: request.receipt.archiveSha256,
+        manifestSha256: request.receipt.manifestSha256,
+      },
+    });
+
+    const evidence = await executeManagedPublicationRetrieval(
+      {
+        version: "continuity-managed-publication-retrieval/v1",
+        ownerId: request.receipt.ownerId,
+        identity,
+        provider: request.provider,
+        acceptance,
+      },
+      fixture.hooks,
+      { destinationPath },
+    );
+
+    expect(evidence).toEqual({
+      archivePath: destinationPath,
+      archiveSha256: request.receipt.archiveSha256,
+      manifestSha256: request.receipt.manifestSha256,
+    });
+    await expect(fs.readFile(destinationPath)).resolves.toEqual(bytes);
+    expect(fixture.stops[0]).toHaveBeenCalledOnce();
+  });
+
+  it("holds and retries the exact destination after directory sync failure", async () => {
+    const { request, bytes } = await createRequest();
+    const fixture = createHooks(bytes);
+    const destinationPath = path.join(path.dirname(request.receipt.archivePath), "prepared.tar.gz");
+    const identity = {
+      ownerId: request.receipt.ownerId,
+      sourceRuntimeGeneration: request.receipt.ownerGeneration,
+      handoffId: request.receipt.handoffIdentity,
+      captureId: request.receipt.captureIdentity,
+      archiveSha256: request.receipt.archiveSha256,
+      archiveSize: request.receipt.archiveSize,
+      manifestSha256: request.receipt.manifestSha256,
+    };
+    const acceptance = {
+      version: CONTINUITY_PUBLICATION_ACCEPTANCE_VERSION,
+      publicationId: "publication/handoff-7",
+      identity,
+      durabilityClass: "immutable" as const,
+      acceptedAt: "2026-07-15T00:00:00.000Z",
+      publicationPluginId: request.provider.pluginId,
+      publicationBindingId: request.provider.id,
+      publicationBindingVersion: request.provider.version,
+      publicationBindingGeneration: request.provider.generation,
+    };
+    fixture.hooks.retrieve = vi.fn(async () => ({
+      version: CONTINUITY_PUBLICATION_RETRIEVAL_VERSION,
+      publicationId: acceptance.publicationId,
+      identity,
+      content: (async function* () {
+        yield bytes;
+      })(),
+    }));
+    fixture.hooks.syncDirectory = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("directory sync failed"))
+      .mockResolvedValueOnce(undefined);
+    mocks.verifyBackupArchive.mockResolvedValue({
+      result: {
+        archiveSha256: request.receipt.archiveSha256,
+        manifestSha256: request.receipt.manifestSha256,
+      },
+    });
+    const retrievalRequest = {
+      version: "continuity-managed-publication-retrieval/v1" as const,
+      ownerId: request.receipt.ownerId,
+      identity,
+      provider: request.provider,
+      acceptance,
+    };
+
+    await expect(
+      executeManagedPublicationRetrieval(retrievalRequest, fixture.hooks, { destinationPath }),
+    ).rejects.toMatchObject({
+      phase: "retrieval",
+      code: "continuity.publication.retrieval_unavailable",
+      disposition: "hold",
+    });
+    await expect(fs.readFile(destinationPath)).resolves.toEqual(bytes);
+
+    await expect(
+      executeManagedPublicationRetrieval(retrievalRequest, fixture.hooks, { destinationPath }),
+    ).resolves.toEqual({
+      archivePath: destinationPath,
+      archiveSha256: request.receipt.archiveSha256,
+      manifestSha256: request.receipt.manifestSha256,
+    });
+    expect(fixture.hooks.syncDirectory).toHaveBeenCalledTimes(2);
+  });
+
   it("quarantines changed plugin ownership before provider execution", async () => {
     const { request, bytes } = await createRequest();
     const fixture = createHooks(bytes);
@@ -236,7 +365,7 @@ describe("managed continuity publication", () => {
     let resolveLateStart: ((services: { stop: () => Promise<void> }) => void) | undefined;
     const lateStop = vi.fn(async () => {});
     fixture.hooks.operationTimeoutMs = 20;
-    fixture.hooks.startServices = vi.fn(
+    fixture.hooks.startServices = vi.fn<NonNullable<ManagedPublicationHooks["startServices"]>>(
       () =>
         new Promise((resolve) => {
           resolveLateStart = resolve;

@@ -23,6 +23,7 @@ import {
   type ContinuityPublicationIdentityV1,
 } from "../continuity/publication-provider.js";
 import { sha256File } from "../infra/crypto-digest.js";
+import { syncDirectoryEntry, syncFileContent } from "../infra/fs-durability.js";
 import { startPluginServicesStrict, type PluginServicesHandle } from "../plugins/services.js";
 import { runCommandWithTimeout } from "../process/exec.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
@@ -123,6 +124,7 @@ export type ManagedPublicationHooks = {
     request: ManagedPublicationRequest;
     acceptance: ContinuityPublicationAcceptanceReceiptV1;
   }) => Promise<void>;
+  syncDirectory?: (directoryPath: string) => Promise<void>;
 };
 
 export type ManagedPublicationRetrievalRequest = {
@@ -668,12 +670,31 @@ async function pinAndVerifyArchive(request: ManagedPublicationRequest): Promise<
 async function verifyFreshRetrieval(params: {
   retrieval: Awaited<ReturnType<typeof retrieveContinuityArtifactV1>>;
   manifestSha256: string;
-}): Promise<void> {
+  destinationPath?: string;
+  syncDirectory?: (directoryPath: string) => Promise<void>;
+}): Promise<
+  | {
+      archivePath: string;
+      archiveSha256: string;
+      manifestSha256: string;
+    }
+  | undefined
+> {
   let directory: string | undefined;
   let verificationFailure: unknown;
   let verificationFailed = false;
+  let evidence:
+    | {
+        archivePath: string;
+        archiveSha256: string;
+        manifestSha256: string;
+      }
+    | undefined;
   try {
-    directory = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-continuity-retrieval-"));
+    const parentDirectory = params.destinationPath
+      ? path.dirname(params.destinationPath)
+      : os.tmpdir();
+    directory = await fs.mkdtemp(path.join(parentDirectory, ".openclaw-continuity-retrieval-"));
     const archivePath = path.join(directory, "archive.tar.gz");
     await pipeline(
       Readable.from(params.retrieval.content),
@@ -683,25 +704,67 @@ async function verifyFreshRetrieval(params: {
     if (verified.result.manifestSha256 !== params.manifestSha256) {
       throw new Error("Continuity publication retrieval manifest does not match acceptance.");
     }
+    if (params.destinationPath) {
+      await syncFileContent(archivePath);
+      try {
+        await fs.link(archivePath, params.destinationPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+          throw error;
+        }
+        const existingStat = await fs.lstat(params.destinationPath);
+        const existing = await verifyBackupArchive({ archive: params.destinationPath });
+        if (
+          existingStat.isSymbolicLink() ||
+          !existingStat.isFile() ||
+          existingStat.size !== params.retrieval.identity.archiveSize ||
+          existing.result.archiveSha256 !== params.retrieval.identity.archiveSha256 ||
+          existing.result.manifestSha256 !== params.manifestSha256
+        ) {
+          throw new Error("Continuity publication retrieval destination conflicts.", {
+            cause: error,
+          });
+        }
+      }
+      try {
+        await (params.syncDirectory ?? syncDirectoryEntry)(parentDirectory);
+      } catch (error) {
+        throw new ManagedPublicationError(
+          "retrieval",
+          "continuity.publication.retrieval_unavailable",
+          "hold",
+          "Continuity publication retrieval destination could not be committed durably.",
+          undefined,
+          { cause: error },
+        );
+      }
+      evidence = {
+        archivePath: params.destinationPath,
+        archiveSha256: verified.result.archiveSha256,
+        manifestSha256: verified.result.manifestSha256,
+      };
+    }
   } catch (error) {
     verificationFailed = true;
     verificationFailure =
-      (error as NodeJS.ErrnoException | undefined)?.code === "ENOSPC"
-        ? new ManagedPublicationError(
-            "retrieval",
-            "continuity.publication.resource_exhausted",
-            "hold",
-            "Continuity publication retrieval exceeded the temporary-disk budget.",
-            "ENOSPC",
-            { cause: error },
-          )
-        : Object.assign(
-            new ContinuityPublicationError(
-              "invalid-retrieval",
-              "Continuity publication retrieval verification failed",
-            ),
-            { cause: error },
-          );
+      error instanceof ManagedPublicationError
+        ? error
+        : (error as NodeJS.ErrnoException | undefined)?.code === "ENOSPC"
+          ? new ManagedPublicationError(
+              "retrieval",
+              "continuity.publication.resource_exhausted",
+              "hold",
+              "Continuity publication retrieval exceeded the temporary-disk budget.",
+              "ENOSPC",
+              { cause: error },
+            )
+          : Object.assign(
+              new ContinuityPublicationError(
+                "invalid-retrieval",
+                "Continuity publication retrieval verification failed",
+              ),
+              { cause: error },
+            );
   }
   if (directory) {
     await removeTemporaryDirectory(directory, verificationFailed ? verificationFailure : undefined);
@@ -709,12 +772,21 @@ async function verifyFreshRetrieval(params: {
   if (verificationFailed) {
     throw verificationFailure;
   }
+  return evidence;
 }
 
 export async function executeManagedPublicationRetrieval(
   request: ManagedPublicationRetrievalRequest,
   hooks: ManagedPublicationHooks = {},
-): Promise<void> {
+  options: { destinationPath?: string } = {},
+): Promise<
+  | {
+      archivePath: string;
+      archiveSha256: string;
+      manifestSha256: string;
+    }
+  | undefined
+> {
   if (!publicationIdentitiesEqual(request.acceptance.identity, request.identity)) {
     throw new ContinuityPublicationError(
       "invalid-request",
@@ -735,6 +807,13 @@ export async function executeManagedPublicationRetrieval(
   let services: PluginServicesHandle | undefined;
   let retrievalFailure: unknown;
   let retrievalFailed = false;
+  let evidence:
+    | {
+        archivePath: string;
+        archiveSha256: string;
+        manifestSha256: string;
+      }
+    | undefined;
   try {
     const runtime = resolveProviderRuntime(context);
     assertRequestedBinding(request.provider, runtime);
@@ -759,9 +838,11 @@ export async function executeManagedPublicationRetrieval(
           expectedOwnerId: request.ownerId,
           signal,
         });
-        await verifyFreshRetrieval({
+        evidence = await verifyFreshRetrieval({
           retrieval,
           manifestSha256: request.identity.manifestSha256,
+          ...(options.destinationPath ? { destinationPath: options.destinationPath } : {}),
+          ...(hooks.syncDirectory ? { syncDirectory: hooks.syncDirectory } : {}),
         });
       },
     });
@@ -780,6 +861,7 @@ export async function executeManagedPublicationRetrieval(
   if (retrievalFailed) {
     throw retrievalFailure;
   }
+  return evidence;
 }
 
 function buildCurrentCliArgv(args: string[]): string[] {

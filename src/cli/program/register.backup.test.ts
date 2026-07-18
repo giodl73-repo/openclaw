@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   backupPublishManagedRetrievalCommand: vi.fn(),
   managedPublicationRequestFailure: vi.fn(),
   readManagedPublicationRequestFromStdin: vi.fn(),
+  backupPrepareManagedCommand: vi.fn(),
+  managedPreparationRequestFailure: vi.fn(),
+  readManagedPreparationRequestFromStdin: vi.fn(),
   backupCreateCommand: vi.fn(),
   backupMaterializeCommand: vi.fn(),
   backupPlanRestoreCommand: vi.fn(),
@@ -47,6 +50,12 @@ vi.mock("../../commands/backup-publish-managed.js", () => ({
   backupPublishManagedRetrievalCommand: mocks.backupPublishManagedRetrievalCommand,
   managedPublicationRequestFailure: mocks.managedPublicationRequestFailure,
   readManagedPublicationRequestFromStdin: mocks.readManagedPublicationRequestFromStdin,
+}));
+
+vi.mock("../../commands/backup-prepare-managed.js", () => ({
+  backupPrepareManagedCommand: mocks.backupPrepareManagedCommand,
+  managedPreparationRequestFailure: mocks.managedPreparationRequestFailure,
+  readManagedPreparationRequestFromStdin: mocks.readManagedPreparationRequestFromStdin,
 }));
 
 vi.mock("../../commands/backup.js", () => ({
@@ -89,6 +98,8 @@ describe("registerBackupCommand", () => {
     mocks.backupPublishManagedCommand.mockResolvedValue(undefined);
     mocks.backupPublishManagedRetrievalCommand.mockResolvedValue(undefined);
     mocks.readManagedPublicationRequestFromStdin.mockResolvedValue('{"version":"publish-test"}');
+    mocks.backupPrepareManagedCommand.mockResolvedValue(undefined);
+    mocks.readManagedPreparationRequestFromStdin.mockResolvedValue('{"version":"prepare-test"}');
     backupCreateCommand.mockResolvedValue(undefined);
     mocks.backupMaterializeCommand.mockResolvedValue(undefined);
     mocks.backupPlanRestoreCommand.mockResolvedValue(undefined);
@@ -212,6 +223,26 @@ describe("registerBackupCommand", () => {
       runtime,
       '{"version":"publish-test"}',
     );
+  });
+
+  it("runs managed preparation from a strict stdin request", async () => {
+    await runCli(["backup", "prepare", "--managed", "--json"]);
+
+    expect(mocks.readManagedPreparationRequestFromStdin).toHaveBeenCalledTimes(1);
+    expect(mocks.backupPrepareManagedCommand).toHaveBeenCalledWith(
+      runtime,
+      '{"version":"prepare-test"}',
+    );
+  });
+
+  it("returns a typed failure when the managed preparation request cannot be read", async () => {
+    const error = new Error("request too large");
+    mocks.readManagedPreparationRequestFromStdin.mockRejectedValue(error);
+
+    await runCli(["backup", "prepare", "--managed", "--json"]);
+
+    expect(mocks.managedPreparationRequestFailure).toHaveBeenCalledWith(runtime, error);
+    expect(mocks.backupPrepareManagedCommand).not.toHaveBeenCalled();
   });
 
   it("returns a typed failure when the managed publication request cannot be read", async () => {

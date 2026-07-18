@@ -15,6 +15,11 @@ import {
 import { backupMaterializeCommand } from "../../commands/backup-materialize.js";
 import { backupPlanRestoreCommand } from "../../commands/backup-plan-restore.js";
 import {
+  backupPrepareManagedCommand,
+  managedPreparationRequestFailure,
+  readManagedPreparationRequestFromStdin,
+} from "../../commands/backup-prepare-managed.js";
+import {
   backupPublishManagedCommand,
   backupPublishManagedRetrievalCommand,
   managedPublicationRequestFailure,
@@ -158,6 +163,24 @@ export function registerBackupCommand(program: Command) {
           destination: opts.destination as string,
           json: Boolean(opts.json),
         });
+      });
+    });
+
+  backup
+    .command("prepare")
+    .description("Retrieve and prepare one managed continuity restore source")
+    .requiredOption("--managed", "Read a strict managed preparation request from stdin")
+    .requiredOption("--json", "Emit the typed preparation result as JSON")
+    .action(async () => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        let request: string;
+        try {
+          request = await readManagedPreparationRequestFromStdin();
+        } catch (error) {
+          managedPreparationRequestFailure(defaultRuntime, error);
+          return;
+        }
+        await backupPrepareManagedCommand(defaultRuntime, request);
       });
     });
 
