@@ -441,6 +441,8 @@ const {
 } = await import("./update-cli.js");
 const updateCliShared = await import("./update-cli/shared.js");
 const { ensureGitCheckout, resolveGitInstallDir } = updateCliShared;
+const { tryInstallShellCompletion } = await import("./update-cli/update-command-service.js");
+const { createCliLocalization } = await import("./i18n/runtime.js");
 const { spawnSync } = await import("node:child_process");
 const { readRestartSentinel } = await import("../infra/restart-sentinel.js");
 
@@ -1132,7 +1134,99 @@ describe("update-cli", () => {
     expect(logOutput).not.toContain("Error: spawnSync");
   });
 
+  it("localizes completion cache timeout guidance while preserving the manual command", async () => {
+    const root = createCaseDir("openclaw-completion-timeout-localized");
+    pathExists.mockResolvedValue(true);
+    const timeoutErr = Object.assign(new Error("spawnSync /usr/bin/node ETIMEDOUT"), {
+      code: "ETIMEDOUT",
+    });
+    vi.mocked(spawnSync).mockReturnValueOnce({
+      pid: 0,
+      output: [],
+      stdout: "",
+      stderr: "",
+      status: null,
+      signal: null,
+      error: timeoutErr,
+    });
+    vi.mocked(runtimeCapture.log).mockClear();
+
+    await updateCliShared.tryWriteCompletionCache(
+      root,
+      false,
+      createCliLocalization({ locale: "zh-CN" }),
+    );
+
+    const logOutput = vi
+      .mocked(runtimeCapture.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(logOutput).toContain("30 秒后超时");
+    expect(logOutput).toContain("openclaw completion --write-state");
+    expect(logOutput).not.toContain("Completion cache update failed");
+    expect(logOutput).not.toContain("Error: spawnSync");
+  });
+
+  it("localizes completion cache failures while preserving stderr", async () => {
+    const root = createCaseDir("openclaw-completion-stderr-localized");
+    pathExists.mockResolvedValue(true);
+    vi.mocked(spawnSync).mockReturnValueOnce({
+      pid: 0,
+      output: [],
+      stdout: "",
+      stderr: "EACCES: permission denied",
+      status: 1,
+      signal: null,
+    });
+    vi.mocked(runtimeCapture.log).mockClear();
+
+    await updateCliShared.tryWriteCompletionCache(
+      root,
+      false,
+      createCliLocalization({ locale: "zh-CN" }),
+    );
+
+    const logOutput = vi
+      .mocked(runtimeCapture.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(logOutput).toContain("补全缓存更新失败");
+    expect(logOutput).toContain("EACCES: permission denied");
+    expect(logOutput).toContain("openclaw completion --write-state");
+  });
+
+  it("localizes the shell completion opt-in prompt and skipped guidance", async () => {
+    setTty(true);
+    checkShellCompletionStatus.mockResolvedValue({
+      shell: "zsh",
+      profileInstalled: false,
+      cacheExists: false,
+      cachePath: "/tmp/openclaw-completion.zsh",
+      usesSlowPattern: false,
+    });
+    confirm.mockResolvedValueOnce(false);
+    vi.mocked(runtimeCapture.log).mockClear();
+
+    await tryInstallShellCompletion({
+      jsonMode: false,
+      skipPrompt: false,
+      localization: createCliLocalization({ locale: "zh-CN" }),
+    });
+
+    expect(String(confirm.mock.calls.at(-1)?.[0]?.message)).toContain(
+      "是否为 openclaw 启用 zsh Shell 补全？",
+    );
+    const logOutput = vi
+      .mocked(runtimeCapture.log)
+      .mock.calls.map((call) => String(call[0]))
+      .join("\n");
+    expect(logOutput).toContain("Shell 补全");
+    expect(logOutput).toContain("已跳过");
+    expect(logOutput).toContain("openclaw completion --install");
+  });
+
   it("keeps update completion refresh best-effort when profile install fails", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
     setTty(true);
     checkShellCompletionStatus.mockResolvedValue({
       shell: "zsh",
@@ -1150,7 +1244,8 @@ describe("update-cli", () => {
       .mocked(runtimeCapture.log)
       .mock.calls.map((call) => String(call[0]))
       .join("\n");
-    expect(logOutput).toContain("Shell completion refresh failed: EACCES: permission denied");
+    expect(logOutput).toContain("Shell 补全刷新失败：EACCES: permission denied");
+    expect(logOutput).not.toContain("Shell completion refresh failed");
     expect(defaultRuntime.exit).not.toHaveBeenCalledWith(1);
   });
 
@@ -6752,7 +6847,13 @@ describe("update-cli", () => {
     expect(syncCall?.config?.update?.channel).toBe("dev");
     expect(syncCall?.workspaceDir).toBe(gitRoot);
     expect(npmPluginUpdateCall()?.config?.update?.channel).toBe("dev");
-    expect(completionCacheSpy).toHaveBeenCalledWith(gitRoot, false);
+    expect(completionCacheSpy).toHaveBeenCalledWith(
+      gitRoot,
+      false,
+      expect.objectContaining({
+        context: expect.objectContaining({ locale: "en" }),
+      }),
+    );
     expect(runRestartScript).not.toHaveBeenCalled();
     expect(runDaemonRestart).not.toHaveBeenCalled();
     expect(defaultRuntime.exit).not.toHaveBeenCalledWith(1);

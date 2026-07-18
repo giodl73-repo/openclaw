@@ -1068,35 +1068,42 @@ async function runUpdatedInstallGatewayRestart(params: {
 export async function tryInstallShellCompletion(opts: {
   jsonMode: boolean;
   skipPrompt: boolean;
+  localization?: CliLocalization;
 }): Promise<void> {
   if (opts.jsonMode || !process.stdin.isTTY) {
     return;
   }
 
+  const localization = opts.localization ?? createCliLocalization();
   const status = await checkShellCompletionStatus(CLI_NAME);
   const generationOptions = { generationMode: "core-only" } as const;
 
   if (status.usesSlowPattern) {
-    defaultRuntime.log(theme.muted("Upgrading shell completion to cached version..."));
+    defaultRuntime.log(theme.muted(localization.t("cli.update.completion.upgrading")));
     const cacheGenerated = await ensureCompletionCacheExists(CLI_NAME, generationOptions);
     if (cacheGenerated) {
-      await installShellCompletionForUpdate(status.shell, true);
+      await installShellCompletionForUpdate(status.shell, true, localization);
     }
     return;
   }
 
   if (status.profileInstalled && !status.cacheExists) {
-    defaultRuntime.log(theme.muted("Regenerating shell completion cache..."));
+    defaultRuntime.log(theme.muted(localization.t("cli.update.completion.regenerating")));
     await ensureCompletionCacheExists(CLI_NAME, generationOptions);
     return;
   }
 
   if (!status.profileInstalled) {
     defaultRuntime.log("");
-    defaultRuntime.log(theme.heading("Shell completion"));
+    defaultRuntime.log(theme.heading(localization.t("cli.update.completion.heading")));
 
     const shouldInstall = await confirm({
-      message: stylePromptMessage(`Enable ${status.shell} shell completion for ${CLI_NAME}?`),
+      message: stylePromptMessage(
+        localization.t("cli.update.completion.enablePrompt", {
+          shell: status.shell,
+          cliName: CLI_NAME,
+        }),
+      ),
       initialValue: true,
     });
 
@@ -1104,7 +1111,9 @@ export async function tryInstallShellCompletion(opts: {
       if (!opts.skipPrompt) {
         defaultRuntime.log(
           theme.muted(
-            `Skipped. Run \`${replaceCliName(formatCliCommand("openclaw completion --install"), CLI_NAME)}\` later to enable.`,
+            localization.t("cli.update.completion.skipped", {
+              command: replaceCliName(formatCliCommand("openclaw completion --install"), CLI_NAME),
+            }),
           ),
         );
       }
@@ -1113,20 +1122,26 @@ export async function tryInstallShellCompletion(opts: {
 
     const cacheGenerated = await ensureCompletionCacheExists(CLI_NAME, generationOptions);
     if (!cacheGenerated) {
-      defaultRuntime.log(theme.warn("Failed to generate completion cache."));
+      defaultRuntime.log(theme.warn(localization.t("cli.update.completion.generationFailed")));
       return;
     }
 
-    await installShellCompletionForUpdate(status.shell, opts.skipPrompt);
+    await installShellCompletionForUpdate(status.shell, opts.skipPrompt, localization);
   }
 }
 
-async function installShellCompletionForUpdate(shell: string, yes: boolean): Promise<void> {
+async function installShellCompletionForUpdate(
+  shell: string,
+  yes: boolean,
+  localization: CliLocalization,
+): Promise<void> {
   try {
     await installCompletion(shell, yes, CLI_NAME);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    defaultRuntime.log(theme.warn(`Shell completion refresh failed: ${message}`));
+    defaultRuntime.log(
+      theme.warn(localization.t("cli.update.completion.refreshFailed", { error: message })),
+    );
   }
 }
 
