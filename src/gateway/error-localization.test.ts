@@ -19,6 +19,8 @@ describe("Gateway error localization metadata", () => {
           reason: ErrorCodes.APPROVAL_NOT_FOUND,
           remediation: "Re-request the action.",
         },
+        retryable: true,
+        retryAfterMs: 250,
       }),
       {
         messageKey: "gateway.approval.notFound",
@@ -32,6 +34,8 @@ describe("Gateway error localization metadata", () => {
     } as const;
 
     expect(localized.message).toBe("unknown or expired approval id");
+    expect(localized.retryable).toBe(true);
+    expect(localized.retryAfterMs).toBe(250);
     expect(localized.details).toMatchObject({
       reason: ErrorCodes.APPROVAL_NOT_FOUND,
       remediation: "Re-request the action.",
@@ -58,30 +62,42 @@ describe("Gateway error localization metadata", () => {
     });
   });
 
-  it("converts only reviewed stable errors", () => {
-    const approvalNotFound = errorShape(
-      ErrorCodes.INVALID_REQUEST,
-      "unknown or expired approval id",
-      {
+  it.each(["unknown or expired approval id", "approval not found"])(
+    "converts the reviewed approval descriptor without changing English: %s",
+    (message) => {
+      const approvalNotFound = errorShape(ErrorCodes.INVALID_REQUEST, message, {
         details: { reason: ErrorCodes.APPROVAL_NOT_FOUND },
-      },
-    );
+      });
+
+      expect(attachKnownGatewayErrorLocalization(approvalNotFound)).toMatchObject({
+        code: ErrorCodes.INVALID_REQUEST,
+        message,
+        details: {
+          reason: ErrorCodes.APPROVAL_NOT_FOUND,
+          localization: {
+            messageKey: "gateway.approval.notFound",
+          },
+        },
+      });
+    },
+  );
+
+  it("leaves nonmatching and message-only errors untouched", () => {
     const unavailable = errorShape(ErrorCodes.UNAVAILABLE, "gateway unavailable", {
       retryable: true,
     });
-
-    expect(attachKnownGatewayErrorLocalization(approvalNotFound)).toMatchObject({
-      code: ErrorCodes.INVALID_REQUEST,
-      message: "unknown or expired approval id",
-      details: {
-        reason: ErrorCodes.APPROVAL_NOT_FOUND,
-        localization: {
-          messageKey: "gateway.approval.notFound",
-        },
-      },
+    const messageOnly = errorShape(ErrorCodes.INVALID_REQUEST, "unknown or expired approval id");
+    const wrongReason = errorShape(ErrorCodes.INVALID_REQUEST, "approval not found", {
+      details: { reason: "SOME_OTHER_REASON" },
     });
-    expect(attachKnownGatewayErrorLocalization(unavailable)).toBe(unavailable);
 
+    expect(attachKnownGatewayErrorLocalization(unavailable)).toBe(unavailable);
+    expect(attachKnownGatewayErrorLocalization(messageOnly)).toBe(messageOnly);
+    expect(attachKnownGatewayErrorLocalization(wrongReason)).toBe(wrongReason);
+
+    const approvalNotFound = errorShape(ErrorCodes.INVALID_REQUEST, "approval not found", {
+      details: { reason: ErrorCodes.APPROVAL_NOT_FOUND },
+    });
     const alreadyLocalized = attachGatewayErrorLocalization(approvalNotFound, {
       messageKey: "gateway.approval.notFound",
     });

@@ -9,6 +9,7 @@ import {
 import type { ValidationError } from "../../../packages/gateway-protocol/src/index.js";
 import { hasApprovalTurnSourceRoute } from "../../infra/approval-turn-source.js";
 import type { ExecApprovalDecision } from "../../infra/exec-approvals.js";
+import { attachKnownGatewayErrorLocalization } from "../error-localization.js";
 import type {
   ExecApprovalIdLookupResult,
   ExecApprovalManager,
@@ -90,14 +91,11 @@ function isApprovalDecision(value: string): value is ExecApprovalDecision {
   return value === "allow-once" || value === "allow-always" || value === "deny";
 }
 
-function respondUnknownOrExpiredApproval(respond: RespondFn): void {
-  respond(
-    false,
-    undefined,
-    errorShape(ErrorCodes.INVALID_REQUEST, "unknown or expired approval id", {
-      details: APPROVAL_NOT_FOUND_DETAILS,
-    }),
-  );
+export function respondUnknownOrExpiredApproval(respond: RespondFn): void {
+  const error = errorShape(ErrorCodes.INVALID_REQUEST, "unknown or expired approval id", {
+    details: APPROVAL_NOT_FOUND_DETAILS,
+  });
+  respond(false, undefined, attachKnownGatewayErrorLocalization(error));
 }
 
 function resolvePendingApprovalLookupError(params: {

@@ -8,7 +8,7 @@ import type {
   ExpiredApprovalSnapshot,
   PendingApprovalSnapshot,
 } from "../../../../packages/gateway-protocol/src/index.js";
-import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationContext, ApplicationGatewaySnapshot } from "../../app/context.ts";
 import { i18n } from "../../i18n/index.ts";
 import { createApplicationContextProvider } from "../../test-helpers/application-context.ts";
@@ -281,6 +281,81 @@ describe("ApprovalPage", () => {
 
     expect(page.querySelector("h1")?.textContent).toBe("Approval unavailable");
     expect(page.querySelectorAll("[data-decision]")).toHaveLength(0);
+  });
+
+  it("renders a recognized production Gateway descriptor in the selected locale", async () => {
+    await i18n.setLocale("zh-CN");
+    const request = vi.fn(async () => {
+      throw new GatewayRequestError({
+        code: "INVALID_REQUEST",
+        message: "approval not found",
+        details: {
+          reason: "APPROVAL_NOT_FOUND",
+          localization: {
+            messageKey: "gateway.approval.notFound",
+          },
+        },
+      });
+    });
+    const { page } = createPage({ client: { request } as unknown as GatewayBrowserClient });
+
+    await settle(page);
+
+    expect(page.querySelector(".approval-page__state--unavailable p")?.textContent).toBe(
+      "审批不存在或已过期。",
+    );
+
+    await i18n.setLocale("de");
+    await settle(page);
+
+    expect(page.querySelector(".approval-page__state--unavailable p")?.textContent).toBe(
+      "approval not found",
+    );
+  });
+
+  it("preserves canonical server English when the selected locale lacks the key", async () => {
+    await i18n.setLocale("de");
+    const request = vi.fn(async () => {
+      throw new GatewayRequestError({
+        code: "INVALID_REQUEST",
+        message: "approval not found",
+        details: {
+          reason: "APPROVAL_NOT_FOUND",
+          localization: {
+            messageKey: "gateway.approval.notFound",
+          },
+        },
+      });
+    });
+    const { page } = createPage({ client: { request } as unknown as GatewayBrowserClient });
+
+    await settle(page);
+
+    expect(page.querySelector(".approval-page__state--unavailable p")?.textContent).toBe(
+      "approval not found",
+    );
+  });
+
+  it("renders canonical English for an unrecognized Gateway descriptor", async () => {
+    const request = vi.fn(async () => {
+      throw new GatewayRequestError({
+        code: "INVALID_REQUEST",
+        message: "approval lookup failed safely",
+        details: {
+          reason: "APPROVAL_NOT_FOUND",
+          localization: {
+            messageKey: "gateway.unreviewed.message",
+          },
+        },
+      });
+    });
+    const { page } = createPage({ client: { request } as unknown as GatewayBrowserClient });
+
+    await settle(page);
+
+    expect(page.querySelector(".approval-page__state--unavailable p")?.textContent).toBe(
+      "approval lookup failed safely",
+    );
   });
 
   it("reconciles canonical state when an applied result does not match the submitted decision", async () => {

@@ -1,6 +1,10 @@
 // Control UI tests cover application-owned overlay races.
 import { describe, expect, it, vi } from "vitest";
-import type { GatewayBrowserClient, GatewayEventFrame } from "../api/gateway.ts";
+import {
+  GatewayRequestError,
+  type GatewayBrowserClient,
+  type GatewayEventFrame,
+} from "../api/gateway.ts";
 import type { ApplicationGateway, ApplicationGatewaySnapshot } from "./gateway.ts";
 import { createApplicationOverlays } from "./overlays.ts";
 
@@ -278,6 +282,34 @@ describe("application approval overlays", () => {
     await decision;
 
     expect(overlays.snapshot.approvalError).toBeNull();
+  });
+
+  it("preserves the legacy approval failure wrapper for nonmatching Gateway errors", async () => {
+    const request = vi.fn<RequestFn>((method) => {
+      if (method.endsWith(".list")) {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(
+        new GatewayRequestError({
+          code: "UNAVAILABLE",
+          message: "approval storage unavailable",
+          details: {
+            reason: "STORAGE_UNAVAILABLE",
+            localization: {
+              messageKey: "gateway.approval.notFound",
+            },
+          },
+        }),
+      );
+    });
+    const harness = createGatewayHarness(client(request));
+    const overlays = createApplicationOverlays(harness.gateway);
+
+    harness.emitApproval("approval-active", 1_000);
+    await overlays.decideApproval("allow-once");
+
+    expect(overlays.snapshot.approvalError).toBe("Approval failed: approval storage unavailable");
+    overlays.dispose();
   });
 });
 

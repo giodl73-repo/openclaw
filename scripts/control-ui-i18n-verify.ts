@@ -239,8 +239,14 @@ export async function verifyRuntimeLocaleConfig() {
     "utf8",
   );
   const typesRaw = await readFile(path.join(ROOT, "ui", "src", "i18n", "lib", "types.ts"), "utf8");
+  const localeTypeUsesSharedRegistry = typesRaw.includes(
+    'export type Locale = Exclude<OpenClawLocale, "sv">',
+  );
   for (const entry of CONTROL_UI_LOCALE_ENTRIES) {
-    if (!registryRaw.includes(`"${entry.locale}"`) || !typesRaw.includes(`| "${entry.locale}"`)) {
+    if (
+      !registryRaw.includes(`"${entry.locale}"`) ||
+      (!localeTypeUsesSharedRegistry && !typesRaw.includes(`| "${entry.locale}"`))
+    ) {
       throw new Error(`runtime locale config is missing ${entry.locale}`);
     }
   }

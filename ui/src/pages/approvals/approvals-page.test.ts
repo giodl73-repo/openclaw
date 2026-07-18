@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalHistoryResult } from "../../../../packages/gateway-protocol/src/schema/approvals.js";
-import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationContext, ApplicationGatewaySnapshot } from "../../app/context.ts";
 import { i18n } from "../../i18n/index.ts";
 import { createApplicationContextProvider } from "../../test-helpers/application-context.ts";
@@ -99,6 +99,27 @@ describe("ApprovalsPage", () => {
 
     const body = page.querySelector(".approval-history-table tbody")?.textContent ?? "";
     expect(body).not.toContain("No resolved approvals");
+  });
+
+  it("renders a recognized Gateway descriptor in the selected locale", async () => {
+    await i18n.setLocale("zh-CN");
+    const request = vi.fn().mockRejectedValueOnce(
+      new GatewayRequestError({
+        code: "INVALID_REQUEST",
+        message: "approval not found",
+        details: {
+          reason: "APPROVAL_NOT_FOUND",
+          localization: {
+            messageKey: "gateway.approval.notFound",
+          },
+        },
+      }),
+    );
+    const page = createPage(request as GatewayBrowserClient["request"]);
+
+    await settle(page);
+
+    expect(page.querySelector(".callout.danger")?.textContent).toContain("审批不存在或已过期。");
   });
 
   it("shows the empty message only after a successful zero-row load", async () => {
