@@ -14,6 +14,7 @@ import {
   type DevicePairSetup,
   type DevicePairSetupAccess,
 } from "../lib/device-pair-setup.ts";
+import { tryResolveLocalizedGatewayErrorMessage } from "../lib/gateway-error-localization.ts";
 import {
   clearResolvedExecApprovalPrompt,
   dismissExecApprovalPrompt,
@@ -661,7 +662,9 @@ export function createApplicationOverlays(
           return;
         }
         if (isCurrentOperation() && promptState.execApprovalQueue[0]?.id === active.id) {
-          promptState.execApprovalError = `Approval failed: ${error instanceof Error ? error.message : String(error)}`;
+          promptState.execApprovalError =
+            tryResolveLocalizedGatewayErrorMessage(error) ??
+            `Approval failed: ${error instanceof Error ? error.message : String(error)}`;
         }
       } finally {
         // Reconnect can admit a new decision while this request is still settling.

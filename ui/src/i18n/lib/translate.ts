@@ -194,6 +194,10 @@ export class I18nManager {
     return renderLocalizedMessage(snapshot, context, { key, params, fallback });
   }
 
+  public hasTranslation(key: string): boolean {
+    return typeof this.snapshot.catalogs[this.locale]?.[key] === "string";
+  }
+
   private rebuildSnapshot() {
     const catalogs = Object.fromEntries(
       Object.entries(this.translations).map(([locale, map]) => [

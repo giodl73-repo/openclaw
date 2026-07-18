@@ -1,7 +1,6 @@
 import type { MessageParam } from "@openclaw/localization-core";
-import { ErrorCodes } from "../../packages/gateway-protocol/src/schema/error-codes.js";
 import type { ErrorShape } from "../../packages/gateway-protocol/src/schema/frames.js";
-import { GATEWAY_ERROR_MESSAGE_KEYS } from "./error-localization-keys.js";
+import { GATEWAY_ERROR_LOCALIZATION_DESCRIPTORS } from "./error-localization-keys.js";
 
 const MESSAGE_KEY_PATTERN = /^[a-z][a-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)+$/u;
 const MAX_MESSAGE_KEY_LENGTH = 160;
@@ -124,19 +123,16 @@ export function readGatewayErrorLocalization(
   };
 }
 
-/**
- * Converts only explicitly reviewed stable errors. Unknown errors retain their
- * original shape and English message. Production emission remains deliberately
- * unwired until the Gateway owner approves the details.localization contract.
- */
+/** Converts only explicitly reviewed stable errors without inspecting English copy. */
 export function attachKnownGatewayErrorLocalization(error: ErrorShape): ErrorShape {
   const reason = isRecord(error.details) ? error.details.reason : undefined;
   if (isRecord(error.details) && "localization" in error.details) {
     return error;
   }
-  if (error.code === ErrorCodes.INVALID_REQUEST && reason === ErrorCodes.APPROVAL_NOT_FOUND) {
+  const descriptor = GATEWAY_ERROR_LOCALIZATION_DESCRIPTORS.approvalNotFound;
+  if (error.code === descriptor.code && reason === descriptor.reason) {
     return attachGatewayErrorLocalization(error, {
-      messageKey: GATEWAY_ERROR_MESSAGE_KEYS.approvalNotFound,
+      messageKey: descriptor.messageKey,
     });
   }
   return error;

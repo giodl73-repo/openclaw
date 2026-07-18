@@ -1,13 +1,22 @@
-import { GATEWAY_ERROR_MESSAGE_KEYS } from "../../../src/gateway/error-localization-keys.ts";
+import { GATEWAY_ERROR_LOCALIZATION_DESCRIPTORS } from "../../../src/gateway/error-localization-keys.ts";
 import { GatewayRequestError } from "../api/gateway.ts";
-import { t } from "../i18n/index.ts";
+import { i18n, t } from "../i18n/index.ts";
 
-const RECOGNIZED_GATEWAY_ERROR_KEYS = new Set<string>(Object.values(GATEWAY_ERROR_MESSAGE_KEYS));
+type GatewayErrorLocalizationDescriptor =
+  (typeof GATEWAY_ERROR_LOCALIZATION_DESCRIPTORS)[keyof typeof GATEWAY_ERROR_LOCALIZATION_DESCRIPTORS];
+
+const RECOGNIZED_GATEWAY_ERROR_DESCRIPTORS = new Map<string, GatewayErrorLocalizationDescriptor>(
+  Object.values(GATEWAY_ERROR_LOCALIZATION_DESCRIPTORS).map((descriptor) => [
+    descriptor.messageKey,
+    descriptor,
+  ]),
+);
 const MAX_MESSAGE_PARAMS = 16;
 const MAX_PARAM_KEY_LENGTH = 64;
 const MAX_PARAM_STRING_LENGTH = 4_096;
 
 type GatewayErrorTranslate = (key: string, params?: Record<string, string>) => string;
+type GatewayErrorHasTranslation = (key: string) => boolean;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -44,6 +53,35 @@ function readMessageParams(value: unknown): Record<string, string> | null {
   return params;
 }
 
+export function tryResolveLocalizedGatewayErrorMessage(
+  error: unknown,
+  translate: GatewayErrorTranslate = t,
+  hasTranslation: GatewayErrorHasTranslation = (key) => i18n.hasTranslation(key),
+): string | null {
+  if (!(error instanceof GatewayRequestError) || !isRecord(error.details)) {
+    return null;
+  }
+  const localization = error.details.localization;
+  if (!isRecord(localization) || typeof localization.messageKey !== "string") {
+    return null;
+  }
+  const messageKey = localization.messageKey;
+  const descriptor = RECOGNIZED_GATEWAY_ERROR_DESCRIPTORS.get(messageKey);
+  if (
+    !descriptor ||
+    error.gatewayCode !== descriptor.code ||
+    error.details.reason !== descriptor.reason
+  ) {
+    return null;
+  }
+  const params = readMessageParams(localization.messageParams);
+  if (!params || !hasTranslation(messageKey)) {
+    return null;
+  }
+  const localized = translate(messageKey, params);
+  return localized && localized !== messageKey ? localized : null;
+}
+
 /**
  * Localizes only reviewed Gateway message keys and retains the server's
  * English message for unknown, malformed, or untranslated descriptors.
@@ -51,23 +89,10 @@ function readMessageParams(value: unknown): Record<string, string> | null {
 export function resolveGatewayErrorMessage(
   error: unknown,
   translate: GatewayErrorTranslate = t,
+  hasTranslation?: GatewayErrorHasTranslation,
 ): string {
-  const fallback = fallbackErrorMessage(error);
-  if (!(error instanceof GatewayRequestError) || !isRecord(error.details)) {
-    return fallback;
-  }
-  const localization = error.details.localization;
-  if (!isRecord(localization) || typeof localization.messageKey !== "string") {
-    return fallback;
-  }
-  const messageKey = localization.messageKey;
-  if (!RECOGNIZED_GATEWAY_ERROR_KEYS.has(messageKey)) {
-    return fallback;
-  }
-  const params = readMessageParams(localization.messageParams);
-  if (!params) {
-    return fallback;
-  }
-  const localized = translate(messageKey, params);
-  return localized && localized !== messageKey ? localized : fallback;
+  return (
+    tryResolveLocalizedGatewayErrorMessage(error, translate, hasTranslation) ??
+    fallbackErrorMessage(error)
+  );
 }

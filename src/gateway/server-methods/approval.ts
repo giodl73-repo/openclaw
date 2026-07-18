@@ -22,6 +22,7 @@ import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.
 import type { SystemAgentApprovalRequestPayload } from "../../infra/system-agent-approvals.js";
 import type { OpenClawStateDatabaseOptions } from "../../state/openclaw-state-db.js";
 import { normalizeControlUiBasePath } from "../control-ui-shared.js";
+import { attachKnownGatewayErrorLocalization } from "../error-localization.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
 import {
   canAccessOperatorApproval,
@@ -126,13 +127,15 @@ function resolveLegacyApprovalLabel(client: GatewayClient | null): string | null
   );
 }
 
-function respondApprovalNotFound(respond: RespondFn): void {
+export function respondApprovalNotFound(respond: RespondFn): void {
   respond(
     false,
     undefined,
-    errorShape(ErrorCodes.INVALID_REQUEST, "approval not found", {
-      details: { reason: ErrorCodes.APPROVAL_NOT_FOUND },
-    }),
+    attachKnownGatewayErrorLocalization(
+      errorShape(ErrorCodes.INVALID_REQUEST, "approval not found", {
+        details: { reason: ErrorCodes.APPROVAL_NOT_FOUND },
+      }),
+    ),
   );
 }
 
