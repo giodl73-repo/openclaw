@@ -2,6 +2,7 @@ import type { Component, OverlayHandle, SelectItem } from "@earendil-works/pi-tu
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
 import { stripAnsi } from "../../packages/terminal-core/src/ansi.js";
+import { createTuiLocalization, type TuiLocalization } from "./i18n/runtime.js";
 import { createTuiTaskSuggestionController } from "./tui-task-suggestions.js";
 
 type TestSelector = Component & {
@@ -34,7 +35,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function createHarness() {
+function createHarness(localization?: TuiLocalization) {
   const selectors: TestSelector[] = [];
   const addSystem = vi.fn();
   const closeOverlay = vi.fn();
@@ -69,6 +70,7 @@ function createHarness() {
       dismissTaskSuggestion,
     },
     chatLog: { addSystem },
+    localization,
     getAgentId: () => agentId,
     getSessionKey: () => sessionKey,
     openOverlay,
@@ -112,6 +114,29 @@ function createHarness() {
 }
 
 describe("TUI task suggestions", () => {
+  it("localizes task chrome while preserving gateway-provided task content and paths", () => {
+    const harness = createHarness(createTuiLocalization({ locale: "zh-CN" }));
+
+    harness.controller.handleEvent("task.suggestion", {
+      action: "created",
+      suggestion: suggestionPayload(),
+    });
+
+    const selector = expectDefined(harness.selectors[0], "localized task selector");
+    expect(selector.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: "accept", label: "在工作树中开始" }),
+        expect.objectContaining({ value: "dismiss", label: "关闭" }),
+      ]),
+    );
+    const prompt = expectDefined(harness.openOverlay.mock.calls[0]?.[0], "localized task prompt");
+    const rendered = stripAnsi(prompt.render(100).join("\n"));
+    expect(rendered).toContain("建议的后续任务：Remove stale adapter");
+    expect(rendered).toContain("项目：/repo/project");
+    expect(rendered).toContain("说明：");
+    expect(rendered).toContain("Delete the stale adapter and update its tests.");
+  });
+
   it("ignores malformed Gateway suggestion payloads", () => {
     const harness = createHarness();
     harness.controller.handleEvent("task.suggestion", {

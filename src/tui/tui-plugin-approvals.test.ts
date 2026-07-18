@@ -2,6 +2,7 @@ import type { Component, OverlayHandle, SelectItem } from "@earendil-works/pi-tu
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
 import { stripAnsi } from "../../packages/terminal-core/src/ansi.js";
+import { createTuiLocalization, type TuiLocalization } from "./i18n/runtime.js";
 import { createTuiPluginApprovalController } from "./tui-plugin-approvals.js";
 
 type TestSelector = Component & {
@@ -39,7 +40,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function createHarness() {
+function createHarness(localization?: TuiLocalization) {
   const selectors: TestSelector[] = [];
   const addSystem = vi.fn();
   const closeOverlay = vi.fn();
@@ -72,6 +73,7 @@ function createHarness() {
   const controller = createTuiPluginApprovalController({
     client: { listPluginApprovals, resolvePluginApproval },
     chatLog: { addSystem },
+    localization,
     getAgentId: () => agentId,
     getSessionKey: () => sessionKey,
     openOverlay,
@@ -118,6 +120,28 @@ function createHarness() {
 }
 
 describe("TUI plugin approvals", () => {
+  it("localizes approval chrome while preserving plugin-owned copy and IDs", () => {
+    const harness = createHarness(createTuiLocalization({ locale: "zh-CN" }));
+
+    harness.controller.handleEvent("plugin.approval.requested", approvalPayload());
+
+    const selector = expectDefined(harness.selectors[0], "localized approval selector");
+    expect(selector.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: "allow-once", label: "允许一次" }),
+        expect.objectContaining({ value: "deny", label: "拒绝" }),
+      ]),
+    );
+    const prompt = expectDefined(
+      harness.openOverlay.mock.calls[0]?.[0],
+      "localized approval prompt",
+    );
+    const rendered = stripAnsi(prompt.render(100).join("\n"));
+    expect(rendered).toContain("工作区技能批准：Apply workspace skill proposal");
+    expect(rendered).toContain("插件：workspace-skills");
+    expect(rendered).toContain("请求：Apply a pending workspace skill proposal");
+  });
+
   it("ignores malformed plugin approval gateway payloads", () => {
     const harness = createHarness();
     harness.controller.handleEvent("plugin.approval.requested", {

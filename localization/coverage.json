@@ -294,11 +294,11 @@
     "cli": {
       "owner": "cli",
       "artifactId": "openclaw-cli",
-      "catalogRevision": "sha256:674f18a04aa0a90e4ab28600b382ad24f2b81a15dca94502f864e83bc1ec6213",
+      "catalogRevision": "sha256:b9abe08ae78f439018a8df0d488dd48fd6c4349ce2b89f1be94f3ad29621b54d",
       "source": "src/cli/i18n/locales/en.ts",
       "catalogs": "src/cli/i18n/locales",
       "migration": "migrated",
-      "validationCommand": "node scripts/run-vitest.mjs run src/cli/i18n/runtime.test.ts",
+      "validationCommand": "node scripts/run-vitest.mjs run src/cli/i18n/runtime.test.ts src/cli/logs-cli.test.ts",
       "contentClasses": [
         "general",
         "recovery"
@@ -379,10 +379,11 @@
     "tui": {
       "owner": "tui",
       "artifactId": "openclaw-cli",
-      "catalogRevision": "none",
-      "source": "src/tui",
-      "migration": "unmigrated",
-      "validationCommand": "pnpm localization:coverage:check",
+      "catalogRevision": "sha256:bd634bb7bab57ceedab7dd3cae343140dde45ae908a8983e4ec0561c01fb11fe",
+      "source": "src/tui/i18n/locales/en.ts",
+      "catalogs": "src/tui/i18n/locales",
+      "migration": "migrated",
+      "validationCommand": "pnpm tui:localization:check",
       "contentClasses": [
         "general",
         "recovery"
@@ -393,7 +394,7 @@
           "maturity": "source"
         },
         "zh-CN": {
-          "maturity": "unsupported"
+          "maturity": "partial"
         },
         "zh-TW": {
           "maturity": "unsupported"
@@ -457,8 +458,7 @@
         }
       },
       "promotionBlockers": [
-        "incomplete-locale-coverage",
-        "surface-not-migrated"
+        "incomplete-locale-coverage"
       ]
     },
     "runtime": {

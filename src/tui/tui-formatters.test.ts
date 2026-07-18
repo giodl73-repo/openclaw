@@ -1,6 +1,7 @@
 // Covers formatting helpers used by TUI status and message rendering.
 import { describe, expect, it } from "vitest";
 import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-error-format.js";
+import { createTuiLocalization } from "./i18n/runtime.js";
 import {
   extractContentFromMessage,
   extractTextFromMessage,
@@ -8,6 +9,7 @@ import {
   formatModelFooter,
   formatGoalFooter,
   formatRemoteConnectionHostFooter,
+  formatTokens,
   isCommandMessage,
   sanitizeRenderableText,
 } from "./tui-formatters.js";
@@ -56,6 +58,26 @@ describe("formatGoalFooter", () => {
       }),
     ).toBe("Goal blocked (/goal resume)");
   });
+
+  it("localizes owned goal labels while preserving command syntax and usage values", () => {
+    expect(
+      formatGoalFooter(
+        {
+          schemaVersion: 1,
+          id: "goal-1",
+          objective: "land PR",
+          status: "active",
+          createdAt: 1,
+          updatedAt: 1,
+          tokenStart: 0,
+          tokensUsed: 12_000,
+          tokenBudget: 30_000,
+          continuationTurns: 0,
+        },
+        createTuiLocalization({ locale: "zh-CN" }),
+      ),
+    ).toBe("正在追求目标 (12k/30k)");
+  });
 });
 
 describe("formatRemoteConnectionHostFooter", () => {
@@ -72,6 +94,23 @@ describe("formatRemoteConnectionHostFooter", () => {
     expect(formatRemoteConnectionHostFooter("ws://127.0.0.1:18789")).toBeNull();
     expect(formatRemoteConnectionHostFooter("ws://127.1:18789")).toBeNull();
     expect(formatRemoteConnectionHostFooter("ws://[::1]:18789")).toBeNull();
+  });
+
+  it("localizes the host label but preserves the hostname", () => {
+    expect(
+      formatRemoteConnectionHostFooter(
+        "wss://gateway.example.com/ws",
+        createTuiLocalization({ locale: "zh-CN" }),
+      ),
+    ).toBe("主机 gateway.example.com");
+  });
+});
+
+describe("formatTokens", () => {
+  it("localizes the product label while preserving token values", () => {
+    expect(formatTokens(12_000, 30_000, createTuiLocalization({ locale: "zh-CN" }))).toBe(
+      "令牌数 12k/30k（40%）",
+    );
   });
 });
 

@@ -1,6 +1,7 @@
 // Verifies TUI command definitions and parser metadata.
 import { beforeAll, describe, expect, it } from "vitest";
 import { getSlashCommands, helpText, parseCommand } from "./commands.js";
+import { createTuiLocalization } from "./i18n/runtime.js";
 
 describe("parseCommand", () => {
   it("normalizes aliases and keeps command args", () => {
@@ -155,6 +156,31 @@ describe("getSlashCommands", () => {
     );
     expect(names).toEqual(expect.arrayContaining(["goal", "btw", "side", "stop", "t"]));
   });
+
+  it("localizes TUI-owned descriptions while preserving command names and dynamic metadata", () => {
+    const commands = getSlashCommands({
+      localization: createTuiLocalization({ locale: "zh-CN" }),
+      dynamicCommands: [
+        {
+          name: "dreaming",
+          description: "Plugin-owned literal",
+          source: "plugin",
+          scope: "both",
+          acceptsArgs: false,
+        },
+      ],
+    });
+
+    expect(commands.find((command) => command.name === "help")?.description).toBe(
+      "显示斜杠命令帮助",
+    );
+    expect(commands.find((command) => command.name === "gwstatus")?.description).toContain(
+      "/gateway-status",
+    );
+    expect(commands.find((command) => command.name === "dreaming")?.description).toBe(
+      "Plugin-owned literal",
+    );
+  });
 });
 
 describe("helpText", () => {
@@ -173,5 +199,15 @@ describe("helpText", () => {
 
     expect(output).not.toContain("/commands");
     expect(output).not.toContain("/status");
+  });
+
+  it("localizes the help heading but preserves command syntax literally", () => {
+    const output = helpText({
+      localization: createTuiLocalization({ locale: "zh-CN" }),
+    });
+
+    expect(output.startsWith("斜杠命令：")).toBe(true);
+    expect(output).toContain("/model <provider/model>");
+    expect(output).toContain("/elevated <on|off|ask|full>");
   });
 });

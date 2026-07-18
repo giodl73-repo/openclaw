@@ -1,7 +1,9 @@
 import type { ChatLog } from "./components/chat-log.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 
-const TUI_AGENT_BUSY_MESSAGE = "agent is busy — press Esc to abort before sending a new message";
-
-export function addBlockedChatSubmitNotice(chatLog: Pick<ChatLog, "addSystem">) {
-  chatLog.addSystem(TUI_AGENT_BUSY_MESSAGE, { coalesceConsecutive: true });
+export function addBlockedChatSubmitNotice(
+  chatLog: Pick<ChatLog, "addSystem">,
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+) {
+  chatLog.addSystem(localization.t("tui.notice.agentBusy"), { coalesceConsecutive: true });
 }

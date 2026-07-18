@@ -37,6 +37,13 @@ import {
 import { getSlashCommands } from "./commands.js";
 import { ChatLog } from "./components/chat-log.js";
 import { CustomEditor } from "./components/custom-editor.js";
+import {
+  createTuiLocalization,
+  getTuiWaitingPhrases,
+  localizeTuiActivityStatus,
+  TUI_ENGLISH_LOCALIZATION,
+  type TuiLocalization,
+} from "./i18n/runtime.js";
 import { resolveLocalRunShutdownGraceMs } from "./local-run-shutdown.js";
 import { editorTheme, theme } from "./theme/theme.js";
 import type { TuiBackend } from "./tui-backend.js";
@@ -78,11 +85,12 @@ import type {
   AgentSummary,
   SessionInfo,
   SessionScope,
+  TuiActivityStatus,
   TuiOptions,
   TuiResult,
   TuiStateAccess,
 } from "./tui-types.js";
-import { buildWaitingStatusMessage, defaultWaitingPhrases } from "./tui-waiting.js";
+import { buildWaitingStatusMessage } from "./tui-waiting.js";
 
 export { resolveFinalAssistantText } from "./tui-formatters.js";
 export type { TuiOptions } from "./tui-types.js";
@@ -213,14 +221,29 @@ export function resolveTuiSessionKey(params: {
   return `agent:${params.currentAgentId}:${normalizeLowercaseStringOrEmpty(trimmed)}`;
 }
 
-export function resolveTuiFooterHostLabel(params: {
-  config: OpenClawConfig;
-  connectionUrl: string;
-}): string | null {
+export function resolveTuiFooterHostLabel(
+  params: {
+    config: OpenClawConfig;
+    connectionUrl: string;
+  },
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+): string | null {
   if (params.config.tui?.footer?.showRemoteHost !== true) {
     return null;
   }
-  return formatRemoteConnectionHostFooter(params.connectionUrl);
+  return formatRemoteConnectionHostFooter(params.connectionUrl, localization);
+}
+
+export function formatTuiHeader(
+  params: {
+    title: string;
+    connectionUrl: string;
+    agent: string;
+    session: string;
+  },
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+): string {
+  return localization.t("tui.header.summary", params);
 }
 
 export function resolveInitialTuiAgentId(params: {
@@ -243,25 +266,29 @@ export function resolveInitialTuiAgentId(params: {
   return normalizeAgentId(params.fallbackAgentId);
 }
 
-export function resolveGatewayDisconnectState(reason?: string): {
+export function resolveGatewayDisconnectState(
+  reason?: string,
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+): {
   connectionStatus: string;
-  activityStatus: string;
+  activityStatus: TuiActivityStatus;
   pairingHint?: string;
 } {
   const reasonLabel = reason?.trim() ? reason.trim() : "closed";
   // Covers both "pairing required" and a pending "scope upgrade" for a paired device.
   if (/pairing required|scope upgrade/i.test(reasonLabel)) {
     return {
-      connectionStatus: `gateway disconnected: ${reasonLabel}`,
+      connectionStatus: localization.t("tui.connection.gatewayDisconnected", {
+        reason: reasonLabel,
+      }),
       activityStatus: "device approval needed: preview latest request",
-      pairingHint:
-        "Device approval needed. Run `openclaw devices approve --latest` to preview the pending request, " +
-        "then rerun the printed `openclaw devices approve <requestId>` command " +
-        "(reuse `--token` or other auth flags if needed), then reconnect.",
+      pairingHint: localization.t("tui.recovery.deviceApproval"),
     };
   }
   return {
-    connectionStatus: `gateway disconnected: ${reasonLabel}`,
+    connectionStatus: localization.t("tui.connection.gatewayDisconnected", {
+      reason: reasonLabel,
+    }),
     activityStatus: "idle",
   };
 }
@@ -420,7 +447,7 @@ export async function drainAndStopTuiSafely(tui: DrainableTui): Promise<void> {
   stopTuiSafely(() => tui.stop());
 }
 
-const TUI_BUSY_ACTIVITY_STATUSES = new Set([
+const TUI_BUSY_ACTIVITY_STATUSES = new Set<TuiActivityStatus>([
   "sending",
   "waiting",
   "streaming",
@@ -429,14 +456,14 @@ const TUI_BUSY_ACTIVITY_STATUSES = new Set([
   "starting up",
 ]);
 
-export function isTuiBusyActivityStatus(status: string): boolean {
+export function isTuiBusyActivityStatus(status: TuiActivityStatus): boolean {
   return TUI_BUSY_ACTIVITY_STATUSES.has(status);
 }
 
 export function resolveTuiToolsToggleActivityStatus(params: {
-  currentStatus: string;
+  currentStatus: TuiActivityStatus;
   toolsExpanded: boolean;
-}): string {
+}): TuiActivityStatus {
   const toolsStatus = params.toolsExpanded ? "tools expanded" : "tools collapsed";
   if (isTuiBusyActivityStatus(params.currentStatus)) {
     return params.currentStatus;
@@ -530,6 +557,7 @@ function resolveEmptySessionInfoDefaults(config: OpenClawConfig): SessionInfo {
 }
 
 export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
+  const localization = createTuiLocalization({ locale: opts.locale });
   const isLocalMode = opts.local === true || opts.backend !== undefined;
   const config = opts.config ?? getRuntimeConfig({ skipPluginValidation: !isLocalMode });
   const fallbackCwd = path.dirname(OPENCLAW_CLI_WRAPPER_PATH);
@@ -574,12 +602,14 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   let lastCtrlCAt = 0;
   let exitRequested = false;
   let exitResult: TuiResult = { exitReason: "exit" };
-  let activityStatus = "idle";
-  let connectionStatus = isLocalMode ? "starting local runtime" : "connecting";
+  let activityStatus: TuiActivityStatus = "idle";
+  let connectionStatus = isLocalMode
+    ? localization.t("tui.connection.startingLocal")
+    : localization.t("tui.connection.connecting");
   let statusTimeout: NodeJS.Timeout | null = null;
   let statusTimer: NodeJS.Timeout | null = null;
   let statusStartedAt: number | null = null;
-  let lastActivityStatus = activityStatus;
+  let lastActivityStatus: TuiActivityStatus = activityStatus;
 
   const state: TuiStateAccess = {
     get agentDefaultId() {
@@ -792,7 +822,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   const header = new Text("", 1, 0);
   const statusContainer = new Container();
   const footer = new Text("", 1, 0);
-  const chatLog = new ChatLog();
+  const chatLog = new ChatLog(180, localization);
   const editor = new CustomEditor(tui, editorTheme);
   const root = new Container();
   root.addChild(header);
@@ -815,6 +845,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
           agentRuntime: sessionInfo.agentRuntime?.id,
           thinkingLevels: sessionInfo.thinkingLevels,
           dynamicCommands: dynamicSlashCommandsKey === dynamicKey ? dynamicSlashCommands : [],
+          localization,
         }),
         resolveUsableCwd(),
       ),
@@ -980,7 +1011,15 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     const title = opts.title ?? "openclaw tui";
     header.setText(
       theme.header(
-        `${title} - ${client.connection.url} - agent ${agentLabel} - session ${sessionLabel}`,
+        formatTuiHeader(
+          {
+            title,
+            connectionUrl: client.connection.url,
+            agent: agentLabel,
+            session: sessionLabel,
+          },
+          localization,
+        ),
       ),
     );
   };
@@ -1027,6 +1066,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   let waitingTick = 0;
   let waitingTimer: NodeJS.Timeout | null = null;
   let waitingPhrase: string | null = null;
+  const waitingPhrases = getTuiWaitingPhrases(localization);
 
   const updateBusyStatusMessage = () => {
     if (!statusLoader || !statusStartedAt) {
@@ -1048,7 +1088,9 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       return;
     }
 
-    statusLoader.setMessage(`${activityStatus} • ${elapsed} | ${connectionStatus}`);
+    statusLoader.setMessage(
+      `${localizeTuiActivityStatus(localization, activityStatus)} • ${elapsed} | ${connectionStatus}`,
+    );
   };
 
   const startStatusTimer = () => {
@@ -1086,8 +1128,11 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
 
     // Pick a phrase once per waiting session.
     if (!waitingPhrase) {
-      const idx = Math.floor(Math.random() * defaultWaitingPhrases.length);
-      waitingPhrase = defaultWaitingPhrases[idx] ?? defaultWaitingPhrases[0] ?? "waiting";
+      const idx = Math.floor(Math.random() * waitingPhrases.length);
+      waitingPhrase =
+        waitingPhrases[idx] ??
+        waitingPhrases[0] ??
+        localizeTuiActivityStatus(localization, "waiting");
     }
 
     waitingTick = 0;
@@ -1131,7 +1176,8 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       statusLoader?.stop();
       statusLoader = null;
       ensureStatusText();
-      const text = activityStatus ? `${connectionStatus} | ${activityStatus}` : connectionStatus;
+      const activityLabel = localizeTuiActivityStatus(localization, activityStatus);
+      const text = activityStatus ? `${connectionStatus} | ${activityLabel}` : connectionStatus;
       statusText?.setText(theme.dim(text));
     }
     lastActivityStatus = activityStatus;
@@ -1147,18 +1193,18 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       statusTimeout = setTimeout(() => {
         connectionStatus = isConnected
           ? isLocalMode
-            ? "local ready"
-            : "connected"
+            ? localization.t("tui.connection.localReady")
+            : localization.t("tui.connection.connected")
           : isLocalMode
-            ? "local stopped"
-            : "disconnected";
+            ? localization.t("tui.connection.localStopped")
+            : localization.t("tui.connection.disconnected");
         renderStatus();
       }, ttlMs);
     }
   };
 
-  const setActivityStatus = (text: string) => {
-    activityStatus = text;
+  const setActivityStatus = (status: TuiActivityStatus) => {
+    activityStatus = status;
     renderStatus();
   };
 
@@ -1231,22 +1277,37 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       : sessionKeyLabel;
     const agentLabel = formatAgentLabel(currentAgentId);
     const modelLabel = formatModelFooter(sessionInfo);
-    const tokens = formatTokens(sessionInfo.totalTokens ?? null, sessionInfo.contextTokens ?? null);
+    const tokens = formatTokens(
+      sessionInfo.totalTokens ?? null,
+      sessionInfo.contextTokens ?? null,
+      localization,
+    );
     const fastLabel =
-      sessionInfo.fastMode === "auto" ? "fast:auto" : sessionInfo.fastMode === true ? "fast" : null;
+      sessionInfo.fastMode === "auto"
+        ? localization.t("tui.footer.fastAuto")
+        : sessionInfo.fastMode === true
+          ? localization.t("tui.footer.fast")
+          : null;
     const verbose = sessionInfo.verboseLevel ?? "off";
     const reasoning = sessionInfo.reasoningLevel ?? "off";
     const reasoningLabel =
-      reasoning === "on" ? "reasoning" : reasoning === "stream" ? "reasoning:stream" : null;
-    const hostLabel = resolveTuiFooterHostLabel({ config, connectionUrl: client.connection.url });
+      reasoning === "on"
+        ? localization.t("tui.footer.reasoning")
+        : reasoning === "stream"
+          ? localization.t("tui.footer.reasoningStream")
+          : null;
+    const hostLabel = resolveTuiFooterHostLabel(
+      { config, connectionUrl: client.connection.url },
+      localization,
+    );
     const footerParts = [
       hostLabel,
-      `agent ${agentLabel}`,
-      `session ${sessionLabel}`,
+      localization.t("tui.footer.agent", { agent: agentLabel }),
+      localization.t("tui.footer.session", { session: sessionLabel }),
       modelLabel,
-      formatGoalFooter(sessionInfo.goal),
+      formatGoalFooter(sessionInfo.goal, localization),
       fastLabel,
-      verbose !== "off" ? `verbose ${verbose}` : null,
+      verbose !== "off" ? localization.t("tui.footer.verbose", { level: verbose }) : null,
       reasoningLabel,
       tokens,
     ].filter(Boolean);
@@ -1257,6 +1318,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   const pluginApprovals = createTuiPluginApprovalController({
     client,
     chatLog,
+    localization,
     getAgentId: () => currentAgentId,
     getSessionKey: () => currentSessionKey,
     openOverlay,
@@ -1287,6 +1349,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     tui,
     opts,
     state,
+    localization,
     agentNames,
     initialSessionInput,
     initialSessionAgentId,
@@ -1310,6 +1373,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   const taskSuggestions = createTuiTaskSuggestionController({
     client,
     chatLog,
+    localization,
     getAgentId: () => currentAgentId,
     getSessionKey: () => currentSessionKey,
     openOverlay,
@@ -1333,6 +1397,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     btw,
     tui,
     state,
+    localization,
     localMode: isLocalMode,
     setActivityStatus,
     refreshSessionInfo,
@@ -1404,6 +1469,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       tui,
       opts: { ...opts, local: isLocalMode },
       state,
+      localization,
       deliverDefault,
       openOverlay,
       closeOverlay,
@@ -1430,6 +1496,7 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   const { runLocalShellLine } = createLocalShellRunner({
     chatLog,
     tui,
+    localization,
     openOverlay,
     closeOverlay,
   });
@@ -1446,16 +1513,25 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     reason: Exclude<TuiChatSubmitAdmission, "allowed">,
   ) => {
     if (reason === "pending") {
-      addBlockedChatSubmitNotice(chatLog);
+      addBlockedChatSubmitNotice(chatLog, localization);
     } else {
-      chatLog.addSystem(disconnectedTuiChatSubmitMessage(isLocalMode));
+      chatLog.addSystem(disconnectedTuiChatSubmitMessage(isLocalMode, localization));
       setActivityStatus("disconnected");
     }
     tui.requestRender();
   };
   const notifySubmitError = (action: TuiSubmitAction, error: unknown) => {
     const message = sanitizeRenderableText(formatErrorMessage(error));
-    chatLog.addSystem(`${action} submit failed: ${message}`);
+    const actionLabel = localization.t(
+      action === "local shell"
+        ? "tui.submitAction.localShell"
+        : action === "command"
+          ? "tui.submitAction.command"
+          : "tui.submitAction.message",
+    );
+    chatLog.addSystem(
+      localization.t("tui.error.submitFailed", { action: actionLabel, error: message }),
+    );
     tui.requestRender();
   };
   const submitHandler = createEditorSubmitHandler({
@@ -1580,7 +1656,11 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     if (reconnected) {
       reconnectStreamingWatchdog();
     }
-    setConnectionStatus(isLocalMode ? "local ready" : "connected");
+    setConnectionStatus(
+      isLocalMode
+        ? localization.t("tui.connection.localReady")
+        : localization.t("tui.connection.connected"),
+    );
     // A reconnect may already have restored a live run's busy status. Only
     // claim the status line when startup owns it, then release that exact state.
     if (!isTuiBusyActivityStatus(activityStatus)) {
@@ -1590,7 +1670,9 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       try {
         await client.subscribeSessionEvents?.();
       } catch (err) {
-        chatLog.addSystem(`session event subscribe failed: ${String(err)}`);
+        chatLog.addSystem(
+          localization.t("tui.error.sessionEventSubscribeFailed", { error: String(err) }),
+        );
       }
       await refreshAgents();
       await restoreRememberedSession();
@@ -1599,19 +1681,27 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       try {
         await pluginApprovals?.refresh();
       } catch (err) {
-        chatLog.addSystem(`plugin approval refresh failed: ${String(err)}`);
+        chatLog.addSystem(
+          localization.t("tui.error.pluginApprovalRefreshFailed", { error: String(err) }),
+        );
       }
       try {
         await taskSuggestions?.refresh();
       } catch (err) {
-        chatLog.addSystem(`task suggestion refresh failed: ${String(err)}`);
+        chatLog.addSystem(
+          localization.t("tui.error.taskSuggestionRefreshFailed", { error: String(err) }),
+        );
       }
       await loadHistory();
       if (activityStatus === "starting up") {
         setActivityStatus("idle");
       }
       setConnectionStatus(
-        isLocalMode ? "local ready" : reconnected ? "gateway reconnected" : "gateway connected",
+        isLocalMode
+          ? localization.t("tui.connection.localReady")
+          : reconnected
+            ? localization.t("tui.connection.gatewayReconnected")
+            : localization.t("tui.connection.gatewayConnected"),
         4000,
       );
       tui.requestRender();
@@ -1624,11 +1714,11 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       updateFooter();
       tui.requestRender();
     })().catch((err: unknown) => {
-      chatLog.addSystem(`startup failed: ${String(err)}`);
+      chatLog.addSystem(localization.t("tui.error.startupFailed", { error: String(err) }));
       if (activityStatus === "starting up") {
         setActivityStatus("idle");
       }
-      setConnectionStatus("startup failed", 5000);
+      setConnectionStatus(localization.t("tui.connection.startupFailed"), 5000);
       tui.requestRender();
     });
   };
@@ -1645,13 +1735,19 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
     dynamicSlashCommandsRequestId += 1;
     updateAutocompleteProvider();
     pauseStreamingWatchdog();
-    const disconnectState = isLocalMode
+    const disconnectState: {
+      connectionStatus: string;
+      activityStatus: TuiActivityStatus;
+      pairingHint?: string;
+    } = isLocalMode
       ? {
-          connectionStatus: `local runtime stopped${reason ? `: ${reason}` : ""}`,
+          connectionStatus: reason
+            ? localization.t("tui.connection.localRuntimeStoppedWithReason", { reason })
+            : localization.t("tui.connection.localRuntimeStopped"),
           activityStatus: "idle",
           pairingHint: undefined,
         }
-      : resolveGatewayDisconnectState(reason);
+      : resolveGatewayDisconnectState(reason, localization);
     setConnectionStatus(disconnectState.connectionStatus, 5000);
     setActivityStatus(disconnectState.activityStatus);
     if (disconnectState.pairingHint && !pairingHintShown) {
@@ -1663,24 +1759,38 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
   };
 
   client.onGap = (info) => {
-    setConnectionStatus(`event gap: expected ${info.expected}, got ${info.received}`, 5000);
+    setConnectionStatus(
+      localization.t("tui.connection.eventGap", {
+        expected: info.expected,
+        received: info.received,
+      }),
+      5000,
+    );
     void (async () => {
       try {
         await pluginApprovals?.refresh();
       } catch (err) {
-        chatLog.addSystem(`plugin approval refresh failed: ${String(err)}`);
+        chatLog.addSystem(
+          localization.t("tui.error.pluginApprovalRefreshFailed", { error: String(err) }),
+        );
       }
       try {
         await taskSuggestions?.refresh();
       } catch (err) {
-        chatLog.addSystem(`task suggestion refresh failed: ${String(err)}`);
+        chatLog.addSystem(
+          localization.t("tui.error.taskSuggestionRefreshFailed", { error: String(err) }),
+        );
       }
     })();
     tui.requestRender();
   };
 
   updateHeader();
-  setConnectionStatus(isLocalMode ? "starting local runtime" : "connecting");
+  setConnectionStatus(
+    isLocalMode
+      ? localization.t("tui.connection.startingLocal")
+      : localization.t("tui.connection.connecting"),
+  );
   updateFooter();
   const sigintHandler = () => {
     handleCtrlC();

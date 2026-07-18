@@ -1,6 +1,7 @@
 // Covers TUI event handler routing for keyboard and backend events.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-error-format.js";
+import { createTuiLocalization, type TuiLocalization } from "./i18n/runtime.js";
 import { createEventHandlers } from "./tui-event-handlers.js";
 import { getPendingSubmitAcceptedRunId, type TuiPendingSubmit } from "./tui-submit-state.js";
 import type {
@@ -152,6 +153,7 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     chatLog?: HandlerChatLog;
     btw?: HandlerBtwPresenter;
     localMode?: boolean;
+    localization?: TuiLocalization;
     refreshSessionInfo?: () => Promise<void>;
   }) => {
     const state = makeState(params?.state);
@@ -162,6 +164,7 @@ describe("tui-event-handlers: handleAgentEvent", () => {
       btw: (params?.btw ?? context.btw) as MockBtwPresenter & HandlerBtwPresenter,
       tui: context.tui,
       state,
+      localization: params?.localization,
       localMode: params?.localMode,
       setActivityStatus: context.setActivityStatus,
       refreshSessionInfo: params?.refreshSessionInfo,
@@ -1769,6 +1772,22 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     expect(chatLog.addSystem).toHaveBeenCalledWith(
       "auth or provider access failed for openai. Run /auth openai to refresh credentials; if you already re-authed, switch models/providers because this account may still be blocked for inference.",
     );
+  });
+
+  it("localizes run wrappers while preserving raw diagnostics", () => {
+    const { state, chatLog, handleChatEvent } = createHandlersHarness({
+      localization: createTuiLocalization({ locale: "zh-CN" }),
+      state: { activeChatRunId: "run-localized" },
+    });
+
+    handleChatEvent({
+      runId: "run-localized",
+      sessionKey: state.currentSessionKey,
+      state: "aborted",
+      errorMessage: "RAW_ABORT_DIAGNOSTIC",
+    });
+
+    expect(chatLog.addSystem).toHaveBeenCalledWith("运行已中止：RAW_ABORT_DIAGNOSTIC");
   });
 
   it("preserves backend billing and usage-limit errors in local mode", () => {

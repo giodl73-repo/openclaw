@@ -1,4 +1,5 @@
 import { isChatStopCommandText } from "../gateway/chat-abort.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 
 export type TuiPendingSubmit =
   | { phase: "sending"; runId: string; draftText: string }
@@ -98,8 +99,11 @@ export function resolveTuiChatSubmitAdmission(params: {
   return params.pendingSubmit ? "pending" : "allowed";
 }
 
-export function disconnectedTuiChatSubmitMessage(local: boolean): string {
+export function disconnectedTuiChatSubmitMessage(
+  local: boolean,
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+): string {
   return local
-    ? "local runtime not ready — message not sent"
-    : "not connected to gateway — message not sent";
+    ? localization.t("tui.notice.localRuntimeNotReady")
+    : localization.t("tui.notice.gatewayDisconnected");
 }

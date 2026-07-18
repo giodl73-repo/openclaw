@@ -8,6 +8,7 @@ import { formatRawAssistantErrorForUi } from "../shared/assistant-error-format.j
 import { extractAssistantVisibleText } from "../shared/chat-message-content.js";
 import { chunkTextByBreakResolver } from "../shared/text-chunking.js";
 import { formatTokenCount } from "../utils/usage-format.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 
 const REPLACEMENT_CHAR_RE = /\uFFFD/g;
 const MAX_TOKEN_CHARS = 32;
@@ -463,25 +464,44 @@ export function isCommandMessage(message: unknown): boolean {
   return (message as Record<string, unknown>).command === true;
 }
 
-export function formatTokens(total?: number | null, context?: number | null) {
+export function formatTokens(
+  total?: number | null,
+  context?: number | null,
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+) {
   if (total == null && context == null) {
-    return "tokens ?";
+    return localization.t("tui.footer.tokensUnknown");
   }
   const totalLabel = total == null ? "?" : formatTokenCount(total);
   if (context == null) {
-    return `tokens ${totalLabel}`;
+    return localization.t("tui.footer.tokensTotal", { total: totalLabel });
   }
   const pct =
     typeof total === "number" && context > 0
       ? Math.min(999, Math.round((total / context) * 100))
       : null;
-  return `tokens ${totalLabel}/${formatTokenCount(context)}${pct !== null ? ` (${pct}%)` : ""}`;
+  const contextLabel = formatTokenCount(context);
+  return pct === null
+    ? localization.t("tui.footer.tokensContext", {
+        total: totalLabel,
+        context: contextLabel,
+      })
+    : localization.t("tui.footer.tokensContextWithPercent", {
+        total: totalLabel,
+        context: contextLabel,
+        percent: pct,
+      });
 }
 
-export function formatRemoteConnectionHostFooter(connectionUrl: string): string | null {
+export function formatRemoteConnectionHostFooter(
+  connectionUrl: string,
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+): string | null {
   try {
     const hostname = new URL(connectionUrl.trim()).hostname.trim();
-    return hostname && !isLoopbackHost(hostname) ? `host ${hostname}` : null;
+    return hostname && !isLoopbackHost(hostname)
+      ? localization.t("tui.footer.host", { hostname })
+      : null;
   } catch {
     return null;
   }
@@ -494,7 +514,10 @@ function formatGoalUsage(goal: SessionGoal): string | null {
   return `${formatTokenCount(goal.tokensUsed)}/${formatTokenCount(goal.tokenBudget)}`;
 }
 
-export function formatGoalFooter(goal?: SessionGoal): string | null {
+export function formatGoalFooter(
+  goal?: SessionGoal,
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+): string | null {
   if (!goal) {
     return null;
   }
@@ -502,35 +525,51 @@ export function formatGoalFooter(goal?: SessionGoal): string | null {
   const suffix = usage ? ` (${usage})` : "";
   switch (goal.status) {
     case "active":
-      return `Pursuing goal${suffix}`;
+      return localization.t("tui.footer.goal.active", { suffix });
     case "paused":
-      return "Goal paused (/goal resume)";
+      return localization.t("tui.footer.goal.paused");
     case "blocked":
-      return "Goal blocked (/goal resume)";
+      return localization.t("tui.footer.goal.blocked");
     case "usage_limited":
-      return "Goal hit usage limits (/goal resume)";
+      return localization.t("tui.footer.goal.usageLimited");
     case "budget_limited":
-      return `Goal unmet${suffix}`;
+      return localization.t("tui.footer.goal.budgetLimited", { suffix });
     case "complete":
-      return `Goal achieved${suffix}`;
+      return localization.t("tui.footer.goal.complete", { suffix });
   }
   return null;
 }
 
-export function formatContextUsageLine(params: {
-  total?: number | null;
-  context?: number | null;
-  remaining?: number | null;
-  percent?: number | null;
-}) {
+export function formatContextUsageLine(
+  params: {
+    total?: number | null;
+    context?: number | null;
+    remaining?: number | null;
+    percent?: number | null;
+  },
+  localization: TuiLocalization = TUI_ENGLISH_LOCALIZATION,
+) {
   const totalLabel = typeof params.total === "number" ? formatTokenCount(params.total) : "?";
   const ctxLabel = typeof params.context === "number" ? formatTokenCount(params.context) : "?";
   const pct = typeof params.percent === "number" ? Math.min(999, Math.round(params.percent)) : null;
   const remainingLabel =
-    typeof params.remaining === "number" ? `${formatTokenCount(params.remaining)} left` : null;
+    typeof params.remaining === "number"
+      ? localization.t("tui.footer.contextRemaining", {
+          remaining: formatTokenCount(params.remaining),
+        })
+      : null;
   const pctLabel = pct !== null ? `${pct}%` : null;
   const extra = [remainingLabel, pctLabel].filter(Boolean).join(", ");
-  return `tokens ${totalLabel}/${ctxLabel}${extra ? ` (${extra})` : ""}`;
+  return extra
+    ? localization.t("tui.footer.contextUsageWithExtra", {
+        total: totalLabel,
+        context: ctxLabel,
+        extra,
+      })
+    : localization.t("tui.footer.contextUsage", {
+        total: totalLabel,
+        context: ctxLabel,
+      });
 }
 
 export function asString(value: unknown, fallback = ""): string {

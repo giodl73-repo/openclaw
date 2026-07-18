@@ -135,6 +135,20 @@ async function withTimeZone<T>(timeZone: string, run: () => Promise<T> | T): Pro
   }
 }
 
+async function withLocale<T>(locale: string, run: () => Promise<T> | T): Promise<T> {
+  const previous = process.env.OPENCLAW_LOCALE;
+  process.env.OPENCLAW_LOCALE = locale;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.OPENCLAW_LOCALE;
+    } else {
+      process.env.OPENCLAW_LOCALE = previous;
+    }
+  }
+}
+
 describe("logs cli", () => {
   beforeEach(() => {
     readSystemdServiceRuntime.mockResolvedValue({ status: "stopped" });
@@ -169,6 +183,50 @@ describe("logs cli", () => {
     expect(stdoutWrites.join("")).toContain("raw line");
     expect(stderrWrites.join("")).toContain("Log tail truncated");
     expect(stderrWrites.join("")).toContain("Log cursor reset");
+  });
+
+  it("localizes human output while preserving log paths and content", async () => {
+    callGatewayFromCli.mockResolvedValueOnce({
+      file: "C:\\logs\\gateway.log",
+      cursor: 1,
+      lines: ["provider/model-id raw line"],
+      truncated: true,
+      reset: true,
+    });
+
+    const stdoutWrites = captureStdoutWrites();
+    const stderrWrites = captureStderrWrites();
+
+    await withLocale("zh-CN", () => runLogsCli(["logs"]));
+
+    expect(stdoutWrites.join("")).toContain("日志文件： C:\\logs\\gateway.log");
+    expect(stdoutWrites.join("")).toContain("provider/model-id raw line");
+    expect(stderrWrites.join("")).toContain("日志尾部已截断（请增大 --max-bytes）。");
+    expect(stderrWrites.join("")).toContain("日志游标已重置（文件已轮转）。");
+  });
+
+  it("keeps JSON notice records locale-invariant", async () => {
+    callGatewayFromCli.mockResolvedValueOnce({
+      file: "/tmp/openclaw.log",
+      cursor: 1,
+      lines: [],
+      truncated: true,
+      reset: true,
+    });
+
+    const stdoutWrites = captureStdoutWrites();
+
+    await withLocale("zh-CN", () => runLogsCli(["logs", "--json"]));
+
+    const records = stdoutWrites
+      .join("")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; message?: string });
+    expect(records.filter((record) => record.type === "notice")).toEqual([
+      { type: "notice", message: "Log tail truncated (increase --max-bytes)." },
+      { type: "notice", message: "Log cursor reset (file rotated)." },
+    ]);
   });
 
   it("uses the passive local Gateway client for implicit loopback log reads", async () => {

@@ -7,6 +7,21 @@ export const CLI_ENGLISH_CATALOG = {
   "cli.gatewayStatus.requireRpcNeedsProbe":
     "Gateway status failed: --require-rpc needs probing enabled. Remove --no-probe or drop --require-rpc.",
   "cli.gatewayStatus.failed": "Gateway status failed: {error}",
+  "cli.logs.positiveInteger": "{flag} must be a positive integer.",
+  "cli.logs.outputClosed": "openclaw logs: output {target} closed ({code}). Stopping tail.",
+  "cli.logs.gatewayUnreachable": "Gateway not reachable. Is it running and accessible?",
+  "cli.logs.doctorHint": "Hint: run `{command}`.",
+  "cli.logs.localFallback": "Local Gateway RPC unavailable; reading configured file log instead.",
+  "cli.logs.journalFallback":
+    "Local Gateway RPC unavailable; reading active systemd gateway journal instead.",
+  "cli.logs.gatewayDisconnected": "[logs] gateway disconnected, reconnecting in {seconds}s...",
+  "cli.logs.gatewayReconnected": "[logs] gateway reconnected",
+  "cli.logs.source": "Log source:",
+  "cli.logs.servicePid": "Service PID:",
+  "cli.logs.serviceUnit": "Service Unit:",
+  "cli.logs.file": "Log file:",
+  "cli.logs.truncated": "Log tail truncated (increase --max-bytes).",
+  "cli.logs.cursorReset": "Log cursor reset (file rotated).",
   "cli.update.timeout.invalid": "--timeout must be a positive integer (seconds)",
   "cli.update.wizard.ttyRequired":
     "Update wizard requires a TTY. Use `openclaw update --channel <stable|extended-stable|beta|dev>` instead.",

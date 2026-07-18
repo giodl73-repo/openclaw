@@ -88,13 +88,14 @@ export async function launchTuiCli(
 ): Promise<void> {
   const args = buildTuiCliArgs(opts);
   const env =
-    launchOptions.gatewayUrl || launchOptions.authSource
+    launchOptions.gatewayUrl || launchOptions.authSource || opts.locale
       ? {
           ...process.env,
           ...(launchOptions.gatewayUrl ? { OPENCLAW_GATEWAY_URL: launchOptions.gatewayUrl } : {}),
           ...(launchOptions.authSource === "config"
             ? { [TUI_SETUP_AUTH_SOURCE_ENV]: TUI_SETUP_AUTH_SOURCE_CONFIG }
             : {}),
+          ...(opts.locale ? { OPENCLAW_LOCALE: opts.locale } : {}),
         }
       : process.env;
   // Pause parent stdin while the inherited-stdio child owns the terminal.

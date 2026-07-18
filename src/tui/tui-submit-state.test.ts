@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createTuiLocalization } from "./i18n/runtime.js";
 import {
   acceptPendingSubmit,
   beginPendingSubmit,
@@ -174,6 +175,15 @@ describe("disconnectedTuiChatSubmitMessage", () => {
     );
     expect(disconnectedTuiChatSubmitMessage(true)).toBe(
       "local runtime not ready — message not sent",
+    );
+  });
+
+  it("localizes the wrapper while preserving the runtime branch", () => {
+    const localization = createTuiLocalization({ locale: "zh-CN" });
+
+    expect(disconnectedTuiChatSubmitMessage(false, localization)).toBe("未连接到网关——消息未发送");
+    expect(disconnectedTuiChatSubmitMessage(true, localization)).toBe(
+      "本地运行时尚未就绪——消息未发送",
     );
   });
 });

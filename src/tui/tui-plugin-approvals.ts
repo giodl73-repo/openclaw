@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { isApprovalStaleError } from "../infra/approval-errors.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 import { selectListTheme, theme } from "./theme/theme.js";
 import type { TuiApprovalDecision, TuiBackend, TuiPluginApproval } from "./tui-backend.js";
 import { sanitizeRenderableText } from "./tui-formatters.js";
@@ -36,22 +37,42 @@ class PluginApprovalPrompt implements Component {
     surfaceLabel: string,
     approval: TuiPluginApproval,
     private readonly selector: ApprovalSelector,
+    localization: TuiLocalization,
   ) {
     const title = sanitizeApprovalText(approval.request.title);
     const description = sanitizeApprovalText(approval.request.description ?? "");
     const severity = approval.request.severity ?? "warning";
+    const severityLabel = localization.t(
+      severity === "critical"
+        ? "tui.approval.severity.critical"
+        : severity === "info"
+          ? "tui.approval.severity.info"
+          : "tui.approval.severity.warning",
+    );
     const metadata = [
-      `Severity: ${severity === "critical" ? "Critical" : severity === "info" ? "Info" : "Warning"}`,
+      localization.t("tui.approval.severity", { severity: severityLabel }),
       ...(approval.request.toolName
-        ? [`Tool: ${sanitizeApprovalText(approval.request.toolName)}`]
+        ? [
+            localization.t("tui.approval.tool", {
+              tool: sanitizeApprovalText(approval.request.toolName),
+            }),
+          ]
         : []),
       ...(approval.request.pluginId
-        ? [`Plugin: ${sanitizeApprovalText(approval.request.pluginId)}`]
+        ? [
+            localization.t("tui.approval.plugin", {
+              plugin: sanitizeApprovalText(approval.request.pluginId),
+            }),
+          ]
         : []),
     ];
-    this.title = new Text(theme.header(`${surfaceLabel}: ${title}`));
+    this.title = new Text(
+      theme.header(localization.t("tui.approval.title", { surface: surfaceLabel, title })),
+    );
     this.metadata = new Text(theme.dim(metadata.join("\n")));
-    this.description = new Text(theme.system(description ? `Request: ${description}` : ""));
+    this.description = new Text(
+      theme.system(description ? localization.t("tui.approval.request", { description }) : ""),
+    );
   }
 
   setConfirmation(text: string): void {
@@ -100,6 +121,7 @@ type TuiPluginApprovalControllerDeps = {
   openOverlay: (component: Component) => OverlayHandle;
   closeOverlay: (handle?: OverlayHandle) => void;
   requestRender: () => void;
+  localization?: TuiLocalization;
   createSelector?: (items: SelectItem[]) => ApprovalSelector;
   nowMs?: () => number;
   setTimeoutFn?: (callback: () => void, delayMs: number) => ApprovalTimer;
@@ -108,23 +130,25 @@ type TuiPluginApprovalControllerDeps = {
 
 const DEFAULT_DECISIONS: readonly TuiApprovalDecision[] = ["allow-once", "allow-always", "deny"];
 
-const DECISION_ITEMS: Record<TuiApprovalDecision, SelectItem> = {
-  "allow-once": {
-    value: "allow-once",
-    label: "Allow once",
-    description: "Approve this change",
-  },
-  "allow-always": {
-    value: "allow-always",
-    label: "Always allow",
-    description: "Approve matching future changes",
-  },
-  deny: {
-    value: "deny",
-    label: "Deny",
-    description: "Do not apply this change",
-  },
-};
+function decisionItems(localization: TuiLocalization): Record<TuiApprovalDecision, SelectItem> {
+  return {
+    "allow-once": {
+      value: "allow-once",
+      label: localization.t("tui.approval.allowOnce"),
+      description: localization.t("tui.approval.allowOnceDescription"),
+    },
+    "allow-always": {
+      value: "allow-always",
+      label: localization.t("tui.approval.allowAlways"),
+      description: localization.t("tui.approval.allowAlwaysDescription"),
+    },
+    deny: {
+      value: "deny",
+      label: localization.t("tui.approval.deny"),
+      description: localization.t("tui.approval.denyDescription"),
+    },
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -190,24 +214,26 @@ function parseResolvedApprovalId(payload: unknown): string | null {
   return payload.id.trim() || null;
 }
 
-function decisionLabel(decision: TuiApprovalDecision): string {
+function decisionLabel(decision: TuiApprovalDecision, localization: TuiLocalization): string {
   if (decision === "allow-once") {
-    return "allowed once";
+    return localization.t("tui.approval.decision.allowedOnce");
   }
   if (decision === "allow-always") {
-    return "always allowed";
+    return localization.t("tui.approval.decision.alwaysAllowed");
   }
-  return "denied";
+  return localization.t("tui.approval.decision.denied");
 }
 
-function approvalSurfaceLabel(approval: TuiPluginApproval): string {
+function approvalSurfaceLabel(approval: TuiPluginApproval, localization: TuiLocalization): string {
   return approval.request.toolName === "skill_workshop"
-    ? "workspace skill approval"
-    : "plugin approval";
+    ? localization.t("tui.approval.surface.workspaceSkill")
+    : localization.t("tui.approval.surface.plugin");
 }
 
 /** Coordinates pending plugin approval events with the active TUI overlay. */
 export function createTuiPluginApprovalController(deps: TuiPluginApprovalControllerDeps) {
+  const localization = deps.localization ?? TUI_ENGLISH_LOCALIZATION;
+  const itemsByDecision = decisionItems(localization);
   const createSelector =
     deps.createSelector ??
     ((items: SelectItem[]) => new SelectList(items, items.length, selectListTheme));
@@ -300,10 +326,10 @@ export function createTuiPluginApprovalController(deps: TuiPluginApprovalControl
       return;
     }
     activeId = approval.id;
-    const surfaceLabel = approvalSurfaceLabel(approval);
+    const surfaceLabel = approvalSurfaceLabel(approval, localization);
 
     const decisions = approval.request.allowedDecisions ?? DEFAULT_DECISIONS;
-    const selector = createSelector(decisions.map((decision) => DECISION_ITEMS[decision]));
+    const selector = createSelector(decisions.map((decision) => itemsByDecision[decision]));
     let allowDecisionArmed = false;
     let prompt: PluginApprovalPrompt | null = null;
     const denyIndex = decisions.indexOf("deny");
@@ -333,29 +359,46 @@ export function createTuiPluginApprovalController(deps: TuiPluginApprovalControl
       let stale = false;
       try {
         if (!deps.client.resolvePluginApproval) {
-          throw new Error("plugin approval resolution is unavailable");
+          throw new Error(localization.t("tui.approval.resolutionUnavailable"));
         }
         const result = await deps.client.resolvePluginApproval(approval.id, decision);
         if (result?.ok === false) {
           stale = true;
         } else {
           remove(approval.id);
-          deps.chatLog.addSystem(`${surfaceLabel}: ${decisionLabel(decision)}`);
+          deps.chatLog.addSystem(
+            localization.t("tui.approval.resolved", {
+              surface: surfaceLabel,
+              decision: decisionLabel(decision, localization),
+            }),
+          );
         }
       } catch (error) {
         if (isApprovalStaleError(error)) {
           stale = true;
         } else {
-          deps.chatLog.addSystem(`${surfaceLabel} failed: ${formatErrorMessage(error)}`);
+          deps.chatLog.addSystem(
+            localization.t("tui.approval.failed", {
+              surface: surfaceLabel,
+              error: formatErrorMessage(error),
+            }),
+          );
         }
       }
       if (stale) {
         remove(approval.id);
-        deps.chatLog.addSystem(`${surfaceLabel}: no longer pending`);
+        deps.chatLog.addSystem(
+          localization.t("tui.approval.noLongerPending", { surface: surfaceLabel }),
+        );
         try {
           await refreshApprovals();
         } catch (error) {
-          deps.chatLog.addSystem(`${surfaceLabel} refresh failed: ${formatErrorMessage(error)}`);
+          deps.chatLog.addSystem(
+            localization.t("tui.approval.refreshFailed", {
+              surface: surfaceLabel,
+              error: formatErrorMessage(error),
+            }),
+          );
         }
       }
       resolvingIds.delete(approval.id);
@@ -372,7 +415,7 @@ export function createTuiPluginApprovalController(deps: TuiPluginApprovalControl
       }
       if (decision !== "deny" && !allowDecisionArmed) {
         allowDecisionArmed = true;
-        prompt?.setConfirmation(`Press Enter again to confirm ${item.label}.`);
+        prompt?.setConfirmation(localization.t("tui.approval.confirm", { decision: item.label }));
         deps.requestRender();
         return;
       }
@@ -388,7 +431,7 @@ export function createTuiPluginApprovalController(deps: TuiPluginApprovalControl
       dismissedIds.add(approval.id);
       activeId = null;
       closeActiveOverlay();
-      deps.chatLog.addSystem(`${surfaceLabel}: dismissed; request remains pending`);
+      deps.chatLog.addSystem(localization.t("tui.approval.dismissed", { surface: surfaceLabel }));
       presentNext();
       deps.requestRender();
     };
@@ -401,7 +444,7 @@ export function createTuiPluginApprovalController(deps: TuiPluginApprovalControl
         activeId = null;
         remove(approval.id);
         closeActiveOverlay();
-        deps.chatLog.addSystem(`${surfaceLabel}: expired`);
+        deps.chatLog.addSystem(localization.t("tui.approval.expired", { surface: surfaceLabel }));
         presentNext();
         deps.requestRender();
       },
@@ -411,7 +454,7 @@ export function createTuiPluginApprovalController(deps: TuiPluginApprovalControl
     if (typeof timer !== "number") {
       timer.unref?.();
     }
-    prompt = new PluginApprovalPrompt(surfaceLabel, approval, selector);
+    prompt = new PluginApprovalPrompt(surfaceLabel, approval, selector, localization);
     activeOverlay = deps.openOverlay(prompt);
     deps.requestRender();
   };

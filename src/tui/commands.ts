@@ -9,6 +9,7 @@ import {
 } from "../auto-reply/commands-registry.js";
 import { formatThinkingLevels, listThinkingLevelLabels } from "../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../config/types.js";
+import { TUI_ENGLISH_LOCALIZATION, type TuiLocalization } from "./i18n/runtime.js";
 
 const VERBOSE_LEVELS = ["on", "off"];
 const TRACE_LEVELS = ["on", "off"];
@@ -31,6 +32,7 @@ type SlashCommandOptions = {
   thinkingLevels?: Array<{ id: string; label: string }>;
   local?: boolean;
   dynamicCommands?: CommandEntry[];
+  localization?: TuiLocalization;
 };
 
 const COMMAND_ALIASES: Record<string, string> = {
@@ -99,6 +101,8 @@ export function isSharedTextCommand(input: string): boolean {
 }
 
 export function getSlashCommands(options: SlashCommandOptions = {}): SlashCommand[] {
+  const localization = options.localization ?? TUI_ENGLISH_LOCALIZATION;
+  const t = localization.t;
   const thinkLevels = options.thinkingLevels?.length
     ? options.thinkingLevels.map((level) => level.label)
     : listThinkingLevelLabels(options.provider, options.model, undefined, options.agentRuntime);
@@ -110,23 +114,23 @@ export function getSlashCommands(options: SlashCommandOptions = {}): SlashComman
   const elevatedCompletions = createLevelCompletion(ELEVATED_LEVELS);
   const activationCompletions = createLevelCompletion(ACTIVATION_LEVELS);
   const commands: SlashCommand[] = [
-    { name: "help", description: "Show slash command help" },
-    { name: "gateway-status", description: "Show gateway status summary" },
-    { name: "gwstatus", description: "Alias for /gateway-status" },
-    ...(options.local ? [{ name: "auth", description: "Run provider auth/login flow" }] : []),
-    { name: "agent", description: "Switch agent (or open picker)" },
-    { name: "agents", description: "Open agent picker" },
-    { name: "openclaw", description: "Return to OpenClaw" },
-    { name: "session", description: "Switch session (or open picker)" },
-    { name: "sessions", description: "Open session picker" },
+    { name: "help", description: t("tui.command.help.description") },
+    { name: "gateway-status", description: t("tui.command.gatewayStatus.description") },
+    { name: "gwstatus", description: t("tui.command.gatewayStatusAlias.description") },
+    ...(options.local ? [{ name: "auth", description: t("tui.command.auth.description") }] : []),
+    { name: "agent", description: t("tui.command.agent.description") },
+    { name: "agents", description: t("tui.command.agents.description") },
+    { name: "openclaw", description: t("tui.command.openclaw.description") },
+    { name: "session", description: t("tui.command.session.description") },
+    { name: "sessions", description: t("tui.command.sessions.description") },
     {
       name: "model",
-      description: "Set model (or open picker)",
+      description: t("tui.command.model.description"),
     },
-    { name: "models", description: "Open model picker" },
+    { name: "models", description: t("tui.command.models.description") },
     {
       name: "think",
-      description: "Set thinking level",
+      description: t("tui.command.think.description"),
       getArgumentCompletions: (prefix) =>
         thinkLevels
           .filter((v) => v.startsWith(normalizeLowercaseStringOrEmpty(prefix)))
@@ -134,50 +138,50 @@ export function getSlashCommands(options: SlashCommandOptions = {}): SlashComman
     },
     {
       name: "fast",
-      description: "Set fast mode auto/on/off",
+      description: t("tui.command.fast.description"),
       getArgumentCompletions: fastCompletions,
     },
     {
       name: "verbose",
-      description: "Set verbose on/off",
+      description: t("tui.command.verbose.description"),
       getArgumentCompletions: verboseCompletions,
     },
     {
       name: "trace",
-      description: "Set trace on/off",
+      description: t("tui.command.trace.description"),
       getArgumentCompletions: traceCompletions,
     },
     {
       name: "reasoning",
-      description: "Set reasoning on/off",
+      description: t("tui.command.reasoning.description"),
       getArgumentCompletions: reasoningCompletions,
     },
     {
       name: "usage",
-      description: "Toggle per-response usage line",
+      description: t("tui.command.usage.description"),
       getArgumentCompletions: usageCompletions,
     },
     {
       name: "elevated",
-      description: "Set elevated on/off/ask/full",
+      description: t("tui.command.elevated.description"),
       getArgumentCompletions: elevatedCompletions,
     },
     {
       name: "elev",
-      description: "Alias for /elevated",
+      description: t("tui.command.elevatedAlias.description"),
       getArgumentCompletions: elevatedCompletions,
     },
     {
       name: "activation",
-      description: "Set group activation",
+      description: t("tui.command.activation.description"),
       getArgumentCompletions: activationCompletions,
     },
-    { name: "abort", description: "Abort active run" },
-    { name: "new", description: "Spawn a new isolated session" },
-    { name: "reset", description: "Reset the current session" },
-    { name: "settings", description: "Open settings" },
-    { name: "exit", description: "Exit the TUI" },
-    { name: "quit", description: "Exit the TUI" },
+    { name: "abort", description: t("tui.command.abort.description") },
+    { name: "new", description: t("tui.command.new.description") },
+    { name: "reset", description: t("tui.command.reset.description") },
+    { name: "settings", description: t("tui.command.settings.description") },
+    { name: "exit", description: t("tui.command.exit.description") },
+    { name: "quit", description: t("tui.command.exit.description") },
   ];
 
   const seen = new Set(commands.map((command) => command.name));
@@ -207,6 +211,7 @@ export function getSlashCommands(options: SlashCommandOptions = {}): SlashComman
 }
 
 export function helpText(options: SlashCommandOptions = {}): string {
+  const localization = options.localization ?? TUI_ENGLISH_LOCALIZATION;
   const thinkLevels = formatThinkingLevels(
     options.provider,
     options.model,
@@ -215,7 +220,7 @@ export function helpText(options: SlashCommandOptions = {}): string {
     options.agentRuntime,
   );
   return [
-    "Slash commands:",
+    localization.t("tui.command.help.heading"),
     "/help",
     ...(options.local ? [] : ["/commands", "/status"]),
     "/gateway-status",

@@ -180,4 +180,17 @@ describe("launchTuiCli", () => {
     expect(options.env?.OPENCLAW_GATEWAY_URL).toBe("ws://127.0.0.1:18789");
     expect(options.env?.OPENCLAW_TUI_SETUP_AUTH_SOURCE).toBe("config");
   });
+
+  it("propagates an explicit locale override to the relaunched TUI", async () => {
+    const child = createChildProcess();
+    spawnMock.mockImplementation((_cmd: string, _args: string[], _opts: SpawnOptions) => {
+      queueMicrotask(() => child.emit("exit", 0, null));
+      return child;
+    });
+
+    await launchTuiCli({ deliver: false, locale: "zh-CN" });
+
+    const options = expectSpawned(["/repo/openclaw.mjs", "tui"]);
+    expect(options.env?.OPENCLAW_LOCALE).toBe("zh-CN");
+  });
 });

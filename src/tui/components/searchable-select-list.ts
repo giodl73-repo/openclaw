@@ -12,6 +12,7 @@ import {
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { stripAnsi, visibleWidth } from "../../../packages/terminal-core/src/ansi.js";
+import { TUI_ENGLISH_LOCALIZATION } from "../i18n/runtime.js";
 
 const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_SGR_REGEX = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
@@ -25,6 +26,11 @@ export interface SearchableSelectListTheme extends SelectListTheme {
 export interface SearchableSelectItem extends SelectItem {
   searchText?: string;
 }
+
+export type SearchableSelectListCopy = {
+  searchPrompt: string;
+  noMatches: string;
+};
 
 /**
  * A select list with a search input at the top for fuzzy filtering.
@@ -48,7 +54,15 @@ export class SearchableSelectList implements Component {
   // Keep a small right margin so we don't risk wrapping due to styling/terminal quirks.
   private static readonly RIGHT_MARGIN_WIDTH = 2;
 
-  constructor(items: SearchableSelectItem[], maxVisible: number, theme: SearchableSelectListTheme) {
+  constructor(
+    items: SearchableSelectItem[],
+    maxVisible: number,
+    theme: SearchableSelectListTheme,
+    private readonly copy: SearchableSelectListCopy = {
+      searchPrompt: TUI_ENGLISH_LOCALIZATION.t("tui.selector.searchPrompt"),
+      noMatches: TUI_ENGLISH_LOCALIZATION.t("tui.selector.noMatches"),
+    },
+  ) {
     this.items = items;
     this.filteredItems = items;
     this.maxVisible = maxVisible;
@@ -213,8 +227,7 @@ export class SearchableSelectList implements Component {
     const lines: string[] = [];
 
     // Search input line
-    const promptText = "search: ";
-    const prompt = this.theme.searchPrompt(promptText);
+    const prompt = this.theme.searchPrompt(this.copy.searchPrompt);
     const inputWidth = Math.max(1, width - visibleWidth(prompt));
     const inputLines = this.searchInput.render(inputWidth);
     const inputText = inputLines[0] ?? "";
@@ -225,7 +238,7 @@ export class SearchableSelectList implements Component {
 
     // If no items match filter, show message
     if (this.filteredItems.length === 0) {
-      lines.push(this.theme.noMatch("  No matches"));
+      lines.push(this.theme.noMatch(this.copy.noMatches));
       return lines;
     }
 
