@@ -103,6 +103,20 @@ export const CLI_ZH_CN_CATALOG = {
     "软件包更新后无法恢复 Windows 计划任务自动启动：{error}",
   "cli.update.service.installKind.git": "Git",
   "cli.update.service.installKind.package": "软件包",
+  "cli.update.completion.cacheWriteTimedOut": "{seconds} 秒后超时",
+  "cli.update.completion.cacheWriteFailed":
+    "补全缓存更新失败：{error}。Shell Tab 补全可能已过期；请手动运行以下命令刷新：{command}",
+  "cli.update.completion.cacheWriteFailedWithStderr":
+    "补全缓存更新失败（{stderr}）。Shell Tab 补全可能已过期；请手动运行以下命令刷新：{command}",
+  "cli.update.completion.cacheWriteFailedWithoutDetail":
+    "补全缓存更新失败。Shell Tab 补全可能已过期；请手动运行以下命令刷新：{command}",
+  "cli.update.completion.upgrading": "正在将 Shell 补全升级为缓存版本...",
+  "cli.update.completion.regenerating": "正在重新生成 Shell 补全缓存...",
+  "cli.update.completion.heading": "Shell 补全",
+  "cli.update.completion.enablePrompt": "是否为 {cliName} 启用 {shell} Shell 补全？",
+  "cli.update.completion.skipped": "已跳过。稍后运行 `{command}` 即可启用。",
+  "cli.update.completion.generationFailed": "无法生成补全缓存。",
+  "cli.update.completion.refreshFailed": "Shell 补全刷新失败：{error}",
   "cli.update.service.noRestartWhileRunning":
     "托管网关服务正在运行时设置了 --no-restart；{installKind}更新不会停止或重启该进程。",
   "cli.update.service.differentRoot":

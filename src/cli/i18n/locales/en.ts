@@ -110,6 +110,20 @@ export const CLI_ENGLISH_CATALOG = {
     "Failed to restore Windows Scheduled Task autostart after package update: {error}",
   "cli.update.service.installKind.git": "git",
   "cli.update.service.installKind.package": "package",
+  "cli.update.completion.cacheWriteTimedOut": "timed out after {seconds}s",
+  "cli.update.completion.cacheWriteFailed":
+    "Completion cache update failed: {error}. Shell tab-completion may be stale; refresh manually with: {command}",
+  "cli.update.completion.cacheWriteFailedWithStderr":
+    "Completion cache update failed ({stderr}). Shell tab-completion may be stale; refresh manually with: {command}",
+  "cli.update.completion.cacheWriteFailedWithoutDetail":
+    "Completion cache update failed. Shell tab-completion may be stale; refresh manually with: {command}",
+  "cli.update.completion.upgrading": "Upgrading shell completion to cached version...",
+  "cli.update.completion.regenerating": "Regenerating shell completion cache...",
+  "cli.update.completion.heading": "Shell completion",
+  "cli.update.completion.enablePrompt": "Enable {shell} shell completion for {cliName}?",
+  "cli.update.completion.skipped": "Skipped. Run `{command}` later to enable.",
+  "cli.update.completion.generationFailed": "Failed to generate completion cache.",
+  "cli.update.completion.refreshFailed": "Shell completion refresh failed: {error}",
   "cli.update.service.noRestartWhileRunning":
     "--no-restart is set while the managed gateway service is running; the {installKind} update will not stop or restart that process.",
   "cli.update.service.differentRoot":

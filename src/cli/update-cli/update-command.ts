@@ -1581,10 +1581,11 @@ async function updateCommandInternal(
     }
   }
 
-  await tryWriteCompletionCache(postUpdateRoot, Boolean(opts.json));
+  await tryWriteCompletionCache(postUpdateRoot, Boolean(opts.json), localization);
   await tryInstallShellCompletion({
     jsonMode: Boolean(opts.json),
     skipPrompt: Boolean(opts.yes),
+    localization,
   });
 
   await writeControlPlaneUpdateRestartSentinelBestEffort({

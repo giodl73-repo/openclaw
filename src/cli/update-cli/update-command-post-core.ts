@@ -50,7 +50,7 @@ import {
 import { runExec } from "../../process/exec.js";
 import { defaultRuntime } from "../../runtime.js";
 import { VERSION } from "../../version.js";
-import type { CliLocalization } from "../i18n/runtime.js";
+import { createCliLocalization, type CliLocalization } from "../i18n/runtime.js";
 import { printResult } from "./progress.js";
 import {
   parseTimeoutMsOrExit,
@@ -161,7 +161,8 @@ function withUpdateFinalizationEnv<T>(run: () => Promise<T>): Promise<T> {
 
 export async function updateFinalizeCommand(opts: UpdateFinalizeOptions): Promise<void> {
   suppressDeprecations();
-  const timeoutMs = parseTimeoutMsOrExit(opts.timeout);
+  const localization = createCliLocalization();
+  const timeoutMs = parseTimeoutMsOrExit(opts.timeout, localization);
   if (timeoutMs === null) {
     return;
   }
@@ -294,7 +295,7 @@ export async function updateFinalizeCommand(opts: UpdateFinalizeOptions): Promis
     },
   };
 
-  await tryWriteCompletionCache(root, Boolean(opts.json));
+  await tryWriteCompletionCache(root, Boolean(opts.json), localization);
   if (opts.json) {
     defaultRuntime.writeJson(result);
   } else if (result.status === "ok") {
