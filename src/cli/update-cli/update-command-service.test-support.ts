@@ -2,6 +2,7 @@ import type { GatewayServiceState } from "../../daemon/service-types.js";
 import type { GatewayService } from "../../daemon/service.js";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
 import type { GatewayRestartSnapshot } from "../daemon-cli/restart-health.js";
+import type { CliLocalization } from "../i18n/runtime.js";
 import "./update-command-service.js";
 
 type PostUpdateLaunchAgentRecoveryResult =
@@ -10,13 +11,23 @@ type PostUpdateLaunchAgentRecoveryResult =
   | { attempted: true; recovered: false; detail: string };
 
 type UpdateCommandServiceTestApi = {
+  formatManagedServiceInstallKindMessage(params: {
+    localization: CliLocalization;
+    key:
+      | "cli.update.service.noRestartWhileRunning"
+      | "cli.update.service.differentRoot"
+      | "cli.update.service.stopping";
+    installKind: "git" | "package";
+  }): string;
   formatPostUpdateGatewayRecoveryInstructions(
     result: UpdateRunResult,
     platform?: NodeJS.Platform,
+    localization?: CliLocalization,
   ): string[];
   recoverInstalledLaunchAgentAfterUpdate(params: {
     service?: GatewayService;
     env?: NodeJS.ProcessEnv;
+    localization?: CliLocalization;
     deps?: {
       platform?: NodeJS.Platform;
       readState?: (
@@ -65,8 +76,15 @@ function getTestApi(): UpdateCommandServiceTestApi {
 export function formatPostUpdateGatewayRecoveryInstructions(
   result: UpdateRunResult,
   platform?: NodeJS.Platform,
+  localization?: CliLocalization,
 ): string[] {
-  return getTestApi().formatPostUpdateGatewayRecoveryInstructions(result, platform);
+  return getTestApi().formatPostUpdateGatewayRecoveryInstructions(result, platform, localization);
+}
+
+export function formatManagedServiceInstallKindMessage(
+  params: Parameters<UpdateCommandServiceTestApi["formatManagedServiceInstallKindMessage"]>[0],
+): string {
+  return getTestApi().formatManagedServiceInstallKindMessage(params);
 }
 
 export async function recoverInstalledLaunchAgentAfterUpdate(

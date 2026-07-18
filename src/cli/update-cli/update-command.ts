@@ -199,6 +199,20 @@ type UpdateDryRunPreview = {
   notes: string[];
 };
 
+function formatDryRunInstallKind(
+  localization: CliLocalization,
+  installKind: UpdateDryRunPreview["installKind"],
+): string {
+  switch (installKind) {
+    case "git":
+      return localization.t("cli.update.dryRun.installKind.git");
+    case "package":
+      return localization.t("cli.update.dryRun.installKind.package");
+    case "unknown":
+      return localization.t("cli.update.dryRun.installKind.unknown");
+  }
+}
+
 function printDryRunPreview(
   preview: UpdateDryRunPreview,
   jsonMode: boolean,
@@ -216,7 +230,9 @@ function printDryRunPreview(
   defaultRuntime.log("");
   defaultRuntime.log(`  ${localization.t("cli.update.dryRun.root")}: ${theme.muted(preview.root)}`);
   defaultRuntime.log(
-    `  ${localization.t("cli.update.dryRun.installKind")}: ${theme.muted(preview.installKind)}`,
+    `  ${localization.t("cli.update.dryRun.installKind")}: ${theme.muted(
+      formatDryRunInstallKind(localization, preview.installKind),
+    )}`,
   );
   defaultRuntime.log(`  ${localization.t("cli.update.dryRun.mode")}: ${theme.muted(preview.mode)}`);
   defaultRuntime.log(
@@ -1132,6 +1148,7 @@ async function updateCommandInternal(
           root: mutationRoot,
           shouldRestart,
           jsonMode: Boolean(opts.json),
+          localization,
         });
         if (preManagedServiceStop.windowsTaskAutoStartRecovery) {
           recoveryState.windowsTaskAutoStartRecovery =
@@ -1153,7 +1170,7 @@ async function updateCommandInternal(
         throw err;
       }
       stop();
-      defaultRuntime.error(`Failed to stop managed gateway service before update: ${String(err)}`);
+      defaultRuntime.error(localization.t("cli.update.service.stopFailed", { error: String(err) }));
       defaultRuntime.exit(1);
       throw new UpdateCommandAbort();
     }
@@ -1167,13 +1184,16 @@ async function updateCommandInternal(
 
     if (shouldBlockMutableUpdateFromGatewayServiceEnv({ preManagedServiceStop })) {
       stop();
-      const updateLabel = updateInstallKind === "git" ? "Git updates" : "Package updates";
+      const updateLabel = localization.t(
+        updateInstallKind === "git"
+          ? "cli.update.service.updateKind.git"
+          : "cli.update.service.updateKind.package",
+      );
       defaultRuntime.error(
-        [
-          `${updateLabel} cannot run from inside the gateway service process.`,
-          "That path replaces the active OpenClaw dist tree while the live gateway may still lazy-load old chunks.",
-          `Run \`${replaceCliName(formatCliCommand("openclaw update"), CLI_NAME)}\` from a shell outside the gateway service, or stop the gateway service first and then update.`,
-        ].join("\n"),
+        localization.t("cli.update.service.insideGateway", {
+          updateKind: updateLabel,
+          updateCommand: replaceCliName(formatCliCommand("openclaw update"), CLI_NAME),
+        }),
       );
       defaultRuntime.exit(1);
       throw new UpdateCommandAbort();
@@ -1270,6 +1290,7 @@ async function updateCommandInternal(
     await maybeRestartServiceAfterFailedMutableUpdate({
       preManagedServiceStop,
       jsonMode: Boolean(opts.json),
+      localization,
     });
     throw err;
   }
@@ -1280,7 +1301,7 @@ async function updateCommandInternal(
   }
 
   if (result.status === "error") {
-    if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop))) {
+    if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop, localization))) {
       return;
     }
     await writeControlPlaneUpdateRestartSentinelBestEffort({
@@ -1291,13 +1312,14 @@ async function updateCommandInternal(
     await maybeRestartServiceAfterFailedMutableUpdate({
       preManagedServiceStop,
       jsonMode: Boolean(opts.json),
+      localization,
     });
     defaultRuntime.exit(1);
     return;
   }
 
   if (result.status === "skipped") {
-    if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop))) {
+    if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop, localization))) {
       return;
     }
     await writeControlPlaneUpdateRestartSentinelBestEffort({
@@ -1308,6 +1330,7 @@ async function updateCommandInternal(
     await maybeRestartServiceAfterFailedMutableUpdate({
       preManagedServiceStop,
       jsonMode: Boolean(opts.json),
+      localization,
     });
     if (result.reason === "dirty") {
       defaultRuntime.error(theme.error("Update blocked: local files are edited in this checkout."));
@@ -1395,7 +1418,7 @@ async function updateCommandInternal(
         : undefined,
     });
     if (freshProcessResult.exitCode !== undefined) {
-      if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop))) {
+      if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop, localization))) {
         return;
       }
       defaultRuntime.exit(freshProcessResult.exitCode);
@@ -1473,7 +1496,7 @@ async function updateCommandInternal(
     : result;
 
   if (postCorePluginUpdate?.status === "error") {
-    if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop))) {
+    if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop, localization))) {
       return;
     }
     await writeControlPlaneUpdateRestartSentinelBestEffort({
@@ -1570,7 +1593,7 @@ async function updateCommandInternal(
     jsonMode: Boolean(opts.json),
   });
 
-  if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop))) {
+  if (!(await restoreWindowsTaskAutoStartOrExit(preManagedServiceStop, localization))) {
     return;
   }
   const restartOk = await maybeRestartService({
@@ -1587,6 +1610,7 @@ async function updateCommandInternal(
     requireRunningServiceAfterRestart:
       resultWithPostUpdate.mode === "git" && preManagedServiceStop?.stopped === true,
     timeoutMs: updateStepTimeoutMs,
+    localization,
   });
   if (!restartOk) {
     await markControlPlaneUpdateRestartSentinelFailureBestEffort({

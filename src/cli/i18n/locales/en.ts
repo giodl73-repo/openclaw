@@ -16,6 +16,9 @@ export const CLI_ENGLISH_CATALOG = {
   "cli.update.dryRun.noChanges": "No changes were applied.",
   "cli.update.dryRun.root": "Root",
   "cli.update.dryRun.installKind": "Install kind",
+  "cli.update.dryRun.installKind.git": "git",
+  "cli.update.dryRun.installKind.package": "package",
+  "cli.update.dryRun.installKind.unknown": "unknown",
   "cli.update.dryRun.mode": "Mode",
   "cli.update.dryRun.channel": "Channel",
   "cli.update.dryRun.tagSpec": "Tag/spec",
@@ -102,6 +105,68 @@ export const CLI_ENGLISH_CATALOG = {
     "Detected native optional dependency build failure. The updater retries with --omit=optional automatically.",
   "cli.update.recovery.optionalDependencyCommand":
     "If it still fails: npm i -g openclaw@latest --omit=optional",
+  "cli.update.service.shutdownCleanupFailed": "Failed to complete update shutdown cleanup: {error}",
+  "cli.update.service.windowsAutostartRestoreFailed":
+    "Failed to restore Windows Scheduled Task autostart after package update: {error}",
+  "cli.update.service.installKind.git": "git",
+  "cli.update.service.installKind.package": "package",
+  "cli.update.service.noRestartWhileRunning":
+    "--no-restart is set while the managed gateway service is running; the {installKind} update will not stop or restart that process.",
+  "cli.update.service.differentRoot":
+    "Managed gateway service points at a different OpenClaw root; leaving it running during this {installKind} update.",
+  "cli.update.service.stopping": "Stopping managed gateway service before {installKind} update...",
+  "cli.update.service.stopFailed": "Failed to stop managed gateway service before update: {error}",
+  "cli.update.service.updateKind.git": "Git updates",
+  "cli.update.service.updateKind.package": "Package updates",
+  "cli.update.service.insideGateway":
+    "{updateKind} cannot run from inside the gateway service process.\nThat path replaces the active OpenClaw dist tree while the live gateway may still lazy-load old chunks.\nRun `{updateCommand}` from a shell outside the gateway service, or stop the gateway service first and then update.",
+  "cli.update.service.ancestryBlocked":
+    "openclaw update detected it is running inside the gateway process tree.\nGateway PID {pid} is an ancestor of this process, so this updater cannot safely stop or restart the gateway that owns it.\nRun `{updateCommand}` from a shell outside the gateway service, or stop the gateway service first and then update.",
+  "cli.update.service.restartedAfterFailure":
+    "Restarted managed gateway service after failed update.",
+  "cli.update.service.restartAfterFailureFailed":
+    "Failed to restart managed gateway service after failed update: {error}",
+  "cli.update.service.recovery.darwin":
+    "Recovery: run `{restartCommand}`; if the LaunchAgent is installed but not loaded, run `{installCommand}` from the logged-in macOS user session, then rerun `{statusCommand}`.",
+  "cli.update.service.recovery.linux":
+    "Recovery: run `{restartCommand}`; if the systemd user service is missing, stale, or not active, run `{installCommand}` from the same user account, then rerun `{statusCommand}`.",
+  "cli.update.service.recovery.win32":
+    "Recovery: run `{restartCommand}`; if the gateway Scheduled Task or Windows login item is missing, stale, or not running, run `{installCommand}` from the same user account, then rerun `{statusCommand}`.",
+  "cli.update.service.recovery.generic":
+    "Recovery: run `{restartCommand}`; if the local service manager reports the gateway service is missing, stale, or not running, run `{installCommand}` from the same user account, then rerun `{statusCommand}`.",
+  "cli.update.service.recovery.rollback":
+    "Rollback: reinstall OpenClaw {version} with the same package manager, then rerun `{installCommand}`.",
+  "cli.update.service.launchAgentRecoveryFailed":
+    "LaunchAgent was installed but not loaded; automatic bootstrap/kickstart recovery failed.",
+  "cli.update.service.staleProcesses":
+    "Found stale gateway process(es) after restart: {pids}. Cleaning up...",
+  "cli.update.service.restartedVerified": "Gateway: restarted and verified.",
+  "cli.update.service.unhealthy": "Gateway did not become healthy after restart.",
+  "cli.update.service.notRunning":
+    "Gateway responded, but the managed service did not report running after restart.",
+  "cli.update.service.launchAgentRecovery": "LaunchAgent recovery: {detail}",
+  "cli.update.service.launchAgentRecoveryFailure": "LaunchAgent recovery failed: {detail}",
+  "cli.update.service.restartLog": "Restart log: {path}",
+  "cli.update.service.statusDetails": "Run `{statusCommand}` for details.",
+  "cli.update.service.restartingHeading": "Restarting service...",
+  "cli.update.service.alreadyUpdated":
+    "Gateway already reports the updated version after service refresh; skipped redundant restart.",
+  "cli.update.service.refreshFailed":
+    "Failed to refresh gateway service environment from updated install: {error}",
+  "cli.update.service.updatedRootMismatch":
+    "Gateway service did not point at the updated install after restart.",
+  "cli.update.service.noInstalledService": "Gateway: restart skipped (no installed service found).",
+  "cli.update.service.restartCompleted": "Daemon restart completed.",
+  "cli.update.service.restarted": "Daemon restarted successfully.",
+  "cli.update.service.doctorFailed": "Doctor failed: {error}",
+  "cli.update.service.restartFailed": "Gateway: restart failed: {error}",
+  "cli.update.service.manualRestart":
+    "You may need to restart the service manually: {restartCommand}",
+  "cli.update.service.restartSkipped": "Gateway: restart skipped (--no-restart).",
+  "cli.update.service.applyTipWithDoctor":
+    "Tip: Run `{doctorCommand}`, then `{restartCommand}` to apply updates to a running gateway.",
+  "cli.update.service.applyTip":
+    "Tip: Run `{restartCommand}` to apply updates to a running gateway.",
   "cli.updateStatus.heading": "OpenClaw update status",
   "cli.updateStatus.header.item": "Item",
   "cli.updateStatus.header.value": "Value",

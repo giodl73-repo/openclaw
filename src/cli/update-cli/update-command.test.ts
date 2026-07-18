@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { resolveGatewayInstallEntrypoint } from "../../daemon/gateway-entrypoint.js";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
+import { createCliLocalization } from "../i18n/runtime.js";
 import { updatePluginsAfterCoreUpdate } from "./update-command-plugins.js";
 import {
   buildInvalidConfigPostCoreUpdateResult,
@@ -19,6 +20,7 @@ import {
   shouldPrepareUpdatedInstallRestart,
 } from "./update-command-service.js";
 import {
+  formatManagedServiceInstallKindMessage,
   formatPostUpdateGatewayRecoveryInstructions,
   recoverInstalledLaunchAgentAfterUpdate,
   recoverLaunchAgentAndRecheckGatewayHealth,
@@ -596,6 +598,61 @@ describe("formatPostUpdateGatewayRecoveryInstructions", () => {
     expect(line).not.toContain("systemd");
     expect(line).not.toContain("LaunchAgent");
     expect(line).not.toContain("Scheduled Task");
+  });
+
+  it("localizes recovery guidance while preserving commands and versions", () => {
+    const localization = createCliLocalization({ locale: "zh-CN" });
+    const localizedResult: UpdateRunResult = {
+      status: "error",
+      mode: "npm",
+      before: { version: "2026.7.1" },
+      steps: [],
+      durationMs: 0,
+    };
+
+    const lines = formatPostUpdateGatewayRecoveryInstructions(
+      localizedResult,
+      "linux",
+      localization,
+    );
+
+    expect(lines[0]).toContain("恢复：");
+    expect(lines[0]).toContain("systemd");
+    expect(lines[0]).toContain("openclaw gateway restart");
+    expect(lines[0]).toContain("openclaw gateway install --force");
+    expect(lines[0]).toContain("openclaw gateway status --deep");
+    expect(lines[1]).toContain("回滚：");
+    expect(lines[1]).toContain("2026.7.1");
+    expect(lines[1]).toContain("openclaw gateway install --force");
+  });
+});
+
+describe("formatManagedServiceInstallKindMessage", () => {
+  it.each([
+    {
+      key: "cli.update.service.noRestartWhileRunning",
+      installKind: "package",
+      expected: "软件包更新不会停止或重启该进程",
+    },
+    {
+      key: "cli.update.service.differentRoot",
+      installKind: "git",
+      expected: "本次Git更新期间将保持其运行",
+    },
+    {
+      key: "cli.update.service.stopping",
+      installKind: "package",
+      expected: "执行软件包更新",
+    },
+  ] as const)("localizes install-kind presentation for $key", ({ key, installKind, expected }) => {
+    const message = formatManagedServiceInstallKindMessage({
+      localization: createCliLocalization({ locale: "zh-CN" }),
+      key,
+      installKind,
+    });
+
+    expect(message).toContain(expected);
+    expect(message).not.toContain(` ${installKind} `);
   });
 });
 

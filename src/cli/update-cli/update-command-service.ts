@@ -52,6 +52,7 @@ import {
   waitForGatewayHealthyRestart,
   type GatewayRestartSnapshot,
 } from "../daemon-cli/restart-health.js";
+import { createCliLocalization, type CliLocalization } from "../i18n/runtime.js";
 import {
   registerSignalExitBarrier,
   registerSignalExitGate,
@@ -130,7 +131,9 @@ async function recoverInstalledLaunchAgentAfterUpdate(params: {
   service?: GatewayService;
   env?: NodeJS.ProcessEnv;
   deps?: PostUpdateLaunchAgentRecoveryDeps;
+  localization?: CliLocalization;
 }): Promise<PostUpdateLaunchAgentRecoveryResult> {
+  const localization = params.localization ?? createCliLocalization();
   const platform = params.deps?.platform ?? process.platform;
   if (platform !== "darwin") {
     return { attempted: false, recovered: false };
@@ -154,8 +157,7 @@ async function recoverInstalledLaunchAgentAfterUpdate(params: {
     return {
       attempted: true,
       recovered: false,
-      detail:
-        "LaunchAgent was installed but not loaded; automatic bootstrap/kickstart recovery failed.",
+      detail: localization.t("cli.update.service.launchAgentRecoveryFailed"),
     };
   }
 
@@ -178,6 +180,7 @@ async function recoverLaunchAgentAndRecheckGatewayHealth(params: {
   expectedVersion?: string;
   env?: NodeJS.ProcessEnv;
   deps?: PostUpdateGatewayHealthRecoveryDeps;
+  localization?: CliLocalization;
 }): Promise<{
   health: GatewayRestartSnapshot;
   launchAgentRecovery: PostUpdateLaunchAgentRecoveryResult | null;
@@ -191,6 +194,7 @@ async function recoverLaunchAgentAndRecheckGatewayHealth(params: {
   const launchAgentRecovery = await recoverLaunchAgent({
     service: params.service,
     env: params.env,
+    localization: params.localization,
   });
   if (!launchAgentRecovery.recovered) {
     return { health: params.health, launchAgentRecovery };
@@ -206,7 +210,10 @@ async function recoverLaunchAgentAndRecheckGatewayHealth(params: {
   return { health, launchAgentRecovery };
 }
 
-function formatPostUpdateGatewayRecoveryLine(platform: NodeJS.Platform): string {
+function formatPostUpdateGatewayRecoveryLine(
+  platform: NodeJS.Platform,
+  localization: CliLocalization,
+): string {
   const restartCommand = replaceCliName(formatCliCommand("openclaw gateway restart"), CLI_NAME);
   const installCommand = replaceCliName(
     formatCliCommand("openclaw gateway install --force"),
@@ -216,27 +223,34 @@ function formatPostUpdateGatewayRecoveryLine(platform: NodeJS.Platform): string 
     formatCliCommand("openclaw gateway status --deep"),
     CLI_NAME,
   );
-  if (platform === "darwin") {
-    return `Recovery: run \`${restartCommand}\`; if the LaunchAgent is installed but not loaded, run \`${installCommand}\` from the logged-in macOS user session, then rerun \`${statusCommand}\`.`;
-  }
-  if (platform === "linux") {
-    return `Recovery: run \`${restartCommand}\`; if the systemd user service is missing, stale, or not active, run \`${installCommand}\` from the same user account, then rerun \`${statusCommand}\`.`;
-  }
-  if (platform === "win32") {
-    return `Recovery: run \`${restartCommand}\`; if the gateway Scheduled Task or Windows login item is missing, stale, or not running, run \`${installCommand}\` from the same user account, then rerun \`${statusCommand}\`.`;
-  }
-  return `Recovery: run \`${restartCommand}\`; if the local service manager reports the gateway service is missing, stale, or not running, run \`${installCommand}\` from the same user account, then rerun \`${statusCommand}\`.`;
+  const key =
+    platform === "darwin"
+      ? "cli.update.service.recovery.darwin"
+      : platform === "linux"
+        ? "cli.update.service.recovery.linux"
+        : platform === "win32"
+          ? "cli.update.service.recovery.win32"
+          : "cli.update.service.recovery.generic";
+  return localization.t(key, { restartCommand, installCommand, statusCommand });
 }
 
 function formatPostUpdateGatewayRecoveryInstructions(
   result: UpdateRunResult,
   platform: NodeJS.Platform = process.platform,
+  localization: CliLocalization = createCliLocalization(),
 ): string[] {
-  const lines = [formatPostUpdateGatewayRecoveryLine(platform)];
+  const lines = [formatPostUpdateGatewayRecoveryLine(platform, localization)];
   const beforeVersion = normalizeOptionalString(result.before?.version);
   if (isPackageManagerUpdateMode(result.mode) && beforeVersion) {
+    const installCommand = replaceCliName(
+      formatCliCommand("openclaw gateway install --force"),
+      CLI_NAME,
+    );
     lines.push(
-      `Rollback: reinstall OpenClaw ${beforeVersion} with the same package manager, then rerun \`${replaceCliName(formatCliCommand("openclaw gateway install --force"), CLI_NAME)}\`.`,
+      localization.t("cli.update.service.recovery.rollback", {
+        version: beforeVersion,
+        installCommand,
+      }),
     );
   }
   return lines;
@@ -245,6 +259,7 @@ function formatPostUpdateGatewayRecoveryInstructions(
 if (process.env.VITEST || process.env.NODE_ENV === "test") {
   (globalThis as Record<PropertyKey, unknown>)[Symbol.for("openclaw.updateCommandServiceTestApi")] =
     {
+      formatManagedServiceInstallKindMessage,
       formatPostUpdateGatewayRecoveryInstructions,
       recoverInstalledLaunchAgentAfterUpdate,
       recoverLaunchAgentAndRecheckGatewayHealth,
@@ -295,10 +310,11 @@ export type ManagedServiceRootRedirect = {
   nodeRunner?: string;
 };
 
-function formatGatewayAncestryBlockMessage(pid: number): string {
-  return `openclaw update detected it is running inside the gateway process tree.
-Gateway PID ${pid} is an ancestor of this process, so this updater cannot safely stop or restart the gateway that owns it.
-Run \`${replaceCliName(formatCliCommand("openclaw update"), CLI_NAME)}\` from a shell outside the gateway service, or stop the gateway service first and then update.`;
+function formatGatewayAncestryBlockMessage(pid: number, localization: CliLocalization): string {
+  return localization.t("cli.update.service.ancestryBlocked", {
+    pid,
+    updateCommand: replaceCliName(formatCliCommand("openclaw update"), CLI_NAME),
+  });
 }
 
 function parsePositivePid(value: unknown): number | null {
@@ -336,16 +352,40 @@ function isGatewayAncestorPid(
   return isInheritedGatewayRuntimePid(parsed, env) || getSelfAndAncestorPidsSync().has(parsed);
 }
 
-function gatewayAncestryBlockMessage(pid: unknown): string | undefined {
-  return isGatewayAncestorPid(pid) ? formatGatewayAncestryBlockMessage(pid) : undefined;
+function gatewayAncestryBlockMessage(
+  pid: unknown,
+  localization: CliLocalization,
+): string | undefined {
+  return isGatewayAncestorPid(pid)
+    ? formatGatewayAncestryBlockMessage(pid, localization)
+    : undefined;
 }
 
 function serviceControlStdoutForMode(jsonMode: boolean): NodeJS.WritableStream {
   return jsonMode ? JSON_MODE_SERVICE_STDOUT : process.stdout;
 }
 
+type ManagedServiceInstallKindMessageKey =
+  | "cli.update.service.noRestartWhileRunning"
+  | "cli.update.service.differentRoot"
+  | "cli.update.service.stopping";
+
+function formatManagedServiceInstallKindMessage(params: {
+  localization: CliLocalization;
+  key: ManagedServiceInstallKindMessageKey;
+  installKind: "git" | "package";
+}): string {
+  const installKind = params.localization.t(
+    params.installKind === "git"
+      ? "cli.update.service.installKind.git"
+      : "cli.update.service.installKind.package",
+  );
+  return params.localization.t(params.key, { installKind });
+}
+
 function armWindowsTaskAutoStartRecovery(
   serviceEnv: NodeJS.ProcessEnv,
+  localization: CliLocalization,
 ): WindowsTaskAutoStartRecovery {
   let restorePromise: Promise<void> | undefined;
   let unregisterSignalExitBarrier = () => {};
@@ -361,7 +401,9 @@ function armWindowsTaskAutoStartRecovery(
     interrupted = true;
     void waitForSignalExitBarriers()
       .catch((err: unknown) => {
-        defaultRuntime.error(`Failed to complete update shutdown cleanup: ${String(err)}`);
+        defaultRuntime.error(
+          localization.t("cli.update.service.shutdownCleanupFailed", { error: String(err) }),
+        );
       })
       .finally(() => {
         process.exit(exitCode);
@@ -418,6 +460,7 @@ async function abortWindowsTaskUpdateIfInterrupted(
 async function maybeSuspendWindowsTaskAutoStartForPackageUpdate(params: {
   updateInstallKind: "git" | "package";
   serviceEnv: NodeJS.ProcessEnv | undefined;
+  localization: CliLocalization;
 }): Promise<WindowsTaskAutoStartRecovery | undefined> {
   if (
     params.updateInstallKind !== "package" ||
@@ -426,7 +469,7 @@ async function maybeSuspendWindowsTaskAutoStartForPackageUpdate(params: {
   ) {
     return undefined;
   }
-  const recovery = armWindowsTaskAutoStartRecovery(params.serviceEnv);
+  const recovery = armWindowsTaskAutoStartRecovery(params.serviceEnv, params.localization);
   let suspended: boolean;
   try {
     suspended = await recovery.suspended;
@@ -461,13 +504,16 @@ export async function maybeResumeWindowsTaskAutoStartAfterPackageUpdate(
 
 export async function restoreWindowsTaskAutoStartOrExit(
   stopState: PreManagedServiceStop | undefined,
+  localization: CliLocalization = createCliLocalization(),
 ): Promise<boolean> {
   try {
     await maybeResumeWindowsTaskAutoStartAfterPackageUpdate(stopState);
     return true;
   } catch (err) {
     defaultRuntime.error(
-      `Failed to restore Windows Scheduled Task autostart after package update: ${String(err)}`,
+      localization.t("cli.update.service.windowsAutostartRestoreFailed", {
+        error: String(err),
+      }),
     );
     defaultRuntime.exit(1);
     return false;
@@ -479,7 +525,9 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
   root: string;
   shouldRestart: boolean;
   jsonMode: boolean;
+  localization?: CliLocalization;
 }): Promise<PreManagedServiceStop> {
+  const localization = params.localization ?? createCliLocalization();
   let service: ReturnType<typeof resolveGatewayService>;
   let serviceState: Awaited<ReturnType<typeof readGatewayServiceState>>;
   try {
@@ -512,7 +560,11 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
     if (!params.jsonMode && serviceState.running) {
       defaultRuntime.log(
         theme.warn(
-          `--no-restart is set while the managed gateway service is running; the ${params.updateInstallKind} update will not stop or restart that process.`,
+          formatManagedServiceInstallKindMessage({
+            localization,
+            key: "cli.update.service.noRestartWhileRunning",
+            installKind: params.updateInstallKind,
+          }),
         ),
       );
     }
@@ -521,6 +573,7 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
       : await maybeSuspendWindowsTaskAutoStartForPackageUpdate({
           updateInstallKind: params.updateInstallKind,
           serviceEnv: serviceState.env,
+          localization,
         });
     return {
       stopped: false,
@@ -541,6 +594,7 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
       : await maybeSuspendWindowsTaskAutoStartForPackageUpdate({
           updateInstallKind: params.updateInstallKind,
           serviceEnv: serviceState.env,
+          localization,
         });
     return {
       stopped: false,
@@ -557,6 +611,7 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
     const windowsTaskAutoStartRecovery = await maybeSuspendWindowsTaskAutoStartForPackageUpdate({
       updateInstallKind: params.updateInstallKind,
       serviceEnv: serviceState.env,
+      localization,
     });
     return {
       stopped: false,
@@ -569,7 +624,7 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
     };
   }
 
-  const blockMessage = gatewayAncestryBlockMessage(serviceState.runtime?.pid);
+  const blockMessage = gatewayAncestryBlockMessage(serviceState.runtime?.pid, localization);
   if (blockMessage) {
     return {
       stopped: false,
@@ -586,7 +641,11 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
     if (!params.jsonMode) {
       defaultRuntime.log(
         theme.muted(
-          `Managed gateway service points at a different OpenClaw root; leaving it running during this ${params.updateInstallKind} update.`,
+          formatManagedServiceInstallKindMessage({
+            localization,
+            key: "cli.update.service.differentRoot",
+            installKind: params.updateInstallKind,
+          }),
         ),
       );
     }
@@ -602,12 +661,19 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
 
   if (!params.jsonMode) {
     defaultRuntime.log(
-      theme.muted(`Stopping managed gateway service before ${params.updateInstallKind} update...`),
+      theme.muted(
+        formatManagedServiceInstallKindMessage({
+          localization,
+          key: "cli.update.service.stopping",
+          installKind: params.updateInstallKind,
+        }),
+      ),
     );
   }
   const windowsTaskAutoStartRecovery = await maybeSuspendWindowsTaskAutoStartForPackageUpdate({
     updateInstallKind: params.updateInstallKind,
     serviceEnv: serviceState.env,
+    localization,
   });
   try {
     await service.stop({
@@ -653,7 +719,9 @@ export async function maybeStopManagedServiceBeforeMutableUpdate(params: {
 export async function maybeRestartServiceAfterFailedMutableUpdate(params: {
   preManagedServiceStop: PreManagedServiceStop | undefined;
   jsonMode: boolean;
+  localization?: CliLocalization;
 }): Promise<void> {
+  const localization = params.localization ?? createCliLocalization();
   if (!params.preManagedServiceStop?.stopped || !params.preManagedServiceStop.serviceEnv) {
     return;
   }
@@ -663,10 +731,12 @@ export async function maybeRestartServiceAfterFailedMutableUpdate(params: {
       stdout: serviceControlStdoutForMode(params.jsonMode),
     });
     if (!params.jsonMode) {
-      defaultRuntime.log(theme.muted("Restarted managed gateway service after failed update."));
+      defaultRuntime.log(theme.muted(localization.t("cli.update.service.restartedAfterFailure")));
     }
   } catch (err) {
-    const message = `Failed to restart managed gateway service after failed update: ${String(err)}`;
+    const message = localization.t("cli.update.service.restartAfterFailureFailed", {
+      error: String(err),
+    });
     if (params.jsonMode) {
       defaultRuntime.error(message);
     } else {
@@ -1184,7 +1254,9 @@ export async function maybeRestartService(params: {
   skipLegacyServiceRestart?: boolean;
   requireRunningServiceAfterRestart?: boolean;
   timeoutMs: number;
+  localization?: CliLocalization;
 }): Promise<boolean> {
+  const localization = params.localization ?? createCliLocalization();
   const verifyRestartedGateway = async (
     expectedGatewayVersion: string | undefined,
     opts: { requireRunningService?: boolean } = {},
@@ -1217,7 +1289,9 @@ export async function maybeRestartService(params: {
       if (!params.opts.json) {
         defaultRuntime.log(
           theme.warn(
-            `Found stale gateway process(es) after restart: ${health.staleGatewayPids.join(", ")}. Cleaning up...`,
+            localization.t("cli.update.service.staleProcesses", {
+              pids: health.staleGatewayPids.join(", "),
+            }),
           ),
         );
       }
@@ -1238,6 +1312,7 @@ export async function maybeRestartService(params: {
       port: params.gatewayPort,
       expectedVersion: expectedGatewayVersion,
       env: params.serviceEnv,
+      localization,
     });
     health = recoveryVerification.health;
     const launchAgentRecovery = recoveryVerification.launchAgentRecovery;
@@ -1259,32 +1334,42 @@ export async function maybeRestartService(params: {
       !opts.requireRunningService || health.runtime.status === "running";
     if (health.healthy && serviceRuntimeHealthy) {
       if (!params.opts.json) {
-        defaultRuntime.log(theme.success("Gateway: restarted and verified."));
+        defaultRuntime.log(theme.success(localization.t("cli.update.service.restartedVerified")));
       }
       return true;
     }
 
     const diagnosticLines = [
-      "Gateway did not become healthy after restart.",
+      localization.t("cli.update.service.unhealthy"),
       ...(health.healthy && opts.requireRunningService
-        ? ["Gateway responded, but the managed service did not report running after restart."]
+        ? [localization.t("cli.update.service.notRunning")]
         : []),
       ...renderRestartDiagnostics(health),
       ...(launchAgentRecovery?.attempted
         ? [
             launchAgentRecovery.recovered
-              ? `LaunchAgent recovery: ${launchAgentRecovery.message}`
-              : `LaunchAgent recovery failed: ${launchAgentRecovery.detail}`,
+              ? localization.t("cli.update.service.launchAgentRecovery", {
+                  detail: launchAgentRecovery.message,
+                })
+              : localization.t("cli.update.service.launchAgentRecoveryFailure", {
+                  detail: launchAgentRecovery.detail,
+                }),
           ]
         : []),
-      `Restart log: ${resolveGatewayRestartLogPath(params.serviceEnv ?? process.env)}`,
-      `Run \`${replaceCliName(formatCliCommand("openclaw gateway status --deep"), CLI_NAME)}\` for details.`,
-      ...formatPostUpdateGatewayRecoveryInstructions(params.result),
+      localization.t("cli.update.service.restartLog", {
+        path: resolveGatewayRestartLogPath(params.serviceEnv ?? process.env),
+      }),
+      localization.t("cli.update.service.statusDetails", {
+        statusCommand: replaceCliName(formatCliCommand("openclaw gateway status --deep"), CLI_NAME),
+      }),
+      ...formatPostUpdateGatewayRecoveryInstructions(params.result, process.platform, localization),
     ];
     if (params.opts.json) {
       defaultRuntime.error(diagnosticLines.join("\n"));
     } else {
-      defaultRuntime.log(theme.warn(diagnosticLines[0] ?? "Gateway did not become healthy."));
+      defaultRuntime.log(
+        theme.warn(diagnosticLines[0] ?? localization.t("cli.update.service.unhealthy")),
+      );
       for (const line of diagnosticLines.slice(1)) {
         defaultRuntime.log(theme.muted(line));
       }
@@ -1300,7 +1385,7 @@ export async function maybeRestartService(params: {
   if (params.shouldRestart) {
     if (!params.opts.json) {
       defaultRuntime.log("");
-      defaultRuntime.log(theme.heading("Restarting service..."));
+      defaultRuntime.log(theme.heading(localization.t("cli.update.service.restartingHeading")));
     }
 
     try {
@@ -1336,18 +1421,16 @@ export async function maybeRestartService(params: {
             });
             refreshedGatewayAlreadyHealthy = health.healthy;
             if (refreshedGatewayAlreadyHealthy && !params.opts.json) {
-              defaultRuntime.log(
-                theme.muted(
-                  "Gateway already reports the updated version after service refresh; skipped redundant restart.",
-                ),
-              );
+              defaultRuntime.log(theme.muted(localization.t("cli.update.service.alreadyUpdated")));
             }
           }
         } catch (err) {
           // Always log the refresh failure so callers can detect it (issue #56772).
           // Previously this was silently suppressed in --json mode, hiding the root
           // cause and preventing auto-update callers from detecting the failure.
-          const message = `Failed to refresh gateway service environment from updated install: ${String(err)}`;
+          const message = localization.t("cli.update.service.refreshFailed", {
+            error: String(err),
+          });
           if (params.opts.json) {
             defaultRuntime.error(message);
           } else {
@@ -1385,7 +1468,7 @@ export async function maybeRestartService(params: {
         ) {
           if (!params.opts.json) {
             defaultRuntime.log(
-              theme.warn("Gateway service did not point at the updated install after restart."),
+              theme.warn(localization.t("cli.update.service.updatedRootMismatch")),
             );
           }
           return false;
@@ -1398,7 +1481,7 @@ export async function maybeRestartService(params: {
         await createUpdateConfigSnapshot();
         restarted = await runDaemonRestart();
       } else if (!refreshedGatewayAlreadyHealthy && !params.opts.json) {
-        defaultRuntime.log(theme.muted("Gateway: restart skipped (no installed service found)."));
+        defaultRuntime.log(theme.muted(localization.t("cli.update.service.noInstalledService")));
       }
 
       const shouldVerifyRestart =
@@ -1418,13 +1501,13 @@ export async function maybeRestartService(params: {
           return false;
         }
         if (!params.opts.json && restartInitiated) {
-          defaultRuntime.log(theme.success("Daemon restart completed."));
+          defaultRuntime.log(theme.success(localization.t("cli.update.service.restartCompleted")));
           defaultRuntime.log("");
         }
       }
 
       if (!params.opts.json && restarted) {
-        defaultRuntime.log(theme.success("Daemon restarted successfully."));
+        defaultRuntime.log(theme.success(localization.t("cli.update.service.restarted")));
         defaultRuntime.log("");
         await createUpdateConfigSnapshot();
         process.env.OPENCLAW_UPDATE_IN_PROGRESS = "1";
@@ -1436,7 +1519,9 @@ export async function maybeRestartService(params: {
             nonInteractive: !interactiveDoctor,
           });
         } catch (err) {
-          defaultRuntime.log(theme.warn(`Doctor failed: ${String(err)}`));
+          defaultRuntime.log(
+            theme.warn(localization.t("cli.update.service.doctorFailed", { error: String(err) })),
+          );
         } finally {
           delete process.env.OPENCLAW_UPDATE_IN_PROGRESS;
           delete process.env[UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV];
@@ -1444,10 +1529,17 @@ export async function maybeRestartService(params: {
       }
     } catch (err) {
       if (!params.opts.json) {
-        defaultRuntime.log(theme.warn(`Gateway: restart failed: ${String(err)}`));
+        defaultRuntime.log(
+          theme.warn(localization.t("cli.update.service.restartFailed", { error: String(err) })),
+        );
         defaultRuntime.log(
           theme.muted(
-            `You may need to restart the service manually: ${replaceCliName(formatCliCommand("openclaw gateway restart"), CLI_NAME)}`,
+            localization.t("cli.update.service.manualRestart", {
+              restartCommand: replaceCliName(
+                formatCliCommand("openclaw gateway restart"),
+                CLI_NAME,
+              ),
+            }),
           ),
         );
       }
@@ -1463,17 +1555,22 @@ export async function maybeRestartService(params: {
 
   if (!params.opts.json) {
     defaultRuntime.log("");
-    defaultRuntime.log(theme.muted("Gateway: restart skipped (--no-restart)."));
+    defaultRuntime.log(theme.muted(localization.t("cli.update.service.restartSkipped")));
     if (params.result.mode === "npm" || params.result.mode === "pnpm") {
       defaultRuntime.log(
         theme.muted(
-          `Tip: Run \`${replaceCliName(formatCliCommand("openclaw doctor"), CLI_NAME)}\`, then \`${replaceCliName(formatCliCommand("openclaw gateway restart"), CLI_NAME)}\` to apply updates to a running gateway.`,
+          localization.t("cli.update.service.applyTipWithDoctor", {
+            doctorCommand: replaceCliName(formatCliCommand("openclaw doctor"), CLI_NAME),
+            restartCommand: replaceCliName(formatCliCommand("openclaw gateway restart"), CLI_NAME),
+          }),
         ),
       );
     } else {
       defaultRuntime.log(
         theme.muted(
-          `Tip: Run \`${replaceCliName(formatCliCommand("openclaw gateway restart"), CLI_NAME)}\` to apply updates to a running gateway.`,
+          localization.t("cli.update.service.applyTip", {
+            restartCommand: replaceCliName(formatCliCommand("openclaw gateway restart"), CLI_NAME),
+          }),
         ),
       );
     }

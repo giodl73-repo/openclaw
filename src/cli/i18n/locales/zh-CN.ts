@@ -16,6 +16,9 @@ export const CLI_ZH_CN_CATALOG = {
   "cli.update.dryRun.noChanges": "未应用任何更改。",
   "cli.update.dryRun.root": "根目录",
   "cli.update.dryRun.installKind": "安装类型",
+  "cli.update.dryRun.installKind.git": "Git",
+  "cli.update.dryRun.installKind.package": "软件包",
+  "cli.update.dryRun.installKind.unknown": "未知",
   "cli.update.dryRun.mode": "模式",
   "cli.update.dryRun.channel": "更新通道",
   "cli.update.dryRun.tagSpec": "标签/规格",
@@ -95,6 +98,59 @@ export const CLI_ZH_CN_CATALOG = {
     "检测到原生可选依赖构建失败。更新程序会自动使用 --omit=optional 重试。",
   "cli.update.recovery.optionalDependencyCommand":
     "如果仍然失败：npm i -g openclaw@latest --omit=optional",
+  "cli.update.service.shutdownCleanupFailed": "无法完成更新关闭清理：{error}",
+  "cli.update.service.windowsAutostartRestoreFailed":
+    "软件包更新后无法恢复 Windows 计划任务自动启动：{error}",
+  "cli.update.service.installKind.git": "Git",
+  "cli.update.service.installKind.package": "软件包",
+  "cli.update.service.noRestartWhileRunning":
+    "托管网关服务正在运行时设置了 --no-restart；{installKind}更新不会停止或重启该进程。",
+  "cli.update.service.differentRoot":
+    "托管网关服务指向其他 OpenClaw 根目录；本次{installKind}更新期间将保持其运行。",
+  "cli.update.service.stopping": "正在停止托管网关服务，然后执行{installKind}更新...",
+  "cli.update.service.stopFailed": "更新前无法停止托管网关服务：{error}",
+  "cli.update.service.updateKind.git": "Git 更新",
+  "cli.update.service.updateKind.package": "软件包更新",
+  "cli.update.service.insideGateway":
+    "{updateKind}无法在网关服务进程内运行。\n该路径会替换当前 OpenClaw dist 树，而运行中的网关仍可能延迟加载旧代码块。\n请从网关服务外部的 shell 运行 `{updateCommand}`，或先停止网关服务再更新。",
+  "cli.update.service.ancestryBlocked":
+    "openclaw update 检测到它正在网关进程树内运行。\n网关 PID {pid} 是当前进程的祖先进程，因此更新程序无法安全停止或重启拥有它的网关。\n请从网关服务外部的 shell 运行 `{updateCommand}`，或先停止网关服务再更新。",
+  "cli.update.service.restartedAfterFailure": "更新失败后已重启托管网关服务。",
+  "cli.update.service.restartAfterFailureFailed": "更新失败后无法重启托管网关服务：{error}",
+  "cli.update.service.recovery.darwin":
+    "恢复：运行 `{restartCommand}`；如果 LaunchAgent 已安装但未加载，请在已登录的 macOS 用户会话中运行 `{installCommand}`，然后重新运行 `{statusCommand}`。",
+  "cli.update.service.recovery.linux":
+    "恢复：运行 `{restartCommand}`；如果 systemd 用户服务缺失、过时或未激活，请使用同一用户账户运行 `{installCommand}`，然后重新运行 `{statusCommand}`。",
+  "cli.update.service.recovery.win32":
+    "恢复：运行 `{restartCommand}`；如果网关计划任务或 Windows 登录项缺失、过时或未运行，请使用同一用户账户运行 `{installCommand}`，然后重新运行 `{statusCommand}`。",
+  "cli.update.service.recovery.generic":
+    "恢复：运行 `{restartCommand}`；如果本地服务管理器报告网关服务缺失、过时或未运行，请使用同一用户账户运行 `{installCommand}`，然后重新运行 `{statusCommand}`。",
+  "cli.update.service.recovery.rollback":
+    "回滚：使用相同的软件包管理器重新安装 OpenClaw {version}，然后重新运行 `{installCommand}`。",
+  "cli.update.service.launchAgentRecoveryFailed":
+    "LaunchAgent 已安装但未加载；自动 bootstrap/kickstart 恢复失败。",
+  "cli.update.service.staleProcesses": "重启后发现过时的网关进程：{pids}。正在清理...",
+  "cli.update.service.restartedVerified": "网关：已重启并验证。",
+  "cli.update.service.unhealthy": "网关重启后未恢复健康。",
+  "cli.update.service.notRunning": "网关已响应，但托管服务在重启后未报告为运行状态。",
+  "cli.update.service.launchAgentRecovery": "LaunchAgent 恢复：{detail}",
+  "cli.update.service.launchAgentRecoveryFailure": "LaunchAgent 恢复失败：{detail}",
+  "cli.update.service.restartLog": "重启日志：{path}",
+  "cli.update.service.statusDetails": "运行 `{statusCommand}` 查看详情。",
+  "cli.update.service.restartingHeading": "正在重启服务...",
+  "cli.update.service.alreadyUpdated": "服务刷新后网关已报告更新后的版本；已跳过重复重启。",
+  "cli.update.service.refreshFailed": "无法从更新后的安装刷新网关服务环境：{error}",
+  "cli.update.service.updatedRootMismatch": "重启后网关服务未指向更新后的安装。",
+  "cli.update.service.noInstalledService": "网关：已跳过重启（未找到已安装的服务）。",
+  "cli.update.service.restartCompleted": "守护进程重启完成。",
+  "cli.update.service.restarted": "守护进程已成功重启。",
+  "cli.update.service.doctorFailed": "Doctor 失败：{error}",
+  "cli.update.service.restartFailed": "网关：重启失败：{error}",
+  "cli.update.service.manualRestart": "可能需要手动重启服务：{restartCommand}",
+  "cli.update.service.restartSkipped": "网关：已跳过重启（--no-restart）。",
+  "cli.update.service.applyTipWithDoctor":
+    "提示：运行 `{doctorCommand}`，然后运行 `{restartCommand}`，以将更新应用到运行中的网关。",
+  "cli.update.service.applyTip": "提示：运行 `{restartCommand}`，以将更新应用到运行中的网关。",
   "cli.updateStatus.heading": "OpenClaw 更新状态",
   "cli.updateStatus.header.item": "项目",
   "cli.updateStatus.header.value": "值",
