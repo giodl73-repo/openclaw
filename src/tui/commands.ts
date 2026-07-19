@@ -1,5 +1,6 @@
 // Defines TUI slash commands and their help metadata.
 import type { SlashCommand } from "@earendil-works/pi-tui";
+import { normalizeLocalizedText, resolveLocalizedText } from "@openclaw/localization-core";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { CommandEntry } from "../../packages/gateway-protocol/src/index.js";
 import {
@@ -73,6 +74,20 @@ function appendSlashCommand(
   }
   seen.add(normalizedName);
   commands.push({ name: normalizedName, description });
+}
+
+function resolveCommandDescription(
+  description: string,
+  localizations: Readonly<Record<string, string>> | undefined,
+  locale: string,
+): string {
+  const normalized = normalizeLocalizedText(description, {
+    scope: "external",
+    legacyLocalizations: localizations,
+  });
+  return normalized.value
+    ? resolveLocalizedText(normalized.value, locale, "external")
+    : description;
 }
 
 export function parseCommand(input: string): ParsedCommand {
@@ -196,14 +211,32 @@ export function getSlashCommands(options: SlashCommandOptions = {}): SlashComman
     }
     const aliases = command.textAliases.length > 0 ? command.textAliases : [`/${command.key}`];
     for (const alias of aliases) {
-      appendSlashCommand(commands, seen, alias, command.description);
+      appendSlashCommand(
+        commands,
+        seen,
+        alias,
+        resolveCommandDescription(
+          command.description,
+          command.descriptionLocalizations,
+          localization.context.locale,
+        ),
+      );
     }
   }
 
   for (const command of options.dynamicCommands ?? []) {
     const aliases = command.textAliases?.length ? command.textAliases : [command.name];
     for (const alias of aliases) {
-      appendSlashCommand(commands, seen, alias, command.description);
+      appendSlashCommand(
+        commands,
+        seen,
+        alias,
+        resolveCommandDescription(
+          command.description,
+          command.descriptionLocalizations,
+          localization.context.locale,
+        ),
+      );
     }
   }
 

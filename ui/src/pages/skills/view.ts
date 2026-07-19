@@ -3,6 +3,7 @@
 // headings outside one group surface, rows with a control cluster, dot+text
 // status instead of pills. The detail/ClawHub dialogs keep their specialized
 // markup.
+import { resolveLocalizedText } from "@openclaw/localization-core";
 import { html, nothing, type TemplateResult } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
@@ -19,7 +20,7 @@ import {
   renderSettingsToggle,
   renderSettingsValue,
 } from "../../components/settings-ui.ts";
-import { t } from "../../i18n/index.ts";
+import { i18n, t } from "../../i18n/index.ts";
 import { clampText } from "../../lib/format.ts";
 import { resolveSafeExternalUrl } from "../../lib/open-external-url.ts";
 import { groupSkills, type SkillGroup } from "../../lib/skills-grouping.ts";
@@ -131,6 +132,18 @@ function skillStatusClass(skill: SkillStatusEntry): string {
     return "muted";
   }
   return isSkillAvailable(skill) ? "ok" : "warn";
+}
+
+function resolveSkillPresentation(skill: SkillStatusEntry) {
+  const locale = i18n.getLocale();
+  return {
+    name: skill.presentation?.displayName
+      ? resolveLocalizedText(skill.presentation.displayName, locale, "external")
+      : skill.name,
+    description: skill.presentation?.description
+      ? resolveLocalizedText(skill.presentation.description, locale, "external")
+      : skill.description,
+  };
 }
 
 /** Dot+text availability status for a skill row. */
@@ -248,11 +261,18 @@ export function renderSkills(props: SkillsProps) {
 
   const filter = normalizeLowercaseStringOrEmpty(props.filter);
   const filtered = filter
-    ? afterStatus.filter((skill) =>
-        normalizeLowercaseStringOrEmpty(
-          [skill.name, skill.description, skill.source].join(" "),
-        ).includes(filter),
-      )
+    ? afterStatus.filter((skill) => {
+        const presentation = resolveSkillPresentation(skill);
+        return normalizeLowercaseStringOrEmpty(
+          [
+            skill.name,
+            skill.description,
+            presentation.name,
+            presentation.description,
+            skill.source,
+          ].join(" "),
+        ).includes(filter);
+      })
     : afterStatus;
   const groups = groupSkills(filtered);
 
@@ -548,19 +568,20 @@ function renderClawHubDetailDialog(props: SkillsProps) {
 function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
   const locked = skillControlsLocked(props);
   const verdict = verdictForSkill(skill, props.clawhubVerdicts);
+  const presentation = resolveSkillPresentation(skill);
 
   return html`
     <div class="settings-row plugins-item plugins-item--clickable">
       <button
         type="button"
         class="settings-row__text plugins-item__detail-button"
-        aria-label=${t("skillsPage.openDetails", { name: skill.name })}
+        aria-label=${t("skillsPage.openDetails", { name: presentation.name })}
         @click=${() => props.onDetailOpen(skill.skillKey)}
       >
         <span class="settings-row__title">
-          ${skill.emoji ? html`<span>${skill.emoji}</span> ` : nothing}${skill.name}
+          ${skill.emoji ? html`<span>${skill.emoji}</span> ` : nothing}${presentation.name}
         </span>
-        <span class="settings-row__desc">${clampText(skill.description, 140)}</span>
+        <span class="settings-row__desc">${clampText(presentation.description, 140)}</span>
       </button>
       <div class="settings-row__control">
         ${skillAvailabilityStatus(skill)}
@@ -572,7 +593,7 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
         ${renderSettingsToggle({
           checked: !skill.disabled,
           disabled: locked,
-          ariaLabel: t("skillsPage.enabledNamed", { name: skill.name }),
+          ariaLabel: t("skillsPage.enabledNamed", { name: presentation.name }),
           onChange: () => props.onToggle(skill.skillKey, skill.disabled),
         })}
       </div>
@@ -593,10 +614,11 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
   const verdict = verdictForSkill(skill, props.clawhubVerdicts);
   const detailTab: SkillDetailTab =
     props.detailTab === "card" && skill.skillCard?.present ? "card" : "overview";
+  const presentation = resolveSkillPresentation(skill);
 
   return html`
     <openclaw-modal-dialog
-      label=${skill.name}
+      label=${presentation.name}
       style="--openclaw-modal-width: min(1040px, calc(100vw - 32px));"
       @modal-cancel=${props.onDetailClose}
     >
@@ -608,7 +630,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
           >
             <span class="statusDot ${skillStatusClass(skill)}"></span>
             ${skill.emoji ? html`<span style="font-size: 18px;">${skill.emoji}</span>` : nothing}
-            <span>${skill.name}</span>
+            <span>${presentation.name}</span>
           </div>
           <button class="btn btn--sm" @click=${props.onDetailClose}>
             ${t("skillsPage.close")}
@@ -617,7 +639,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
         <div class="md-preview-dialog__body" style="display: grid; gap: 16px;">
           <div>
             <div style="font-size: 14px; line-height: 1.5; color: var(--text);">
-              ${skill.description}
+              ${presentation.description}
             </div>
             ${renderSkillStatusChips({ skill, showBundledBadge })}
           </div>
@@ -670,7 +692,7 @@ function renderSkillDetail(skill: SkillStatusEntry, props: SkillsProps) {
             ${renderSettingsToggle({
               checked: !skill.disabled,
               disabled: locked,
-              ariaLabel: skill.name,
+              ariaLabel: presentation.name,
               onChange: () => props.onToggle(skill.skillKey, skill.disabled),
             })}
             <span style="font-size: 13px; font-weight: 500;">

@@ -370,6 +370,15 @@ describe("commands registry", () => {
     });
   });
 
+  it("normalizes one product command description for native projections", () => {
+    const command = listChatCommands().find((entry) => entry.key === "commands");
+
+    expect(command?.description).toBe("List all slash commands.");
+    expect(command?.descriptionLocalizations).toEqual({
+      "zh-CN": "列出所有斜杠命令。",
+    });
+  });
+
   it("applies discord native command overrides", () => {
     installDiscordNativeCommandOverrides();
     const native = listNativeCommandSpecsForConfig(

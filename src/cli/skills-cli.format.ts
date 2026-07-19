@@ -1,4 +1,9 @@
 // Formatting layer for `openclaw skills` commands; keeps discovery data separate from terminal UI.
+import {
+  OPENCLAW_LOCALES,
+  resolveLocalizedText,
+  resolveProcessLocalizationContext,
+} from "@openclaw/localization-core";
 import { sanitizeForLog, stripAnsi } from "../../packages/terminal-core/src/ansi.js";
 import {
   decorativeEmoji,
@@ -88,9 +93,27 @@ function sanitizeJsonValue(value: unknown): unknown {
   }
   return value;
 }
-function formatSkillName(skill: SkillStatusEntry): string {
+function resolveSkillPresentation(skill: SkillStatusEntry, locale: string) {
+  return {
+    name: skill.presentation?.displayName
+      ? resolveLocalizedText(skill.presentation.displayName, locale, "external")
+      : skill.name,
+    description: skill.presentation?.description
+      ? resolveLocalizedText(skill.presentation.description, locale, "external")
+      : skill.description,
+  };
+}
+
+function resolveSkillPresentationLocale(): string {
+  return resolveProcessLocalizationContext(process.env, {
+    audience: "operator",
+    supportedLocales: OPENCLAW_LOCALES,
+  }).context.locale;
+}
+
+function formatSkillName(skill: SkillStatusEntry, locale: string): string {
   const emoji = normalizeSkillEmoji(skill.emoji);
-  const name = theme.command(sanitizeForLog(skill.name));
+  const name = theme.command(sanitizeForLog(resolveSkillPresentation(skill, locale).name));
   return emoji ? `${emoji} ${name}` : name;
 }
 
@@ -153,13 +176,15 @@ export function formatSkillsList(report: SkillStatusReport, opts: SkillsListOpti
   }
 
   const ready = skills.filter(isReadyForAgent);
+  const locale = resolveSkillPresentationLocale();
   const tableWidth = getTerminalTableWidth();
   const rows = skills.map((skill) => {
     const missing = formatSkillMissingSummary(skill);
+    const presentation = resolveSkillPresentation(skill, locale);
     return {
       Status: formatSkillStatus(skill),
-      Skill: formatSkillName(skill),
-      Description: theme.muted(skill.description),
+      Skill: formatSkillName(skill, locale),
+      Description: theme.muted(presentation.description),
       Source: skill.source,
       Missing: missing ? theme.warn(missing) : "",
     };
@@ -219,6 +244,7 @@ export function formatSkillInfo(
   }
 
   const lines: string[] = [];
+  const presentation = resolveSkillPresentation(skill, resolveSkillPresentationLocale());
   const emoji = normalizeSkillEmoji(skill.emoji);
   const status = skill.disabled
     ? theme.warn(decorativePrefix("⏸", "Disabled"))
@@ -230,13 +256,13 @@ export function formatSkillInfo(
           ? theme.success("✓ Ready")
           : theme.warn("△ Needs setup");
 
-  const safeName = sanitizeForLog(skill.name);
+  const safeName = sanitizeForLog(presentation.name);
   const safeHomepage = skill.homepage ? sanitizeForLog(skill.homepage) : undefined;
   const safeSkillKey = sanitizeForLog(skill.skillKey);
 
   lines.push(`${emoji ? `${emoji} ` : ""}${theme.heading(safeName)} ${status}`);
   lines.push("");
-  lines.push(sanitizeForLog(skill.description));
+  lines.push(sanitizeForLog(presentation.description));
   lines.push("");
 
   lines.push(theme.heading("Details:"));

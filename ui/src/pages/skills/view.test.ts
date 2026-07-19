@@ -4,6 +4,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { render } from "lit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsListResult, SkillStatusEntry, SkillStatusReport } from "../../api/types.ts";
+import { i18n } from "../../i18n/index.ts";
 import { getRenderedModalDialog } from "../../test-helpers/modal-dialog.ts";
 import { renderSkills } from "./view.ts";
 
@@ -115,11 +116,12 @@ function createProps(overrides: Partial<SkillsProps> = {}): SkillsProps {
 }
 
 describe("renderSkills", () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
     while (dialogRestores.length > 0) {
       dialogRestores.pop()?.();
     }
+    await i18n.setLocale("en");
   });
 
   it("renders the agent selector and routes agent changes", async () => {
@@ -172,6 +174,36 @@ describe("renderSkills", () => {
     expect(normalizeText(group!.querySelector(".settings-group .settings-row")!)).toContain(
       "Repo Skill",
     );
+  });
+
+  it("rerenders localized skill presentation from the live UI locale", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    dialogRestores.push(() => container.remove());
+    const skill = createSkill({
+      presentation: {
+        displayName: {
+          default: "Repo Skill",
+          localizations: { "zh-CN": "仓库技能" },
+        },
+        description: {
+          default: "Skill description",
+          localizations: { "zh-CN": "技能描述" },
+        },
+      },
+    });
+    const report: SkillStatusReport = {
+      workspaceDir: "/tmp/workspace",
+      managedSkillsDir: "/tmp/skills",
+      skills: [skill],
+    };
+
+    await i18n.setLocale("zh-CN");
+    render(renderSkills(createProps({ report })), container);
+    await Promise.resolve();
+
+    expect(normalizeText(container)).toContain("仓库技能");
+    expect(normalizeText(container)).toContain("技能描述");
   });
 
   it("locks every skill mutation control behind the active mutation", async () => {

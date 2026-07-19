@@ -677,6 +677,12 @@ function resolveSkillEntryMetadata(params: {
   skillDir: string;
 }): OpenClawSkillMetadata | undefined {
   const metadata = resolveOpenClawMetadata(params.frontmatter);
+  if (metadata?.presentationIssues?.length) {
+    skillsLogger.warn("Ignoring invalid localized skill presentation metadata.", {
+      skillDir: compactPathForConsoleMessage(params.skillDir),
+      issues: metadata.presentationIssues,
+    });
+  }
   if (metadata?.skillKey) {
     return metadata;
   }

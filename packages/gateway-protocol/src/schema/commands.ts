@@ -14,6 +14,13 @@ import { NonEmptyString } from "./primitives.js";
 export const COMMAND_NAME_MAX_LENGTH = 200;
 /** Maximum command description length accepted in catalog entries. */
 export const COMMAND_DESCRIPTION_MAX_LENGTH = 2_000;
+/** Maximum locale entries advertised for one command description. */
+export const COMMAND_DESCRIPTION_LOCALIZATION_MAX_ITEMS = 64;
+/** Maximum locale-tag length accepted in localized command metadata. */
+export const COMMAND_LOCALE_MAX_LENGTH = 64;
+const COMMAND_LOCALE_KEY_PATTERN = `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,${
+  COMMAND_LOCALE_MAX_LENGTH - 2
+}}[A-Za-z0-9])$`;
 /** Maximum text aliases advertised for one command. */
 export const COMMAND_ALIAS_MAX_ITEMS = 20;
 /** Maximum declared arguments advertised for one command. */
@@ -32,6 +39,17 @@ export const COMMAND_CHOICE_LABEL_MAX_LENGTH = 200;
 export const COMMAND_LIST_MAX_ITEMS = 500;
 
 const BoundedNonEmptyString = (maxLength: number) => Type.String({ minLength: 1, maxLength });
+const CommandDescriptionLocalizationsSchema = Type.Unsafe<Record<string, string>>({
+  type: "object",
+  patternProperties: {
+    [COMMAND_LOCALE_KEY_PATTERN]: Type.String({
+      minLength: 1,
+      maxLength: COMMAND_DESCRIPTION_MAX_LENGTH,
+    }),
+  },
+  additionalProperties: false,
+  maxProperties: COMMAND_DESCRIPTION_LOCALIZATION_MAX_ITEMS,
+});
 
 /** Source system that contributed a command. */
 export const CommandSourceSchema = Type.Union([
@@ -86,6 +104,7 @@ export const CommandEntrySchema = closedObject({
     }),
   ),
   description: Type.String({ maxLength: COMMAND_DESCRIPTION_MAX_LENGTH }),
+  descriptionLocalizations: Type.Optional(CommandDescriptionLocalizationsSchema),
   category: Type.Optional(CommandCategorySchema),
   source: CommandSourceSchema,
   scope: CommandScopeSchema,

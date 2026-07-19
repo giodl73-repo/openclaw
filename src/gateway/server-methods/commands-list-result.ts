@@ -15,6 +15,8 @@ import {
   COMMAND_CHOICE_LABEL_MAX_LENGTH,
   COMMAND_CHOICE_VALUE_MAX_LENGTH,
   COMMAND_DESCRIPTION_MAX_LENGTH,
+  COMMAND_DESCRIPTION_LOCALIZATION_MAX_ITEMS,
+  COMMAND_LOCALE_MAX_LENGTH,
   COMMAND_LIST_MAX_ITEMS,
   COMMAND_NAME_MAX_LENGTH,
 } from "../../../packages/gateway-protocol/src/schema.js";
@@ -50,6 +52,22 @@ function trimClampNonEmpty(value: string, maxLength: number): string | null {
 
 function clampDescription(value: string | undefined): string {
   return clampString(value ?? "", COMMAND_DESCRIPTION_MAX_LENGTH);
+}
+
+function clampDescriptionLocalizations(
+  value: Readonly<Record<string, string>> | undefined,
+): Record<string, string> | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const entries = Object.entries(value)
+    .slice(0, COMMAND_DESCRIPTION_LOCALIZATION_MAX_ITEMS)
+    .map(([locale, description]) => [locale, clampDescription(description)] as const)
+    .filter(
+      ([locale, description]) =>
+        locale.length >= 2 && locale.length <= COMMAND_LOCALE_MAX_LENGTH && description.length > 0,
+    );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function resolveNativeName(cmd: ChatCommandDefinition, provider?: string): string {
@@ -149,6 +167,7 @@ function mapCommand(
 ): CommandEntry {
   const shouldIncludeArgs = includeArgs && cmd.acceptsArgs && cmd.args?.length;
   const nativeName = cmd.scope === "text" ? undefined : resolveNativeName(cmd, provider);
+  const descriptionLocalizations = clampDescriptionLocalizations(cmd.descriptionLocalizations);
   return {
     name: clampString(
       nameSurface === "text" ? resolvePrimaryTextName(cmd) : (nativeName ?? cmd.key),
@@ -157,6 +176,7 @@ function mapCommand(
     ...(nativeName ? { nativeName: clampString(nativeName, COMMAND_NAME_MAX_LENGTH) } : {}),
     ...(cmd.scope !== "native" ? { textAliases: resolveTextAliases(cmd) } : {}),
     description: clampDescription(cmd.description),
+    ...(descriptionLocalizations ? { descriptionLocalizations } : {}),
     ...(cmd.category ? { category: cmd.category } : {}),
     source,
     scope: cmd.scope,
@@ -182,6 +202,7 @@ function buildPluginCommandEntries(params: {
   const entries: CommandEntry[] = [];
 
   for (const spec of pluginSpecs) {
+    const descriptionLocalizations = clampDescriptionLocalizations(spec.descriptionLocalizations);
     entries.push({
       name: clampString(
         params.nameSurface === "text" ? spec.name : (spec.nativeName ?? spec.name),
@@ -192,6 +213,7 @@ function buildPluginCommandEntries(params: {
         : {}),
       textAliases: [`/${clampString(spec.name, COMMAND_NAME_MAX_LENGTH)}`],
       description: clampDescription(spec.description),
+      ...(descriptionLocalizations ? { descriptionLocalizations } : {}),
       source: "plugin",
       scope: "both",
       acceptsArgs: spec.acceptsArgs,

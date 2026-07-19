@@ -248,4 +248,36 @@ user-invocable: true
       ],
     });
   });
+
+  it("normalizes localized skill presentation without changing root identity metadata", () => {
+    const frontmatter = parseFrontmatter(`---
+name: peekaboo
+description: Capture and automate macOS UI.
+metadata:
+  openclaw:
+    presentation:
+      displayName:
+        default: Peekaboo
+        localizations:
+          zh-CN: Peekaboo 界面自动化
+      description:
+        default: Capture and automate macOS UI.
+        localizations:
+          not@locale: Invalid
+---
+# Peekaboo
+`);
+
+    expect(frontmatter.name).toBe("peekaboo");
+    expect(frontmatter.description).toBe("Capture and automate macOS UI.");
+    expect(resolveOpenClawMetadata(frontmatter)).toMatchObject({
+      presentation: {
+        displayName: {
+          default: "Peekaboo",
+          localizations: { "zh-CN": "Peekaboo 界面自动化" },
+        },
+      },
+      presentationIssues: [expect.stringContaining("invalid-locale")],
+    });
+  });
 });

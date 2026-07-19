@@ -1,4 +1,9 @@
 // Frontmatter helpers parse skill metadata from SKILL.md files.
+import {
+  normalizeLocalizedText,
+  type LocalizedTextInput,
+  type NormalizedLocalizedText,
+} from "@openclaw/localization-core";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import { parseFrontmatterBlockResult } from "../../../packages/markdown-core/src/frontmatter.js";
 import { validateRegistryNpmSpec } from "../../infra/npm-registry-spec.js";
@@ -34,6 +39,8 @@ export function parseFrontmatter(content: string): ParsedSkillFrontmatter {
 const BREW_FORMULA_PATTERN = /^[A-Za-z0-9][A-Za-z0-9@+._/-]*$/;
 const GO_MODULE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~+\-/]*(?:@[A-Za-z0-9][A-Za-z0-9._~+\-/]*)?$/;
 const UV_PACKAGE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._\-[\]=<>!~+,]*$/;
+
+type SkillPresentationMetadata = NonNullable<OpenClawSkillMetadata["presentation"]>;
 
 function normalizeSafeBrewFormula(raw: unknown): string | undefined {
   if (typeof raw !== "string") {
@@ -190,6 +197,81 @@ function parseInstallSpec(input: unknown): SkillInstallSpec | undefined {
   return spec;
 }
 
+function parseLocalizedPresentationField(
+  value: unknown,
+  field: "displayName" | "description",
+): { value?: NormalizedLocalizedText; issue?: string } {
+  let input: LocalizedTextInput;
+  if (typeof value === "string") {
+    input = value;
+  } else if (value && typeof value === "object" && !Array.isArray(value)) {
+    const candidate = value as Record<string, unknown>;
+    const localizations = candidate.localizations;
+    if (
+      typeof candidate.default !== "string" ||
+      (localizations !== undefined &&
+        (!localizations ||
+          typeof localizations !== "object" ||
+          Array.isArray(localizations) ||
+          !Object.values(localizations).every((entry) => typeof entry === "string")))
+    ) {
+      return { issue: `${field} must be a string or localized text object` };
+    }
+    input = {
+      default: candidate.default,
+      ...(localizations
+        ? { localizations: Object.fromEntries(Object.entries(localizations)) }
+        : {}),
+    };
+  } else {
+    return { issue: `${field} must be a string or localized text object` };
+  }
+  const result = normalizeLocalizedText(input, {
+    scope: "external",
+    maxLength: field === "displayName" ? 120 : 2_000,
+    maxLocalizations: 32,
+    maxAggregateLength: 16_384,
+  });
+  if (!result.value) {
+    return {
+      issue: result.issues.map((entry) => `${entry.code}: ${entry.detail}`).join(" "),
+    };
+  }
+  return { value: result.value };
+}
+
+function resolveSkillPresentation(metadataObj: Record<string, unknown>): {
+  presentation?: SkillPresentationMetadata;
+  issues?: readonly string[];
+} {
+  const raw = metadataObj.presentation;
+  if (raw === undefined) {
+    return {};
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { issues: ["presentation must be an object"] };
+  }
+
+  const presentation: SkillPresentationMetadata = {};
+  const issues: string[] = [];
+  for (const field of ["displayName", "description"] as const) {
+    const value = (raw as Record<string, unknown>)[field];
+    if (value === undefined) {
+      continue;
+    }
+    const parsed = parseLocalizedPresentationField(value, field);
+    if (parsed.value) {
+      presentation[field] = parsed.value;
+    } else if (parsed.issue) {
+      issues.push(`${field}: ${parsed.issue}`);
+    }
+  }
+  return {
+    ...(Object.keys(presentation).length > 0 ? { presentation } : {}),
+    ...(issues.length > 0 ? { issues: Object.freeze(issues) } : {}),
+  };
+}
+
 export function resolveOpenClawMetadata(
   frontmatter: ParsedSkillFrontmatter,
 ): OpenClawSkillMetadata | undefined {
@@ -200,10 +282,13 @@ export function resolveOpenClawMetadata(
   const requires = resolveOpenClawManifestRequires(metadataObj);
   const install = resolveOpenClawManifestInstall(metadataObj, parseInstallSpec);
   const osRaw = resolveOpenClawManifestOs(metadataObj);
+  const presentation = resolveSkillPresentation(metadataObj);
   return {
     always: typeof metadataObj.always === "boolean" ? metadataObj.always : undefined,
     emoji: readStringValue(metadataObj.emoji),
     homepage: readStringValue(metadataObj.homepage),
+    presentation: presentation.presentation,
+    presentationIssues: presentation.issues,
     skillKey: readStringValue(metadataObj.skillKey),
     primaryEnv: readStringValue(metadataObj.primaryEnv),
     os: osRaw.length > 0 ? osRaw : undefined,

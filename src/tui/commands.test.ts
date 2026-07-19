@@ -164,6 +164,9 @@ describe("getSlashCommands", () => {
         {
           name: "dreaming",
           description: "Plugin-owned literal",
+          descriptionLocalizations: {
+            "zh-CN": "插件命令说明",
+          },
           source: "plugin",
           scope: "both",
           acceptsArgs: false,
@@ -178,7 +181,7 @@ describe("getSlashCommands", () => {
       "/gateway-status",
     );
     expect(commands.find((command) => command.name === "dreaming")?.description).toBe(
-      "Plugin-owned literal",
+      "插件命令说明",
     );
   });
 });
