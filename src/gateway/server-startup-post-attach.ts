@@ -1150,6 +1150,7 @@ export async function startGatewayPostAttachRuntime(
     onGatewayLifetimeSidecars?: (sidecars: GatewayPostReadySidecarHandle[]) => void;
     startWorkerEnvironmentRuntime?: () => Awaitable<GatewayPostReadySidecarHandle | null>;
     onSidecarsReady?: () => void;
+    beforeReady?: () => Awaitable<void>;
     isClosing?: () => boolean;
     startupTrace?: GatewayStartupTrace;
     sidecarStartup?: GatewaySidecarStartupMode;
@@ -1366,6 +1367,7 @@ export async function startGatewayPostAttachRuntime(
         params.onPostReadySidecars?.(postReadySidecars);
         params.onGatewayLifetimeSidecars?.(gatewayLifetimeSidecars);
         params.log.info(formatGatewayStartupOutcomes(startupOutcomes.snapshot()));
+        await params.beforeReady?.();
         params.onSidecarsReady?.();
         params.startupTrace?.detail("sidecars.ready", [
           [
@@ -1427,11 +1429,16 @@ export async function startGatewayPostAttachRuntime(
       params.log.warn(`gateway sidecars failed to start: ${String(err)}`);
     });
 
-  if (params.sidecarStartup !== "defer") {
+  if (params.sidecarStartup !== "defer" || params.beforeReady) {
+    const guardedSidecarsPromise = sidecarsPromise.catch(async (err: unknown) => {
+      const tailscaleCleanup = await tailscaleCleanupPromise;
+      await tailscaleCleanup?.();
+      throw err;
+    });
     const [, tailscaleCleanup, sidecarsResult] = await Promise.all([
       startupLogPromise,
       tailscaleCleanupPromise,
-      sidecarsPromise,
+      guardedSidecarsPromise,
     ]);
     updateCheck.start();
     return {
