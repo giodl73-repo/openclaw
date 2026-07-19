@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const vi: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "ID phê duyệt không xác định hoặc đã hết hạn.",
+    },
+  },
   common: {
     health: "Tình trạng",
     ok: "OK",

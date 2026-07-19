@@ -109,6 +109,27 @@ Commit source changes and generated artifacts together. Do not mark a
 locale/surface combination complete while it still relies on untranslated
 fallback or stale source text.
 
+## Review simpler-script backfill
+
+PR 14 tracks the registered left-to-right locales that do not require the
+dedicated Indic, Thai, or Arabic-derived-script proof reserved for PR 15:
+`zh-CN`, `zh-TW`, `pt-BR`, `de`, `es`, `ja-JP`, `ko`, `fr`, `it`, `tr`, `uk`,
+`id`, `pl`, `vi`, `nl`, `ru`, and `sv`.
+
+Run:
+
+```bash
+pnpm localization:backfill:check
+```
+
+The checked report at `localization/simple-script-backfill.json` records
+remaining artifact, fallback, native-quality, and human-review blockers for
+each locale. Zero fallback is necessary but not sufficient for promotion:
+generated or model-assisted copy remains partial until a named language owner
+records the required linguistic and sensitive-copy review in
+`localization/simple-script-reviews.json`. Change a locale to `reviewed` only
+after that review is complete and include the accountable `languageOwner`.
+
 ## Change an existing string
 
 Treat an English source edit as a new translation revision:

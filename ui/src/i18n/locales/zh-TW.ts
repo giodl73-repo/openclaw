@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const zh_TW: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "未知或已過期的核准 ID。",
+    },
+  },
   common: {
     health: "健康狀況",
     ok: "OK",

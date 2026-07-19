@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const nl: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "Onbekende of verlopen goedkeurings-ID.",
+    },
+  },
   common: {
     health: "Status",
     ok: "OK",

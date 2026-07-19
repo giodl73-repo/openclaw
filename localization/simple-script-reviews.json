@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "locales": {
+    "zh-CN": {
+      "status": "pending"
+    },
+    "zh-TW": {
+      "status": "pending"
+    },
+    "pt-BR": {
+      "status": "pending"
+    },
+    "de": {
+      "status": "pending"
+    },
+    "es": {
+      "status": "pending"
+    },
+    "ja-JP": {
+      "status": "pending"
+    },
+    "ko": {
+      "status": "pending"
+    },
+    "fr": {
+      "status": "pending"
+    },
+    "it": {
+      "status": "pending"
+    },
+    "tr": {
+      "status": "pending"
+    },
+    "uk": {
+      "status": "pending"
+    },
+    "id": {
+      "status": "pending"
+    },
+    "pl": {
+      "status": "pending"
+    },
+    "vi": {
+      "status": "pending"
+    },
+    "nl": {
+      "status": "pending"
+    },
+    "ru": {
+      "status": "pending"
+    },
+    "sv": {
+      "status": "pending"
+    }
+  }
+}

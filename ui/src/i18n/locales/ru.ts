@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const ru: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "Неизвестный идентификатор подтверждения или срок его действия истёк.",
+    },
+  },
   common: {
     health: "Состояние",
     ok: "ОК",

@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const ko: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "알 수 없거나 만료된 승인 ID입니다.",
+    },
+  },
   common: {
     health: "상태",
     ok: "확인",
