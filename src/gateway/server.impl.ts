@@ -62,6 +62,7 @@ import { resolveWorkerProvider } from "../plugins/worker-provider-registry.js";
 import { getTotalQueueSize, isGatewayDraining } from "../process/command-queue.js";
 import {
   getActiveGatewayRootWorkCount,
+  isGatewayRestartDraining,
   tryBeginGatewaySuspendAdmission,
 } from "../process/gateway-work-admission.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -1011,7 +1012,9 @@ export async function startGatewayServer(
   const getContinuityReadiness = createReadinessChecker({
     channelManager,
     startedAt: serverStartedAt,
-    getGatewayDraining: isGatewayDraining,
+    // Restored startup owns the reversible suspension fence it is preparing to
+    // release. Only a real restart drain should invalidate its base readiness.
+    getGatewayDraining: isGatewayRestartDraining,
     getEventLoopHealth: readinessEventLoopHealth.snapshot,
     shouldSkipChannelReadiness: () =>
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
