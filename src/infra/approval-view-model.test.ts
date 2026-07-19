@@ -5,7 +5,11 @@ import {
 } from "@openclaw/localization-core";
 // Tests approval view model formatting for prompts and decisions.
 import { describe, expect, it } from "vitest";
-import { createApprovalMessageRenderer } from "./approval-localization.js";
+import {
+  APPROVAL_ENGLISH_MESSAGES,
+  APPROVAL_ZH_CN_MESSAGES,
+  approvalLocalizationTestHelpers,
+} from "./approval-localization.js";
 import {
   buildExpiredApprovalView,
   buildPendingApprovalView,
@@ -62,38 +66,10 @@ describe("buildPendingApprovalView", () => {
   });
 
   it("localizes product-owned labels without changing approval literals or actions", () => {
-    const source = {
-      "approval.exec.title.pending": "Exec Approval Required",
-      "approval.exec.title.resolved": "Exec Approval",
-      "approval.exec.title.expired": "Exec Approval",
-      "approval.exec.description.pending": "A command needs your approval.",
-      "approval.metadata.agent": "Agent",
-      "approval.metadata.cwd": "CWD",
-      "approval.metadata.host": "Host",
-      "approval.metadata.envOverrides": "Env Overrides",
-      "approval.metadata.severity": "Severity",
-      "approval.metadata.tool": "Tool",
-      "approval.metadata.plugin": "Plugin",
-      "approval.severity.critical": "Critical",
-      "approval.severity.info": "Info",
-      "approval.severity.warning": "Warning",
-      "approval.action.allowOnce": "Allow Once",
-      "approval.action.allowAlways": "Allow Always",
-      "approval.action.deny": "Deny",
-    } as const;
-    const candidate = {
-      ...source,
-      "approval.exec.title.pending": "需要执行批准",
-      "approval.exec.description.pending": "一个命令需要你的批准。",
-      "approval.metadata.agent": "代理",
-      "approval.metadata.cwd": "工作目录",
-      "approval.metadata.host": "主机",
-      "approval.action.allowOnce": "允许一次",
-      "approval.action.allowAlways": "始终允许",
-      "approval.action.deny": "拒绝",
-    } as const;
+    const source = APPROVAL_ENGLISH_MESSAGES;
+    const candidate = APPROVAL_ZH_CN_MESSAGES;
     expect(validateCatalog({ namespace: "approval", source, candidate })).toEqual([]);
-    const renderMessage = createApprovalMessageRenderer({
+    const renderMessage = approvalLocalizationTestHelpers.createRenderer({
       context: createLocalizationContext({
         locale: "zh-CN",
         source: "explicit-recipient",
@@ -197,31 +173,13 @@ describe("buildPendingApprovalView", () => {
   });
 
   it("uses phase-specific keys while preserving exact resolution values", () => {
-    const source = {
-      "approval.exec.title.pending": "Exec Approval Required",
-      "approval.exec.title.resolved": "Exec Approval",
-      "approval.exec.title.expired": "Exec Approval",
-      "approval.exec.description.pending": "A command needs your approval.",
-      "approval.metadata.agent": "Agent",
-      "approval.metadata.cwd": "CWD",
-      "approval.metadata.host": "Host",
-      "approval.metadata.envOverrides": "Env Overrides",
-      "approval.metadata.severity": "Severity",
-      "approval.metadata.tool": "Tool",
-      "approval.metadata.plugin": "Plugin",
-      "approval.severity.critical": "Critical",
-      "approval.severity.info": "Info",
-      "approval.severity.warning": "Warning",
-      "approval.action.allowOnce": "Allow Once",
-      "approval.action.allowAlways": "Allow Always",
-      "approval.action.deny": "Deny",
-    } as const;
+    const source = APPROVAL_ENGLISH_MESSAGES;
     const candidate = {
       ...source,
       "approval.exec.title.resolved": "تم حسم الموافقة",
       "approval.exec.title.expired": "انتهت صلاحية الموافقة",
     } as const;
-    const renderMessage = createApprovalMessageRenderer({
+    const renderMessage = approvalLocalizationTestHelpers.createRenderer({
       context: createLocalizationContext({
         locale: "ar",
         source: "explicit-recipient",
@@ -268,7 +226,7 @@ describe("buildPendingApprovalView", () => {
   });
 
   it("uses reviewed English as the emergency fallback for missing catalog entries", () => {
-    const renderMessage = createApprovalMessageRenderer({
+    const renderMessage = approvalLocalizationTestHelpers.createRenderer({
       context: createLocalizationContext({
         locale: "ar",
         source: "explicit-recipient",
@@ -298,7 +256,7 @@ describe("buildPendingApprovalView", () => {
   });
 
   it("uses one English snapshot for an incomplete safety catalog", () => {
-    const renderMessage = createApprovalMessageRenderer({
+    const renderMessage = approvalLocalizationTestHelpers.createRenderer({
       context: createLocalizationContext({
         locale: "zh-CN",
         source: "explicit-recipient",
