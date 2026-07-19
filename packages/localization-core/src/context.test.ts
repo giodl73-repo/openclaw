@@ -17,6 +17,64 @@ describe("localization context", () => {
     expect(Object.isFrozen(result.context)).toBe(true);
   });
 
+  it("uses an exact explicit recipient locale before lower preference tiers", () => {
+    const result = resolveLocalizationContext({
+      audience: "operator",
+      explicitRecipient: "zh-Hans",
+      request: "de",
+      surfacePreference: "fr",
+      platform: ["es-MX"],
+      supportedLocales: ["en", "zh-CN"],
+    });
+
+    expect(result).toEqual({
+      context: {
+        locale: "zh-CN",
+        fallbackLocales: ["en"],
+        source: "explicit-recipient",
+        audience: "operator",
+      },
+      findings: [],
+    });
+  });
+
+  it("rejects malformed and unsupported explicit recipient locales with bounded findings", () => {
+    const malformed = resolveLocalizationContext({
+      audience: "operator",
+      explicitRecipient: "not_a_locale",
+      supportedLocales: ["en", "zh-CN"],
+    });
+    const unsupported = resolveLocalizationContext({
+      audience: "operator",
+      explicitRecipient: "de",
+      supportedLocales: ["en", "zh-CN"],
+    });
+
+    expect(malformed).toEqual({
+      context: {
+        locale: "en",
+        fallbackLocales: [],
+        source: "english-default",
+        audience: "operator",
+      },
+      findings: [
+        {
+          source: "explicit-recipient",
+          value: "not_a_locale",
+          reason: "invalid",
+        },
+      ],
+    });
+    expect(unsupported.findings).toEqual([
+      {
+        source: "explicit-recipient",
+        value: "de",
+        reason: "unsupported-by-surface",
+      },
+    ]);
+    expect(unsupported.context.locale).toBe("en");
+  });
+
   it("ignores a stale stored preference and records a bounded finding", () => {
     const result = resolveLocalizationContext({
       audience: "user",

@@ -16,7 +16,7 @@ import type {
   ResolvedApprovalView,
 } from "./approval-view-model.types.js";
 import { resolveExecApprovalCommandDisplay } from "./exec-approval-command-display.js";
-import { buildTypedApprovalActionDescriptors } from "./exec-approval-reply.js";
+import { buildTypedApprovalActionDescriptorsWithRenderer } from "./exec-approval-reply.js";
 import {
   resolveExecApprovalRequestAllowedDecisions,
   type ExecApprovalRequest,
@@ -112,23 +112,6 @@ function buildPluginMetadata(
   return metadata;
 }
 
-function localizeActions<T extends { decision: string; label: string }>(
-  actions: readonly T[],
-  options?: ApprovalViewOptions,
-): T[] {
-  return actions.map((action) => ({
-    ...action,
-    label: renderApprovalMessage(
-      options,
-      action.decision === "allow-once"
-        ? "approval.action.allowOnce"
-        : action.decision === "allow-always"
-          ? "approval.action.allowAlways"
-          : "approval.action.deny",
-    ),
-  }));
-}
-
 function buildExecViewBase<TPhase extends ApprovalPhase>(
   request: ExecApprovalRequest,
   phase: TPhase,
@@ -195,15 +178,15 @@ export function buildPendingApprovalView(
     const pluginRequest = request as PluginApprovalRequest;
     return {
       ...buildPluginViewBase(pluginRequest, "pending", options),
-      actions: localizeActions(
-        buildTypedApprovalActionDescriptors({
+      actions: buildTypedApprovalActionDescriptorsWithRenderer(
+        {
           approvalCommandId: pluginRequest.id,
           approvalKind,
           allowedDecisions: resolveCanonicalPluginApprovalRequestAllowedDecisions(
             pluginRequest.request,
           ),
-        }),
-        options,
+        },
+        options?.renderMessage ?? DEFAULT_APPROVAL_MESSAGE_RENDERER,
       ),
       expiresAtMs: pluginRequest.expiresAtMs,
     };
@@ -211,14 +194,14 @@ export function buildPendingApprovalView(
   const execRequest = request as ExecApprovalRequest;
   return {
     ...buildExecViewBase(execRequest, "pending", options),
-    actions: localizeActions(
-      buildTypedApprovalActionDescriptors({
+    actions: buildTypedApprovalActionDescriptorsWithRenderer(
+      {
         approvalCommandId: execRequest.id,
         approvalKind,
         ask: execRequest.request.ask,
         allowedDecisions: resolveExecApprovalRequestAllowedDecisions(execRequest.request),
-      }),
-      options,
+      },
+      options?.renderMessage ?? DEFAULT_APPROVAL_MESSAGE_RENDERER,
     ),
     expiresAtMs: execRequest.expiresAtMs,
   };

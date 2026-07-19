@@ -12,10 +12,13 @@ import type {
   MessagePresentationAction,
   MessagePresentationButton,
 } from "../interactive/payload.js";
-import { formatHumanList } from "../shared/human-list.js";
 // Builds reply payloads for exec approval prompts and outcomes.
 import { formatFencedCodeBlock } from "../shared/markdown-code.js";
 import { formatApprovalDisplayPath } from "./approval-display-paths.js";
+import {
+  DEFAULT_APPROVAL_MESSAGE_RENDERER,
+  type ApprovalMessageRenderer,
+} from "./approval-localization.js";
 import {
   describeNativeExecApprovalClientSetup,
   listNativeExecApprovalClientLabels,
@@ -85,11 +88,38 @@ export type ExecApprovalUnavailableReplyParams = {
   nodeId?: string;
 };
 
-function resolveNativeExecApprovalClientList(params?: { excludeChannel?: string }): string {
-  return formatHumanList(
+function formatApprovalHumanList(
+  values: readonly string[],
+  renderMessage: ApprovalMessageRenderer,
+): string {
+  if (values.length === 0) {
+    return "";
+  }
+  if (values.length === 1) {
+    return expectDefined(values[0], "values entry at 0");
+  }
+  if (values.length === 2) {
+    return renderMessage("approval.list.two", {
+      first: expectDefined(values[0], "values entry at 0"),
+      second: expectDefined(values[1], "values entry at 1"),
+    });
+  }
+  const separator = renderMessage("approval.list.separator");
+  return renderMessage("approval.list.many", {
+    head: values.slice(0, -1).join(separator),
+    last: expectDefined(values.at(-1), "values last entry"),
+  });
+}
+
+function resolveNativeExecApprovalClientList(params: {
+  excludeChannel?: string;
+  renderMessage: ApprovalMessageRenderer;
+}): string {
+  return formatApprovalHumanList(
     listNativeExecApprovalClientLabels({
-      excludeChannel: params?.excludeChannel,
+      excludeChannel: params.excludeChannel,
     }),
+    params.renderMessage,
   );
 }
 
@@ -97,19 +127,21 @@ function buildGenericNativeExecApprovalFallbackText(params?: {
   excludeChannel?: string;
   host?: ExecHost;
   nodeId?: string;
+  renderMessage?: ApprovalMessageRenderer;
 }): string {
+  const renderMessage = params?.renderMessage ?? DEFAULT_APPROVAL_MESSAGE_RENDERER;
   const clients = resolveNativeExecApprovalClientList({
     excludeChannel: params?.excludeChannel,
+    renderMessage,
   });
-  let manualRecovery =
-    "Print the Control UI URL with `openclaw dashboard --no-open`, open it in a browser, then use the approval inbox.";
+  let manualRecovery = renderMessage("approval.unavailable.manualRecovery");
   if (params?.host === "node") {
     const nodeId = normalizeOptionalString(params.nodeId) ?? "<id|name|ip>";
-    manualRecovery += ` Inspect the node's effective exec policy with \`openclaw approvals get --node ${nodeId}\`.`;
+    manualRecovery += ` ${renderMessage("approval.unavailable.nodePolicyInspection", { nodeId })}`;
   }
   return clients
-    ? `Approve it from the Web UI or terminal UI, or enable a native chat approval client such as ${clients}. ${manualRecovery} If those accounts already know your owner ID via allowFrom or owner config, OpenClaw can often infer approvers automatically.`
-    : `Approve it from the Web UI or terminal UI. ${manualRecovery}`;
+    ? renderMessage("approval.unavailable.fallback.withClients", { clients, manualRecovery })
+    : renderMessage("approval.unavailable.fallback.withoutClients", { manualRecovery });
 }
 
 function resolveAllowedDecisions(params: {
@@ -147,6 +179,7 @@ type BuildExecApprovalActionDescriptorsParams = {
 function buildApprovalActionDescriptors(
   approvalCommandId: string,
   allowedDecisions: readonly ExecApprovalReplyDecision[],
+  renderMessage: ApprovalMessageRenderer,
 ): ExecApprovalActionDescriptor[] {
   const descriptors: ExecApprovalActionDescriptor[] = [];
   const buildDescriptor = (descriptor: {
@@ -166,7 +199,7 @@ function buildApprovalActionDescriptors(
     descriptors.push(
       buildDescriptor({
         decision: "allow-once",
-        label: "Allow Once",
+        label: renderMessage("approval.action.allowOnce"),
         style: "success",
       }),
     );
@@ -175,7 +208,7 @@ function buildApprovalActionDescriptors(
     descriptors.push(
       buildDescriptor({
         decision: "allow-always",
-        label: "Allow Always",
+        label: renderMessage("approval.action.allowAlways"),
         style: "primary",
       }),
     );
@@ -184,7 +217,7 @@ function buildApprovalActionDescriptors(
     descriptors.push(
       buildDescriptor({
         decision: "deny",
-        label: "Deny",
+        label: renderMessage("approval.action.deny"),
         style: "danger",
       }),
     );
@@ -192,13 +225,55 @@ function buildApprovalActionDescriptors(
   return descriptors;
 }
 
-export function buildExecApprovalActionDescriptors(
+function buildLocalizedExecApprovalActionDescriptors(
   params: BuildExecApprovalActionDescriptorsParams,
+  renderMessage: ApprovalMessageRenderer,
 ): ExecApprovalActionDescriptor[] {
   const approvalCommandId = params.approvalCommandId.trim();
   return approvalCommandId
-    ? buildApprovalActionDescriptors(approvalCommandId, resolveAllowedDecisions(params))
+    ? buildApprovalActionDescriptors(
+        approvalCommandId,
+        resolveAllowedDecisions(params),
+        renderMessage,
+      )
     : [];
+}
+
+export function buildExecApprovalActionDescriptors(
+  params: BuildExecApprovalActionDescriptorsParams,
+): ExecApprovalActionDescriptor[] {
+  return buildLocalizedExecApprovalActionDescriptors(params, DEFAULT_APPROVAL_MESSAGE_RENDERER);
+}
+
+/** Build approval descriptors with explicit owner-aware typed actions. */
+export function buildTypedApprovalActionDescriptorsWithRenderer(
+  params: BuildExecApprovalActionDescriptorsParams & {
+    approvalKind: "exec" | "plugin";
+  },
+  renderMessage: ApprovalMessageRenderer,
+): TypedApprovalActionDescriptor[] {
+  const approvalId = params.approvalCommandId;
+  if (!isWellFormedApprovalId(approvalId)) {
+    return [];
+  }
+  return buildApprovalActionDescriptors(
+    approvalId,
+    resolveAllowedDecisions(params),
+    renderMessage,
+  ).map((descriptor) => {
+    return {
+      decision: descriptor.decision,
+      label: descriptor.label,
+      style: descriptor.style,
+      command: descriptor.command,
+      action: {
+        type: "approval",
+        approvalId,
+        approvalKind: params.approvalKind,
+        decision: descriptor.decision,
+      },
+    };
+  });
 }
 
 /** Build approval descriptors with explicit owner-aware typed actions. */
@@ -207,26 +282,7 @@ export function buildTypedApprovalActionDescriptors(
     approvalKind: "exec" | "plugin";
   },
 ): TypedApprovalActionDescriptor[] {
-  const approvalId = params.approvalCommandId;
-  if (!isWellFormedApprovalId(approvalId)) {
-    return [];
-  }
-  return buildApprovalActionDescriptors(approvalId, resolveAllowedDecisions(params)).map(
-    (descriptor) => {
-      return {
-        decision: descriptor.decision,
-        label: descriptor.label,
-        style: descriptor.style,
-        command: descriptor.command,
-        action: {
-          type: "approval",
-          approvalId,
-          approvalKind: params.approvalKind,
-          decision: descriptor.decision,
-        },
-      };
-    },
-  );
+  return buildTypedApprovalActionDescriptorsWithRenderer(params, DEFAULT_APPROVAL_MESSAGE_RENDERER);
 }
 
 function buildApprovalInteractiveButtons(
@@ -275,16 +331,44 @@ type BuildApprovalPresentationParams = {
   allowedDecisions?: readonly ExecApprovalReplyDecision[];
 };
 
+function buildLocalizedApprovalPresentation(
+  params: BuildApprovalPresentationParams,
+  renderMessage: ApprovalMessageRenderer,
+): MessagePresentation | undefined {
+  return buildApprovalPresentationFromActionDescriptors(
+    buildLocalizedExecApprovalActionDescriptors(
+      {
+        approvalCommandId: params.approvalId,
+        ask: params.ask,
+        allowedDecisions: params.allowedDecisions,
+      },
+      renderMessage,
+    ),
+  );
+}
+
 /** Build the shipped command-backed portable approval controls. */
 export function buildApprovalPresentation(
   params: BuildApprovalPresentationParams,
 ): MessagePresentation | undefined {
+  return buildLocalizedApprovalPresentation(params, DEFAULT_APPROVAL_MESSAGE_RENDERER);
+}
+
+/** Build portable approval controls with explicit owner-aware typed actions. */
+function buildLocalizedTypedApprovalPresentation(
+  params: BuildApprovalPresentationParams & { approvalKind: "exec" | "plugin" },
+  renderMessage: ApprovalMessageRenderer,
+): MessagePresentation | undefined {
   return buildApprovalPresentationFromActionDescriptors(
-    buildExecApprovalActionDescriptors({
-      approvalCommandId: params.approvalId,
-      ask: params.ask,
-      allowedDecisions: params.allowedDecisions,
-    }),
+    buildTypedApprovalActionDescriptorsWithRenderer(
+      {
+        approvalCommandId: params.approvalId,
+        approvalKind: params.approvalKind,
+        ask: params.ask,
+        allowedDecisions: params.allowedDecisions,
+      },
+      renderMessage,
+    ),
   );
 }
 
@@ -292,14 +376,7 @@ export function buildApprovalPresentation(
 export function buildTypedApprovalPresentation(
   params: BuildApprovalPresentationParams & { approvalKind: "exec" | "plugin" },
 ): MessagePresentation | undefined {
-  return buildApprovalPresentationFromActionDescriptors(
-    buildTypedApprovalActionDescriptors({
-      approvalCommandId: params.approvalId,
-      approvalKind: params.approvalKind,
-      ask: params.ask,
-      allowedDecisions: params.allowedDecisions,
-    }),
-  );
+  return buildLocalizedTypedApprovalPresentation(params, DEFAULT_APPROVAL_MESSAGE_RENDERER);
 }
 
 /** Build the shipped command-backed exec-approval presentation. */
@@ -339,8 +416,14 @@ export function buildApprovalInteractiveReplyFromActionDescriptors(
   return buttons.length > 0 ? { blocks: [{ type: "buttons", buttons }] } : undefined;
 }
 
+function getLocalizedExecApprovalApproverDmNoticeText(
+  renderMessage: ApprovalMessageRenderer,
+): string {
+  return renderMessage("approval.unavailable.dmSent");
+}
+
 export function getExecApprovalApproverDmNoticeText(): string {
-  return "Approval required. I sent approval DMs to the approvers for this account.";
+  return getLocalizedExecApprovalApproverDmNoticeText(DEFAULT_APPROVAL_MESSAGE_RENDERER);
 }
 
 export function parseExecApprovalCommandText(
@@ -361,10 +444,14 @@ export function parseExecApprovalCommandText(
   };
 }
 
-export function formatExecApprovalExpiresIn(expiresAtMs: number, nowMs: number): string {
+function formatLocalizedExecApprovalExpiresIn(
+  expiresAtMs: number,
+  nowMs: number,
+  renderMessage: ApprovalMessageRenderer,
+): string {
   const totalSeconds = Math.max(0, Math.round((expiresAtMs - nowMs) / 1000));
   if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
+    return renderMessage("approval.duration.seconds", { value: totalSeconds });
   }
 
   const hours = Math.floor(totalSeconds / 3600);
@@ -372,15 +459,23 @@ export function formatExecApprovalExpiresIn(expiresAtMs: number, nowMs: number):
   const seconds = totalSeconds % 60;
   const parts: string[] = [];
   if (hours > 0) {
-    parts.push(`${hours}h`);
+    parts.push(renderMessage("approval.duration.hours", { value: hours }));
   }
   if (minutes > 0) {
-    parts.push(`${minutes}m`);
+    parts.push(renderMessage("approval.duration.minutes", { value: minutes }));
   }
   if (hours === 0 && minutes < 5 && seconds > 0) {
-    parts.push(`${seconds}s`);
+    parts.push(renderMessage("approval.duration.seconds", { value: seconds }));
   }
   return parts.join(" ");
+}
+
+export function formatExecApprovalExpiresIn(expiresAtMs: number, nowMs: number): string {
+  return formatLocalizedExecApprovalExpiresIn(
+    expiresAtMs,
+    nowMs,
+    DEFAULT_APPROVAL_MESSAGE_RENDERER,
+  );
 }
 
 export function getExecApprovalReplyMetadata(
@@ -419,15 +514,19 @@ export function getExecApprovalReplyMetadata(
   };
 }
 
-export function buildExecApprovalPendingReplyPayload(
+export function buildExecApprovalPendingReplyPayloadWithRenderer(
   params: ExecApprovalPendingReplyParams,
+  renderMessage: ApprovalMessageRenderer,
 ): ReplyPayload {
   const approvalCommandId = params.approvalCommandId?.trim() || params.approvalSlug;
   const allowedDecisions = resolveAllowedDecisions(params);
-  const descriptors = buildExecApprovalActionDescriptors({
-    approvalCommandId,
-    allowedDecisions,
-  });
+  const descriptors = buildLocalizedExecApprovalActionDescriptors(
+    {
+      approvalCommandId,
+      allowedDecisions,
+    },
+    renderMessage,
+  );
   const primaryAction = descriptors[0] ?? null;
   const secondaryActions = descriptors.slice(1);
   const lines: string[] = [];
@@ -435,43 +534,56 @@ export function buildExecApprovalPendingReplyPayload(
   if (warningText) {
     lines.push(warningText);
   }
-  lines.push("Approval required.");
+  lines.push(renderMessage("approval.reply.required"));
   if (primaryAction) {
-    lines.push("Run:");
+    lines.push(renderMessage("approval.reply.run"));
     lines.push(formatFencedCodeBlock(primaryAction.command, "txt"));
   }
-  lines.push("Pending command:");
+  lines.push(renderMessage("approval.reply.pendingCommand"));
   lines.push(formatFencedCodeBlock(params.command, "sh"));
   const secondaryFence = buildApprovalCommandFence(secondaryActions);
   if (secondaryFence) {
-    lines.push("Other options:");
+    lines.push(renderMessage("approval.reply.otherOptions"));
     lines.push(secondaryFence);
   }
   if (!allowedDecisions.includes("allow-always")) {
-    lines.push("Allow Always is unavailable for this command.");
+    lines.push(renderMessage("approval.reply.allowAlwaysUnavailable"));
   }
   const info: string[] = [];
-  info.push(`Host: ${params.host}`);
+  info.push(renderMessage("approval.reply.info.host", { host: params.host }));
   if (params.nodeId) {
-    info.push(`Node: ${params.nodeId}`);
+    info.push(renderMessage("approval.reply.info.node", { nodeId: params.nodeId }));
   }
   if (params.cwd) {
-    info.push(`CWD: ${formatApprovalDisplayPath(params.cwd)}`);
+    info.push(
+      renderMessage("approval.reply.info.cwd", {
+        cwd: formatApprovalDisplayPath(params.cwd),
+      }),
+    );
   }
   if (typeof params.expiresAtMs === "number" && Number.isFinite(params.expiresAtMs)) {
     info.push(
-      `Expires in: ${formatExecApprovalExpiresIn(params.expiresAtMs, params.nowMs ?? Date.now())}`,
+      renderMessage("approval.reply.info.expiresIn", {
+        duration: formatLocalizedExecApprovalExpiresIn(
+          params.expiresAtMs,
+          params.nowMs ?? Date.now(),
+          renderMessage,
+        ),
+      }),
     );
   }
-  info.push(`Full id: \`${params.approvalId}\``);
+  info.push(renderMessage("approval.reply.info.fullId", { approvalId: params.approvalId }));
   lines.push(info.join("\n"));
 
   return {
     text: lines.join("\n\n"),
-    presentation: buildApprovalPresentation({
-      approvalId: params.approvalId,
-      allowedDecisions,
-    }),
+    presentation: buildLocalizedApprovalPresentation(
+      {
+        approvalId: params.approvalId,
+        allowedDecisions,
+      },
+      renderMessage,
+    ),
     channelData: {
       execApproval: {
         approvalId: params.approvalId,
@@ -485,23 +597,49 @@ export function buildExecApprovalPendingReplyPayload(
   };
 }
 
+export function buildExecApprovalPendingReplyPayload(
+  params: ExecApprovalPendingReplyParams,
+): ReplyPayload {
+  return buildExecApprovalPendingReplyPayloadWithRenderer(
+    params,
+    DEFAULT_APPROVAL_MESSAGE_RENDERER,
+  );
+}
+
+/** Build an exec approval prompt with canonical typed decision actions. */
+export function buildTypedExecApprovalPendingReplyPayloadWithRenderer(
+  params: ExecApprovalPendingReplyParams,
+  renderMessage: ApprovalMessageRenderer,
+): ReplyPayload {
+  const payload = buildExecApprovalPendingReplyPayloadWithRenderer(params, renderMessage);
+  return {
+    ...payload,
+    presentation: buildLocalizedTypedApprovalPresentation(
+      {
+        approvalId: params.approvalId,
+        approvalKind: "exec",
+        allowedDecisions: resolveAllowedDecisions(params),
+      },
+      renderMessage,
+    ),
+  };
+}
+
 /** Build an exec approval prompt with canonical typed decision actions. */
 export function buildTypedExecApprovalPendingReplyPayload(
   params: ExecApprovalPendingReplyParams,
 ): ReplyPayload {
-  const payload = buildExecApprovalPendingReplyPayload(params);
-  return {
-    ...payload,
-    presentation: buildTypedExecApprovalPresentation({
-      approvalCommandId: params.approvalId,
-      allowedDecisions: resolveAllowedDecisions(params),
-    }),
-  };
+  return buildTypedExecApprovalPendingReplyPayloadWithRenderer(
+    params,
+    DEFAULT_APPROVAL_MESSAGE_RENDERER,
+  );
 }
 
-export function buildExecApprovalUnavailableReplyPayload(
+export function buildExecApprovalUnavailableReplyPayloadWithRenderer(
   params: ExecApprovalUnavailableReplyParams,
+  requestedRenderer: ApprovalMessageRenderer,
 ): ReplyPayload {
+  let renderMessage = requestedRenderer;
   const lines: string[] = [];
   const warningText = params.warningText?.trim();
   if (warningText) {
@@ -509,16 +647,13 @@ export function buildExecApprovalUnavailableReplyPayload(
   }
 
   if (params.sentApproverDms) {
-    lines.push(getExecApprovalApproverDmNoticeText());
+    lines.push(getLocalizedExecApprovalApproverDmNoticeText(renderMessage));
     return {
       text: lines.join("\n\n"),
     };
   }
 
   if (params.reason === "initiating-platform-disabled") {
-    lines.push(
-      `Exec approval is required, but native chat exec approvals are not configured on ${params.channelLabel ?? "this platform"}.`,
-    );
     const channel = normalizeOptionalLowercaseString(params.channel);
     const setupText =
       channel && params.channelLabel && supportsNativeExecApprovalClient(channel)
@@ -529,39 +664,66 @@ export function buildExecApprovalUnavailableReplyPayload(
           })
         : null;
     if (setupText) {
+      // Channel-owned setup paragraphs remain English until their adapters own translations.
+      renderMessage = DEFAULT_APPROVAL_MESSAGE_RENDERER;
+      lines.push(
+        renderMessage("approval.unavailable.disabled", {
+          channelLabel: params.channelLabel ?? renderMessage("approval.unavailable.platform.this"),
+        }),
+      );
       lines.push(setupText);
     } else {
+      lines.push(
+        renderMessage("approval.unavailable.disabled", {
+          channelLabel: params.channelLabel ?? renderMessage("approval.unavailable.platform.this"),
+        }),
+      );
       lines.push(
         buildGenericNativeExecApprovalFallbackText({
           host: params.host,
           nodeId: params.nodeId,
+          renderMessage,
         }),
       );
     }
   } else if (params.reason === "initiating-platform-unsupported") {
     lines.push(
-      `Exec approval is required, but ${params.channelLabel ?? "this platform"} does not support chat exec approvals.`,
+      renderMessage("approval.unavailable.unsupported", {
+        channelLabel: params.channelLabel ?? renderMessage("approval.unavailable.platform.this"),
+      }),
     );
     lines.push(
       buildGenericNativeExecApprovalFallbackText({
         excludeChannel: params.channel,
         host: params.host,
         nodeId: params.nodeId,
+        renderMessage,
       }),
     );
   } else {
+    lines.push(renderMessage("approval.unavailable.noRoute"));
+    const fallback = buildGenericNativeExecApprovalFallbackText({
+      host: params.host,
+      nodeId: params.nodeId,
+      renderMessage,
+    });
     lines.push(
-      "Exec approval is required, but no interactive approval client is currently available.",
-    );
-    lines.push(
-      `${buildGenericNativeExecApprovalFallbackText({
-        host: params.host,
-        nodeId: params.nodeId,
-      })} Then retry the command. You can usually leave execApprovals.approvers unset when owner config already identifies the approvers.`,
+      renderMessage("approval.unavailable.noRouteRecovery", {
+        fallback,
+      }),
     );
   }
 
   return {
     text: lines.join("\n\n"),
   };
+}
+
+export function buildExecApprovalUnavailableReplyPayload(
+  params: ExecApprovalUnavailableReplyParams,
+): ReplyPayload {
+  return buildExecApprovalUnavailableReplyPayloadWithRenderer(
+    params,
+    DEFAULT_APPROVAL_MESSAGE_RENDERER,
+  );
 }

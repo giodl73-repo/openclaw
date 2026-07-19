@@ -8,8 +8,10 @@ export {
   buildExecApprovalPresentation,
   buildExecApprovalActionDescriptors,
   buildExecApprovalPendingReplyPayload,
+  buildExecApprovalPendingReplyPayloadWithRenderer,
   buildTypedApprovalPresentation,
   buildTypedExecApprovalPendingReplyPayload,
+  buildTypedExecApprovalPendingReplyPayloadWithRenderer,
   getExecApprovalApproverDmNoticeText,
   getExecApprovalReplyMetadata,
   parseExecApprovalCommandText,
@@ -18,6 +20,10 @@ export {
   type ExecApprovalReplyDecision,
   type ExecApprovalReplyMetadata,
 } from "../infra/exec-approval-reply.js";
+export {
+  createApprovalMessageRenderer,
+  type ApprovalMessageRenderer,
+} from "../infra/approval-localization.js";
 export { resolveExecApprovalCommandDisplay } from "../infra/exec-approval-command-display.js";
 export {
   resolveExecApprovalAllowedDecisions,

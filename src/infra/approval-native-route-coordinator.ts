@@ -4,6 +4,7 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
+import { DEFAULT_APPROVAL_MESSAGE_RENDERER } from "./approval-localization.js";
 import type {
   ChannelApprovalNativeDeliveryPlan,
   ChannelApprovalNativePlannedTarget,
@@ -214,6 +215,7 @@ function resolveApprovalRouteNotice(params: {
     return null;
   }
   const originAccountId = normalizeOptionalString(target.accountId);
+  const renderMessage = DEFAULT_APPROVAL_MESSAGE_RENDERER;
   const deliveredAnyTarget = params.reports.some((report) => report.deliveredTargets.length > 0);
   if (!deliveredAnyTarget && params.reports.some(hasPlannedNativeTargets)) {
     return {
@@ -225,6 +227,7 @@ function resolveApprovalRouteNotice(params: {
         approvalId: params.request.id,
         approvalKind: params.approvalKind,
         allowedDecisions: readAllowedDecisionStrings(params.request),
+        renderMessage,
       }),
     };
   }
@@ -267,10 +270,11 @@ function resolveApprovalRouteNotice(params: {
       describeApprovalDeliveryDestination({
         channelLabel: report.channelLabel,
         deliveredTargets: report.deliveredTargets,
+        renderMessage,
       }),
     ];
   });
-  const text = resolveApprovalRoutedElsewhereNoticeText(destinations);
+  const text = resolveApprovalRoutedElsewhereNoticeText(destinations, renderMessage);
   if (!text) {
     return null;
   }

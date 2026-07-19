@@ -18,10 +18,10 @@ export type LocalizationSource =
   | "english-default";
 
 export type LocalizationContext = {
-  locale: OpenClawLocale;
-  fallbackLocales: readonly OpenClawLocale[];
-  source: LocalizationSource;
-  audience: LocalizationAudience;
+  readonly locale: OpenClawLocale;
+  readonly fallbackLocales: readonly OpenClawLocale[];
+  readonly source: LocalizationSource;
+  readonly audience: LocalizationAudience;
 };
 
 export type LocaleResolutionFinding = {
@@ -56,6 +56,7 @@ export function createLocalizationContext(params: {
 export function resolveLocalizationContext(params: {
   audience: LocalizationAudience;
   explicitUser?: string | null;
+  explicitRecipient?: string | null;
   request?: string | null;
   surfacePreference?: string | null;
   operatorDefault?: string | null;
@@ -66,6 +67,7 @@ export function resolveLocalizationContext(params: {
   const findings: LocaleResolutionFinding[] = [];
   const strictCandidates: ReadonlyArray<[LocalizationSource, string | null | undefined]> = [
     ["explicit-user", params.explicitUser],
+    ["explicit-recipient", params.explicitRecipient],
     ["request", params.request],
     ["surface-preference", params.surfacePreference],
     ["operator-default", params.operatorDefault],
