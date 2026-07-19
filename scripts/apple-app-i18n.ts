@@ -142,6 +142,8 @@ const APPLE_LOCALE_DIRECTORIES: Record<string, string> = {
   "zh-CN": "zh-Hans",
   "zh-TW": "zh-Hant",
 };
+export const getAppleLocaleDirectory = (locale: string) =>
+  APPLE_LOCALE_DIRECTORIES[locale] ?? locale;
 const LOCALIZED_WRAPPER_CONTRACTS: Record<string, readonly string[]> = {
   "apps/ios/Sources/Design/OpenClawProComponents.swift": [
     "enum OpenClawTextValue: ExpressibleByStringLiteral",
@@ -790,7 +792,7 @@ async function syncIosInfoPlist(write: boolean): Promise<number> {
       await readFile(path.join(ROOT, target.sourcePath), "utf8"),
     );
     for (const locale of APPLE_I18N_LOCALES) {
-      const localeDir = APPLE_LOCALE_DIRECTORIES[locale] ?? locale;
+      const localeDir = getAppleLocaleDirectory(locale);
       const outputPath = path.join(
         ROOT,
         target.outputRoot,
@@ -933,7 +935,7 @@ export async function compileMacosLocalizations(outputDir: string) {
   }
 
   for (const locale of REQUIRED_LOCALES) {
-    const localeDir = APPLE_LOCALE_DIRECTORIES[locale] ?? locale;
+    const localeDir = getAppleLocaleDirectory(locale);
     const lprojDir = path.join(outputDir, `${localeDir}.lproj`);
     const lines = Object.entries(catalog.strings)
       .toSorted(([left], [right]) => compareCodeUnits(left, right))

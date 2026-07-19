@@ -22,7 +22,9 @@ import { TUI_SUPPORTED_LOCALES } from "../src/tui/i18n/runtime.js";
 import { WIZARD_LOCALES } from "../src/wizard/i18n/index.js";
 import { SUPPORTED_LOCALES as CONTROL_UI_LOCALES } from "../ui/src/i18n/lib/registry.js";
 import { APPLE_I18N_LOCALES } from "./apple-app-i18n.js";
+import { GENERATED_LOCALES } from "./lib/docs-i18n-locales.mjs";
 import { computeLocalizationCatalogRevision } from "./lib/localization-catalog-revision.js";
+import { DOCS_PLATFORM_CONSTRAINED_LOCALES } from "./lib/localization-surface-convergence.js";
 import { NATIVE_I18N_LOCALES } from "./native-app-i18n.js";
 
 type SurfaceSeed = {
@@ -48,6 +50,7 @@ const catalogFile =
     path.join(directory, `${locale}${extension}`);
 const docsGlossary = (locale: Exclude<OpenClawLocale, "en">): string =>
   path.join("docs/.i18n", `glossary.${locale}.json`);
+const docsLocales = GENERATED_LOCALES.map((entry) => entry.dir);
 
 const SURFACE_SEEDS: Record<LocalizationSurfaceId, SurfaceSeed> = {
   "control-ui": {
@@ -173,6 +176,8 @@ const SURFACE_SEEDS: Record<LocalizationSurfaceId, SurfaceSeed> = {
     revisionPaths: ["docs/.i18n"],
     contentClasses: ["general", "security", "authentication", "recovery", "generated"],
     localeArtifact: docsGlossary,
+    supportedLocales: ["en", ...docsLocales],
+    platformConstrainedLocales: DOCS_PLATFORM_CONSTRAINED_LOCALES,
   },
 };
 

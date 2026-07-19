@@ -34,7 +34,11 @@ Generated locale trees and live translation memory now live in the publish repo:
 
 - Control UI supports `en`, `zh-CN`, `zh-TW`, `pt-BR`, `de`, `es`, `ja-JP`, `ko`, `fr`, `hi`, `ar`, `it`, `vi`, `nl`, `fa`, `ru`, `tr`, `uk`, `id`, `pl`, and `th`.
 - Docs translation workflows generate the same non-English locale set in `openclaw/docs`.
+- Swedish (`sv`) is registered for native apps but is not yet generated for Control UI or docs;
+  that explicit omission is checked by `pnpm localization:surface-convergence:check`.
 - The Mintlify docs language picker can expose only the locales accepted by Mintlify `navigation.languages`; Russian (`ru`) and Hindi (`hi`) are now included in the publish configuration.
+- Persian (`fa`) and Thai (`th`) remain generated but are marked platform-constrained
+  until Mintlify accepts them in `navigation.languages`.
 - Do not treat locale visibility in generated `docs/docs.json` as proof that translation artifacts exist. Verify each generated locale folder and its translation memory in `openclaw/docs`.
 
 ## Files in this folder

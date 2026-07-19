@@ -38,7 +38,9 @@ const ANDROID_QUALIFIERS: Record<string, string> = {
   "pt-BR": "pt-rBR",
   "ja-JP": "ja",
 };
-const localeDirectory = (locale: string) => `values-${ANDROID_QUALIFIERS[locale] ?? locale}`;
+export const getAndroidLocaleDirectory = (locale: string) =>
+  `values-${ANDROID_QUALIFIERS[locale] ?? locale}`;
+const localeDirectory = getAndroidLocaleDirectory;
 const LOCALES = ["values", ...NATIVE_I18N_LOCALES.map(localeDirectory)] as const;
 const STRING_RE = /<string\s+name="([A-Za-z0-9_]+)"([^>]*)>([\s\S]*?)<\/string>/gu;
 const ARRAY_RE = /<string-array\s+name="([A-Za-z0-9_]+)"[^>]*>([\s\S]*?)<\/string-array>/gu;
