@@ -2,24 +2,9 @@
   "fallbacks": {
     "gateway.approval.notFound": [
       "ar",
-      "de",
-      "es",
       "fa",
-      "fr",
       "hi",
-      "id",
-      "it",
-      "ja-JP",
-      "ko",
-      "nl",
-      "pl",
-      "pt-BR",
-      "ru",
-      "th",
-      "tr",
-      "uk",
-      "vi",
-      "zh-TW"
+      "th"
     ]
   },
   "sourceHash": "5d8931830d2daf6451a8431bbbc2dfffc4860eb92726e5aba5d7926379db468b",

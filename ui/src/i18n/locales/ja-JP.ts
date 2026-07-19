@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const ja_JP: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "承認 ID が不明か、有効期限が切れています。",
+    },
+  },
   common: {
     health: "健全性",
     ok: "OK",
