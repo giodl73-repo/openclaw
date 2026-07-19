@@ -130,6 +130,33 @@ records the required linguistic and sensitive-copy review in
 `localization/simple-script-reviews.json`. Change a locale to `reviewed` only
 after that review is complete and include the accountable `languageOwner`.
 
+## Close complex-script and release readiness
+
+PR 15 applies the same evidence contract to Hindi, Arabic, Thai, and Persian.
+It also verifies registered direction profiles, preserves directional isolation
+around interpolated commands and identifiers in RTL messages, and publishes the
+final claim gate.
+
+Run:
+
+```bash
+pnpm localization:release:check
+```
+
+The command checks:
+
+- `localization/complex-script-backfill.json` for complex-script catalog,
+  artifact, platform-constraint, and review blockers;
+- `localization/complex-script-reviews.json` for named human review evidence;
+  and
+- `localization/release-readiness.json` for the product-level claim derived
+  from every locale/surface maturity row in `localization/coverage.json`.
+
+An unqualified full-product claim remains disabled until every required
+locale/surface cell is `complete`. Platform-constrained cells permit only the
+explicitly qualified OpenClaw-owned localization claim, and all other maturity
+states keep the release at `qualified-maturity-only`.
+
 ## Change an existing string
 
 Treat an English source edit as a new translation revision:

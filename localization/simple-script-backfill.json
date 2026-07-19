@@ -17,7 +17,7 @@
         "supported": true
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -49,7 +49,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -83,7 +83,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -118,7 +118,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -153,7 +153,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -188,7 +188,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -223,7 +223,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -258,7 +258,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -293,7 +293,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -328,7 +328,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -363,7 +363,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -398,7 +398,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -433,7 +433,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -468,7 +468,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -503,7 +503,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -538,7 +538,7 @@
         "supported": false
       },
       "docs": {
-        "supported": true
+        "status": "supported"
       },
       "native": {
         "sharedArtifact": true,
@@ -573,7 +573,7 @@
         "supported": false
       },
       "docs": {
-        "supported": false
+        "status": "unsupported"
       },
       "native": {
         "sharedArtifact": true,

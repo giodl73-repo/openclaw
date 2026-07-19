@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "locales": {
+    "hi": {
+      "status": "pending"
+    },
+    "ar": {
+      "status": "pending"
+    },
+    "th": {
+      "status": "pending"
+    },
+    "fa": {
+      "status": "pending"
+    }
+  }
+}

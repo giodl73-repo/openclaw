@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "scope": "registered-complex-script-and-rtl",
+  "profiles": {
+    "hi": {
+      "script": "devanagari",
+      "direction": "ltr"
+    },
+    "ar": {
+      "script": "arabic",
+      "direction": "rtl"
+    },
+    "th": {
+      "script": "thai",
+      "direction": "ltr"
+    },
+    "fa": {
+      "script": "arabic-derived",
+      "direction": "rtl"
+    }
+  },
+  "locales": {
+    "hi": {
+      "controlUi": {
+        "supported": true,
+        "fallbackCount": 0
+      },
+      "cliOnboarding": {
+        "supported": false
+      },
+      "cli": {
+        "supported": false
+      },
+      "tui": {
+        "supported": false
+      },
+      "docs": {
+        "status": "supported"
+      },
+      "native": {
+        "sharedArtifact": true,
+        "androidArtifact": true,
+        "appleArtifact": true,
+        "qualityAdvisories": 371
+      },
+      "review": {
+        "status": "pending"
+      },
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "ar": {
+      "controlUi": {
+        "supported": true,
+        "fallbackCount": 0
+      },
+      "cliOnboarding": {
+        "supported": false
+      },
+      "cli": {
+        "supported": false
+      },
+      "tui": {
+        "supported": false
+      },
+      "docs": {
+        "status": "supported"
+      },
+      "native": {
+        "sharedArtifact": true,
+        "androidArtifact": true,
+        "appleArtifact": true,
+        "qualityAdvisories": 270
+      },
+      "review": {
+        "status": "pending"
+      },
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "th": {
+      "controlUi": {
+        "supported": true,
+        "fallbackCount": 0
+      },
+      "cliOnboarding": {
+        "supported": false
+      },
+      "cli": {
+        "supported": false
+      },
+      "tui": {
+        "supported": false
+      },
+      "docs": {
+        "status": "platform-constrained"
+      },
+      "native": {
+        "sharedArtifact": true,
+        "androidArtifact": true,
+        "appleArtifact": true,
+        "qualityAdvisories": 306
+      },
+      "review": {
+        "status": "pending"
+      },
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "docs-platform-constrained",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "fa": {
+      "controlUi": {
+        "supported": true,
+        "fallbackCount": 0
+      },
+      "cliOnboarding": {
+        "supported": false
+      },
+      "cli": {
+        "supported": false
+      },
+      "tui": {
+        "supported": false
+      },
+      "docs": {
+        "status": "platform-constrained"
+      },
+      "native": {
+        "sharedArtifact": true,
+        "androidArtifact": true,
+        "appleArtifact": true,
+        "qualityAdvisories": 274
+      },
+      "review": {
+        "status": "pending"
+      },
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "docs-platform-constrained",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    }
+  }
+}

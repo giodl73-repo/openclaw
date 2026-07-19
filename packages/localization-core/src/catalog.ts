@@ -1,5 +1,10 @@
 import type { LocalizationContext } from "./context.js";
-import { OPENCLAW_LOCALE_REGISTRY_REVISION, type OpenClawLocale } from "./locale-registry.js";
+import {
+  getLocaleDirection,
+  OPENCLAW_LOCALE_REGISTRY_REVISION,
+  type LocaleDirection,
+  type OpenClawLocale,
+} from "./locale-registry.js";
 
 export type MessageParam = string | number | boolean;
 
@@ -50,6 +55,8 @@ const FORBIDDEN_BIDI_CONTROL_PATTERN =
   /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u206a-\u206f]/u;
 const PLURAL_CATEGORIES = new Set<PluralCategory>(["zero", "one", "two", "few", "many", "other"]);
 const PLURAL_RULES = new Map<OpenClawLocale, Intl.PluralRules>();
+const FIRST_STRONG_ISOLATE = "\u2068";
+const POP_DIRECTIONAL_ISOLATE = "\u2069";
 
 export function createCatalogSnapshot(params: {
   catalogRevision: string;
@@ -75,12 +82,13 @@ export function renderLocalizedMessage(
   context: LocalizationContext,
   message: LocalizedMessage,
 ): string {
-  const fallback = interpolateMessage(message.fallback, message.params);
+  const direction = getLocaleDirection(context.locale);
+  const fallback = interpolateMessage(message.fallback, message.params, direction);
   const locales = [context.locale, ...context.fallbackLocales];
   for (const locale of locales) {
     const entry = snapshot.catalogs[locale]?.[message.key];
     if (entry !== undefined) {
-      return renderCatalogEntry(entry, locale, message.params, fallback);
+      return renderCatalogEntry(entry, locale, message.params, fallback, direction);
     }
   }
   return fallback;
@@ -89,13 +97,20 @@ export function renderLocalizedMessage(
 export function interpolateMessage(
   value: string,
   params?: Readonly<Record<string, MessageParam>>,
+  direction: LocaleDirection = "ltr",
 ): string {
   if (!params) {
     return value;
   }
   return value.replace(PLACEHOLDER_PATTERN, (match, key: string) => {
     const param = params[key];
-    return param === undefined ? match : String(param);
+    if (param === undefined) {
+      return match;
+    }
+    const rendered = String(param);
+    return direction === "rtl"
+      ? `${FIRST_STRONG_ISOLATE}${rendered}${POP_DIRECTIONAL_ISOLATE}`
+      : rendered;
   });
 }
 
@@ -142,9 +157,10 @@ function renderCatalogEntry(
   locale: OpenClawLocale,
   params: Readonly<Record<string, MessageParam>> | undefined,
   fallback: string,
+  direction: LocaleDirection,
 ): string {
   if (typeof entry === "string") {
-    return interpolateMessage(entry, params);
+    return interpolateMessage(entry, params, direction);
   }
 
   const selector = params?.[entry.param];
@@ -154,7 +170,9 @@ function renderCatalogEntry(
     }
     const category = getPluralRules(locale).select(selector) as PluralCategory;
     const template = entry.cases[category] ?? entry.cases.other;
-    return typeof template === "string" ? interpolateMessage(template, params) : fallback;
+    return typeof template === "string"
+      ? interpolateMessage(template, params, direction)
+      : fallback;
   }
 
   function getPluralRules(localeId: OpenClawLocale): Intl.PluralRules {
@@ -171,7 +189,7 @@ function renderCatalogEntry(
     return fallback;
   }
   const template = entry.cases[String(selector)] ?? entry.cases.other;
-  return typeof template === "string" ? interpolateMessage(template, params) : fallback;
+  return typeof template === "string" ? interpolateMessage(template, params, direction) : fallback;
 }
 
 function freezeCatalog(catalog: LocalizationCatalog): LocalizationCatalog {

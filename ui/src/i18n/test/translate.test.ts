@@ -160,6 +160,8 @@ describe("i18n", () => {
   it.each([
     ["ar", "rtl"],
     ["fa", "rtl"],
+    ["hi", "ltr"],
+    ["th", "ltr"],
     ["de", "ltr"],
   ] as const)("updates document language and direction for %s", async (locale, direction) => {
     translate.i18n.registerTranslation(locale, shippedLocales[locale]);
@@ -167,6 +169,21 @@ describe("i18n", () => {
     expect(document.documentElement.lang).toBe(locale);
     expect(document.documentElement.dir).toBe(direction);
   });
+
+  it.each([
+    ["hi", hi, /\p{Script=Devanagari}/u],
+    ["ar", ar, /\p{Script=Arabic}/u],
+    ["th", th, /\p{Script=Thai}/u],
+    ["fa", fa, /\p{Script=Arabic}/u],
+  ] as const)(
+    "ships script-appropriate approval copy for %s",
+    (locale, messages, scriptPattern) => {
+      const value = readString(messages, "gateway.approval.notFound");
+      expect(value, locale).toMatch(scriptPattern);
+      expect(value, locale).not.toMatch(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u);
+      expect(value, locale).not.toBe(readString(en, "gateway.approval.notFound"));
+    },
+  );
 
   it("keeps the latest locale when lazy loads complete out of order", async () => {
     const pending = new Map<string, (translation: TranslationMap | null) => void>();
