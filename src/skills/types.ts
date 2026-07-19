@@ -1,4 +1,5 @@
 // Skill types expose the shared skill contracts used by discovery, loading, and runtime flows.
+import type { NormalizedLocalizedText } from "@openclaw/localization-core";
 import type { Skill } from "./loading/skill-contract.js";
 
 export type SkillInstallSpec = {
@@ -23,6 +24,11 @@ export type OpenClawSkillMetadata = {
   primaryEnv?: string;
   emoji?: string;
   homepage?: string;
+  presentation?: {
+    displayName?: NormalizedLocalizedText;
+    description?: NormalizedLocalizedText;
+  };
+  presentationIssues?: readonly string[];
   os?: string[];
   requires?: {
     bins?: string[];

@@ -47,14 +47,16 @@ describe("slash command browser import", () => {
     );
 
     expect(importDeclarations(commands)).toEqual([
+      'import { resolveLocalizedText } from "@openclaw/localization-core";',
       'import { asNullableRecord as asRecord } from "@openclaw/normalization-core/record-coerce";',
       'import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";',
       'import type { CommandEntry } from "../../../../packages/gateway-protocol/src/index.js";',
       'import { buildBuiltinChatCommands } from "../../../../src/auto-reply/commands-registry.shared.js";',
-      'import { t } from "../../i18n/index.ts";',
+      'import { i18n, t } from "../../i18n/index.ts";',
       'import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";',
     ]);
     expect(importDeclarations(sharedRegistry)).toEqual([
+      'import { normalizeLocalizedText, type LocalizedTextInput } from "../../packages/localization-core/src/metadata.js";',
       'import { normalizeOptionalLowercaseString } from "../../packages/normalization-core/src/string-coerce.js";',
       'import { normalizeStringEntries } from "../../packages/normalization-core/src/string-normalization.js";',
       'import { formatFastModeAutoLabel, resolveFastModeModelAutoOnSeconds } from "../shared/fast-mode.js";',

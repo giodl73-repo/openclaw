@@ -1,10 +1,11 @@
 // Control UI chat domain owns pure slash command rules.
 
+import { resolveLocalizedText } from "@openclaw/localization-core";
 import { asNullableRecord as asRecord } from "@openclaw/normalization-core/record-coerce";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { CommandEntry } from "../../../../packages/gateway-protocol/src/index.js";
 import { buildBuiltinChatCommands } from "../../../../src/auto-reply/commands-registry.shared.js";
-import { t } from "../../i18n/index.ts";
+import { i18n, t } from "../../i18n/index.ts";
 import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 
 export type SlashCommandCategory = "session" | "model" | "agents" | "tools";
@@ -17,6 +18,7 @@ export type SlashCommandDef = {
   name: string;
   aliases?: string[];
   description: string;
+  descriptionLocalizations?: Readonly<Record<string, string>>;
   descriptionKey?: string;
   args?: string;
   icon?: ChatIconName;
@@ -38,6 +40,7 @@ type CommandLike = {
   name: string;
   aliases?: string[];
   description: string;
+  descriptionLocalizations?: Readonly<Record<string, string>>;
   args?: Array<{
     name: string;
     required?: boolean;
@@ -244,6 +247,7 @@ function toSlashCommand(
     name,
     aliases: getSlashAliases(command).filter((alias) => alias !== name),
     description: COMMAND_DESCRIPTION_OVERRIDES[command.key] ?? command.description,
+    descriptionLocalizations: command.descriptionLocalizations,
     descriptionKey: COMMAND_DESCRIPTION_KEYS[command.key],
     args: COMMAND_ARGS_OVERRIDES[command.key] ?? formatArgs(command),
     icon: mapIcon(command),
@@ -317,6 +321,7 @@ function buildLocalSlashCommands(): SlashCommandDef[] {
       name: command.textAliases[0]?.replace(/^\//u, "") ?? command.key,
       aliases: command.textAliases,
       description: command.description,
+      descriptionLocalizations: command.descriptionLocalizations,
       args: command.args?.map((arg) => ({
         name: arg.name,
         required: arg.required,
@@ -379,6 +384,20 @@ function normalizeCommandEntry(
     name: primaryName,
     aliases: aliases.map((alias) => `/${alias}`),
     description: clampText(entry.description, MAX_REMOTE_DESCRIPTION_LENGTH),
+    descriptionLocalizations:
+      "descriptionLocalizations" in entry &&
+      entry.descriptionLocalizations &&
+      typeof entry.descriptionLocalizations === "object" &&
+      !Array.isArray(entry.descriptionLocalizations)
+        ? Object.fromEntries(
+            Object.entries(entry.descriptionLocalizations)
+              .filter((item): item is [string, string] => typeof item[1] === "string")
+              .map(([locale, description]) => [
+                locale,
+                clampText(description, MAX_REMOTE_DESCRIPTION_LENGTH),
+              ]),
+          )
+        : undefined,
     ...(args.length > 0 ? { args } : {}),
     category: typeof entry.category === "string" ? entry.category : undefined,
   };
@@ -433,7 +452,20 @@ export function getSlashCommandCategoryLabel(category: SlashCommandCategory): st
 }
 
 export function getSlashCommandDescription(command: SlashCommandDef): string {
-  return command.descriptionKey ? t(command.descriptionKey) : command.description;
+  if (command.descriptionKey) {
+    return t(command.descriptionKey);
+  }
+  if (command.descriptionLocalizations) {
+    return resolveLocalizedText(
+      {
+        default: command.description,
+        localizations: command.descriptionLocalizations,
+      },
+      i18n.getLocale(),
+      "external",
+    );
+  }
+  return command.description;
 }
 
 const TIER_ORDER: Record<SlashCommandTier, number> = {

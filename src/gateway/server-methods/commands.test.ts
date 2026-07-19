@@ -20,6 +20,10 @@ const mockChatCommands: ChatCommandDefinition[] = [
     key: "model",
     nativeName: "model",
     description: "Set model",
+    descriptionLocalizations: {
+      "zh-CN": "设置模型",
+      [`en-x-${"segment-".repeat(9)}tail`]: "Oversized locale tag",
+    },
     textAliases: ["/model", "/m"],
     acceptsArgs: true,
     args: [
@@ -329,6 +333,7 @@ describe("commands.list handler", () => {
     expect(model.nativeName).toBe("model");
     expect(model.textAliases).toEqual(["/model", "/m"]);
     expect(model.description).toBe("Set model");
+    expect(model.descriptionLocalizations).toEqual({ "zh-CN": "设置模型" });
     expect(model.category).toBe("options");
     expect(model.source).toBe("native");
     expect(model.scope).toBe("both");

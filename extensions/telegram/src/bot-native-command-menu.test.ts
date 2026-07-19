@@ -335,6 +335,7 @@ describe("bot-native-command-menu", () => {
         descriptionLocalizations: {
           ko: "한국어",
           "en-GB": "British English is unsupported by Telegram",
+          "zh-CN": "Telegram language scopes do not accept regional product locales",
         },
       },
     ];
@@ -364,7 +365,7 @@ describe("bot-native-command-menu", () => {
       language_code: "ko",
     });
     expect(runtimeLog).toHaveBeenCalledWith(
-      "Telegram command menu ignored unsupported description localization codes: en-GB.",
+      "Telegram command menu ignored unsupported description localization codes: en-GB, zh-CN.",
     );
   });
 

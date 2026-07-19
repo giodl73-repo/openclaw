@@ -47,6 +47,8 @@ type SkillInstallOption = {
 export type SkillStatusEntry = {
   name: string;
   description: string;
+  presentation?: NonNullable<SkillEntry["metadata"]>["presentation"];
+  presentationIssues?: readonly string[];
   source: string;
   bundled: boolean;
   filePath: string;
@@ -316,6 +318,10 @@ function buildSkillStatus(
   return {
     name: entry.skill.name,
     description: entry.skill.description,
+    ...(entry.metadata?.presentation ? { presentation: entry.metadata.presentation } : {}),
+    ...(entry.metadata?.presentationIssues
+      ? { presentationIssues: entry.metadata.presentationIssues }
+      : {}),
     source: skillSource,
     bundled,
     filePath: entry.skill.filePath,

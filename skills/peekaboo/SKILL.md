@@ -7,6 +7,16 @@ metadata:
     "openclaw":
       {
         "emoji": "👀",
+        "presentation":
+          {
+            "displayName":
+              { "default": "Peekaboo", "localizations": { "zh-CN": "Peekaboo 界面自动化" } },
+            "description":
+              {
+                "default": "Capture and automate macOS UI with the Peekaboo CLI.",
+                "localizations": { "zh-CN": "使用 Peekaboo CLI 捕获并自动操作 macOS 界面。" },
+              },
+          },
         "os": ["darwin"],
         "requires": { "bins": ["peekaboo"] },
         "install":

@@ -18,6 +18,7 @@ import {
 } from "../infra/node-commands.js";
 import {
   isReservedCommandName,
+  normalizePluginCommandDescription,
   registerPluginCommand,
   validatePluginCommandDefinition,
 } from "./command-registration.js";
@@ -436,10 +437,29 @@ export function createOperationRegistrars(state: PluginRegistryState) {
       }
     }
     record.commands.push(name);
+    const localizedDescription = normalizePluginCommandDescription(command);
+    if (!localizedDescription.value) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `command registration failed: ${localizedDescription.issues
+          .map((issue) => issue.detail)
+          .join(" ")}`,
+      });
+      return;
+    }
+    const normalizedCommand = {
+      ...command,
+      description: localizedDescription.value.default,
+      ...(Object.keys(localizedDescription.value.localizations).length > 0
+        ? { descriptionLocalizations: localizedDescription.value.localizations }
+        : { descriptionLocalizations: undefined }),
+    };
     registry.commands.push({
       pluginId: record.id,
       pluginName: record.name,
-      command,
+      command: normalizedCommand,
       source: record.source,
       rootDir: record.rootDir,
     });

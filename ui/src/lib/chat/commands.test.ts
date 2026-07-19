@@ -1,16 +1,20 @@
 // @vitest-environment node
 import { expectDefined, isRecord } from "@openclaw/normalization-core";
 import { afterEach, describe, expect, it } from "vitest";
+import { i18n } from "../../i18n/index.ts";
 import {
   buildFallbackSlashCommands,
   buildSlashCommandsFromEntries,
+  getSlashCommandDescription,
   getRemoteCommandEntries,
   parseSlashCommand,
   replaceSlashCommands,
   SLASH_COMMANDS,
+  type SlashCommandDef,
 } from "./commands.ts";
 
-afterEach(() => {
+afterEach(async () => {
+  await i18n.setLocale("en");
   replaceSlashCommands(buildFallbackSlashCommands());
 });
 
@@ -180,6 +184,26 @@ describe("parseSlashCommand", () => {
       executeLocal: false,
     });
     expectParsedSlash("/dock_discord", { name: "dock-discord" }, "");
+  });
+
+  it("resolves remote command descriptions against the live UI locale", async () => {
+    await i18n.setLocale("zh-CN");
+    applyRemoteEntries([
+      {
+        name: "dreaming",
+        textAliases: ["/dreaming"],
+        description: "Enable or disable memory dreaming.",
+        descriptionLocalizations: { "zh-CN": "启用或停用记忆梦境。" },
+        source: "plugin",
+        scope: "both",
+        acceptsArgs: true,
+      },
+    ]);
+
+    const command = requireCommandByName("dreaming") as SlashCommandDef;
+    expect(getSlashCommandDescription(command)).toBe("启用或停用记忆梦境。");
+    await i18n.setLocale("en");
+    expect(getSlashCommandDescription(command)).toBe("Enable or disable memory dreaming.");
   });
 
   it("does not let remote commands collide with reserved local commands", () => {

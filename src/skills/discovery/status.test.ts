@@ -13,6 +13,40 @@ type SkillStatus = ReturnType<typeof buildWorkspaceSkillStatus>["skills"][number
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 describe("buildWorkspaceSkillStatus", () => {
+  it("carries presentation metadata without changing stable skill fields", () => {
+    const report = buildWorkspaceSkillStatus("/tmp/ws", {
+      entries: [
+        createEntry("peekaboo", {
+          description: "Capture and automate macOS UI.",
+          metadata: {
+            presentation: {
+              displayName: {
+                default: "Peekaboo",
+                localizations: { "zh-CN": "Peekaboo 界面自动化" },
+              },
+              description: {
+                default: "Capture and automate macOS UI.",
+                localizations: { "zh-CN": "捕获并自动操作 macOS 界面。" },
+              },
+            },
+          },
+        }),
+      ],
+    });
+
+    expect(report.skills[0]).toMatchObject({
+      name: "peekaboo",
+      description: "Capture and automate macOS UI.",
+      skillKey: "peekaboo",
+      presentation: {
+        displayName: {
+          default: "Peekaboo",
+          localizations: { "zh-CN": "Peekaboo 界面自动化" },
+        },
+      },
+    });
+  });
+
   it("reports blank env requirements as missing", () => {
     const envName = "OPENCLAW_TEST_BLANK_SKILL_STATUS";
     const original = process.env[envName];

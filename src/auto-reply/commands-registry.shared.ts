@@ -1,3 +1,7 @@
+import {
+  normalizeLocalizedText,
+  type LocalizedTextInput,
+} from "../../packages/localization-core/src/metadata.js";
 /** Shared command registry builders used by browser-safe and runtime command lists. */
 import { normalizeOptionalLowercaseString } from "../../packages/normalization-core/src/string-coerce.js";
 import { normalizeStringEntries } from "../../packages/normalization-core/src/string-normalization.js";
@@ -31,7 +35,8 @@ type DefineChatCommandInput = {
   nativeName?: string;
   nativeAliases?: string[];
   nativeProviders?: string[];
-  description: string;
+  description: LocalizedTextInput;
+  descriptionLocalizations?: Readonly<Record<string, string>>;
   args?: ChatCommandDefinition["args"];
   argsParsing?: ChatCommandDefinition["argsParsing"];
   formatArgs?: ChatCommandDefinition["formatArgs"];
@@ -65,6 +70,17 @@ export function defineChatCommand(command: DefineChatCommandInput): ChatCommandD
     command.scope ?? (command.nativeName ? (aliases.length ? "both" : "native") : "text");
   const acceptsArgs = command.acceptsArgs ?? Boolean(command.args?.length);
   const argsParsing = command.argsParsing ?? (command.args?.length ? "positional" : "none");
+  const description = normalizeLocalizedText(command.description, {
+    scope: "product",
+    legacyLocalizations: command.descriptionLocalizations,
+  });
+  if (!description.value) {
+    throw new Error(
+      `Invalid localized command description for ${command.key}: ${description.issues
+        .map((issue) => issue.detail)
+        .join(" ")}`,
+    );
+  }
   return {
     key: command.key,
     nativeName: command.nativeName,
@@ -74,7 +90,10 @@ export function defineChatCommand(command: DefineChatCommandInput): ChatCommandD
     nativeProviders: command.nativeProviders
       ? normalizeStringEntries(command.nativeProviders)
       : undefined,
-    description: command.description,
+    description: description.value.default,
+    ...(Object.keys(description.value.localizations).length > 0
+      ? { descriptionLocalizations: description.value.localizations }
+      : {}),
     acceptsArgs,
     args: command.args,
     argsParsing,
@@ -189,7 +208,12 @@ export function buildBuiltinChatCommands(
     defineChatCommand({
       key: "commands",
       nativeName: "commands",
-      description: "List all slash commands.",
+      description: {
+        default: "List all slash commands.",
+        localizations: {
+          "zh-CN": "列出所有斜杠命令。",
+        },
+      },
       textAlias: "/commands",
       category: "status",
       tier: "power",

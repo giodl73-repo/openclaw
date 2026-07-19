@@ -603,6 +603,49 @@ describe("registerPluginCommand", () => {
     ]);
   });
 
+  it("canonicalizes plugin description locale tags before snapshot projection", () => {
+    const result = registerVoiceCommandForTest({
+      description: "Demo command",
+      descriptionLocalizations: {
+        "EN-us": "Demo command",
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(listProviderPluginCommandSpecs("discord")[0]?.descriptionLocalizations).toEqual({
+      "en-US": "Demo command",
+    });
+  });
+
+  it("rejects malformed plugin description locale tags", () => {
+    const result = registerVoiceCommandForTest({
+      description: "Demo command",
+      descriptionLocalizations: { "not@locale": "Invalid" },
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("valid canonicalizable BCP 47"),
+    });
+  });
+
+  it("preserves legacy plugin metadata sizes before bounded surface projection", () => {
+    const description = "d".repeat(2_100);
+    const descriptionLocalizations = Object.fromEntries(
+      Array.from({ length: 65 }, (_, index) => [`en-x-l${index}`, description]),
+    );
+    const result = registerVoiceCommandForTest({
+      description,
+      descriptionLocalizations,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(listProviderPluginCommandSpecs("discord")[0]).toMatchObject({
+      description,
+      descriptionLocalizations,
+    });
+  });
+
   it("rejects empty native description localizations", () => {
     const result = registerVoiceCommandForTest({
       description: "Demo command",

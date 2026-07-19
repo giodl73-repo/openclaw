@@ -111,6 +111,50 @@ describe("skills-cli (e2e)", () => {
     expect(output).toContain("peekaboo");
     expect(output).toContain("Details:");
   });
+
+  it("localizes human skill presentation while preserving JSON identity fields", () => {
+    const entries = createEntries();
+    entries[0]!.metadata = {
+      ...entries[0]!.metadata,
+      presentation: {
+        displayName: {
+          default: "Peekaboo",
+          localizations: {
+            de: "Peekaboo-Oberflächenautomatisierung",
+            "zh-CN": "Peekaboo 界面自动化",
+          },
+        },
+        description: {
+          default: "Capture UI screenshots",
+          localizations: {
+            de: "UI-Screenshots erfassen",
+            "zh-CN": "捕获界面截图",
+          },
+        },
+      },
+    };
+    const report = buildWorkspaceSkillStatus(tempWorkspaceDir, {
+      managedSkillsDir: "/nonexistent",
+      entries,
+    });
+    const previousLocale = process.env.OPENCLAW_LOCALE;
+    process.env.OPENCLAW_LOCALE = "de";
+    try {
+      expect(formatSkillsList(report, {})).toContain("Peekaboo-Oberflächenautomatisierung");
+      expect(formatSkillsList(report, {})).toContain("UI-Screenshots erfassen");
+      const parsed = JSON.parse(formatSkillsList(report, { json: true }));
+      expect(parsed.skills[0]).toMatchObject({
+        name: "peekaboo",
+        description: "Capture UI screenshots",
+      });
+    } finally {
+      if (previousLocale === undefined) {
+        delete process.env.OPENCLAW_LOCALE;
+      } else {
+        process.env.OPENCLAW_LOCALE = previousLocale;
+      }
+    }
+  });
 });
 
 function createFixtureSkill(params: {

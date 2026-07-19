@@ -7,6 +7,7 @@ export default {
     "src/context.ts",
     "src/coverage.ts",
     "src/locale-registry.ts",
+    "src/metadata.ts",
   ],
   fixedExtension: false,
   format: "esm",

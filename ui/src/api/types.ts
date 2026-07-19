@@ -808,6 +808,17 @@ type SkillCardStatus = {
 export type SkillStatusEntry = {
   name: string;
   description: string;
+  presentation?: {
+    displayName?: {
+      default: string;
+      localizations: Readonly<Record<string, string>>;
+    };
+    description?: {
+      default: string;
+      localizations: Readonly<Record<string, string>>;
+    };
+  };
+  presentationIssues?: readonly string[];
   source: string;
   filePath: string;
   baseDir: string;

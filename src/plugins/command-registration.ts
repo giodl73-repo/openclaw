@@ -1,3 +1,4 @@
+import { normalizeLocalizedText } from "@openclaw/localization-core";
 /** Validates and registers plugin command definitions into the global command registry. */
 import {
   normalizeLowercaseStringOrEmpty,
@@ -133,6 +134,26 @@ export function validatePluginCommandDefinition(
   if (!command.description.trim()) {
     return "Command description cannot be empty";
   }
+  if (
+    command.descriptionLocalizations !== undefined &&
+    !isRecord(command.descriptionLocalizations)
+  ) {
+    return "Command descriptionLocalizations must be an object";
+  }
+  for (const [locale, description] of Object.entries(command.descriptionLocalizations ?? {})) {
+    if (typeof description !== "string") {
+      return `Description localization "${locale}" must be a string`;
+    }
+    if (!description.trim()) {
+      return `Description localization "${locale}" cannot be empty`;
+    }
+  }
+  const localizedDescription = normalizePluginCommandDescription(command);
+  if (!localizedDescription.value) {
+    return `Command description is invalid: ${localizedDescription.issues
+      .map((issue) => issue.detail)
+      .join(" ")}`;
+  }
   if (command.ownership === "reserved") {
     if (!opts?.allowReservedCommandNames) {
       return "Reserved command ownership is only available to bundled reserved commands";
@@ -209,21 +230,30 @@ export function validatePluginCommandDefinition(
       return `Native progress message "${label}" cannot be empty`;
     }
   }
-  if (
-    command.descriptionLocalizations !== undefined &&
-    !isRecord(command.descriptionLocalizations)
-  ) {
-    return "Command descriptionLocalizations must be an object";
-  }
-  for (const [locale, description] of Object.entries(command.descriptionLocalizations ?? {})) {
-    if (typeof description !== "string") {
-      return `Description localization "${locale}" must be a string`;
-    }
-    if (!description.trim()) {
-      return `Description localization "${locale}" cannot be empty`;
-    }
-  }
   return null;
+}
+
+export function normalizePluginCommandDescription(command: {
+  description: string;
+  descriptionLocalizations?: Readonly<Record<string, string>>;
+}) {
+  const translations = Object.values(command.descriptionLocalizations ?? {});
+  // Legacy plugin metadata had no size limits. Preserve registration compatibility;
+  // bounded Gateway and native-platform projections enforce their own envelopes.
+  return normalizeLocalizedText(command.description, {
+    scope: "external",
+    legacyLocalizations: command.descriptionLocalizations,
+    maxLength: Math.max(
+      2_000,
+      command.description.length,
+      ...translations.map((value) => value.length),
+    ),
+    maxLocalizations: Math.max(64, translations.length),
+    maxAggregateLength: Math.max(
+      65_536,
+      command.description.length + translations.reduce((total, value) => total + value.length, 0),
+    ),
+  });
 }
 
 function validateAgentPromptGuidance(index: number, guidance: AgentPromptGuidance): string | null {
@@ -342,11 +372,22 @@ export function registerPluginCommand(
 
   const name = command.name.trim();
   const normalizedName = normalizeLowercaseStringOrEmpty(name);
-  const description = command.description.trim();
+  const localizedDescription = normalizePluginCommandDescription(command);
+  if (!localizedDescription.value) {
+    return {
+      ok: false,
+      error: `Command description is invalid: ${localizedDescription.issues
+        .map((issue) => issue.detail)
+        .join(" ")}`,
+    };
+  }
   const normalizedCommand = {
     ...command,
     name,
-    description,
+    description: localizedDescription.value.default,
+    ...(Object.keys(localizedDescription.value.localizations).length > 0
+      ? { descriptionLocalizations: localizedDescription.value.localizations }
+      : { descriptionLocalizations: undefined }),
     ...(command.channels
       ? { channels: command.channels.map((channel) => normalizeLowercaseStringOrEmpty(channel)) }
       : {}),

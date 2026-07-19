@@ -33,6 +33,11 @@
       "types": "./dist/locale-registry.d.mts",
       "import": "./dist/locale-registry.mjs",
       "default": "./dist/locale-registry.mjs"
+    },
+    "./metadata": {
+      "types": "./dist/metadata.d.mts",
+      "import": "./dist/metadata.mjs",
+      "default": "./dist/metadata.mjs"
     }
   },
   "scripts": {

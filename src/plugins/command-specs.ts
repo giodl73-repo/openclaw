@@ -18,6 +18,7 @@ type PluginCommandSpecOptions = {
 type PluginCommandEntrySpec = {
   name: string;
   description: string;
+  descriptionLocalizations?: Record<string, string>;
   acceptsArgs: boolean;
   nativeName?: string;
 };
@@ -153,6 +154,9 @@ function serializePluginCommandEntrySpec(
   return {
     name: resolvePluginTextName(cmd),
     description: cmd.description.trim(),
+    ...(cmd.descriptionLocalizations
+      ? { descriptionLocalizations: cmd.descriptionLocalizations }
+      : {}),
     acceptsArgs: cmd.acceptsArgs ?? false,
     ...(nativeName ? { nativeName } : {}),
   };
