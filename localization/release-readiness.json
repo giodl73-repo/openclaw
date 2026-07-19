@@ -1,0 +1,685 @@
+{
+  "version": 1,
+  "status": "qualified-maturity-only",
+  "unqualifiedFullProductClaim": false,
+  "openClawOwnedLocalizationComplete": false,
+  "localeCount": 21,
+  "surfaceCount": 15,
+  "platformConstraints": [
+    {
+      "locale": "th",
+      "surface": "docs"
+    },
+    {
+      "locale": "fa",
+      "surface": "docs"
+    }
+  ],
+  "locales": {
+    "zh-CN": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "zh-TW": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "pt-BR": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "de": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "es": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "ja-JP": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "ko": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "fr": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "hi": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "ar": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "it": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "tr": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "uk": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "id": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "pl": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "th": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": [
+        "docs"
+      ]
+    },
+    "vi": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "nl": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "fa": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": [
+        "docs"
+      ]
+    },
+    "ru": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    },
+    "sv": {
+      "blockingSurfaces": [
+        "control-ui",
+        "cli-onboarding",
+        "channel-plugin-setup",
+        "cli",
+        "tui",
+        "runtime",
+        "gateway-errors",
+        "server-rendered-channels",
+        "command-metadata",
+        "telegram-command-menu",
+        "discord-command-menu",
+        "skill-metadata",
+        "android",
+        "apple",
+        "docs"
+      ],
+      "completeSurfaces": [],
+      "platformConstrainedSurfaces": []
+    }
+  },
+  "sources": {
+    "coverage": "localization/coverage.json",
+    "simplerScript": "localization/simple-script-backfill.json",
+    "complexScript": "localization/complex-script-backfill.json"
+  },
+  "conformance": {
+    "complexScriptCatalogs": "ui/src/i18n/test/translate.test.ts",
+    "rtlInterpolation": "packages/localization-core/src/catalog.test.ts",
+    "rtlTerminalIsolation": "src/tui/tui-formatters.test.ts"
+  },
+  "backfill": {
+    "zh-CN": {
+      "blockers": [
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "zh-TW": {
+      "blockers": [
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "pt-BR": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "de": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "es": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "ja-JP": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "ko": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "fr": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "it": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "tr": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "uk": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "id": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "pl": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "vi": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "nl": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "ru": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "sv": {
+      "blockers": [
+        "control-ui-unsupported",
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "docs-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "hi": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "ar": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "th": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "docs-platform-constrained",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    },
+    "fa": {
+      "blockers": [
+        "cli-onboarding-unsupported",
+        "cli-unsupported",
+        "tui-unsupported",
+        "docs-platform-constrained",
+        "native-quality-advisories",
+        "human-review-pending"
+      ],
+      "promotionEligible": false
+    }
+  }
+}

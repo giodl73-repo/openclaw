@@ -36,7 +36,7 @@
     "control-ui": {
       "owner": "control-ui",
       "artifactId": "control-ui-web",
-      "catalogRevision": "sha256:dfee9146049f27721d407e5cc7ada55aa1d67228052936ce8542e2a8ec9aa5a8",
+      "catalogRevision": "sha256:40d451b1682312ffdd9b1709bef49bf670666f072d1fa39ff04bcd889c489327",
       "source": "ui/src/i18n/locales/en.ts",
       "catalogs": "ui/src/i18n/locales",
       "migration": "migrated",

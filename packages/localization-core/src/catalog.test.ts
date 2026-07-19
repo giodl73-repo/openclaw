@@ -26,7 +26,7 @@ describe("localization catalogs", () => {
     ["en", 2, "2 files"],
     ["ru", 2, "2 файла"],
     ["pl", 2, "2 pliki"],
-    ["ar", 2, "2 ملفان"],
+    ["ar", 2, "\u20682\u2069 ملفان"],
   ] as const)("renders plural categories for %s", (locale, count, expected) => {
     const snapshot = createCatalogSnapshot({
       catalogRevision: "test",
@@ -108,6 +108,41 @@ describe("localization catalogs", () => {
         fallback: "Approve {target}?",
       }),
     ).toBe("Approve gateway?");
+  });
+
+  it("isolates interpolated literals in right-to-left messages", () => {
+    const snapshot = createCatalogSnapshot({
+      catalogRevision: "test",
+      catalogs: { ar: { "core.command": "تشغيل {command} للطلب {id}" } },
+    });
+    const context = createLocalizationContext({
+      locale: "ar",
+      source: "explicit-user",
+      audience: "operator",
+    });
+    expect(
+      renderLocalizedMessage(snapshot, context, {
+        key: "core.command",
+        params: { command: "/status", id: "req-123" },
+        fallback: "Run {command} for request {id}",
+      }),
+    ).toBe("تشغيل \u2068/status\u2069 للطلب \u2068req-123\u2069");
+  });
+
+  it("isolates interpolated literals in right-to-left English fallback", () => {
+    const snapshot = createCatalogSnapshot({ catalogRevision: "test", catalogs: {} });
+    const context = createLocalizationContext({
+      locale: "fa",
+      source: "explicit-user",
+      audience: "operator",
+    });
+    expect(
+      renderLocalizedMessage(snapshot, context, {
+        key: "core.command",
+        params: { command: "/status" },
+        fallback: "Run {command}",
+      }),
+    ).toBe("Run \u2068/status\u2069");
   });
 
   it("uses the matched catalog locale for plural fallback", () => {

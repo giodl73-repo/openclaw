@@ -1,12 +1,5 @@
 {
-  "fallbacks": {
-    "gateway.approval.notFound": [
-      "ar",
-      "fa",
-      "hi",
-      "th"
-    ]
-  },
+  "fallbacks": {},
   "sourceHash": "5d8931830d2daf6451a8431bbbc2dfffc4860eb92726e5aba5d7926379db468b",
   "version": 1
 }

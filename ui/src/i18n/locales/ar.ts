@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const ar: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "معرّف الموافقة غير معروف أو منتهي الصلاحية.",
+    },
+  },
   common: {
     health: "الصحة",
     ok: "حسنًا",

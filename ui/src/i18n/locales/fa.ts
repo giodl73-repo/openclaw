@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const fa: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "شناسهٔ تأیید ناشناخته است یا منقضی شده است.",
+    },
+  },
   common: {
     health: "سلامت",
     ok: "تأیید",

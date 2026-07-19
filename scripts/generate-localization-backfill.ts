@@ -8,11 +8,16 @@ import { getAndroidLocaleDirectory } from "./android-app-i18n.js";
 import { APPLE_I18N_LOCALES } from "./apple-app-i18n.js";
 import { GENERATED_LOCALES } from "./lib/docs-i18n-locales.mjs";
 import {
+  COMPLEX_SCRIPT_LOCALES,
+  COMPLEX_SCRIPT_PROFILES,
+  evaluateLocalizationReleaseReadiness,
   evaluateBackfillLocale,
   SIMPLER_SCRIPT_LOCALES,
   validateBackfillLocalePartition,
   type BackfillLocaleEvidence,
+  type BackfillLocaleState,
 } from "./lib/localization-backfill-contract.js";
+import { DOCS_PLATFORM_CONSTRAINED_LOCALES } from "./lib/localization-surface-convergence.js";
 import {
   checkNativeLocaleArtifacts,
   collectNativeI18nEntries,
@@ -38,8 +43,11 @@ type AppleCatalog = {
 };
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const outputPath = path.join(ROOT, "localization", "simple-script-backfill.json");
-const reviewManifestPath = path.join(ROOT, "localization", "simple-script-reviews.json");
+const localizationDir = path.join(ROOT, "localization");
+const simpleOutputPath = path.join(localizationDir, "simple-script-backfill.json");
+const complexOutputPath = path.join(localizationDir, "complex-script-backfill.json");
+const releaseOutputPath = path.join(localizationDir, "release-readiness.json");
+const coveragePath = path.join(localizationDir, "coverage.json");
 const fallbackBaselinePath = path.join(
   ROOT,
   "ui",
@@ -60,22 +68,6 @@ if (partitionIssues.length > 0) {
 const fallbackBaseline = JSON.parse(
   fs.readFileSync(fallbackBaselinePath, "utf8"),
 ) as FallbackBaseline;
-const reviewManifest = JSON.parse(fs.readFileSync(reviewManifestPath, "utf8")) as ReviewManifest;
-const reviewLocales = Object.keys(reviewManifest.locales).toSorted();
-if (
-  reviewManifest.version !== 1 ||
-  reviewLocales.join("\u0000") !== [...SIMPLER_SCRIPT_LOCALES].toSorted().join("\u0000")
-) {
-  throw new Error("simple-script review manifest must contain every simpler-script locale exactly");
-}
-for (const [locale, review] of Object.entries(reviewManifest.locales)) {
-  if (
-    (review.status !== "pending" && review.status !== "reviewed") ||
-    (review.status === "reviewed" && !review.languageOwner?.trim())
-  ) {
-    throw new Error(`invalid simple-script review evidence for ${locale}`);
-  }
-}
 const fallbackCounts = new Map<string, number>();
 for (const locales of Object.values(fallbackBaseline.fallbacks)) {
   for (const locale of locales) {
@@ -91,69 +83,158 @@ for (const finding of nativeFindings) {
 }
 
 const docsLocales = new Set<string>(GENERATED_LOCALES.map((entry) => entry.dir));
+const constrainedDocsLocales = new Set<string>(DOCS_PLATFORM_CONSTRAINED_LOCALES);
 const nativeLocales = new Set<string>(NATIVE_I18N_LOCALES);
 const appleLocales = new Set<string>(APPLE_I18N_LOCALES);
 const appleCatalog = JSON.parse(
   fs.readFileSync(path.join(ROOT, "apps", "ios", "Resources", "Localizable.xcstrings"), "utf8"),
 ) as AppleCatalog;
 const appleCatalogEntries = Object.values(appleCatalog.strings ?? {});
-const locales = Object.fromEntries(
-  SIMPLER_SCRIPT_LOCALES.map((locale) => {
-    const review = reviewManifest.locales[locale];
-    if (!review) {
-      throw new Error(`missing simple-script review evidence for ${locale}`);
+const readReviewManifest = (
+  fileName: string,
+  expectedLocales: readonly string[],
+): ReviewManifest => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(localizationDir, fileName), "utf8")) as
+    | ReviewManifest
+    | undefined;
+  const reviewLocales = Object.keys(manifest?.locales ?? {}).toSorted();
+  if (
+    manifest?.version !== 1 ||
+    reviewLocales.join("\u0000") !== [...expectedLocales].toSorted().join("\u0000")
+  ) {
+    throw new Error(`${fileName} must contain every scoped locale exactly`);
+  }
+  for (const [locale, review] of Object.entries(manifest.locales)) {
+    if (
+      (review.status !== "pending" && review.status !== "reviewed") ||
+      (review.status === "reviewed" && !review.languageOwner?.trim())
+    ) {
+      throw new Error(`invalid review evidence for ${locale} in ${fileName}`);
     }
-    const androidArtifactPath = path.join(
-      ROOT,
-      "apps",
-      "android",
-      "app",
-      "src",
-      "main",
-      "res",
-      getAndroidLocaleDirectory(locale),
-      "strings.xml",
-    );
-    const evidence: BackfillLocaleEvidence = {
-      controlUi: {
-        supported: supportsLocale(CONTROL_UI_LOCALES, locale),
-        fallbackCount: fallbackCounts.get(locale) ?? 0,
-      },
-      cliOnboarding: { supported: supportsLocale(WIZARD_LOCALES, locale) },
-      cli: { supported: supportsLocale(CLI_SUPPORTED_LOCALES, locale) },
-      tui: { supported: supportsLocale(TUI_SUPPORTED_LOCALES, locale) },
-      docs: { supported: docsLocales.has(locale) },
-      native: {
-        sharedArtifact: nativeLocales.has(locale),
-        androidArtifact: fs.existsSync(androidArtifactPath),
-        appleArtifact:
-          appleLocales.has(locale) &&
-          appleCatalogEntries.length > 0 &&
-          appleCatalogEntries.every((entry) =>
-            Boolean(entry.localizations?.[locale]?.stringUnit?.value?.trim()),
-          ),
-        qualityAdvisories: nativeFindingCounts.get(locale) ?? 0,
-      },
-      review,
-    };
-    return [locale, evaluateBackfillLocale(evidence)];
-  }),
-);
+  }
+  return manifest;
+};
 
-const report = {
+const buildLocaleStates = (
+  scopedLocales: readonly string[],
+  reviewManifest: ReviewManifest,
+): Record<string, BackfillLocaleState> =>
+  Object.fromEntries(
+    scopedLocales.map((locale) => {
+      const review = reviewManifest.locales[locale];
+      if (!review) {
+        throw new Error(`missing localization review evidence for ${locale}`);
+      }
+      const androidArtifactPath = path.join(
+        ROOT,
+        "apps",
+        "android",
+        "app",
+        "src",
+        "main",
+        "res",
+        getAndroidLocaleDirectory(locale),
+        "strings.xml",
+      );
+      const docsStatus = constrainedDocsLocales.has(locale)
+        ? "platform-constrained"
+        : docsLocales.has(locale)
+          ? "supported"
+          : "unsupported";
+      const evidence: BackfillLocaleEvidence = {
+        controlUi: {
+          supported: supportsLocale(CONTROL_UI_LOCALES, locale),
+          fallbackCount: fallbackCounts.get(locale) ?? 0,
+        },
+        cliOnboarding: { supported: supportsLocale(WIZARD_LOCALES, locale) },
+        cli: { supported: supportsLocale(CLI_SUPPORTED_LOCALES, locale) },
+        tui: { supported: supportsLocale(TUI_SUPPORTED_LOCALES, locale) },
+        docs: { status: docsStatus },
+        native: {
+          sharedArtifact: nativeLocales.has(locale),
+          androidArtifact: fs.existsSync(androidArtifactPath),
+          appleArtifact:
+            appleLocales.has(locale) &&
+            appleCatalogEntries.length > 0 &&
+            appleCatalogEntries.every((entry) =>
+              Boolean(entry.localizations?.[locale]?.stringUnit?.value?.trim()),
+            ),
+          qualityAdvisories: nativeFindingCounts.get(locale) ?? 0,
+        },
+        review,
+      };
+      return [locale, evaluateBackfillLocale(evidence)];
+    }),
+  );
+
+const simpleLocales = buildLocaleStates(
+  SIMPLER_SCRIPT_LOCALES,
+  readReviewManifest("simple-script-reviews.json", SIMPLER_SCRIPT_LOCALES),
+);
+const complexLocales = buildLocaleStates(
+  COMPLEX_SCRIPT_LOCALES,
+  readReviewManifest("complex-script-reviews.json", COMPLEX_SCRIPT_LOCALES),
+);
+const simpleReport = {
   version: 1,
   scope: "registered-non-rtl-simple-shaping",
-  locales,
+  locales: simpleLocales,
 };
-const serialized = `${JSON.stringify(report, null, 2)}\n`;
-if (write) {
-  fs.writeFileSync(outputPath, serialized);
-  process.stdout.write(`wrote ${path.relative(process.cwd(), outputPath)}\n`);
-} else {
+const complexReport = {
+  version: 1,
+  scope: "registered-complex-script-and-rtl",
+  profiles: COMPLEX_SCRIPT_PROFILES,
+  locales: complexLocales,
+};
+const coverage = JSON.parse(fs.readFileSync(coveragePath, "utf8")) as {
+  surfaces: Record<string, { locales: Record<string, { maturity: string }> }>;
+};
+const releaseReadiness = evaluateLocalizationReleaseReadiness(coverage);
+const allBackfillStates = { ...simpleLocales, ...complexLocales };
+const releaseReport = {
+  version: 1,
+  ...releaseReadiness,
+  sources: {
+    coverage: "localization/coverage.json",
+    simplerScript: "localization/simple-script-backfill.json",
+    complexScript: "localization/complex-script-backfill.json",
+  },
+  conformance: {
+    complexScriptCatalogs: "ui/src/i18n/test/translate.test.ts",
+    rtlInterpolation: "packages/localization-core/src/catalog.test.ts",
+    rtlTerminalIsolation: "src/tui/tui-formatters.test.ts",
+  },
+  backfill: Object.fromEntries(
+    Object.entries(allBackfillStates).map(([locale, state]) => [
+      locale,
+      {
+        blockers: state.blockers,
+        promotionEligible: state.promotionEligible,
+      },
+    ]),
+  ),
+};
+
+const outputs = [
+  [simpleOutputPath, simpleReport],
+  [complexOutputPath, complexReport],
+  [releaseOutputPath, releaseReport],
+] as const;
+const stale: string[] = [];
+for (const [outputPath, report] of outputs) {
+  const serialized = `${JSON.stringify(report, null, 2)}\n`;
+  if (write) {
+    fs.writeFileSync(outputPath, serialized);
+    process.stdout.write(`wrote ${path.relative(process.cwd(), outputPath)}\n`);
+    continue;
+  }
   const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, "utf8") : "";
   if (current !== serialized) {
-    throw new Error(
-      "simple-script localization backfill report is stale; run pnpm localization:backfill:sync",
-    );
+    stale.push(path.relative(ROOT, outputPath));
   }
+}
+if (stale.length > 0) {
+  throw new Error(
+    `localization backfill reports are stale: ${stale.join(", ")}; run pnpm localization:backfill:sync`,
+  );
 }

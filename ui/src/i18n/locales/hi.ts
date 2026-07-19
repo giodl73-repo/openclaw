@@ -3,6 +3,11 @@
 import type { TranslationMap } from "../lib/types.ts";
 
 export const hi: TranslationMap = {
+  gateway: {
+    approval: {
+      notFound: "अनुमोदन आईडी अज्ञात है या उसकी समय-सीमा समाप्त हो चुकी है।",
+    },
+  },
   common: {
     health: "स्वास्थ्य",
     ok: "ठीक है",
