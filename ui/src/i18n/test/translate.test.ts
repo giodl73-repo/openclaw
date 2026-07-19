@@ -150,7 +150,7 @@ describe("i18n", () => {
     vi.stubGlobal("navigator", {
       language: "he-IL",
       languages: ["he-IL", "de-DE"],
-    } as Navigator);
+    });
     const fresh = await importFreshTranslate();
     await vi.waitFor(() => {
       expect(fresh.i18n.getLocale()).toBe("de");

@@ -1243,7 +1243,7 @@
     "docs": {
       "owner": "docs",
       "artifactId": "openclaw-docs",
-      "catalogRevision": "sha256:1d0e502e49da9aaca575744d30e71d68e997b0ee79b27998ea05e69a6f77284a",
+      "catalogRevision": "sha256:71704be0be657de591a93bfef7ce55964478c1b21dfc59e16e7e43d8e1068866",
       "source": "docs",
       "catalogs": "docs/.i18n",
       "migration": "external",
@@ -1306,7 +1306,7 @@
           "maturity": "partial"
         },
         "th": {
-          "maturity": "partial"
+          "maturity": "platform-constrained"
         },
         "vi": {
           "maturity": "partial"
@@ -1315,7 +1315,7 @@
           "maturity": "partial"
         },
         "fa": {
-          "maturity": "partial"
+          "maturity": "platform-constrained"
         },
         "ru": {
           "maturity": "partial"
