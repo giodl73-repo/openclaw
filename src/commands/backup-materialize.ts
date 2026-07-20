@@ -388,7 +388,7 @@ function formatResult(result: BackupMaterializeResult): string {
   ].join("\n");
 }
 
-async function materializeContinuityArchive(
+export async function materializeContinuityArchive(
   opts: BackupMaterializeOptions,
 ): Promise<BackupMaterializeResult> {
   const archivePath = resolveUserPath(opts.archive);

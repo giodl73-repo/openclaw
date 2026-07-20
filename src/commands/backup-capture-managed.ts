@@ -21,6 +21,12 @@ import {
   type ContinuityArchivePlan,
   resolveContinuityArchivePlanFromPaths,
 } from "../continuity/archive-plan.js";
+import {
+  CONTINUITY_WAKE_DESCRIPTOR_VERSION,
+  type ContinuityWakeDescriptor,
+  resolveContinuityWakeDescriptor,
+  resolveContinuityWakeDescriptorFromStore,
+} from "../continuity/wake-descriptor.js";
 import { sha256File, sha256Hex } from "../infra/crypto-digest.js";
 import { ensureDurableDirectoryTree, syncDirectoryEntry } from "../infra/fs-durability.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
@@ -76,6 +82,7 @@ export type ManagedFinalCaptureSuccess = {
   stagingCleaned: true;
   continuityCapture: ContinuityArchiveCapture;
   continuityObligations: ContinuityArchiveObligations;
+  continuityWake: ContinuityWakeDescriptor;
 };
 
 export type ManagedFinalCaptureFailureCode =
@@ -100,6 +107,9 @@ export type ManagedFinalCaptureResult = ManagedFinalCaptureSuccess | ManagedFina
 
 export type ManagedFinalCaptureHooks = {
   resolvePlan?: (request: ManagedFinalCaptureRequest) => Promise<ContinuityArchivePlan>;
+  resolveWakeDescriptor?: (
+    request: ManagedFinalCaptureRequest,
+  ) => Promise<ContinuityWakeDescriptor>;
   afterArchiveCreated?: () => Promise<void>;
 };
 
@@ -231,9 +241,10 @@ export function parseManagedFinalCaptureRequest(raw: string): ManagedFinalCaptur
   };
 }
 
-async function resolveManagedFinalCapturePlan(
+async function resolveManagedFinalCaptureInputs(
   request: ManagedFinalCaptureRequest,
-): Promise<ContinuityArchivePlan> {
+  journaledWake?: ContinuityWakeDescriptor,
+): Promise<[ContinuityArchivePlan, ContinuityWakeDescriptor]> {
   const configRead = await readConfigFileSnapshotWithPluginMetadata({
     observe: false,
     isolateEnv: true,
@@ -247,7 +258,7 @@ async function resolveManagedFinalCapturePlan(
     plugins: metadata ? collectPluginSchemaMetadata(metadata.manifestRegistry) : [],
     channels: metadata ? collectChannelSchemaMetadata(metadata.manifestRegistry) : [],
   });
-  return resolveContinuityArchivePlanFromPaths({
+  const plan = await resolveContinuityArchivePlanFromPaths({
     stateDir: backupPlan.stateDir,
     configPath: backupPlan.configPath,
     configRaw: configRead.snapshot.raw ?? "",
@@ -265,6 +276,14 @@ async function resolveManagedFinalCapturePlan(
     ],
     nowMs: request.capture.capturedAtMs,
   });
+  const wake =
+    journaledWake ??
+    (await resolveContinuityWakeDescriptorFromStore(
+      configRead.snapshot.config.cron?.store,
+      process.env.OPENCLAW_SKIP_CRON !== "1" && configRead.snapshot.config.cron?.enabled !== false,
+      request.capture.capturedAtMs,
+    ));
+  return [plan, wake];
 }
 
 function canonicalJson(value: unknown): string {
@@ -450,6 +469,7 @@ function parseCommittedResult(value: unknown): ManagedFinalCaptureSuccess {
     "stagingCleaned",
     "continuityCapture",
     "continuityObligations",
+    "continuityWake",
   ]);
   const holdRevision = value.holdRevision;
   const capturedAtMs = value.capturedAtMs;
@@ -496,6 +516,56 @@ function parseCommittedResult(value: unknown): ManagedFinalCaptureSuccess {
     stagingCleaned: true,
     continuityCapture: parseContinuityArchiveCapture(value.continuityCapture),
     continuityObligations: parseContinuityArchiveObligations(value.continuityObligations),
+    continuityWake: parseContinuityWakeDescriptor(value.continuityWake),
+  };
+}
+
+function parseContinuityWakeDescriptor(value: unknown): ContinuityWakeDescriptor {
+  if (!isRecord(value)) {
+    throw new Error("Continuity wake descriptor must be an object.");
+  }
+  assertExactFields(value, "Continuity wake descriptor", [
+    "version",
+    "schedulerGeneration",
+    "nextRequiredAt",
+    "reasonClass",
+  ]);
+  const nextRequiredAt = value.nextRequiredAt;
+  const reasonClass = value.reasonClass;
+  if (
+    value.version !== CONTINUITY_WAKE_DESCRIPTOR_VERSION ||
+    typeof value.schedulerGeneration !== "string" ||
+    !PREFIXED_SHA256_PATTERN.test(value.schedulerGeneration)
+  ) {
+    throw new Error("Continuity wake descriptor is invalid.");
+  }
+  if (nextRequiredAt === null) {
+    if (reasonClass !== "none") {
+      throw new Error("Continuity wake descriptor is invalid.");
+    }
+    return {
+      version: CONTINUITY_WAKE_DESCRIPTOR_VERSION,
+      schedulerGeneration: value.schedulerGeneration,
+      nextRequiredAt: null,
+      reasonClass: "none",
+    };
+  }
+  if (typeof nextRequiredAt !== "string") {
+    throw new Error("Continuity wake descriptor is invalid.");
+  }
+  const nextRequiredAtMs = Date.parse(nextRequiredAt);
+  if (
+    reasonClass !== "cron" ||
+    !Number.isFinite(nextRequiredAtMs) ||
+    new Date(nextRequiredAtMs).toISOString() !== nextRequiredAt
+  ) {
+    throw new Error("Continuity wake descriptor is invalid.");
+  }
+  return {
+    version: CONTINUITY_WAKE_DESCRIPTOR_VERSION,
+    schedulerGeneration: value.schedulerGeneration,
+    nextRequiredAt,
+    reasonClass: "cron",
   };
 }
 
@@ -566,7 +636,8 @@ async function tryReplayCommittedCapture(
       !isRecord(intent) ||
       !Object.hasOwn(intent, "request") ||
       !Object.hasOwn(intent, "planIdentity") ||
-      Object.keys(intent).length !== 2 ||
+      !Object.hasOwn(intent, "continuityWake") ||
+      Object.keys(intent).length !== 3 ||
       canonicalJson(intent.request) !== canonicalJson(request) ||
       typeof intent.planIdentity !== "string" ||
       !/^[a-f0-9]{64}$/u.test(intent.planIdentity)
@@ -578,8 +649,12 @@ async function tryReplayCommittedCapture(
         "Continuity capture committed result has invalid intent evidence.",
       );
     }
+    const intentWake = parseContinuityWakeDescriptor(intent.continuityWake);
     const result = parseCommittedResult(committed);
-    if (result.planIdentity !== intent.planIdentity) {
+    if (
+      result.planIdentity !== intent.planIdentity ||
+      canonicalJson(result.continuityWake) !== canonicalJson(intentWake)
+    ) {
       throw new ManagedFinalCaptureError(
         "journal",
         "continuity.capture.journal_conflict",
@@ -588,6 +663,55 @@ async function tryReplayCommittedCapture(
       );
     }
     return await verifyCommittedReplay(request, result);
+  });
+}
+
+async function tryReadJournaledWakeDescriptor(
+  request: ManagedFinalCaptureRequest,
+): Promise<ContinuityWakeDescriptor | undefined> {
+  return runJournalPhase(async () => {
+    const journalRoot = path.resolve(request.journalRoot);
+    try {
+      await fs.lstat(journalRoot);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    }
+    await ensureDurableDirectoryTree(journalRoot, { requirePrivateExisting: true });
+    const journalDir = path.join(journalRoot, sha256Hex(request.authority.captureIdentity));
+    try {
+      await fs.lstat(journalDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    }
+    await ensureDurableDirectoryTree(journalDir, { requirePrivateExisting: true });
+    const intent = await readJournalJsonIfPresent(path.join(journalDir, "intent.json"));
+    if (intent === undefined) {
+      return undefined;
+    }
+    if (
+      !isRecord(intent) ||
+      !Object.hasOwn(intent, "request") ||
+      !Object.hasOwn(intent, "planIdentity") ||
+      !Object.hasOwn(intent, "continuityWake") ||
+      Object.keys(intent).length !== 3 ||
+      canonicalJson(intent.request) !== canonicalJson(request) ||
+      typeof intent.planIdentity !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(intent.planIdentity)
+    ) {
+      throw new ManagedFinalCaptureError(
+        "journal",
+        "continuity.capture.journal_conflict",
+        "quarantine",
+        "Continuity capture journal has invalid intent evidence.",
+      );
+    }
+    return parseContinuityWakeDescriptor(intent.continuityWake);
   });
 }
 
@@ -642,9 +766,26 @@ export async function executeManagedFinalCapture(
   if (committedReplay) {
     return committedReplay;
   }
+  const journaledWake = await tryReadJournaledWakeDescriptor(request);
   let plan: ContinuityArchivePlan;
+  let continuityWake: ContinuityWakeDescriptor;
   try {
-    plan = await (hooks.resolvePlan ?? resolveManagedFinalCapturePlan)(request);
+    if (!hooks.resolvePlan && !hooks.resolveWakeDescriptor) {
+      [plan, continuityWake] = await resolveManagedFinalCaptureInputs(request, journaledWake);
+    } else {
+      [plan, continuityWake] = await Promise.all([
+        hooks.resolvePlan
+          ? hooks.resolvePlan(request)
+          : resolveManagedFinalCaptureInputs(request, journaledWake).then(
+              ([resolvedPlan]) => resolvedPlan,
+            ),
+        journaledWake
+          ? Promise.resolve(journaledWake)
+          : hooks.resolveWakeDescriptor
+            ? hooks.resolveWakeDescriptor(request)
+            : resolveContinuityWakeDescriptor(),
+      ]);
+    }
   } catch (error) {
     throw new ManagedFinalCaptureError(
       "plan",
@@ -672,17 +813,28 @@ export async function executeManagedFinalCapture(
     await ensureDurableDirectoryTree(journalDir, { requirePrivateExisting: true });
     const intentPath = path.join(journalDir, "intent.json");
     const resultPath = path.join(journalDir, "result.json");
-    const intent = { request, planIdentity };
+    const intent = { request, planIdentity, continuityWake };
     const existingIntent = await readJournalJsonIfPresent(intentPath);
     if (existingIntent === undefined) {
       await writeOrRequirePrivateJson(intentPath, intent);
-    } else if (canonicalJson(existingIntent) !== canonicalJson(intent)) {
-      throw new ManagedFinalCaptureError(
-        "journal",
-        "continuity.capture.journal_conflict",
-        "quarantine",
-        "Continuity capture identity is already bound to a different request or plan.",
-      );
+    } else {
+      if (
+        !isRecord(existingIntent) ||
+        !Object.hasOwn(existingIntent, "request") ||
+        !Object.hasOwn(existingIntent, "planIdentity") ||
+        !Object.hasOwn(existingIntent, "continuityWake") ||
+        Object.keys(existingIntent).length !== 3 ||
+        canonicalJson(existingIntent.request) !== canonicalJson(request) ||
+        existingIntent.planIdentity !== planIdentity
+      ) {
+        throw new ManagedFinalCaptureError(
+          "journal",
+          "continuity.capture.journal_conflict",
+          "quarantine",
+          "Continuity capture identity is already bound to a different request or plan.",
+        );
+      }
+      continuityWake = parseContinuityWakeDescriptor(existingIntent.continuityWake);
     }
     return {
       resultPath,
@@ -756,6 +908,7 @@ export async function executeManagedFinalCapture(
     stagingCleaned: true,
     continuityCapture: created.continuityCapture,
     continuityObligations: created.continuityObligations,
+    continuityWake,
   };
   try {
     await runJournalPhase(async () => await writeOrRequirePrivateJson(journal.resultPath, result));
