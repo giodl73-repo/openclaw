@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   backupActivateManagedCommand: vi.fn(),
   managedRestoreRequestFailure: vi.fn(),
   readManagedRestoreRequestFromStdin: vi.fn(),
+  backupCaptureManagedCommand: vi.fn(),
+  managedFinalCaptureRequestFailure: vi.fn(),
+  readManagedFinalCaptureRequestFromStdin: vi.fn(),
   backupCreateCommand: vi.fn(),
   backupMaterializeCommand: vi.fn(),
   backupPlanRestoreCommand: vi.fn(),
@@ -27,6 +30,12 @@ vi.mock("../../commands/backup-activate-managed.js", () => ({
   backupActivateManagedCommand: mocks.backupActivateManagedCommand,
   managedRestoreRequestFailure: mocks.managedRestoreRequestFailure,
   readManagedRestoreRequestFromStdin: mocks.readManagedRestoreRequestFromStdin,
+}));
+
+vi.mock("../../commands/backup-capture-managed.js", () => ({
+  backupCaptureManagedCommand: mocks.backupCaptureManagedCommand,
+  managedFinalCaptureRequestFailure: mocks.managedFinalCaptureRequestFailure,
+  readManagedFinalCaptureRequestFromStdin: mocks.readManagedFinalCaptureRequestFromStdin,
 }));
 
 vi.mock("../../commands/backup.js", () => ({
@@ -64,6 +73,8 @@ describe("registerBackupCommand", () => {
     vi.clearAllMocks();
     mocks.backupActivateManagedCommand.mockResolvedValue(undefined);
     mocks.readManagedRestoreRequestFromStdin.mockResolvedValue('{"version":"test"}');
+    mocks.backupCaptureManagedCommand.mockResolvedValue(undefined);
+    mocks.readManagedFinalCaptureRequestFromStdin.mockResolvedValue('{"version":"capture-test"}');
     backupCreateCommand.mockResolvedValue(undefined);
     mocks.backupMaterializeCommand.mockResolvedValue(undefined);
     mocks.backupPlanRestoreCommand.mockResolvedValue(undefined);
@@ -166,6 +177,38 @@ describe("registerBackupCommand", () => {
     expect(mocks.backupActivateManagedCommand).toHaveBeenCalledWith(runtime, '{"version":"test"}', {
       json: true,
     });
+  });
+
+  it("runs managed final capture from a strict stdin request", async () => {
+    await runCli(["backup", "capture", "--managed", "--json"]);
+
+    expect(mocks.readManagedFinalCaptureRequestFromStdin).toHaveBeenCalledTimes(1);
+    expect(mocks.backupCaptureManagedCommand).toHaveBeenCalledWith(
+      runtime,
+      '{"version":"capture-test"}',
+      { json: true },
+    );
+  });
+
+  it("requires JSON output for managed final capture", async () => {
+    await runCli(["backup", "capture", "--managed"]);
+
+    expect(runtime.error).toHaveBeenCalledWith("backup capture requires --managed --json.");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(mocks.readManagedFinalCaptureRequestFromStdin).not.toHaveBeenCalled();
+    expect(mocks.backupCaptureManagedCommand).not.toHaveBeenCalled();
+  });
+
+  it("returns a typed failure when the managed capture request cannot be read", async () => {
+    const error = new Error("request too large");
+    mocks.readManagedFinalCaptureRequestFromStdin.mockRejectedValue(error);
+
+    await runCli(["backup", "capture", "--managed", "--json"]);
+
+    expect(mocks.managedFinalCaptureRequestFailure).toHaveBeenCalledWith(runtime, error, {
+      json: true,
+    });
+    expect(mocks.backupCaptureManagedCommand).not.toHaveBeenCalled();
   });
 
   it("returns a typed failure when the managed stdin request cannot be read", async () => {
