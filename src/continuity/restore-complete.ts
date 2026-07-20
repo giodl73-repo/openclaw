@@ -11,7 +11,7 @@ import {
 } from "./archive-obligations.js";
 import type { ContinuityWakeDescriptor } from "./wake-descriptor.js";
 
-const RESTORE_COMPLETE_VERSION = "continuity-restore-complete/v1";
+const RESTORE_COMPLETE_VERSION = "continuity-restore-complete/v2";
 const RESTORE_COMPLETE_OUTCOME_VERSION = "continuity-restore-complete-result/v1";
 const PREFIXED_SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
@@ -62,6 +62,7 @@ export type ContinuityRestoreCompleteEvidence = {
   operationId: string;
   ownerId: string;
   destinationRuntimeGeneration: string;
+  lifecycleOwnerGeneration: string;
   acceptedRecoveryPoint: AcceptedRecoveryPoint;
   preparationIdentity: string;
   admissionIdentity: string;
@@ -74,6 +75,7 @@ export type ContinuityRestoreCompleteRecord = {
   version: typeof RESTORE_COMPLETE_VERSION;
   ownerId: string;
   destinationRuntimeGeneration: string;
+  lifecycleOwnerGeneration: string;
   recoveryPointId: string;
   manifestSha256: string;
   preparationIdentity: string;
@@ -232,6 +234,7 @@ export function parseContinuityRestoreCompleteEvidence(
     "operationId",
     "ownerId",
     "destinationRuntimeGeneration",
+    "lifecycleOwnerGeneration",
     "acceptedRecoveryPoint",
     "preparationIdentity",
     "admissionIdentity",
@@ -272,6 +275,10 @@ export function parseContinuityRestoreCompleteEvidence(
       parsed.destinationRuntimeGeneration,
       "Destination runtime generation",
     ),
+    lifecycleOwnerGeneration: readEvidenceString(
+      parsed.lifecycleOwnerGeneration,
+      "Lifecycle owner generation",
+    ),
     acceptedRecoveryPoint: {
       recoveryPointId: readEvidenceString(accepted.recoveryPointId, "Recovery-point identity"),
       publicationIdentity: readEvidenceString(accepted.publicationIdentity, "Publication identity"),
@@ -286,7 +293,7 @@ export function parseContinuityRestoreCompleteEvidence(
       ok: true,
       ownerGeneration: readEvidenceString(
         restore.ownerGeneration,
-        "Committed destination generation",
+        "Committed lifecycle owner generation",
       ),
       restoreIdentity: readEvidenceString(restore.restoreIdentity, "Restore identity"),
       planId: readEvidenceString(restore.planId, "Committed restore plan identity"),
@@ -313,13 +320,14 @@ function validateStaticEvidence(evidence: ContinuityRestoreCompleteEvidence): vo
   requireString(evidence.operationId, "Restore-complete operation identity");
   requireString(evidence.ownerId, "Owner identity", PREFIXED_SHA256_PATTERN);
   requireString(evidence.destinationRuntimeGeneration, "Destination runtime generation");
+  requireString(evidence.lifecycleOwnerGeneration, "Lifecycle owner generation");
   requireString(evidence.acceptedRecoveryPoint.recoveryPointId, "Recovery-point identity");
   requireString(evidence.acceptedRecoveryPoint.publicationIdentity, "Publication identity");
   requireString(evidence.acceptedRecoveryPoint.manifestSha256, "Manifest digest", SHA256_PATTERN);
   requireString(evidence.preparationIdentity, "Preparation identity");
   requireString(evidence.admissionIdentity, "Admission identity");
   requireString(evidence.expectedPlanId, "Expected restore plan identity", SHA256_PATTERN);
-  requireString(evidence.restore.ownerGeneration, "Committed destination generation");
+  requireString(evidence.restore.ownerGeneration, "Committed lifecycle owner generation");
   requireString(evidence.restore.restoreIdentity, "Restore identity");
   requireString(evidence.restore.planId, "Committed restore plan identity", SHA256_PATTERN);
   requireString(
@@ -344,7 +352,7 @@ function validateStaticEvidence(evidence: ContinuityRestoreCompleteEvidence): vo
     );
   }
   if (
-    evidence.restore.ownerGeneration !== evidence.destinationRuntimeGeneration ||
+    evidence.restore.ownerGeneration !== evidence.lifecycleOwnerGeneration ||
     evidence.restore.planId !== evidence.expectedPlanId
   ) {
     throw new ContinuityRestoreCompleteError(
@@ -486,6 +494,7 @@ function buildRecord(
     version: RESTORE_COMPLETE_VERSION,
     ownerId: evidence.ownerId,
     destinationRuntimeGeneration: evidence.destinationRuntimeGeneration,
+    lifecycleOwnerGeneration: evidence.lifecycleOwnerGeneration,
     recoveryPointId: evidence.acceptedRecoveryPoint.recoveryPointId,
     manifestSha256: evidence.acceptedRecoveryPoint.manifestSha256,
     preparationIdentity: evidence.preparationIdentity,
@@ -512,6 +521,7 @@ function assertRecordMatchesEvidence(
   if (
     record.ownerId !== evidence.ownerId ||
     record.destinationRuntimeGeneration !== evidence.destinationRuntimeGeneration ||
+    record.lifecycleOwnerGeneration !== evidence.lifecycleOwnerGeneration ||
     record.recoveryPointId !== evidence.acceptedRecoveryPoint.recoveryPointId ||
     record.manifestSha256 !== evidence.acceptedRecoveryPoint.manifestSha256 ||
     record.preparationIdentity !== evidence.preparationIdentity ||
@@ -539,6 +549,7 @@ function validateRestoreCompleteRecord(parsed: unknown): ContinuityRestoreComple
     "version",
     "ownerId",
     "destinationRuntimeGeneration",
+    "lifecycleOwnerGeneration",
     "recoveryPointId",
     "manifestSha256",
     "preparationIdentity",
@@ -575,6 +586,7 @@ function validateRestoreCompleteRecord(parsed: unknown): ContinuityRestoreComple
   for (const value of [
     record.ownerId,
     record.destinationRuntimeGeneration,
+    record.lifecycleOwnerGeneration,
     record.recoveryPointId,
     record.manifestSha256,
     record.preparationIdentity,
@@ -840,6 +852,7 @@ export function openRestoredAdmission(
   expected: {
     ownerId: string;
     destinationRuntimeGeneration: string;
+    lifecycleOwnerGeneration: string;
     restoreReceiptIdentity: string;
     admissionIdentity: string;
     readinessGeneration: string;
@@ -859,6 +872,7 @@ export function openRestoredAdmission(
   if (
     record.ownerId !== expected.ownerId ||
     record.destinationRuntimeGeneration !== expected.destinationRuntimeGeneration ||
+    record.lifecycleOwnerGeneration !== expected.lifecycleOwnerGeneration ||
     record.restoreReceiptIdentity !== expected.restoreReceiptIdentity ||
     record.admissionIdentity !== expected.admissionIdentity ||
     record.readinessGeneration !== expected.readinessGeneration

@@ -4,6 +4,7 @@ import {
   beginGatewayRestartSignalAdmission,
   GatewayDrainingError,
   getActiveGatewayRootWorkCount,
+  isGatewayRestartDraining,
   isGatewaySubordinateWorkAdmissionClosed,
   isGatewayWorkAdmissionClosed,
   markGatewayRestartDraining,
@@ -50,6 +51,18 @@ it("rolls back or releases a generation-bound suspension without resetting roots
   expect(prepared?.release()).toBe(false);
   expect(invalidated).not.toHaveBeenCalled();
   expect(isGatewayWorkAdmissionClosed()).toBe(false);
+});
+
+it("distinguishes reversible suspension from restart drain", () => {
+  const suspension = tryBeginGatewaySuspendAdmission(() => {});
+  expect(suspension?.commit()).toBe(true);
+  expect(isGatewayWorkAdmissionClosed()).toBe(true);
+  expect(isGatewayRestartDraining()).toBe(false);
+
+  markGatewayRestartDraining();
+
+  expect(isGatewayWorkAdmissionClosed()).toBe(true);
+  expect(isGatewayRestartDraining()).toBe(true);
 });
 
 it("lets an admitted root cross only the reversible suspension fence", async () => {

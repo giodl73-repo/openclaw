@@ -442,6 +442,9 @@ describe("startGatewayPostAttachRuntime", () => {
       onSidecarsReady: () => {
         events.push("sidecars-ready");
       },
+      beforeReady: async () => {
+        events.push("before-ready");
+      },
     });
 
     expect(outcomeMessages).toHaveLength(1);
@@ -456,9 +459,47 @@ describe("startGatewayPostAttachRuntime", () => {
       "post-ready-registered",
       "lifetime-registered",
       "outcomes",
+      "before-ready",
       "sidecars-ready",
       "ready-log",
     ]);
+  });
+
+  it("suppresses the ready log when the pre-ready transaction fails", async () => {
+    const log = { info: vi.fn(), warn: vi.fn() };
+    const tailscaleCleanup = vi.fn(async () => {});
+
+    await expect(
+      startGatewayPostAttachRuntime(
+        {
+          ...createPostAttachParams(),
+          log,
+          tailscaleMode: "serve",
+          resetOnExit: true,
+          beforeReady: async () => {
+            throw new Error("restored startup blocked");
+          },
+        },
+        createPostAttachRuntimeDeps({
+          startGatewayTailscaleExposure: vi.fn(async () => tailscaleCleanup),
+        }),
+      ),
+    ).rejects.toThrow("restored startup blocked");
+
+    expect(log.info).not.toHaveBeenCalledWith("gateway ready");
+    expect(tailscaleCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a pre-ready failure when sidecar startup is deferred", async () => {
+    await expect(
+      startGatewayPostAttachRuntime({
+        ...createPostAttachParams(),
+        sidecarStartup: "defer",
+        beforeReady: async () => {
+          throw new Error("deferred restored startup blocked");
+        },
+      }),
+    ).rejects.toThrow("deferred restored startup blocked");
   });
 
   it("reports internal hook load failures without copying the error into the summary", async () => {

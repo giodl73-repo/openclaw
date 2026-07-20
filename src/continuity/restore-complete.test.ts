@@ -64,6 +64,7 @@ function restoredEvidence(): ContinuityRestoreCompleteEvidence {
     operationId: "restore-complete-1",
     ownerId: prefixedSha("a"),
     destinationRuntimeGeneration: "runtime-generation-19",
+    lifecycleOwnerGeneration: "continuity-lifecycle-1",
     acceptedRecoveryPoint: {
       recoveryPointId: "recovery-point-17",
       publicationIdentity: "publication-17",
@@ -76,7 +77,7 @@ function restoredEvidence(): ContinuityRestoreCompleteEvidence {
     restore: {
       version: "continuity-restore-execution-result/v1",
       ok: true,
-      ownerGeneration: "runtime-generation-19",
+      ownerGeneration: "continuity-lifecycle-1",
       restoreIdentity: "restore-17",
       planId: rawSha("c"),
       receiptIdentity: prefixedSha("d"),
@@ -182,6 +183,7 @@ describe("completeContinuityRestore", () => {
         "version",
         "ownerId",
         "destinationRuntimeGeneration",
+        "lifecycleOwnerGeneration",
         "recoveryPointId",
         "manifestSha256",
         "preparationIdentity",
@@ -205,6 +207,7 @@ describe("completeContinuityRestore", () => {
     const admission = openRestoredAdmission(result.record, {
       ownerId: result.record.ownerId,
       destinationRuntimeGeneration: result.record.destinationRuntimeGeneration,
+      lifecycleOwnerGeneration: result.record.lifecycleOwnerGeneration,
       restoreReceiptIdentity: result.record.restoreReceiptIdentity,
       admissionIdentity: result.record.admissionIdentity,
       readinessGeneration: result.record.readinessGeneration,
@@ -266,9 +269,39 @@ describe("completeContinuityRestore", () => {
     });
   });
 
-  it("binds the committed restore to destination generation and plan", async () => {
+  it("keeps lifecycle ownership independent from destination generation", async () => {
     const evidence = restoredEvidence();
-    evidence.restore.ownerGeneration = "runtime-generation-20";
+    const reconcileScheduler = vi.fn(async () => undefined);
+    const result = await completeContinuityRestore(evidence, await makeJournalRoot(), {
+      ...dependencies(),
+      reconcileScheduler,
+    });
+    requireCompletion(result);
+    expect(result.record.destinationRuntimeGeneration).toBe("runtime-generation-19");
+    expect(result.record.lifecycleOwnerGeneration).toBe("continuity-lifecycle-1");
+    expect(reconcileScheduler).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a restore from a different lifecycle owner generation", async () => {
+    const evidence = restoredEvidence();
+    evidence.restore.ownerGeneration = "continuity-lifecycle-0";
+    const reconcileScheduler = vi.fn(async () => undefined);
+    const result = await completeContinuityRestore(evidence, await makeJournalRoot(), {
+      ...dependencies(),
+      reconcileScheduler,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      phase: "restoring",
+      code: "ContinuityRestoreFailed",
+      disposition: "quarantine",
+    });
+    expect(reconcileScheduler).not.toHaveBeenCalled();
+  });
+
+  it("rejects a committed restore for a different plan", async () => {
+    const evidence = restoredEvidence();
+    evidence.restore.planId = rawSha("f");
     const reconcileScheduler = vi.fn(async () => undefined);
     const result = await completeContinuityRestore(evidence, await makeJournalRoot(), {
       ...dependencies(),
@@ -401,6 +434,21 @@ describe("completeContinuityRestore", () => {
     });
   });
 
+  it("quarantines replay with a different lifecycle owner generation", async () => {
+    const journalRoot = await makeJournalRoot();
+    const first = await completeContinuityRestore(restoredEvidence(), journalRoot, dependencies());
+    requireCompletion(first);
+    const replayEvidence = restoredEvidence();
+    replayEvidence.lifecycleOwnerGeneration = "continuity-lifecycle-2";
+    replayEvidence.restore.ownerGeneration = "continuity-lifecycle-2";
+    const replay = await completeContinuityRestore(replayEvidence, journalRoot, dependencies());
+    expect(replay).toMatchObject({
+      ok: false,
+      code: "ReadinessGenerationConflict",
+      disposition: "quarantine",
+    });
+  });
+
   it("quarantines non-canonical durable bytes", async () => {
     const journalRoot = await makeJournalRoot();
     const first = await completeContinuityRestore(restoredEvidence(), journalRoot, dependencies());
@@ -484,6 +532,7 @@ describe("completeContinuityRestore", () => {
       openRestoredAdmission(modified, {
         ownerId: modified.ownerId,
         destinationRuntimeGeneration: modified.destinationRuntimeGeneration,
+        lifecycleOwnerGeneration: modified.lifecycleOwnerGeneration,
         restoreReceiptIdentity: modified.restoreReceiptIdentity,
         admissionIdentity: modified.admissionIdentity,
         readinessGeneration: modified.readinessGeneration,

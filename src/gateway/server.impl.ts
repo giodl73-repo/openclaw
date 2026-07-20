@@ -60,7 +60,11 @@ import {
 } from "../plugins/runtime.js";
 import { resolveWorkerProvider } from "../plugins/worker-provider-registry.js";
 import { getTotalQueueSize, isGatewayDraining } from "../process/command-queue.js";
-import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
+import {
+  getActiveGatewayRootWorkCount,
+  isGatewayRestartDraining,
+  tryBeginGatewaySuspendAdmission,
+} from "../process/gateway-work-admission.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
   clearSecretsRuntimeSnapshot,
@@ -102,6 +106,11 @@ import {
   resumeGatewayRestartTraceFromHandoff,
 } from "./restart-trace.js";
 import { resolveGatewayPluginConfig } from "./runtime-plugin-config.js";
+import {
+  createGatewayContinuityRestoreDependencies,
+  runGatewayContinuityRestoredStartup,
+} from "./continuity-restored-startup-runtime.js";
+import { CONTINUITY_RESTORED_STARTUP_FILE_ENV } from "./continuity-restored-startup.js";
 import type { ChannelAutostartSuppression } from "./server-channels.js";
 import { resolveGatewayControlUiRootState } from "./server-control-ui-root.js";
 import { createLazyGatewayCronState } from "./server-cron-lazy.js";
@@ -543,6 +552,9 @@ export type GatewayServerOptions = {
 };
 
 type SetupWizardRunner = NonNullable<GatewayServerOptions["wizardRunner"]>;
+type GatewaySuspendAdmissionLease = NonNullable<
+  ReturnType<typeof tryBeginGatewaySuspendAdmission>
+>;
 
 const runDefaultSetupWizard: SetupWizardRunner = async (...args) => {
   const { runSetupWizard } = await import("../wizard/setup.js");
@@ -977,13 +989,32 @@ export async function startGatewayServer(
   });
   channelManager.setAutostartSuppression(opts.channelAutostartSuppression ?? null);
   const sidecarStartup = opts.sidecarStartup ?? "start";
-  const isGatewayStartupPending = () => !startupSidecarsReady && sidecarStartup === "start";
+  const continuityRestoredStartupFile =
+    process.env[CONTINUITY_RESTORED_STARTUP_FILE_ENV];
+  const isContinuityRestoredStartup =
+    continuityRestoredStartupFile !== undefined;
+  if (isContinuityRestoredStartup) {
+    delete process.env[CONTINUITY_RESTORED_STARTUP_FILE_ENV];
+  }
+  const isGatewayStartupPending = () =>
+    !startupSidecarsReady && (sidecarStartup === "start" || isContinuityRestoredStartup);
   const getReadiness = createReadinessChecker({
     channelManager,
     startedAt: serverStartedAt,
     getStartupPending: isGatewayStartupPending,
     getStartupPendingReason: () => startupPendingReason,
     getGatewayDraining: isGatewayDraining,
+    getEventLoopHealth: readinessEventLoopHealth.snapshot,
+    shouldSkipChannelReadiness: () =>
+      isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
+      isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
+  });
+  const getContinuityReadiness = createReadinessChecker({
+    channelManager,
+    startedAt: serverStartedAt,
+    // Restored startup owns the reversible suspension fence it is preparing to
+    // release. Only a real restart drain should invalidate its base readiness.
+    getGatewayDraining: isGatewayRestartDraining,
     getEventLoopHealth: readinessEventLoopHealth.snapshot,
     shouldSkipChannelReadiness: () =>
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
@@ -1302,6 +1333,7 @@ export async function startGatewayServer(
       await runClosePrelude();
       await createCloseHandler()({ reason: "gateway startup failed" });
     } finally {
+      releaseContinuityStartupAdmission();
       clearFallbackGatewayContextForServer();
     }
   };
@@ -1309,7 +1341,21 @@ export async function startGatewayServer(
     broadcast("voicewake.routing.changed", { config }, { dropIfSlow: true });
   };
 
+  let continuityStartupAdmission: GatewaySuspendAdmissionLease | null = null;
+  const releaseContinuityStartupAdmission = () => {
+    const admission = continuityStartupAdmission;
+    continuityStartupAdmission = null;
+    return admission?.release() ?? !isContinuityRestoredStartup;
+  };
   try {
+    if (isContinuityRestoredStartup) {
+      const admission = tryBeginGatewaySuspendAdmission(() => {});
+      if (!admission || !admission.commit()) {
+        admission?.rollback();
+        throw new Error("restored Gateway startup could not close work admission");
+      }
+      continuityStartupAdmission = admission;
+    }
     const earlyRuntime = await startupTrace.measure("runtime.early", () =>
       loadGatewayStartupEarlyModule().then(({ startGatewayEarlyRuntime }) =>
         startGatewayEarlyRuntime({
@@ -1938,6 +1984,50 @@ export async function startGatewayServer(
               startupSidecarsReady = true;
               activateScheduledServicesWhenReady();
             },
+            ...(isContinuityRestoredStartup
+              ? {
+                  beforeReady: async () => {
+                    const result = await runGatewayContinuityRestoredStartup({
+                      env: {
+                        [CONTINUITY_RESTORED_STARTUP_FILE_ENV]:
+                          continuityRestoredStartupFile,
+                      },
+                      dependencies: createGatewayContinuityRestoreDependencies({
+                        config: cfgAtStart,
+                        cronState: runtimeState.cronState,
+                        cronReconciliation,
+                        markCronStartHandled: () => {
+                          gatewayCronStartHandled = true;
+                        },
+                        getPluginRegistry: () => pluginRegistry,
+                        getPluginDependencyMetadata: () =>
+                          pluginLookUpTable?.byPluginId ?? null,
+                        getExpectedPluginIds: () =>
+                          pluginLookUpTable?.startup.pluginIds ?? null,
+                        getPluginDiagnostics: () =>
+                          pluginLookUpTable
+                            ? [
+                                ...pluginLookUpTable.diagnostics,
+                                ...pluginRegistry.diagnostics,
+                              ]
+                            : null,
+                        getReadiness: getContinuityReadiness,
+                        isClosing: () => closePreludeStarted,
+                      }),
+                      beforeSuccessResult: () => {
+                        if (!releaseContinuityStartupAdmission()) {
+                          throw new Error(
+                            "restored Gateway startup lost work admission",
+                          );
+                        }
+                      },
+                    });
+                    if (!result?.ok) {
+                      throw new Error("restored Gateway startup did not complete");
+                    }
+                  },
+                }
+              : {}),
             isClosing: () => closePreludeStarted,
             startupTrace,
             sidecarStartup,
