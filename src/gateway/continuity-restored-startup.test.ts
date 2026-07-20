@@ -64,6 +64,7 @@ function restoredEvidence(): ContinuityRestoreCompleteEvidence {
     operationId: "restore-complete-1",
     ownerId: prefixedSha("a"),
     destinationRuntimeGeneration: "runtime-generation-19",
+    lifecycleOwnerGeneration: "continuity-lifecycle-1",
     acceptedRecoveryPoint: {
       recoveryPointId: "recovery-point-17",
       publicationIdentity: "publication-17",
@@ -76,7 +77,7 @@ function restoredEvidence(): ContinuityRestoreCompleteEvidence {
     restore: {
       version: "continuity-restore-execution-result/v1",
       ok: true,
-      ownerGeneration: "runtime-generation-19",
+      ownerGeneration: "continuity-lifecycle-1",
       restoreIdentity: "restore-17",
       planId: rawSha("c"),
       receiptIdentity: prefixedSha("d"),
@@ -118,7 +119,7 @@ function dependencies(
 async function descriptor() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-restored-startup-"));
   return {
-    version: "continuity-restored-startup/v1" as const,
+    version: "continuity-restored-startup/v2" as const,
     journalRoot: path.join(root, "journal"),
     evidence: restoredEvidence(),
   };
@@ -164,7 +165,7 @@ describe("continuity restored startup", () => {
     );
 
     expect(result).toEqual({
-      version: "continuity-restored-startup-result/v1",
+      version: "continuity-restored-startup-result/v2",
       ok: false,
       phase: "blocked",
       code: "ContinuityReadinessFailed",

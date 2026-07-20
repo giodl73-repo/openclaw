@@ -13,14 +13,14 @@ import {
 } from "../continuity/restore-complete.js";
 import { isRecord } from "../utils.js";
 
-const RESTORED_STARTUP_DESCRIPTOR_VERSION = "continuity-restored-startup/v1";
-const RESTORED_STARTUP_RESULT_VERSION = "continuity-restored-startup-result/v1";
+const RESTORED_STARTUP_DESCRIPTOR_VERSION = "continuity-restored-startup/v2";
+const RESTORED_STARTUP_RESULT_VERSION = "continuity-restored-startup-result/v2";
 const MAX_DESCRIPTOR_BYTES = 64 * 1024;
 const MAX_RESULT_BYTES = 64 * 1024;
 
 export const CONTINUITY_RESTORED_STARTUP_FILE_ENV = "OPENCLAW_CONTINUITY_RESTORED_STARTUP_FILE";
 export const CONTINUITY_RESTORED_STARTUP_RESULT_PREFIX =
-  "[gateway] continuity-restored-startup-result/v1 ";
+  "[gateway] continuity-restored-startup-result/v2 ";
 
 export type ContinuityRestoredStartupDescriptor = {
   version: typeof RESTORED_STARTUP_DESCRIPTOR_VERSION;
@@ -152,6 +152,7 @@ export async function runContinuityRestoredStartup(
   const admission = openRestoredAdmission(completed.record, {
     ownerId: descriptor.evidence.ownerId,
     destinationRuntimeGeneration: descriptor.evidence.destinationRuntimeGeneration,
+    lifecycleOwnerGeneration: descriptor.evidence.lifecycleOwnerGeneration,
     restoreReceiptIdentity: descriptor.evidence.restore.receiptIdentity,
     admissionIdentity: descriptor.evidence.admissionIdentity,
     readinessGeneration: completed.readinessGeneration,
