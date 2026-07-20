@@ -2,6 +2,11 @@
 import type { Command } from "commander";
 import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
+import {
+  backupActivateManagedCommand,
+  managedRestoreRequestFailure,
+  readManagedRestoreRequestFromStdin,
+} from "../../commands/backup-activate-managed.js";
 import { backupMaterializeCommand } from "../../commands/backup-materialize.js";
 import { backupPlanRestoreCommand } from "../../commands/backup-plan-restore.js";
 import { backupRetrieveCommand } from "../../commands/backup-retrieve.js";
@@ -15,7 +20,7 @@ import { formatHelpExamples } from "../help-format.js";
 export function registerBackupCommand(program: Command) {
   const backup = program
     .command("backup")
-    .description("Create, verify, retrieve, materialize, and plan local OpenClaw recovery")
+    .description("Create, verify, retrieve, materialize, plan, and activate OpenClaw recovery")
     .addHelpText(
       "after",
       () =>
@@ -142,6 +147,24 @@ export function registerBackupCommand(program: Command) {
           destination: opts.destination as string,
           json: Boolean(opts.json),
         });
+      });
+    });
+
+  backup
+    .command("activate")
+    .description("Execute a launcher-fenced managed continuity restore")
+    .requiredOption("--managed", "Require immutable launcher-managed restore context")
+    .requiredOption("--json", "Emit the typed restore result as JSON")
+    .action(async () => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        let request: string;
+        try {
+          request = await readManagedRestoreRequestFromStdin();
+        } catch (error) {
+          managedRestoreRequestFailure(defaultRuntime, error, { json: true });
+          return;
+        }
+        await backupActivateManagedCommand(defaultRuntime, request, { json: true });
       });
     });
 

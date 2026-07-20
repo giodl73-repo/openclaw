@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerBackupCommand } from "./register.backup.js";
 
 const mocks = vi.hoisted(() => ({
+  backupActivateManagedCommand: vi.fn(),
+  managedRestoreRequestFailure: vi.fn(),
+  readManagedRestoreRequestFromStdin: vi.fn(),
   backupCreateCommand: vi.fn(),
   backupMaterializeCommand: vi.fn(),
   backupPlanRestoreCommand: vi.fn(),
@@ -19,6 +22,12 @@ const mocks = vi.hoisted(() => ({
 const backupCreateCommand = mocks.backupCreateCommand;
 const backupVerifyCommand = mocks.backupVerifyCommand;
 const runtime = mocks.runtime;
+
+vi.mock("../../commands/backup-activate-managed.js", () => ({
+  backupActivateManagedCommand: mocks.backupActivateManagedCommand,
+  managedRestoreRequestFailure: mocks.managedRestoreRequestFailure,
+  readManagedRestoreRequestFromStdin: mocks.readManagedRestoreRequestFromStdin,
+}));
 
 vi.mock("../../commands/backup.js", () => ({
   backupCreateCommand: mocks.backupCreateCommand,
@@ -53,6 +62,8 @@ describe("registerBackupCommand", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.backupActivateManagedCommand.mockResolvedValue(undefined);
+    mocks.readManagedRestoreRequestFromStdin.mockResolvedValue('{"version":"test"}');
     backupCreateCommand.mockResolvedValue(undefined);
     mocks.backupMaterializeCommand.mockResolvedValue(undefined);
     mocks.backupPlanRestoreCommand.mockResolvedValue(undefined);
@@ -146,6 +157,25 @@ describe("registerBackupCommand", () => {
       destination: "/tmp/offline-root",
       json: true,
     });
+  });
+
+  it("runs managed activation from a strict stdin request", async () => {
+    await runCli(["backup", "activate", "--managed", "--json"]);
+
+    expect(mocks.readManagedRestoreRequestFromStdin).toHaveBeenCalledTimes(1);
+    expect(mocks.backupActivateManagedCommand).toHaveBeenCalledWith(runtime, '{"version":"test"}', {
+      json: true,
+    });
+  });
+
+  it("returns a typed failure when the managed stdin request cannot be read", async () => {
+    const error = new Error("request too large");
+    mocks.readManagedRestoreRequestFromStdin.mockRejectedValue(error);
+
+    await runCli(["backup", "activate", "--managed", "--json"]);
+
+    expect(mocks.managedRestoreRequestFailure).toHaveBeenCalledWith(runtime, error, { json: true });
+    expect(mocks.backupActivateManagedCommand).not.toHaveBeenCalled();
   });
 
   it("plans exact restore roots without activating them", async () => {

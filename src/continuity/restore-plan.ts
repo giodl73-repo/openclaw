@@ -32,19 +32,34 @@ export type ContinuityRestorePlanMember = CanonicalRestorePlanAsset & {
   targetRelativePath: string;
 };
 
+export type CanonicalRestorePlanFile = {
+  componentId: string;
+  archivePath: string;
+  materializedSourcePath: string;
+  canonicalTargetPath: string;
+  sha256: string;
+  size: number;
+  executable: boolean;
+};
+
+export type ContinuityRestorePlanFile = CanonicalRestorePlanFile & {
+  targetRelativePath: string;
+};
+
 export type ContinuityRestorePlanGroup = {
   rootComponentId: string;
   canonicalTargetPath: string;
   targetKind: "file" | "directory";
   canonicalTargetAnchor: string;
   members: ContinuityRestorePlanMember[];
+  files?: ContinuityRestorePlanFile[];
 };
 
 export type ContinuityRestorePlanReceipt = {
   schemaVersion: 1;
   contract: {
     planner: "openclaw-core";
-    plannerSchemaVersion: 1;
+    plannerSchemaVersion: 2;
     runtimeVersion: string;
   };
   planId: string;
@@ -62,11 +77,12 @@ export type ContinuityRestorePlanReceipt = {
     authorizationDigest: string;
   };
   groups: ContinuityRestorePlanGroup[];
-  blockers: [
-    { code: "continuity.restore.materialization_content_identity_required" },
-    { code: "continuity.restore.launcher_lease_required" },
-    { code: "continuity.restore.publication_capability_missing" },
-  ];
+  blockers: Array<{
+    code:
+      | "continuity.restore.materialization_content_identity_required"
+      | "continuity.restore.launcher_lease_required"
+      | "continuity.restore.publication_capability_missing";
+  }>;
   executionEligible: false;
 };
 
@@ -75,8 +91,8 @@ type BuildContinuityRestorePlanParams = {
   artifact: ContinuityRestorePlanReceipt["artifact"];
   materialization: ContinuityRestorePlanReceipt["materialization"];
   assets: readonly CanonicalRestorePlanAsset[];
+  files?: readonly CanonicalRestorePlanFile[];
   authorizedPublicationRoots: readonly string[];
-  existingTargetPaths?: ReadonlySet<string>;
 };
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
@@ -269,28 +285,6 @@ function assertAuthorization(
   return normalizedRoots;
 }
 
-function assertTargetsAbsent(
-  assets: readonly CanonicalRestorePlanAsset[],
-  existingTargetPaths: ReadonlySet<string>,
-): void {
-  const existingPaths = [...existingTargetPaths];
-  if (
-    assets.some((asset) =>
-      existingPaths.some(
-        (existingPath) =>
-          existingPath === asset.canonicalTargetPath ||
-          (asset.targetKind === "directory" &&
-            isPathWithin(existingPath, asset.canonicalTargetPath)),
-      ),
-    )
-  ) {
-    throw new ContinuityRestorePlanError(
-      "continuity.restore.target_present",
-      "Continuity restore targets must be absent when planned.",
-    );
-  }
-}
-
 function assertMaterializedSourcesContained(
   assets: readonly CanonicalRestorePlanAsset[],
   materializationRoot: string,
@@ -313,6 +307,77 @@ function assertIdentity(value: string, label: string): void {
   if (!SHA256_PATTERN.test(value)) {
     throw new Error(`${label} must be a lowercase SHA-256 identity.`);
   }
+}
+
+function attachFiles(
+  groups: ContinuityRestorePlanGroup[],
+  files: readonly CanonicalRestorePlanFile[] | undefined,
+): ContinuityRestorePlanGroup[] {
+  if (files === undefined) {
+    return groups;
+  }
+  const componentMembers = new Map(
+    groups.flatMap((group) =>
+      group.members.map((member) => [member.componentId, { group, member }]),
+    ),
+  );
+  const archivePaths = new Set<string>();
+  const materializedPaths = new Set<string>();
+  const targetPaths = new Set<string>();
+  const filesByGroup = new Map<ContinuityRestorePlanGroup, ContinuityRestorePlanFile[]>(
+    groups.map((group) => [group, []]),
+  );
+  for (const file of files) {
+    const ownership = componentMembers.get(file.componentId);
+    if (
+      !ownership ||
+      archivePaths.has(file.archivePath) ||
+      materializedPaths.has(file.materializedSourcePath) ||
+      targetPaths.has(file.canonicalTargetPath) ||
+      path.posix.normalize(file.archivePath) !== file.archivePath ||
+      !file.archivePath ||
+      !SHA256_PATTERN.test(file.sha256) ||
+      !Number.isSafeInteger(file.size) ||
+      file.size < 0 ||
+      typeof file.executable !== "boolean"
+    ) {
+      throw new ContinuityRestorePlanError(
+        "continuity.restore.materialization_escape",
+        "Continuity restore file inventory contains invalid identities.",
+      );
+    }
+    assertAbsolutePath(file.materializedSourcePath, "Continuity materialized file");
+    assertAbsolutePath(file.canonicalTargetPath, "Continuity target file");
+    const { group, member } = ownership;
+    if (
+      !isPathWithin(file.materializedSourcePath, member.materializedSourcePath) ||
+      !isPathWithin(file.canonicalTargetPath, member.canonicalTargetPath) ||
+      !isPathWithin(file.canonicalTargetPath, group.canonicalTargetPath) ||
+      (member.targetKind === "file" &&
+        (file.materializedSourcePath !== member.materializedSourcePath ||
+          file.canonicalTargetPath !== member.canonicalTargetPath))
+    ) {
+      throw new ContinuityRestorePlanError(
+        "continuity.restore.materialization_escape",
+        "Continuity restore file inventory escaped its owning component.",
+      );
+    }
+    archivePaths.add(file.archivePath);
+    materializedPaths.add(file.materializedSourcePath);
+    targetPaths.add(file.canonicalTargetPath);
+    filesByGroup.get(group)!.push({
+      ...file,
+      targetRelativePath: path.relative(group.canonicalTargetPath, file.canonicalTargetPath),
+    });
+  }
+  return groups.map((group) => ({
+    ...group,
+    files: filesByGroup
+      .get(group)!
+      .toSorted((left, right) =>
+        left.archivePath < right.archivePath ? -1 : left.archivePath > right.archivePath ? 1 : 0,
+      ),
+  }));
 }
 
 export function buildContinuityRestorePlanReceipt(
@@ -339,21 +404,41 @@ export function buildContinuityRestorePlanReceipt(
   assertAbsolutePath(materialization.root, "Continuity materialized root");
   const assets = normalizeAssets(params.assets);
   assertMaterializedSourcesContained(assets, materialization.root);
-  assertTargetsAbsent(assets, params.existingTargetPaths ?? new Set());
-  const groups = buildGroups(assets);
+  const groups = attachFiles(buildGroups(assets), params.files);
   const authorizedRoots = assertAuthorization(groups, params.authorizedPublicationRoots);
   const authorizationDigest = sha256Hex(JSON.stringify(authorizedRoots));
   const identity = {
     contract: {
       planner: "openclaw-core" as const,
-      plannerSchemaVersion: 1 as const,
+      plannerSchemaVersion: 2 as const,
       runtimeVersion: params.runtimeVersion,
     },
     artifact,
     materialization,
     authorizationDigest,
-    groups,
+    groups: groups.map((group) => ({
+      rootComponentId: group.rootComponentId,
+      canonicalTargetPath: group.canonicalTargetPath,
+      targetKind: group.targetKind,
+      members: group.members.map((member) => ({
+        componentId: member.componentId,
+        kind: member.kind,
+        restoreOrder: member.restoreOrder,
+        canonicalTargetPath: member.canonicalTargetPath,
+        materializedSourcePath: member.materializedSourcePath,
+        targetKind: member.targetKind,
+        targetRelativePath: member.targetRelativePath,
+      })),
+      ...(group.files === undefined ? {} : { files: group.files }),
+    })),
   };
+  const blockers: ContinuityRestorePlanReceipt["blockers"] = [
+    ...(params.files === undefined
+      ? [{ code: "continuity.restore.materialization_content_identity_required" as const }]
+      : []),
+    { code: "continuity.restore.launcher_lease_required" },
+    { code: "continuity.restore.publication_capability_missing" },
+  ];
   return {
     schemaVersion: 1,
     contract: identity.contract,
@@ -365,11 +450,7 @@ export function buildContinuityRestorePlanReceipt(
       authorizationDigest,
     },
     groups,
-    blockers: [
-      { code: "continuity.restore.materialization_content_identity_required" },
-      { code: "continuity.restore.launcher_lease_required" },
-      { code: "continuity.restore.publication_capability_missing" },
-    ],
+    blockers,
     executionEligible: false,
   };
 }

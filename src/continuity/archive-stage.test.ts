@@ -6,6 +6,7 @@ import { buildConfigSchema } from "../config/schema.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { resolveContinuityArchivePlanFromPaths } from "./archive-plan.js";
 import { stageContinuityArchivePlan } from "./archive-stage.js";
+import { CONTINUITY_RESTORE_CLAIM_MARKER } from "./restore-claim.js";
 
 const tempDirs: string[] = [];
 
@@ -75,7 +76,9 @@ describe("continuity archive staging", () => {
   it("stages separated sources and sanitized SQLite snapshots without mutating live state", async () => {
     const fixture = await makeFixture();
     const databasePath = path.join(fixture.stateDir, "state", "openclaw.sqlite");
+    const claimMarkerPath = path.join(fixture.stateDir, CONTINUITY_RESTORE_CLAIM_MARKER);
     createStateDatabase(databasePath);
+    await fs.writeFile(claimMarkerPath, "prior restore evidence\n");
     const plan = await createPlan(fixture);
 
     const staged = await stageContinuityArchivePlan({
@@ -116,6 +119,15 @@ describe("continuity archive staging", () => {
     await expect(
       fs.access(
         path.join(stagedPath(staged.stagingDir, plan.sources.state.archivePath), "credentials"),
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.readFile(claimMarkerPath, "utf8")).resolves.toBe("prior restore evidence\n");
+    await expect(
+      fs.access(
+        path.join(
+          stagedPath(staged.stagingDir, plan.sources.state.archivePath),
+          CONTINUITY_RESTORE_CLAIM_MARKER,
+        ),
       ),
     ).rejects.toMatchObject({ code: "ENOENT" });
     expect(staged.evidence).toMatchObject({
