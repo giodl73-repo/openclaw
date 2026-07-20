@@ -649,6 +649,7 @@ const CommitmentsSchema = z
 const ContinuitySchema = z
   .object({
     level: z.enum(["conventional", "archived", "portable", "elastic"]).optional(),
+    publicationProvider: z.string().min(1).optional(),
   })
   .strict()
   .optional();

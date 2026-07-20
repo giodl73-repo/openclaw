@@ -29,6 +29,10 @@ import {
   clearContextEnginesForOwner,
   registerContextEngineForOwner,
 } from "../context-engine/registry.js";
+import {
+  normalizeContinuityPublicationProviderV1,
+  type ContinuityPublicationProviderV1,
+} from "../continuity/publication-provider.js";
 import { createPluginGatewayMethodDescriptor } from "../gateway/methods/registry.js";
 import { isOperatorScope, type OperatorScope } from "../gateway/operator-scopes.js";
 import type { GatewayRequestHandler, RespondFn } from "../gateway/server-methods/types.js";
@@ -1569,6 +1573,40 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       kindLabel: "migration provider",
       registrations: registry.migrationProviders,
       ownedIds: record.migrationProviderIds,
+    });
+  };
+
+  const registerContinuityPublicationProvider = (
+    record: PluginRecord,
+    provider: ContinuityPublicationProviderV1,
+  ) => {
+    const normalizedProvider = normalizeContinuityPublicationProviderV1(provider);
+    if (!normalizedProvider) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: "continuity publication provider registration is invalid",
+      });
+      return;
+    }
+    const existing = registry.continuityPublicationProviders.find(
+      (entry) => entry.provider.id === normalizedProvider.id,
+    );
+    if (existing) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `continuity publication provider already registered: ${normalizedProvider.id} (${existing.pluginId})`,
+      });
+    }
+    registry.continuityPublicationProviders.push({
+      pluginId: record.id,
+      pluginName: record.name,
+      provider: normalizedProvider,
+      source: record.source,
+      rootDir: record.rootDir,
     });
   };
 
@@ -3521,6 +3559,8 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               registerWebFetchProvider: (provider) => registerWebFetchProvider(record, provider),
               registerWebSearchProvider: (provider) => registerWebSearchProvider(record, provider),
               registerMigrationProvider: (provider) => registerMigrationProvider(record, provider),
+              registerContinuityPublicationProvider: (provider) =>
+                registerContinuityPublicationProvider(record, provider),
               registerGatewayMethod: (method, handler, opts) =>
                 registerGatewayMethod(record, method, handler, opts),
               registerSessionCatalog: (provider) => registerSessionCatalog(record, provider),
@@ -4000,6 +4040,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     registerMusicGenerationProvider,
     registerWebSearchProvider,
     registerMigrationProvider,
+    registerContinuityPublicationProvider,
     registerGatewayMethod,
     registerSessionCatalog,
     registerCli,
