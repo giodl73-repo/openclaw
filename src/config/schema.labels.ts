@@ -54,6 +54,8 @@ export const FIELD_LABELS: Record<string, string> = {
   commitments: "Commitments",
   "commitments.enabled": "Commitments Enabled",
   "commitments.maxPerDay": "Commitments per Day",
+  continuity: "State Continuity",
+  "continuity.level": "Continuity Level",
   "diagnostics.enabled": "Diagnostics Enabled",
   "diagnostics.flags": "Diagnostics Flags",
   "diagnostics.stuckSessionWarnMs": "Session Liveness Threshold (ms)",

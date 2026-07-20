@@ -5,6 +5,9 @@ import { registerBackupCommand } from "./register.backup.js";
 
 const mocks = vi.hoisted(() => ({
   backupCreateCommand: vi.fn(),
+  backupMaterializeCommand: vi.fn(),
+  backupPlanRestoreCommand: vi.fn(),
+  backupRetrieveCommand: vi.fn(),
   backupVerifyCommand: vi.fn(),
   runtime: {
     log: vi.fn(),
@@ -19,6 +22,18 @@ const runtime = mocks.runtime;
 
 vi.mock("../../commands/backup.js", () => ({
   backupCreateCommand: mocks.backupCreateCommand,
+}));
+
+vi.mock("../../commands/backup-materialize.js", () => ({
+  backupMaterializeCommand: mocks.backupMaterializeCommand,
+}));
+
+vi.mock("../../commands/backup-plan-restore.js", () => ({
+  backupPlanRestoreCommand: mocks.backupPlanRestoreCommand,
+}));
+
+vi.mock("../../commands/backup-retrieve.js", () => ({
+  backupRetrieveCommand: mocks.backupRetrieveCommand,
 }));
 
 vi.mock("../../commands/backup-verify.js", () => ({
@@ -39,6 +54,9 @@ describe("registerBackupCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     backupCreateCommand.mockResolvedValue(undefined);
+    mocks.backupMaterializeCommand.mockResolvedValue(undefined);
+    mocks.backupPlanRestoreCommand.mockResolvedValue(undefined);
+    mocks.backupRetrieveCommand.mockResolvedValue(undefined);
     backupVerifyCommand.mockResolvedValue(undefined);
   });
 
@@ -92,5 +110,63 @@ describe("registerBackupCommand", () => {
     const options = expectForwardedOptions(backupVerifyCommand);
     expect(options.archive).toBe("/tmp/openclaw-backup.tar.gz");
     expect(options.json).toBe(true);
+  });
+
+  it("runs backup retrieve with a required clean destination", async () => {
+    await runCli([
+      "backup",
+      "retrieve",
+      "/tmp/openclaw-backup.tar.gz",
+      "--destination",
+      "/tmp/restored",
+      "--json",
+    ]);
+
+    const options = expectForwardedOptions(mocks.backupRetrieveCommand);
+    expect(options).toStrictEqual({
+      archive: "/tmp/openclaw-backup.tar.gz",
+      destination: "/tmp/restored",
+      json: true,
+    });
+  });
+
+  it("materializes a continuity archive into a required clean destination", async () => {
+    await runCli([
+      "backup",
+      "materialize",
+      "/tmp/continuity.tar.gz",
+      "--destination",
+      "/tmp/offline-root",
+      "--json",
+    ]);
+
+    const options = expectForwardedOptions(mocks.backupMaterializeCommand);
+    expect(options).toStrictEqual({
+      archive: "/tmp/continuity.tar.gz",
+      destination: "/tmp/offline-root",
+      json: true,
+    });
+  });
+
+  it("plans exact restore roots without activating them", async () => {
+    await runCli([
+      "backup",
+      "plan-restore",
+      "/tmp/continuity.tar.gz",
+      "--materialized",
+      "/tmp/offline-root",
+      "--authorize",
+      "/tmp/live-state",
+      "/tmp/live-config.json",
+      "--json",
+    ]);
+
+    const options = expectForwardedOptions(mocks.backupPlanRestoreCommand);
+    expect(options).toStrictEqual({
+      archive: "/tmp/continuity.tar.gz",
+      materialized: "/tmp/offline-root",
+      authorize: ["/tmp/live-state", "/tmp/live-config.json"],
+      json: true,
+    });
   });
 });

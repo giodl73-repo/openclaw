@@ -364,7 +364,7 @@ export async function resolveStatusSummaryFromOverview(params: {
   overview: Pick<StatusScanOverviewResult, "skipColdStartNetworkChecks" | "cfg" | "sourceConfig">;
 }) {
   if (params.overview.skipColdStartNetworkChecks) {
-    return buildColdStartStatusSummary();
+    return buildColdStartStatusSummary(params.overview.cfg);
   }
   return await loadStatusSummaryModule().then(({ getStatusSummary }) =>
     getStatusSummary({

@@ -301,6 +301,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Enable hidden LLM extraction, storage, and heartbeat delivery for inferred follow-up commitments. Default: false.",
   "commitments.maxPerDay":
     "Maximum inferred follow-up commitments delivered per agent session in a rolling day. Default: 3.",
+  continuity:
+    "Runtime state continuity guarantee selected for this OpenClaw instance. Omit this section to preserve Conventional behavior; stronger configured levels remain ineffective until their required capabilities are available.",
+  "continuity.level":
+    "Minimum complete CAPE guarantee requested for the runtime: conventional, archived, portable, or elastic. Status reports the requested and independently proven effective levels.",
   "agents.list.*.skills":
     "Optional allowlist of skills for this agent. If omitted, the agent inherits agents.defaults.skills when set; otherwise skills stay unrestricted. Set [] for no skills. An explicit list fully replaces inherited defaults instead of merging with them.",
   "agents.list[].skills":

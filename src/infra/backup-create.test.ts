@@ -425,6 +425,29 @@ describe("buildExtensionsNodeModulesFilter", () => {
   });
 });
 
+describe("backup capture scope", () => {
+  it("canonicalizes a symlinked credential path before comparing it with assets", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-backup-scope-"));
+    try {
+      const realStateDir = path.join(root, "real-state");
+      const linkedStateDir = path.join(root, "linked-state");
+      await fs.mkdir(path.join(realStateDir, "credentials"), { recursive: true });
+      await fs.symlink(realStateDir, linkedStateDir);
+
+      await expect(
+        backupCreateInternals.isPathInBackupCaptureScope(path.join(linkedStateDir, "credentials"), [
+          { sourcePath: realStateDir },
+        ]),
+      ).resolves.toBe(true);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("createBackupArchive", () => {
   it("falls back when injected nowMs is outside Date range", async () => {
     await withOpenClawTestState(
@@ -548,6 +571,10 @@ describe("createBackupArchive", () => {
           ).toBe(false);
         }
         expect(result.skippedVolatileCount).toBe(10);
+        expect(result.continuityAssessment?.blockers).toContainEqual({
+          code: "continuity.sessions.legacy_transcripts_excluded",
+          count: 1,
+        });
       },
     );
   });
@@ -572,12 +599,22 @@ describe("createBackupArchive", () => {
             ) VALUES ('outbound', 'queued-1', 'pending', 0, '{"id":"queued-1"}', 10, 10)
           `,
         ).run();
+        db.prepare(
+          `
+            INSERT INTO auth_profile_stores (store_key, store_json, updated_at)
+            VALUES ('main', '{"profiles":{"openai:default":{"key":"secret"}}}', 10)
+          `,
+        ).run();
 
         try {
           const result = await createBackupArchive({
             output: outputDir,
             includeWorkspace: false,
             nowMs: Date.UTC(2026, 4, 9, 8, 30, 0),
+          });
+          expect(result.continuityAssessment?.blockers).toContainEqual({
+            code: "continuity.credentials.auth_profile_store_included",
+            count: 1,
           });
           const entries = await listArchiveEntries(result.archivePath);
           const archivedDbEntry = entries.find((entry) =>
@@ -662,6 +699,10 @@ describe("createBackupArchive", () => {
           output: outputDir,
           includeWorkspace: false,
           nowMs: Date.UTC(2026, 4, 9, 8, 31, 0),
+        });
+        expect(result.continuityAssessment?.blockers).toContainEqual({
+          code: "continuity.credentials.auth_profile_store_included",
+          count: 1,
         });
         const entries = await listArchiveEntries(result.archivePath);
         const archivedDbEntry = entries.find((entry) =>
@@ -1179,6 +1220,7 @@ describe("createBackupArchive", () => {
         const runtime: RuntimeEnv = { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
         const verification = await backupVerifyCommand(runtime, { archive: result.archivePath });
         expect(verification.ok).toBe(true);
+        expect(verification.componentCount).toBe(result.assets.length);
       },
     );
   });

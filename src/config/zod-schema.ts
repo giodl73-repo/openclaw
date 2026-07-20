@@ -646,6 +646,13 @@ const CommitmentsSchema = z
   .strict()
   .optional();
 
+const ContinuitySchema = z
+  .object({
+    level: z.enum(["conventional", "archived", "portable", "elastic"]).optional(),
+  })
+  .strict()
+  .optional();
+
 export const OpenClawSchema = z
   .object({
     $schema: z.string().optional(),
@@ -1137,6 +1144,7 @@ export const OpenClawSchema = z
       .strict()
       .optional(),
     commitments: CommitmentsSchema,
+    continuity: ContinuitySchema,
     hooks: z
       .object({
         enabled: z.boolean().optional(),

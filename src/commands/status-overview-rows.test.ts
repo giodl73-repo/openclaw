@@ -19,12 +19,32 @@ describe("status-overview-rows", () => {
     const rows = buildStatusCommandOverviewRows(createStatusCommandOverviewRowsParams());
 
     expect(findRowValue(rows, "OS")).toBe(`macOS · node ${process.versions.node}`);
+    expect(findRowValue(rows, "Continuity")).toBe("conventional");
     expect(findRowValue(rows, "Memory")).toBe(
       "1 files · 2 chunks · plugin memory · ok(vector ready) · warn(fts ready) · muted(cache warm)",
     );
     expect(findRowValue(rows, "Plugin compatibility")).toBe("warn(1 notice · 1 plugin)");
     expect(findRowValue(rows, "Sessions")).toBe(
       "2 active · default gpt-5.5 (12k ctx) · store.json",
+    );
+  });
+
+  it("warns when configured continuity exceeds the effective guarantee", () => {
+    const baseParams = createStatusCommandOverviewRowsParams();
+    const rows = buildStatusCommandOverviewRows(
+      createStatusCommandOverviewRowsParams({
+        summary: {
+          ...baseParams.summary,
+          continuity: {
+            ...baseParams.summary.continuity,
+            desiredLevel: "portable",
+          },
+        },
+      }),
+    );
+
+    expect(findRowValue(rows, "Continuity")).toBe(
+      "warn(portable requested · conventional effective)",
     );
   });
 

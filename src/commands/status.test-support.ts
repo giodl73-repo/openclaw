@@ -1,4 +1,5 @@
 // Status test support builds reusable gateway, update, heartbeat, and service fixtures for command tests.
+import { resolveContinuityStatus } from "../continuity/state-inventory.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
 import { isBetaTag } from "../infra/update-channels.js";
 import type { Tone } from "../memory-host-sdk/status.js";
@@ -98,6 +99,7 @@ export const baseStatusOverviewSurface = {
 } as unknown as StatusOverviewSurface;
 
 const baseStatusSummary = {
+  continuity: resolveContinuityStatus({}),
   tasks: { total: 3, active: 1, failures: 0, byStatus: { queued: 1, running: 1 } },
   taskAudit: { errors: 1, warnings: 0 },
   heartbeat: {

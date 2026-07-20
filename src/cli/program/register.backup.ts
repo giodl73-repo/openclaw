@@ -1,18 +1,21 @@
-// Backup command registration for local state archive creation and verification.
+// Backup command registration for local archive creation, verification, retrieval, and materialization.
 import type { Command } from "commander";
 import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
+import { backupMaterializeCommand } from "../../commands/backup-materialize.js";
+import { backupPlanRestoreCommand } from "../../commands/backup-plan-restore.js";
+import { backupRetrieveCommand } from "../../commands/backup-retrieve.js";
 import { backupVerifyCommand } from "../../commands/backup-verify.js";
 import { backupCreateCommand } from "../../commands/backup.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
 
-/** Register backup create/verify subcommands. */
+/** Register local backup and continuity recovery subcommands. */
 export function registerBackupCommand(program: Command) {
   const backup = program
     .command("backup")
-    .description("Create and verify local backup archives for OpenClaw state")
+    .description("Create, verify, retrieve, materialize, and plan local OpenClaw recovery")
     .addHelpText(
       "after",
       () =>
@@ -87,6 +90,86 @@ export function registerBackupCommand(program: Command) {
       await runCommandWithRuntime(defaultRuntime, async () => {
         await backupVerifyCommand(defaultRuntime, {
           archive: archive as string,
+          json: Boolean(opts.json),
+        });
+      });
+    });
+
+  backup
+    .command("retrieve <archive>")
+    .description("Verify and retrieve a backup into a new staging directory")
+    .requiredOption("--destination <path>", "New staging directory (must not exist)")
+    .option("--json", "Output JSON", false)
+    .addHelpText(
+      "after",
+      () =>
+        `\n${theme.heading("Examples:")}\n${formatHelpExamples([
+          [
+            "openclaw backup retrieve ./backup.tar.gz --destination ./restored",
+            "Verify and extract a backup into a non-active staging directory.",
+          ],
+        ])}`,
+    )
+    .action(async (archive, opts) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        await backupRetrieveCommand(defaultRuntime, {
+          archive: archive as string,
+          destination: opts.destination as string,
+          json: Boolean(opts.json),
+        });
+      });
+    });
+
+  backup
+    .command("materialize <archive>")
+    .description("Materialize a continuity archive into a new offline filesystem root")
+    .requiredOption("--destination <path>", "New offline filesystem root (must not exist)")
+    .option("--json", "Output JSON", false)
+    .addHelpText(
+      "after",
+      () =>
+        `\n${theme.heading("Examples:")}\n${formatHelpExamples([
+          [
+            "openclaw backup materialize ./continuity.tar.gz --destination ./offline-root",
+            "Verify and materialize continuity components without activating live state.",
+          ],
+        ])}`,
+    )
+    .action(async (archive, opts) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        await backupMaterializeCommand(defaultRuntime, {
+          archive: archive as string,
+          destination: opts.destination as string,
+          json: Boolean(opts.json),
+        });
+      });
+    });
+
+  backup
+    .command("plan-restore <archive>")
+    .description("Preview exact continuity restore targets without changing them")
+    .requiredOption("--materialized <path>", "Verified offline materialization root")
+    .requiredOption(
+      "--authorize <path...>",
+      "Exact publication roots independently authorized for restore",
+    )
+    .option("--json", "Output JSON", false)
+    .addHelpText(
+      "after",
+      () =>
+        `\n${theme.heading("Examples:")}\n${formatHelpExamples([
+          [
+            "openclaw backup plan-restore ./continuity.tar.gz --materialized ./offline-root --authorize ~/.openclaw ~/.openclaw.json",
+            "Verify and preview exact restore targets without writing them.",
+          ],
+        ])}`,
+    )
+    .action(async (archive, opts) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        await backupPlanRestoreCommand(defaultRuntime, {
+          archive: archive as string,
+          materialized: opts.materialized as string,
+          authorize: opts.authorize as string[],
           json: Boolean(opts.json),
         });
       });

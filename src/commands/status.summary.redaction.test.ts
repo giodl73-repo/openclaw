@@ -1,5 +1,6 @@
 // Status summary redaction tests cover sensitive field removal from summarized runtime state.
 import { describe, expect, it } from "vitest";
+import { resolveContinuityStatus } from "../continuity/state-inventory.js";
 import { redactSensitiveStatusSummary } from "./status.summary.js";
 import type { SessionStatus, StatusSummary } from "./status.types.js";
 
@@ -27,6 +28,7 @@ describe("redactSensitiveStatusSummary", () => {
   it("removes sensitive session and path details while preserving summary structure", () => {
     const input: StatusSummary = {
       runtimeVersion: "2026.3.8",
+      continuity: resolveContinuityStatus({}),
       heartbeat: {
         defaultAgentId: "main",
         agents: [{ agentId: "main", enabled: true, every: "5m", everyMs: 300_000 }],

@@ -81,7 +81,9 @@ describe("buildStatusScanResult", () => {
       ],
     };
     const channels = { rows: [], details: [] };
-    const summary = buildColdStartStatusSummary();
+    const summary = buildColdStartStatusSummary({ continuity: { level: "archived" } });
+    expect(summary.continuity.desiredLevel).toBe("archived");
+    expect(summary.continuity.effectiveLevel).toBe("conventional");
     const memory = { agentId: "main", backend: "builtin" as const, provider: "sqlite" };
     const memoryPlugin = { enabled: true, slot: "memory-core" };
     const pluginCompatibility = [

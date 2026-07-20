@@ -5,6 +5,7 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 import * as tar from "tar";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sha256Hex } from "../infra/crypto-digest.js";
 import { buildBackupArchiveRoot } from "./backup-shared.js";
 import { backupVerifyCommand } from "./backup-verify.js";
 
@@ -36,11 +37,13 @@ function createBackupManifest(assetArchivePath: string, archiveRoot = TEST_ARCHI
 
 function encodeTarEntry(params: {
   path: string;
-  contents?: string;
+  contents?: string | Buffer;
   type?: "File" | "Link";
   linkpath?: string;
 }): Buffer {
-  const body = Buffer.from(params.contents ?? "", "utf8");
+  const body = Buffer.isBuffer(params.contents)
+    ? params.contents
+    : Buffer.from(params.contents ?? "");
   const header = new tar.Header({
     path: params.path,
     type: params.type ?? "File",
@@ -205,9 +208,155 @@ describe("backupVerifyCommand", () => {
       expect(verified.ok).toBe(true);
       expect(verified.archiveRoot).toBe(archiveRoot);
       expect(verified.assetCount).toBeGreaterThan(0);
+      expect(verified.archiveSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(verified.manifestSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(verified.archiveSha256).not.toBe(verified.manifestSha256);
     } finally {
       await fs.rm(archiveDir, { recursive: true, force: true });
     }
+  });
+
+  it("accepts an explicit backup artifact type", async () => {
+    const manifest = {
+      ...createBackupManifest(`${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/payload.txt`),
+      artifactType: "backup",
+    };
+    await createArchiveWithManifestContent(
+      {
+        tempPrefix: "openclaw-backup-explicit-type-",
+        manifestContent: `${JSON.stringify(manifest, null, 2)}\n`,
+      },
+      async (archivePath) => {
+        const verified = await backupVerifyCommand(createBackupVerifyRuntime(), {
+          archive: archivePath,
+        });
+        expect(verified.artifactType).toBe("backup");
+      },
+    );
+  });
+
+  it("hashes the exact archived manifest bytes", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-backup-byte-hash-"));
+    const archivePath = path.join(tempDir, "backup.tar.gz");
+    const payloadArchivePath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/state.txt`;
+    const manifestText = JSON.stringify(createBackupManifest(payloadArchivePath));
+    const marker = '"runtimeVersion":"test"';
+    const markerIndex = manifestText.indexOf(marker);
+    const valueIndex = markerIndex + '"runtimeVersion":"'.length;
+    const manifestBytes = Buffer.concat([
+      Buffer.from(manifestText.slice(0, valueIndex)),
+      Buffer.from([0xff]),
+      Buffer.from(manifestText.slice(valueIndex + "test".length)),
+    ]);
+    try {
+      const archive = gzipSync(
+        Buffer.concat([
+          encodeTarEntry({
+            path: `${TEST_ARCHIVE_ROOT}/manifest.json`,
+            contents: manifestBytes,
+          }),
+          encodeTarEntry({ path: payloadArchivePath, contents: "payload\n" }),
+          Buffer.alloc(1024),
+        ]),
+      );
+      await fs.writeFile(archivePath, archive);
+
+      const verified = await backupVerifyCommand(createBackupVerifyRuntime(), {
+        archive: archivePath,
+      });
+
+      expect(verified.archiveSha256).toBe(sha256Hex(archive));
+      expect(verified.manifestSha256).toBe(sha256Hex(manifestBytes));
+      expect(verified.manifestSha256).not.toBe(sha256Hex(manifestBytes.toString("utf8")));
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a valid fail-closed continuity assessment", async () => {
+    const payloadPath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/payload.txt`;
+    const continuityAssessment = {
+      targetLevel: "archived",
+      eligible: false,
+      blockers: [
+        {
+          code: "continuity.sessions.legacy_transcripts_excluded",
+          count: 2,
+        },
+        {
+          code: "continuity.config.secret_classification_unproven",
+          count: 1,
+        },
+      ],
+    } as const;
+    await createArchiveWithManifestContent(
+      {
+        tempPrefix: "openclaw-backup-continuity-assessment-",
+        manifestContent: `${JSON.stringify(
+          {
+            ...createBackupManifest(payloadPath),
+            continuityAssessment,
+          },
+          null,
+          2,
+        )}\n`,
+      },
+      async (archivePath) => {
+        const verified = await backupVerifyCommand(createBackupVerifyRuntime(), {
+          archive: archivePath,
+        });
+        expect(verified.continuityAssessment).toEqual(continuityAssessment);
+      },
+    );
+  });
+
+  it("rejects a success-shaped continuity assessment", async () => {
+    const payloadPath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/payload.txt`;
+    await createArchiveWithManifestContent(
+      {
+        tempPrefix: "openclaw-backup-invalid-continuity-assessment-",
+        manifestContent: `${JSON.stringify({
+          ...createBackupManifest(payloadPath),
+          continuityAssessment: {
+            targetLevel: "archived",
+            eligible: true,
+            blockers: [],
+          },
+        })}\n`,
+      },
+      async (archivePath) => {
+        await expect(
+          backupVerifyCommand(createBackupVerifyRuntime(), { archive: archivePath }),
+        ).rejects.toThrow(/unsupported eligibility metadata/i);
+      },
+    );
+  });
+
+  it("rejects continuity assessments without the mandatory fail-closed blocker", async () => {
+    const payloadPath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/payload.txt`;
+    await createArchiveWithManifestContent(
+      {
+        tempPrefix: "openclaw-backup-missing-continuity-blocker-",
+        manifestContent: `${JSON.stringify({
+          ...createBackupManifest(payloadPath),
+          continuityAssessment: {
+            targetLevel: "archived",
+            eligible: false,
+            blockers: [
+              {
+                code: "continuity.sessions.legacy_transcripts_excluded",
+                count: 1,
+              },
+            ],
+          },
+        })}\n`,
+      },
+      async (archivePath) => {
+        await expect(
+          backupVerifyCommand(createBackupVerifyRuntime(), { archive: archivePath }),
+        ).rejects.toThrow(/missing its fail-closed blocker/i);
+      },
+    );
   });
 
   it("fails when the archive does not contain a manifest", async () => {
@@ -536,5 +685,30 @@ describe("backupVerifyCommand", () => {
         },
       );
     }
+  });
+
+  it("stops archive inspection at the configured entry limit", async () => {
+    const payloadArchivePath = `${TEST_ARCHIVE_ROOT}/payload/posix/tmp/.openclaw/state.txt`;
+    await withBrokenArchiveFixture(
+      {
+        tempPrefix: "openclaw-backup-entry-limit-",
+        manifestAssetArchivePath: payloadArchivePath,
+        payloads: [
+          {
+            fileName: "state.txt",
+            contents: "state\n",
+            archivePath: payloadArchivePath,
+          },
+        ],
+      },
+      async (archivePath) => {
+        await expect(
+          backupVerifyCommand(createBackupVerifyRuntime(), {
+            archive: archivePath,
+            maxEntries: 1,
+          }),
+        ).rejects.toThrow(/exceeds the 1-entry limit/i);
+      },
+    );
   });
 });
