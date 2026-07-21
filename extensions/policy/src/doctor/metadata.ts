@@ -255,6 +255,15 @@ export const POLICY_RULE_METADATA = [
     scopeSelectors: ["agentIds"],
   },
   {
+    policyPath: ["tools", "exec", "allowModes"],
+    strictness: "allowlist-subset",
+    valueType: "string-list",
+    checkIds: [CHECK_IDS.policyToolsExecModeUnapproved],
+    emptyList: "disabled",
+    allowedValues: ["deny", "allowlist", "ask", "auto", "full"],
+    scopeSelectors: ["agentIds"],
+  },
+  {
     policyPath: ["tools", "exec", "allowSecurity"],
     strictness: "allowlist-subset",
     valueType: "string-list",

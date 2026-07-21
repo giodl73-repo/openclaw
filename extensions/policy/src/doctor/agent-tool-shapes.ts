@@ -4,6 +4,7 @@ import {
   SUPPORTED_AGENT_WORKSPACE_DENY_TOOLS,
   SUPPORTED_TOOL_EXEC_ASK,
   SUPPORTED_TOOL_EXEC_HOST,
+  SUPPORTED_TOOL_EXEC_MODES,
   SUPPORTED_TOOL_EXEC_SECURITY,
   SUPPORTED_TOOL_PROFILES,
 } from "./policy-constants.js";
@@ -178,6 +179,7 @@ export function toolPosturePolicyShapeFinding(
   const exec = isRecord(tools.exec) ? tools.exec : {};
   const unsupportedExecKey = unsupportedPolicyKey(exec, [
     "allowHosts",
+    "allowModes",
     "allowSecurity",
     "requireAsk",
   ]);
@@ -190,6 +192,7 @@ export function toolPosturePolicyShapeFinding(
     );
   }
   const execLists = [
+    ["allowModes", SUPPORTED_TOOL_EXEC_MODES, "normalized exec mode"],
     ["allowSecurity", SUPPORTED_TOOL_EXEC_SECURITY, "exec security mode"],
     ["requireAsk", SUPPORTED_TOOL_EXEC_ASK, "exec ask mode"],
     ["allowHosts", SUPPORTED_TOOL_EXEC_HOST, "exec host"],

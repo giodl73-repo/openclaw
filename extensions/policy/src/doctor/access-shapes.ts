@@ -382,7 +382,7 @@ export function scopedToolsPolicyShapeFinding(
   for (const [section, allowedKeys] of [
     ["profiles", ["allow"]],
     ["fs", ["requireWorkspaceOnly"]],
-    ["exec", ["allowSecurity", "requireAsk", "allowHosts"]],
+    ["exec", ["allowModes", "allowSecurity", "requireAsk", "allowHosts"]],
     ["elevated", ["allow"]],
     ["alsoAllow", ["expected"]],
   ] as const) {

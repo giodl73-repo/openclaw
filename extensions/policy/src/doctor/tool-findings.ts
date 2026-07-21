@@ -152,6 +152,7 @@ function toolExecPostureFindings(
   evidenceFilter: (entry: PolicyToolPostureEvidence) => boolean,
 ): readonly HealthFinding[] {
   return [
+    ...toolExecModeFindings(toolsPolicy, policyDocName, requirementBase, evidence, evidenceFilter),
     ...toolStringPostureAllowFindings(toolsPolicy, policyDocName, requirementBase, evidence, {
       checkId: CHECK_IDS.policyToolsExecSecurityUnapproved,
       kind: "execSecurity",
@@ -177,6 +178,35 @@ function toolExecPostureFindings(
       evidenceFilter,
     }),
   ];
+}
+
+function toolExecModeFindings(
+  toolsPolicy: Record<string, unknown>,
+  policyDocName: string,
+  requirementBase: string,
+  evidence: PolicyEvidence,
+  evidenceFilter: (entry: PolicyToolPostureEvidence) => boolean,
+): readonly HealthFinding[] {
+  const allowed = new Set(readStringList(toolsPolicy, ["exec", "allowModes"]));
+  if (allowed.size === 0) {
+    return [];
+  }
+  return toolPostureEntries(evidence, "execMode")
+    .filter(evidenceFilter)
+    .filter((entry) => typeof entry.value !== "string" || !allowed.has(entry.value.toLowerCase()))
+    .map((entry): HealthFinding => {
+      const message =
+        typeof entry.value === "string"
+          ? `${toolPostureLabel(entry)} uses unapproved normalized exec mode '${entry.value}'.`
+          : `${toolPostureLabel(entry)} does not declare a normalized exec mode.`;
+      return toolPostureFinding(entry, {
+        checkId: CHECK_IDS.policyToolsExecModeUnapproved,
+        message,
+        requirement: `oc://${policyDocName}/${requirementBase}/exec/allowModes`,
+        fixHint:
+          "Set tools.exec.mode to an approved mode, remove legacy security/ask overrides, or update policy after review.",
+      });
+    });
 }
 
 function toolStringPostureAllowFindings(

@@ -214,6 +214,12 @@ const POLICY_FIX_METADATA = [
     },
   ),
   m(
+    CHECK_IDS.policyToolsExecModeUnapproved,
+    "reviewRequired",
+    "Replace legacy exec security/ask overrides with an allowed normalized mode.",
+    { policyPath: ["tools", "exec", "allowModes"], configTargets: ["tools.exec.mode"] },
+  ),
+  m(
     CHECK_IDS.policyToolsExecSecurityUnapproved,
     "reviewRequired",
     "Set exec security to an allowed value.",

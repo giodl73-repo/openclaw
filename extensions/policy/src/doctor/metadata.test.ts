@@ -56,6 +56,12 @@ describe("policy doctor metadata", () => {
         selectors: ["agentIds"],
       },
       {
+        path: "tools.exec.allowModes",
+        strictness: "allowlist-subset",
+        emptyList: "disabled",
+        selectors: ["agentIds"],
+      },
+      {
         path: "tools.exec.allowSecurity",
         strictness: "allowlist-subset",
         emptyList: "disabled",
@@ -282,6 +288,7 @@ describe("policy doctor metadata", () => {
         "policy/tools-also-allow-unexpected",
         "policy/tools-exec-ask-unapproved",
         "policy/tools-exec-host-unapproved",
+        "policy/tools-exec-mode-unapproved",
         "policy/tools-exec-security-unapproved",
         "policy/tools-fs-workspace-only-required",
         "policy/tools-profile-unapproved",

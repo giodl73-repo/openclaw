@@ -84,6 +84,7 @@ export type PolicyToolPostureEvidence = {
     | "elevatedEnabled"
     | "execAsk"
     | "execHost"
+    | "execMode"
     | "execSecurity"
     | "fsWorkspaceOnly"
     | "profile";

@@ -288,6 +288,7 @@ describe("registerPolicyDoctorChecks", () => {
       "policy/tools-exec-security-unapproved",
       "policy/tools-exec-ask-unapproved",
       "policy/tools-exec-host-unapproved",
+      "policy/tools-exec-mode-unapproved",
       "policy/tools-elevated-enabled",
       "policy/tools-also-allow-missing",
       "policy/tools-also-allow-unexpected",

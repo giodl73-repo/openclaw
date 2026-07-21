@@ -256,7 +256,8 @@ function toolPosturePolicyHasRules(value: unknown): boolean {
     (isRecord(tools.profiles) && tools.profiles.allow !== undefined) ||
     (isRecord(tools.fs) && tools.fs.requireWorkspaceOnly !== undefined) ||
     (isRecord(tools.exec) &&
-      (tools.exec.allowSecurity !== undefined ||
+      (tools.exec.allowModes !== undefined ||
+        tools.exec.allowSecurity !== undefined ||
         tools.exec.requireAsk !== undefined ||
         tools.exec.allowHosts !== undefined)) ||
     (isRecord(tools.elevated) && tools.elevated.allow !== undefined) ||
