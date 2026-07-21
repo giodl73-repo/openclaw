@@ -116,6 +116,7 @@ export type {
 } from "../plugins/codex-app-server-extension-types.js";
 export type {
   NativeHookRelayEvent,
+  NativeHookRelayDeferredPostToolUseContext,
   NativeHookRelayProcessResponse,
   NativeHookRelayProvider,
   NativeHookRelayRegistrationHandle,

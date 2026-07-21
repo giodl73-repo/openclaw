@@ -497,6 +497,9 @@ export function createAgentToolResultMiddlewareRunner(
     return resolvedHandlers;
   };
   return {
+    async hasMiddleware(): Promise<boolean> {
+      return (await resolveHandlers()).length > 0;
+    },
     async applyToolResultMiddleware(
       event: AgentToolResultMiddlewareEvent,
     ): Promise<OpenClawAgentToolResult> {

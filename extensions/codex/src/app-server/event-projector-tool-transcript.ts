@@ -1,7 +1,10 @@
+import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
 import {
+  createAgentToolResultMiddlewareRunner,
   runAgentHarnessAfterToolCallHook,
   type AgentMessage,
   type EmbeddedRunAttemptParams,
+  type NativeHookRelayDeferredPostToolUseContext,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { Usage } from "openclaw/plugin-sdk/llm";
 import { asDateTimestampMs } from "openclaw/plugin-sdk/number-runtime";
@@ -15,6 +18,8 @@ import {
 } from "./event-projector-items.js";
 import {
   isNativePostToolUseRelayItem,
+  isStructuredPostToolUseProjectionItem,
+  itemAfterToolCallResult,
   itemMeta,
   itemOutputText,
   itemToolArgs,
@@ -55,6 +60,8 @@ const ZERO_USAGE: Usage = {
 
 const MISSING_TOOL_RESULT_ERROR =
   "OpenClaw recorded a native Codex tool.call without a matching tool.result before the turn completed.";
+const NATIVE_POST_TOOL_USE_CONTEXT_TIMEOUT_MS = 10_000;
+const NATIVE_POST_TOOL_USE_CONTEXT_POLL_MS = 10;
 
 export class CodexToolTranscriptProjection {
   private readonly messages: AgentMessage[] = [];
@@ -74,7 +81,11 @@ export class CodexToolTranscriptProjection {
     private readonly progress: CodexToolProgressProjection,
     private readonly nextTranscriptTimestamp: () => number,
     private readonly options: {
+      consumeNativePostToolUseContext?: (
+        toolCallId: string,
+      ) => NativeHookRelayDeferredPostToolUseContext | undefined;
       nativePostToolUseRelayEnabled?: boolean;
+      runAbortSignal?: AbortSignal;
       trajectoryRecorder?: CodexTrajectoryRecorder | null;
     } = {},
   ) {}
@@ -177,23 +188,17 @@ export class CodexToolTranscriptProjection {
       return;
     }
     this.afterToolCallObservedItemIds.add(item.id);
-    const result = itemToolResult(item).result;
+    const result = itemAfterToolCallResult(item, this.progress.outputTextByItem);
     const error = itemToolError(item, status, this.progress.outputTextByItem);
     const startedAt = resolveStartedAtFromDurationMs(item.durationMs);
-    const hookParams = {
-      toolName: name,
-      toolCallId: item.id,
-      runId: this.params.runId,
-      agentId: this.params.agentId,
-      sessionId: this.params.sessionId,
-      sessionKey: this.params.sessionKey,
-      startArgs: itemToolArgs(item) ?? {},
-      ...(result !== undefined ? { result } : {}),
-      ...(error ? { error } : {}),
-      ...(startedAt !== undefined ? { startedAt } : {}),
-    };
     setImmediate(() => {
-      void runAgentHarnessAfterToolCallHook(hookParams);
+      void this.dispatchAfterToolCallObservation({
+        item,
+        name,
+        result,
+        error,
+        startedAt,
+      });
     });
   }
 
@@ -328,7 +333,111 @@ export class CodexToolTranscriptProjection {
     ) {
       return false;
     }
-    return !(this.options.nativePostToolUseRelayEnabled && isNativePostToolUseRelayItem(item));
+    return !(
+      this.options.nativePostToolUseRelayEnabled &&
+      isNativePostToolUseRelayItem(item) &&
+      !isStructuredPostToolUseProjectionItem(item)
+    );
+  }
+
+  private async dispatchAfterToolCallObservation(params: {
+    item: CodexThreadItem;
+    name: string;
+    result?: Record<string, unknown>;
+    error?: string;
+    startedAt?: number;
+  }): Promise<void> {
+    const nativeRelayResolution = await this.waitForNativePostToolUseContext(params.item);
+    if (nativeRelayResolution.aborted) {
+      return;
+    }
+    const nativeRelayContext = nativeRelayResolution.context;
+    const startArgs = nativeRelayContext?.startArgs ?? itemToolArgs(params.item) ?? {};
+    const structuredToolName = params.item.type === "commandExecution" ? "exec" : "apply_patch";
+    const toolName =
+      this.options.nativePostToolUseRelayEnabled &&
+      isStructuredPostToolUseProjectionItem(params.item)
+        ? (nativeRelayContext?.toolName ?? structuredToolName)
+        : params.name;
+    let result: unknown = params.result;
+    if (
+      params.result &&
+      this.options.nativePostToolUseRelayEnabled &&
+      isStructuredPostToolUseProjectionItem(params.item)
+    ) {
+      const cwd =
+        nativeRelayContext?.cwd ??
+        (typeof startArgs.cwd === "string" ? startArgs.cwd : this.params.workspaceDir);
+      const middlewareInput = toAgentToolResult(params.result);
+      const middlewareRunner = createAgentToolResultMiddlewareRunner({
+        runtime: "codex",
+        agentId: this.params.agentId,
+        sessionId: this.params.sessionId,
+        sessionKey: this.params.sessionKey,
+        runId: this.params.runId,
+      });
+      if (await middlewareRunner.hasMiddleware()) {
+        result = await middlewareRunner.applyToolResultMiddleware({
+          turnId: this.turnId,
+          toolCallId: params.item.id,
+          toolName,
+          args: startArgs,
+          ...(cwd ? { cwd } : {}),
+          result: middlewareInput,
+        });
+      }
+    }
+    await runAgentHarnessAfterToolCallHook({
+      toolName,
+      toolCallId: params.item.id,
+      runId: this.params.runId,
+      agentId: this.params.agentId,
+      sessionId: this.params.sessionId,
+      sessionKey: this.params.sessionKey,
+      ...(nativeRelayContext?.channelId ? { channelId: nativeRelayContext.channelId } : {}),
+      startArgs,
+      ...(result !== undefined ? { result } : {}),
+      ...(params.error ? { error: params.error } : {}),
+      ...(params.startedAt !== undefined ? { startedAt: params.startedAt } : {}),
+    });
+  }
+
+  private async waitForNativePostToolUseContext(item: CodexThreadItem): Promise<{
+    context?: NativeHookRelayDeferredPostToolUseContext;
+    aborted: boolean;
+  }> {
+    const consume = this.options.consumeNativePostToolUseContext;
+    if (
+      !consume ||
+      !this.options.nativePostToolUseRelayEnabled ||
+      !isStructuredPostToolUseProjectionItem(item)
+    ) {
+      return { aborted: false };
+    }
+    const availableContext = consume(item.id);
+    if (availableContext) {
+      return { context: availableContext, aborted: false };
+    }
+    if (isNonSuccessItemStatus(itemStatus(item))) {
+      return { aborted: false };
+    }
+    const deadline = Date.now() + NATIVE_POST_TOOL_USE_CONTEXT_TIMEOUT_MS;
+    while (true) {
+      if (this.options.runAbortSignal?.aborted) {
+        return { aborted: true };
+      }
+      const context = consume(item.id);
+      if (context || Date.now() >= deadline) {
+        return { context, aborted: false };
+      }
+      const aborted = await waitForPollOrAbort(
+        NATIVE_POST_TOOL_USE_CONTEXT_POLL_MS,
+        this.options.runAbortSignal,
+      );
+      if (aborted) {
+        return { aborted: true };
+      }
+    }
   }
 
   private createToolCallMessage(params: ToolTranscriptCallInput): AgentMessage {
@@ -371,6 +480,32 @@ export class CodexToolTranscriptProjection {
       timestamp: this.nextTranscriptTimestamp(),
     } as unknown as AgentMessage;
   }
+}
+
+function waitForPollOrAbort(delayMs: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(false);
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function toAgentToolResult(result: Record<string, unknown>): AgentToolResult<unknown> {
+  const output =
+    typeof result.output === "string" ? result.output : JSON.stringify(result, null, 2);
+  return {
+    content: [{ type: "text", text: output }],
+    details: result,
+  };
 }
 
 function formatMissingToolResultError(params: { id: string; name: string }): string {

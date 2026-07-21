@@ -95,6 +95,13 @@ export type NativeHookRelayProcessResponse = {
   failureDisposition?: Exclude<BeforeToolCallFailureDisposition, "blocked">;
 };
 
+export type NativeHookRelayDeferredPostToolUseContext = {
+  toolName: "exec" | "apply_patch";
+  startArgs: Record<string, JsonValue>;
+  cwd?: string;
+  channelId?: string;
+};
+
 type NativeHookRelayRegistration = {
   relayId: string;
   provider: NativeHookRelayProvider;
@@ -107,6 +114,7 @@ type NativeHookRelayRegistration = {
   runId: string;
   channelId?: string;
   requester?: PluginHookToolRequesterContext;
+  deferStructuredPostToolUseToProjector?: boolean;
   allowedEvents: readonly NativeHookRelayEvent[];
   expiresAtMs: number;
   signal?: AbortSignal;
@@ -126,6 +134,9 @@ export type NativeHookRelayRegistrationHandle = NativeHookRelayRegistration & {
     options?: NativeHookRelayCommandForEventOptions,
   ) => string;
   renew: (ttlMs?: number) => void;
+  consumeDeferredPostToolUseContext: (
+    toolCallId: string,
+  ) => NativeHookRelayDeferredPostToolUseContext | undefined;
   unregister: () => void;
 };
 
@@ -141,6 +152,7 @@ type RegisterNativeHookRelayParams = {
   runId: string;
   channelId?: string;
   requester?: PluginHookToolRequesterContext;
+  deferStructuredPostToolUseToProjector?: boolean;
   allowedEvents?: readonly NativeHookRelayEvent[];
   /** Whether this relay should run OpenClaw loop detection from native PreToolUse hooks. */
   preToolUseLoopDetection?: boolean;
@@ -261,6 +273,7 @@ type NativeHookRelaySharedState = {
 
 type ActiveNativeHookRelayRegistration = NativeHookRelayRegistration & {
   generation: string;
+  deferredPostToolUseContexts: Map<string, NativeHookRelayDeferredPostToolUseContext>;
   preToolUseLoopDetection: boolean;
   preToolUseFailureProjections: Map<string, { promise: Promise<void>; settled: boolean }>;
 };
@@ -449,7 +462,11 @@ export function registerNativeHookRelay(
     runId: params.runId,
     ...(params.channelId ? { channelId: params.channelId } : {}),
     ...(params.requester ? { requester: params.requester } : {}),
+    ...(params.deferStructuredPostToolUseToProjector
+      ? { deferStructuredPostToolUseToProjector: true }
+      : {}),
     allowedEvents,
+    deferredPostToolUseContexts: new Map(),
     preToolUseLoopDetection: params.preToolUseLoopDetection !== false,
     expiresAtMs,
     preToolUseFailureProjections: new Map(),
@@ -513,6 +530,11 @@ export function registerNativeHookRelay(
       }
       current.expiresAtMs = renewedExpiresAtMs;
       handle.expiresAtMs = renewedExpiresAtMs;
+    },
+    consumeDeferredPostToolUseContext: (toolCallId) => {
+      const context = registration.deferredPostToolUseContexts.get(toolCallId);
+      registration.deferredPostToolUseContexts.delete(toolCallId);
+      return context;
     },
     unregister: () => unregisterNativeHookRelay(relayId, registration),
   };
@@ -1482,7 +1504,7 @@ async function runNativeHookRelayPreToolUse(params: {
 }
 
 async function runNativeHookRelayPostToolUse(params: {
-  registration: NativeHookRelayRegistration;
+  registration: ActiveNativeHookRelayRegistration;
   invocation: NativeHookRelayInvocation;
   adapter: NativeHookRelayProviderAdapter;
 }): Promise<NativeHookRelayProcessResponse> {
@@ -1490,6 +1512,28 @@ async function runNativeHookRelayPostToolUse(params: {
   const toolCallId =
     params.invocation.toolUseId ?? `${params.invocation.event}:${params.invocation.receivedAt}`;
   const startArgs = params.adapter.readToolInput(params.invocation.rawPayload);
+  // Codex serializes shell and apply_patch PostToolUse responses as flat text.
+  // Their app-server completion items carry the authoritative structured result,
+  // so defer both middleware and after_tool_call dispatch to that projector.
+  if (
+    params.registration.deferStructuredPostToolUseToProjector &&
+    params.invocation.toolUseId &&
+    (toolName === "exec" || toolName === "apply_patch")
+  ) {
+    params.registration.deferredPostToolUseContexts.set(params.invocation.toolUseId, {
+      toolName,
+      startArgs,
+      ...(params.invocation.cwd ? { cwd: params.invocation.cwd } : {}),
+      ...(params.registration.channelId ? { channelId: params.registration.channelId } : {}),
+    });
+    if (params.registration.deferredPostToolUseContexts.size > MAX_NATIVE_HOOK_RELAY_INVOCATIONS) {
+      const oldestToolCallId = params.registration.deferredPostToolUseContexts.keys().next().value;
+      if (oldestToolCallId) {
+        params.registration.deferredPostToolUseContexts.delete(oldestToolCallId);
+      }
+    }
+    return params.adapter.renderNoopResponse(params.invocation.event);
+  }
   const rawResult = params.adapter.readToolResponse(params.invocation.rawPayload);
   // Native results are observe-only for middleware: codex-rs PostToolUse hooks
   // cannot replace tool_response (PostToolUseOutcome has no result field), so a

@@ -2517,7 +2517,7 @@ describe("native hook relay registry", () => {
     expect(beforeToolCall).toHaveBeenCalledTimes(1);
   });
 
-  it("maps Codex PostToolUse to OpenClaw after_tool_call observation", async () => {
+  it("defers Codex shell and file-change observations to the app-server projector", async () => {
     const afterToolCall = vi.fn();
     initializeGlobalHookRunner(
       createMockPluginRegistry([{ hookName: "after_tool_call", handler: afterToolCall }]),
@@ -2529,6 +2529,7 @@ describe("native hook relay registry", () => {
       sessionKey: "agent:main:session-1",
       runId: "run-1",
       channelId: "telegram",
+      deferStructuredPostToolUseToProjector: true,
     });
 
     const response = await invokeNativeHookRelay({
@@ -2545,24 +2546,31 @@ describe("native hook relay registry", () => {
     });
 
     expect(response).toEqual({ stdout: "", stderr: "", exitCode: 0 });
-    const event = getMockCallArg(afterToolCall, 0, 0, "after tool call event");
-    expectRecordFields(event, {
+    expect(relay.consumeDeferredPostToolUseContext("native-call-1")).toEqual({
       toolName: "exec",
-      params: { command: "pnpm test" },
-      runId: "run-1",
-      toolCallId: "native-call-1",
-      result: { output: "ok", exit_code: 0 },
-    });
-    const context = getMockCallArg(afterToolCall, 0, 1, "after tool call context");
-    expectRecordFields(context, {
-      agentId: "agent-1",
-      sessionId: "session-1",
-      sessionKey: "agent:main:session-1",
-      runId: "run-1",
+      startArgs: { command: "pnpm test" },
       channelId: "telegram",
-      toolName: "exec",
-      toolCallId: "native-call-1",
     });
+
+    await invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "post_tool_use",
+      rawPayload: {
+        hook_event_name: "PostToolUse",
+        tool_name: "apply_patch",
+        tool_use_id: "native-call-2",
+        tool_input: { patch: "*** Begin Patch" },
+        tool_response: "Done!",
+      },
+    });
+
+    expect(relay.consumeDeferredPostToolUseContext("native-call-2")).toEqual({
+      toolName: "apply_patch",
+      startArgs: { patch: "*** Begin Patch" },
+      channelId: "telegram",
+    });
+    expect(afterToolCall).not.toHaveBeenCalled();
   });
 
   it("maps Codex MCP PreToolUse to OpenClaw before_tool_call and can block", async () => {

@@ -11,6 +11,7 @@ import {
   type HeartbeatToolResponse,
   type MessagingToolSend,
   type MessagingToolSourceReplyPayload,
+  type NativeHookRelayDeferredPostToolUseContext,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { CodexAssistantProjection } from "./event-projector-assistant.js";
 import { CodexProjectionDiagnostics } from "./event-projector-diagnostics.js";
@@ -74,6 +75,9 @@ type CodexAppServerToolTelemetry = {
 };
 
 type CodexAppServerEventProjectorOptions = {
+  consumeNativePostToolUseContext?: (
+    toolCallId: string,
+  ) => NativeHookRelayDeferredPostToolUseContext | undefined;
   nativePostToolUseRelayEnabled?: boolean;
   onNativeToolResultRecorded?: () => void | Promise<void>;
   readRecentRateLimits?: () => JsonValue | undefined;
@@ -131,7 +135,9 @@ export class CodexAppServerEventProjector {
       this.toolProgressProjection,
       () => this.nextTranscriptTimestamp(),
       {
+        consumeNativePostToolUseContext: options.consumeNativePostToolUseContext,
         nativePostToolUseRelayEnabled: options.nativePostToolUseRelayEnabled,
+        runAbortSignal: options.runAbortSignal,
         trajectoryRecorder: options.trajectoryRecorder,
       },
     );

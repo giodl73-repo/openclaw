@@ -40,14 +40,11 @@ export function nativeToolActionFingerprint(item: CodexThreadItem): string | und
 }
 
 export function isNativePostToolUseRelayItem(item: CodexThreadItem): boolean {
-  switch (item.type) {
-    case "commandExecution":
-    case "fileChange":
-    case "mcpToolCall":
-      return true;
-    default:
-      return false;
-  }
+  return isStructuredPostToolUseProjectionItem(item) || item.type === "mcpToolCall";
+}
+
+export function isStructuredPostToolUseProjectionItem(item: CodexThreadItem): boolean {
+  return item.type === "commandExecution" || item.type === "fileChange";
 }
 
 export function shouldSuppressChannelProgressForItem(item: CodexThreadItem): boolean {
@@ -145,6 +142,18 @@ export function itemToolResult(item: CodexThreadItem): { result?: Record<string,
     return { result: webSearchToolResult(item) };
   }
   return {};
+}
+
+export function itemAfterToolCallResult(
+  item: CodexThreadItem,
+  outputTextByItem?: ReadonlyMap<string, string>,
+): Record<string, unknown> | undefined {
+  const result = itemToolResult(item).result;
+  if (!result || item.type !== "commandExecution") {
+    return result;
+  }
+  const output = itemOutputText(item, outputTextByItem);
+  return output ? { ...result, output } : result;
 }
 
 function webSearchToolResult(item: CodexThreadItem): Record<string, unknown> {
