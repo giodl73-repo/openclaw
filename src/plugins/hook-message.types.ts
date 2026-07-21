@@ -32,14 +32,10 @@ export type PluginHookMessageContext = {
    * each cron/heartbeat/followup-triggered run.
    *
    * Generated once in `agent-runner-execution.ts`/`followup-runner.ts` via
-   * `crypto.randomUUID()`. Currently populated for inbound message hooks
-   * (`inbound_claim`, `message_received`) and for agent-runtime hooks that
-   * already receive the run id (e.g. `agent_end`, `llm_input`, `llm_output`).
-   * It is **not yet** plumbed through the outbound delivery path, so
-   * plugins observing `message_sending` / `message_sent` should not rely
-   * on `runId` to correlate against `agent_end`; use `sessionKey` for
-   * outbound→inbound correlation today (with the caveat that it cannot
-   * disambiguate concurrent turns in the same session).
+   * `crypto.randomUUID()`. Populated for agent-runtime hooks that receive the
+   * active run id (e.g. `agent_end`, `llm_input`, `llm_output`) and outbound
+   * delivery hooks when the dispatch path carries that exact run id. Delivery
+   * replay and paths without authoritative run ownership omit it.
    */
   runId?: string;
   messageId?: string;

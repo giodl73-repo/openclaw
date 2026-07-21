@@ -25,6 +25,8 @@ export type OutboundSessionContext = {
    * the relevant runner.
    */
   key?: string;
+  /** Agent run that produced this delivery, when the caller can prove it. */
+  runId?: string;
   /**
    * Session key used for policy resolution when delivery differs from the
    * control session. Used to look up silent-reply policy, send rate limits,
@@ -61,6 +63,7 @@ export type OutboundSessionContext = {
 export function buildOutboundSessionContext(params: {
   cfg: OpenClawConfig;
   sessionKey?: string | null;
+  runId?: string | null;
   policySessionKey?: string | null;
   conversationType?: string | null;
   isGroup?: boolean | null;
@@ -72,6 +75,7 @@ export function buildOutboundSessionContext(params: {
   requesterSenderE164?: string | null;
 }): OutboundSessionContext | undefined {
   const key = normalizeOptionalString(params.sessionKey);
+  const runId = normalizeOptionalString(params.runId);
   const policyKey = normalizeOptionalString(params.policySessionKey);
   const deliveryRoute = parseSessionDeliveryRoute(policyKey ?? key);
   const declaredChatType = normalizeChatType(params.conversationType ?? undefined);
@@ -111,6 +115,7 @@ export function buildOutboundSessionContext(params: {
   const agentId = explicitAgentId ?? derivedAgentId;
   if (
     !key &&
+    !runId &&
     !policyKey &&
     !conversationType &&
     !conversationKind &&
@@ -125,6 +130,7 @@ export function buildOutboundSessionContext(params: {
   }
   return {
     ...(key ? { key } : {}),
+    ...(runId ? { runId } : {}),
     ...(policyKey ? { policyKey } : {}),
     ...(conversationType ? { conversationType } : {}),
     ...(conversationKind ? { conversationKind } : {}),

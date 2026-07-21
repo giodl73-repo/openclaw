@@ -78,6 +78,17 @@ describe("buildOutboundSessionContext", () => {
     });
   });
 
+  it("preserves the trimmed authoritative run id", () => {
+    expect(
+      buildOutboundSessionContext({
+        cfg: {} as never,
+        runId: "  run-123  ",
+      }),
+    ).toEqual({
+      runId: "run-123",
+    });
+  });
+
   it("preserves a trimmed requester sender id when provided", () => {
     expect(
       buildOutboundSessionContext({

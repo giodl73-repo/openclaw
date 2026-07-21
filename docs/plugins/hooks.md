@@ -678,6 +678,11 @@ first-class fields before reading legacy metadata.
 Prefer typed `threadId` and `replyToId` fields before using channel-specific
 metadata.
 
+For replies routed from an active agent turn, `message_sending` and
+`message_sent` receive the same `ctx.runId` as the agent lifecycle and tool
+hooks. Recovered delivery, standalone sends, and other paths without
+authoritative run ownership omit it.
+
 Decision rules:
 
 - `message_sending` with `cancel: true` is terminal.

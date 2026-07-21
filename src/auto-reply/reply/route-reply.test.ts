@@ -319,6 +319,10 @@ describe("routeReply", () => {
         runId: "run-1",
       },
     });
+    expect(lastDelivery().session).toMatchObject({
+      key: "agent:test",
+      runId: "run-1",
+    });
     expect(lastDelivery()).not.toHaveProperty("skipMessageSendingHooks");
   });
 
