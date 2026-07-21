@@ -76,6 +76,43 @@ as `scripts/changed-lanes.mjs` and skips the shared helper implementation
 itself. `check:changed` runs this report for changed test paths as a
 warning-only CI signal (GitHub warning annotations, not failures).
 
+## Test structured operational behavior
+
+When a change preserves a machine-readable result, outcome, status, finding,
+decision, usage observation, or diagnostic event, test the fact at the
+subsystem boundary that owns its meaning. Do not make rendered text, an
+exporter, or a polling consumer the only proof.
+
+Keep the proof near the owner and record:
+
+- the semantic owner and exact lifecycle transition where the fact becomes
+  authoritative;
+- one accepted fixture and one structured failure, denial, timeout,
+  unavailable, degraded, or unknown fixture;
+- the existing machine identity and structured fields consumers can use
+  without parsing prose;
+- existing trace, run, call, tool-call, session, message, agent, or generation
+  identity that is preserved, plus identity that is intentionally unavailable;
+- public fields, private data, redaction, and content that must remain omitted;
+- compatibility behavior for existing hooks, events, persisted data, or
+  supported mixed-version consumers;
+- exactly-once behavior across retry, fallback, supersession, cleanup, and
+  competing projection paths when the fact is terminal;
+- disabled-consumer, timeout, or cancellation behavior when projection is
+  asynchronous; and
+- the string parsing, polling, verbose-only reporting, false success, or
+  duplicate classification the change removes.
+
+Use owner-native terms and existing projection surfaces. Avoid a shared result
+envelope, global outcome enum, central conformance suite, or cross-subsystem
+test helper. Add a helper only after multiple accepted owner changes use
+identical mechanics and the helper remains optional and dependency-light.
+
+Run owner lifecycle tests first. Add focused hook, diagnostic, exporter,
+Doctor/Status, or localization tests only for projections the change claims to
+support. Exporter acceptance alone does not prove that the owner classified the
+fact correctly.
+
 ## Live and Docker/Parallels workflows
 
 When debugging real providers/models (requires real creds):
