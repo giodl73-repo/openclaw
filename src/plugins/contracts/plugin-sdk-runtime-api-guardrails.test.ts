@@ -48,7 +48,7 @@ const RUNTIME_API_EXPORT_GUARDS: Record<string, readonly string[]> = {
     pluginId: "diagnostics-otel",
     relativePath: "runtime-api.ts",
   })]: [
-    'export { createDiagnosticsOtelService } from "./src/service.js";',
+    'export { createDiagnosticsOtelExporter, createDiagnosticsOtelService } from "./src/service.js";',
     'export type { OpenClawPluginServiceContext } from "./api.js";',
   ],
   [bundledPluginFile({ rootDir: ROOT_DIR, pluginId: "discord", relativePath: "runtime-api.ts" })]: [

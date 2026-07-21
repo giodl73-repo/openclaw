@@ -190,7 +190,7 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { OpenClawPluginServiceContext } from "../api.js";
 import { emitDiagnosticEvent } from "../api.js";
-import { createDiagnosticsOtelService } from "./service.js";
+import { createDiagnosticsOtelExporter, createDiagnosticsOtelService } from "./service.js";
 
 const OTEL_TEST_STATE_DIR = "/tmp/openclaw-diagnostics-otel-test";
 const OTEL_TEST_ENDPOINT = "http://otel-collector:4318";
@@ -634,6 +634,136 @@ describe("diagnostics-otel service", () => {
         process.env[key] = value;
       }
     }
+  });
+
+  test("projects subagent terminal outcomes without exporting owner identifiers", async () => {
+    const exporter = createDiagnosticsOtelExporter();
+    const ctx = createOtelContext(OTEL_TEST_ENDPOINT, { traces: true, metrics: true });
+    await exporter.service.start(ctx);
+
+    const completedEvent = {
+      targetSessionKey: "agent:main:subagent:private-child",
+      targetKind: "subagent",
+      reason: "subagent-complete",
+      runId: "private-run-id",
+      endedAt: 2_000,
+      outcome: "ok",
+      error: "private task output",
+    };
+    exporter.recordSubagentEnded(completedEvent);
+    exporter.recordSubagentEnded({
+      targetKind: "subagent",
+      reason: "subagent-killed",
+      endedAt: 3_000,
+      outcome: "killed",
+    });
+
+    const counter = telemetryState.counters.get("openclaw.subagent.ended");
+    expect(counter?.add).toHaveBeenNthCalledWith(1, 1, {
+      "openclaw.subagent.outcome": "ok",
+      "openclaw.subagent.reason": "subagent-complete",
+      "openclaw.subagent.target_kind": "subagent",
+    });
+    expect(counter?.add).toHaveBeenNthCalledWith(2, 1, {
+      "openclaw.subagent.outcome": "killed",
+      "openclaw.subagent.reason": "subagent-killed",
+      "openclaw.subagent.target_kind": "subagent",
+    });
+
+    const spanCalls = telemetryState.tracer.startSpan.mock.calls.filter(
+      (call) => call[0] === "openclaw.subagent.ended",
+    );
+    expect(spanCalls).toHaveLength(2);
+    expect(spanCalls[0]?.[1]).toEqual({
+      attributes: {
+        "openclaw.subagent.outcome": "ok",
+        "openclaw.subagent.reason": "subagent-complete",
+        "openclaw.subagent.target_kind": "subagent",
+      },
+      startTime: 2_000,
+    });
+    expect(spanCalls[0]?.[2]).toBeUndefined();
+    expect(spanCalls[1]?.[2]).toBeUndefined();
+    expect(telemetryState.spans[0]?.end).toHaveBeenCalledWith(2_000);
+    expect(telemetryState.spans[0]?.setStatus).not.toHaveBeenCalled();
+    expect(telemetryState.spans[1]?.setStatus).toHaveBeenCalledWith({
+      code: 2,
+      message: "killed",
+    });
+    expect(telemetryState.spans[1]?.end).toHaveBeenCalledWith(3_000);
+
+    await exporter.service.stop?.(ctx);
+  });
+
+  test("bounds unrecognized subagent terminal dimensions", async () => {
+    const exporter = createDiagnosticsOtelExporter();
+    const ctx = createOtelContext(OTEL_TEST_ENDPOINT, { metrics: true });
+    await exporter.service.start(ctx);
+
+    exporter.recordSubagentEnded({
+      targetKind: "private-target",
+      reason: "private free-form termination text",
+      outcome: "private-outcome",
+    });
+    exporter.recordSubagentEnded({
+      targetKind: "acp",
+      reason: "session-reset",
+      outcome: "reset",
+    });
+    exporter.recordSubagentEnded({
+      targetKind: "acp",
+      reason: "session-delete",
+      outcome: "deleted",
+    });
+
+    const counter = telemetryState.counters.get("openclaw.subagent.ended");
+    expect(counter?.add).toHaveBeenNthCalledWith(1, 1, {
+      "openclaw.subagent.outcome": "unknown",
+      "openclaw.subagent.reason": "unknown",
+      "openclaw.subagent.target_kind": "unknown",
+    });
+    expect(counter?.add).toHaveBeenNthCalledWith(2, 1, {
+      "openclaw.subagent.outcome": "reset",
+      "openclaw.subagent.reason": "session-reset",
+      "openclaw.subagent.target_kind": "acp",
+    });
+    expect(counter?.add).toHaveBeenNthCalledWith(3, 1, {
+      "openclaw.subagent.outcome": "deleted",
+      "openclaw.subagent.reason": "session-delete",
+      "openclaw.subagent.target_kind": "acp",
+    });
+    expect(
+      telemetryState.tracer.startSpan.mock.calls.some(
+        (call) => call[0] === "openclaw.subagent.ended",
+      ),
+    ).toBe(false);
+
+    await exporter.service.stop?.(ctx);
+  });
+
+  test("ignores subagent terminal hooks while the exporter service is inactive", async () => {
+    const exporter = createDiagnosticsOtelExporter();
+    const event = {
+      targetKind: "subagent",
+      reason: "subagent-error",
+      endedAt: 4_000,
+      outcome: "error",
+    };
+
+    exporter.recordSubagentEnded(event);
+    expect(telemetryState.tracer.startSpan).not.toHaveBeenCalled();
+
+    const ctx = createTraceOnlyContext(OTEL_TEST_ENDPOINT);
+    await exporter.service.start(ctx);
+    exporter.recordSubagentEnded(event);
+    await exporter.service.stop?.(ctx);
+    exporter.recordSubagentEnded(event);
+
+    expect(
+      telemetryState.tracer.startSpan.mock.calls.filter(
+        (call) => call[0] === "openclaw.subagent.ended",
+      ),
+    ).toHaveLength(1);
   });
 
   test("drops camelCase and snake_case diagnostic id log attributes before export", async () => {

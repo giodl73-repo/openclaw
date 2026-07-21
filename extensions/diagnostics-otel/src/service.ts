@@ -44,10 +44,41 @@ import { createModelRecorders } from "./service-recorders-model.js";
 import { createOperationsRecorders } from "./service-recorders-operations.js";
 import { createToolAndSystemRecorders } from "./service-recorders-tools.js";
 import { createUsageRecorders } from "./service-recorders-usage.js";
+import {
+  createSubagentEndedRecorder,
+  type SubagentEndedTelemetryEvent,
+} from "./service-subagents.js";
 import { createDiagnosticsTraceRuntime } from "./service-traces.js";
 import type { OtelLogsExporter, TelemetryExporterDiagnosticEvent } from "./service-types.js";
 
+type DiagnosticsOtelServiceOptions = {
+  setSubagentEndedRecorder?: (
+    recorder: ((event: SubagentEndedTelemetryEvent) => void) | null,
+  ) => void;
+};
+
+export function createDiagnosticsOtelExporter(): {
+  service: OpenClawPluginService;
+  recordSubagentEnded: (event: SubagentEndedTelemetryEvent) => void;
+} {
+  let recorder: ((event: SubagentEndedTelemetryEvent) => void) | null = null;
+  return {
+    service: createDiagnosticsOtelServiceWithOptions({
+      setSubagentEndedRecorder: (nextRecorder) => {
+        recorder = nextRecorder;
+      },
+    }),
+    recordSubagentEnded: (event) => recorder?.(event),
+  };
+}
+
 export function createDiagnosticsOtelService(): OpenClawPluginService {
+  return createDiagnosticsOtelServiceWithOptions();
+}
+
+function createDiagnosticsOtelServiceWithOptions(
+  options: DiagnosticsOtelServiceOptions = {},
+): OpenClawPluginService {
   let sdk: NodeSDK | null = null;
   let logProvider: LoggerProvider | null = null;
   let unsubscribe: (() => void) | null = null;
@@ -66,6 +97,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
     sdk = null;
     stopActiveTrustedSpans = null;
     unregisterUnhandledRejectionHandler = null;
+    options.setSubagentEndedRecorder?.(null);
 
     currentUnregisterUnhandledRejectionHandler?.();
     currentUnsubscribe?.();
@@ -302,6 +334,21 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
           recordSecurityEvent,
         }),
       );
+      const recordSubagentEnded = createSubagentEndedRecorder({
+        metrics: diagnosticMetrics,
+        metricsEnabled,
+        traces: diagnosticsTrace,
+        tracesEnabled,
+      });
+      options.setSubagentEndedRecorder?.((event) => {
+        try {
+          recordSubagentEnded(event);
+        } catch (err) {
+          ctx.logger.warn(
+            `diagnostics-otel: failed to record subagent terminal event: ${formatError(err)}`,
+          );
+        }
+      });
 
       unregisterUnhandledRejectionHandler = registerUnhandledRejectionHandler((reason) => {
         const otlpError = findOtlpExporterError(reason);
