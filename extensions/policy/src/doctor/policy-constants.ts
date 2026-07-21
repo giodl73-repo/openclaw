@@ -71,6 +71,8 @@ export const SUPPORTED_TOOL_EXEC_ASK = ["off", "on-miss", "always"] as const;
 
 export const SUPPORTED_TOOL_EXEC_HOST = ["auto", "sandbox", "gateway", "node"] as const;
 
+export const SUPPORTED_TOOL_EXEC_MODES = ["deny", "allowlist", "ask", "auto", "full"] as const;
+
 export const SUPPORTED_EXEC_APPROVAL_SECURITY = ["deny", "allowlist", "full"] as const;
 
 export const SUPPORTED_SANDBOX_MODES = ["off", "non-main", "all"] as const;

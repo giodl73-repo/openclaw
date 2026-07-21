@@ -1,3 +1,4 @@
+import { normalizeExecMode, resolveExecPolicyForMode } from "openclaw/plugin-sdk/infra-runtime";
 import {
   isRecord,
   asBoolean as readBoolean,
@@ -102,6 +103,28 @@ function pushToolExecPosture(
 ): void {
   const localExec = isRecord(params.tools.exec) ? params.tools.exec : {};
   const inheritedExec = isRecord(params.inheritedTools.exec) ? params.inheritedTools.exec : {};
+  const localMode = readString(localExec.mode);
+  const inheritedMode = readString(inheritedExec.mode);
+  const localLegacyOverride = localExec.security !== undefined || localExec.ask !== undefined;
+  const selectedMode = localMode ?? (localLegacyOverride ? undefined : inheritedMode);
+  const normalizedLocalMode = normalizeExecMode(localMode);
+  const normalizedInheritedMode = normalizeExecMode(inheritedMode);
+  const localModePolicy =
+    normalizedLocalMode === null ? undefined : resolveExecPolicyForMode(normalizedLocalMode);
+  const inheritedModePolicy =
+    localMode === undefined && normalizedInheritedMode !== null
+      ? resolveExecPolicyForMode(normalizedInheritedMode)
+      : undefined;
+  const modeInherited =
+    localMode === undefined && !localLegacyOverride && inheritedMode !== undefined;
+  pushToolPostureValue(entries, params, {
+    suffix: "exec/mode",
+    kind: "execMode",
+    value: selectedMode,
+    explicit: localMode !== undefined || (!localLegacyOverride && inheritedMode !== undefined),
+    inherited: modeInherited,
+  });
+
   const localHost = readString(localExec.host);
   const inheritedHost = readString(inheritedExec.host);
   const host = localHost ?? inheritedHost ?? "auto";
@@ -120,23 +143,55 @@ function pushToolExecPosture(
   const sandboxCanApply = sandboxMode === "all";
   pushToolPostureValue(entries, params, {
     suffix: "exec/security",
+    sourceSuffix:
+      localModePolicy !== undefined
+        ? "exec/mode"
+        : localSecurity !== undefined
+          ? undefined
+          : inheritedModePolicy !== undefined
+            ? "exec/mode"
+            : undefined,
     kind: "execSecurity",
     value:
+      localModePolicy?.security ??
       localSecurity ??
+      inheritedModePolicy?.security ??
       inheritedSecurity ??
       (host === "sandbox" || (host === "auto" && sandboxCanApply) ? "deny" : "full"),
-    explicit: localSecurity !== undefined || inheritedSecurity !== undefined,
-    inherited: localSecurity === undefined && inheritedSecurity !== undefined,
+    explicit:
+      localModePolicy !== undefined ||
+      localSecurity !== undefined ||
+      inheritedModePolicy !== undefined ||
+      inheritedSecurity !== undefined,
+    inherited:
+      localModePolicy === undefined &&
+      localSecurity === undefined &&
+      (inheritedModePolicy !== undefined || inheritedSecurity !== undefined),
   });
 
   const localAsk = readString(localExec.ask);
   const inheritedAsk = readString(inheritedExec.ask);
   pushToolPostureValue(entries, params, {
     suffix: "exec/ask",
+    sourceSuffix:
+      localModePolicy !== undefined
+        ? "exec/mode"
+        : localAsk !== undefined
+          ? undefined
+          : inheritedModePolicy !== undefined
+            ? "exec/mode"
+            : undefined,
     kind: "execAsk",
-    value: localAsk ?? inheritedAsk ?? "off",
-    explicit: localAsk !== undefined || inheritedAsk !== undefined,
-    inherited: localAsk === undefined && inheritedAsk !== undefined,
+    value: localModePolicy?.ask ?? localAsk ?? inheritedModePolicy?.ask ?? inheritedAsk ?? "off",
+    explicit:
+      localModePolicy !== undefined ||
+      localAsk !== undefined ||
+      inheritedModePolicy !== undefined ||
+      inheritedAsk !== undefined,
+    inherited:
+      localModePolicy === undefined &&
+      localAsk === undefined &&
+      (inheritedModePolicy !== undefined || inheritedAsk !== undefined),
   });
 }
 
@@ -202,6 +257,7 @@ function pushToolPostureValue(
   params: ToolPostureParams,
   entry: {
     readonly suffix: string;
+    readonly sourceSuffix?: string;
     readonly kind: PolicyToolPostureEvidence["kind"];
     readonly value: boolean | string | undefined;
     readonly explicit: boolean;
@@ -211,7 +267,7 @@ function pushToolPostureValue(
   entries.push({
     id: `${params.id}-${entry.suffix.replaceAll("/", "-")}`,
     kind: entry.kind,
-    source: `${entry.inherited ? params.inheritedSourceBase : params.sourceBase}/${entry.suffix}`,
+    source: `${entry.inherited ? params.inheritedSourceBase : params.sourceBase}/${entry.sourceSuffix ?? entry.suffix}`,
     scope: params.scope,
     ...(params.agentId === undefined ? {} : { agentId: params.agentId }),
     ...(entry.value === undefined ? {} : { value: entry.value }),

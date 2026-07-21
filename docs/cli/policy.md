@@ -168,8 +168,9 @@ example covering every supported section:
       "requireWorkspaceOnly": true,
     },
     "exec": {
+      "allowModes": ["ask"],
       "allowSecurity": ["deny", "allowlist"],
-      "requireAsk": ["always"],
+      "requireAsk": ["on-miss"],
       "allowHosts": ["sandbox"],
     },
     "elevated": {
@@ -251,9 +252,10 @@ agent id instead of skipping it.
       "agentIds": ["release-agent"],
       "tools": {
         "exec": {
+          "allowModes": ["ask"],
           "allowHosts": ["sandbox"],
           "allowSecurity": ["deny", "allowlist"],
-          "requireAsk": ["always"],
+          "requireAsk": ["on-miss"],
         },
         "denyTools": ["exec", "process", "write", "edit", "apply_patch"],
       },
@@ -500,16 +502,22 @@ only reviewed exec approval posture for selected agents.
 
 #### Tool posture
 
-| Policy field                    | Observed state                                              | Use when                                                                                                 |
-| ------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `tools.profiles.allow`          | `tools.profile` and `agents.list[].tools.profile`           | Allow only tool profile ids such as `minimal`, `messaging`, or `coding`.                                 |
-| `tools.fs.requireWorkspaceOnly` | `tools.fs.workspaceOnly` and per-agent `tools.fs` overrides | Set to `true` to require workspace-only filesystem tool posture.                                         |
-| `tools.exec.allowSecurity`      | `tools.exec.security` and per-agent exec security           | Allow only exec security modes such as `deny` or `allowlist`.                                            |
-| `tools.exec.requireAsk`         | `tools.exec.ask` and per-agent exec ask mode                | Require approval posture such as `always`.                                                               |
-| `tools.exec.allowHosts`         | `tools.exec.host` and per-agent exec host routing           | Allow only exec host routing modes such as `sandbox`.                                                    |
-| `tools.elevated.allow`          | `tools.elevated.enabled` and per-agent elevated posture     | Set to `false` to require elevated tool mode to stay disabled.                                           |
-| `tools.alsoAllow.expected`      | `tools.alsoAllow` and per-agent `tools.alsoAllow`           | Require exact `alsoAllow` entries and report missing or unexpected additive tool grants.                 |
-| `tools.denyTools`               | `tools.deny` and `agents.list[].tools.deny`                 | Require configured tool deny lists to include tool ids or groups such as `group:runtime` and `group:fs`. |
+| Policy field                    | Observed state                                              | Use when                                                                                                             |
+| ------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `tools.profiles.allow`          | `tools.profile` and `agents.list[].tools.profile`           | Allow only tool profile ids such as `minimal`, `messaging`, or `coding`.                                             |
+| `tools.fs.requireWorkspaceOnly` | `tools.fs.workspaceOnly` and per-agent `tools.fs` overrides | Set to `true` to require workspace-only filesystem tool posture.                                                     |
+| `tools.exec.allowModes`         | Explicit `tools.exec.mode` and inherited per-agent mode     | Require normalized modes such as `ask`; missing modes and legacy `security`/`ask` overrides do not infer compliance. |
+| `tools.exec.allowSecurity`      | `tools.exec.security` and per-agent exec security           | Allow only exec security modes such as `deny` or `allowlist`.                                                        |
+| `tools.exec.requireAsk`         | `tools.exec.ask` and per-agent exec ask mode                | Require approval posture such as `always`.                                                                           |
+| `tools.exec.allowHosts`         | `tools.exec.host` and per-agent exec host routing           | Allow only exec host routing modes such as `sandbox`.                                                                |
+| `tools.elevated.allow`          | `tools.elevated.enabled` and per-agent elevated posture     | Set to `false` to require elevated tool mode to stay disabled.                                                       |
+| `tools.alsoAllow.expected`      | `tools.alsoAllow` and per-agent `tools.alsoAllow`           | Require exact `alsoAllow` entries and report missing or unexpected additive tool grants.                             |
+| `tools.denyTools`               | `tools.deny` and `agents.list[].tools.deny`                 | Require configured tool deny lists to include tool ids or groups such as `group:runtime` and `group:fs`.             |
+
+`tools.exec.allowModes` evaluates the normalized mode declaration separately
+from the legacy `security` and `ask` rules. A per-agent `security` or `ask`
+override clears an inherited mode at runtime, so policy reports that agent as
+missing a normalized mode instead of reconstructing one from the raw fields.
 
 ## Run checks
 

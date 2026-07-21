@@ -898,6 +898,155 @@ describe("registerPolicyDoctorChecks", () => {
     expect(result.findings).toEqual([]);
   });
 
+  it("requires an explicit approved normalized exec mode", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = {
+      ...cfgWithPolicy(),
+      tools: {
+        exec: { mode: "ask" },
+      },
+      agents: {
+        list: [
+          { id: "inherits-ask" },
+          { id: "auto-review", tools: { exec: { mode: "auto" } } },
+          {
+            id: "legacy-override",
+            tools: { exec: { security: "allowlist", ask: "always" } },
+          },
+          { id: "security-override", tools: { exec: { security: "full" } } },
+          { id: "ask-override", tools: { exec: { ask: "off" } } },
+          { id: "full-access", tools: { exec: { mode: "full" } } },
+        ],
+      },
+    } as unknown as OpenClawConfig;
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        tools: {
+          exec: {
+            allowModes: ["ask"],
+            allowSecurity: ["allowlist"],
+            requireAsk: ["on-miss"],
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+    const evidence = collectPolicyEvidence(cfg as unknown as Record<string, unknown>);
+
+    expect(evidence.toolPosture).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "inherits-ask-exec-mode",
+          kind: "execMode",
+          value: "ask",
+          source: "oc://openclaw.config/tools/exec/mode",
+        }),
+        expect.objectContaining({
+          id: "tools-exec-security",
+          kind: "execSecurity",
+          value: "allowlist",
+          source: "oc://openclaw.config/tools/exec/mode",
+        }),
+        expect.objectContaining({
+          id: "tools-exec-ask",
+          kind: "execAsk",
+          value: "on-miss",
+          source: "oc://openclaw.config/tools/exec/mode",
+        }),
+        expect.objectContaining({
+          id: "legacy-override-exec-mode",
+          kind: "execMode",
+          explicit: false,
+          source: "oc://openclaw.config/agents/list/#2/tools/exec/mode",
+        }),
+        expect.objectContaining({
+          id: "security-override-exec-ask",
+          kind: "execAsk",
+          value: "on-miss",
+          source: "oc://openclaw.config/tools/exec/mode",
+        }),
+        expect.objectContaining({
+          id: "ask-override-exec-security",
+          kind: "execSecurity",
+          value: "allowlist",
+          source: "oc://openclaw.config/tools/exec/mode",
+        }),
+      ]),
+    );
+    expect(
+      result.findings.filter((finding) => finding.checkId === "policy/tools-exec-mode-unapproved"),
+    ).toEqual([
+      expect.objectContaining({
+        checkId: "policy/tools-exec-mode-unapproved",
+        ocPath: "oc://openclaw.config/agents/list/#1/tools/exec/mode",
+        requirement: "oc://policy.jsonc/tools/exec/allowModes",
+      }),
+      expect.objectContaining({
+        checkId: "policy/tools-exec-mode-unapproved",
+        message: "agent 'legacy-override' does not declare a normalized exec mode.",
+        ocPath: "oc://openclaw.config/agents/list/#2/tools/exec/mode",
+        requirement: "oc://policy.jsonc/tools/exec/allowModes",
+      }),
+      expect.objectContaining({
+        checkId: "policy/tools-exec-mode-unapproved",
+        message: "agent 'security-override' does not declare a normalized exec mode.",
+        ocPath: "oc://openclaw.config/agents/list/#3/tools/exec/mode",
+        requirement: "oc://policy.jsonc/tools/exec/allowModes",
+      }),
+      expect.objectContaining({
+        checkId: "policy/tools-exec-mode-unapproved",
+        message: "agent 'ask-override' does not declare a normalized exec mode.",
+        ocPath: "oc://openclaw.config/agents/list/#4/tools/exec/mode",
+        requirement: "oc://policy.jsonc/tools/exec/allowModes",
+      }),
+      expect.objectContaining({
+        checkId: "policy/tools-exec-mode-unapproved",
+        ocPath: "oc://openclaw.config/agents/list/#5/tools/exec/mode",
+        requirement: "oc://policy.jsonc/tools/exec/allowModes",
+      }),
+    ]);
+    expect(result.findings).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ocPath: "oc://openclaw.config/tools/exec/mode",
+        }),
+        expect.objectContaining({
+          ocPath: "oc://openclaw.config/agents/list/#0/tools/exec/mode",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects unsupported normalized exec modes in policy", async () => {
+    const configPath = join(workspaceDir, "openclaw.jsonc");
+    const cfg = cfgWithPolicy();
+    await fs.writeFile(configPath, "{}", "utf-8");
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        tools: {
+          exec: { allowModes: ["guardian"] },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerPolicyDoctorChecks();
+    const result = await runDoctorLintChecks(ctx(configPath, cfg));
+
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        checkId: "policy/policy-jsonc-invalid",
+        target: "oc://policy.jsonc/tools/exec/allowModes/#0",
+      }),
+    ]);
+  });
+
   it("reports global and agent-scoped tool claims independently", async () => {
     const configPath = join(workspaceDir, "openclaw.jsonc");
     const cfg = {

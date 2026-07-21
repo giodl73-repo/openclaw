@@ -82,6 +82,15 @@ export function createPolicyAgentToolChecks(deps: PolicyDoctorCheckDeps): readon
       return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyToolsExecHostUnapproved);
     },
   };
+  const policyToolsExecModeUnapprovedCheck: HealthCheck = {
+    id: CHECK_IDS.policyToolsExecModeUnapproved,
+    kind: "plugin",
+    description: "Normalized exec mode matches policy allow rules.",
+    source: "policy",
+    async detect(ctx) {
+      return findingsForCheck(await evaluatePolicy(ctx), CHECK_IDS.policyToolsExecModeUnapproved);
+    },
+  };
   const policyToolsElevatedEnabledCheck: HealthCheck = {
     id: CHECK_IDS.policyToolsElevatedEnabled,
     kind: "plugin",
@@ -133,6 +142,7 @@ export function createPolicyAgentToolChecks(deps: PolicyDoctorCheckDeps): readon
     policyToolsExecSecurityUnapprovedCheck,
     policyToolsExecAskUnapprovedCheck,
     policyToolsExecHostUnapprovedCheck,
+    policyToolsExecModeUnapprovedCheck,
     policyToolsElevatedEnabledCheck,
     policyToolsAlsoAllowMissingCheck,
     policyToolsAlsoAllowUnexpectedCheck,
