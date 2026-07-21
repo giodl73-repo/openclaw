@@ -88,6 +88,8 @@ export async function activateCodexAttemptTurn(
       nativePostToolUseRelayEnabled:
         resourceState.nativeHookRelay?.allowedEvents.includes("post_tool_use") === true &&
         resourceState.nativeHookRelay.shouldRelayEvent("post_tool_use"),
+      consumeNativePostToolUseContext:
+        resourceState.nativeHookRelay?.consumeDeferredPostToolUseContext,
       readRecentRateLimits: () => readRecentCodexRateLimits(resourceState.client),
       runAbortSignal: runAbortController.signal,
       trajectoryRecorder,

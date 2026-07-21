@@ -166,6 +166,7 @@ export function createCodexNativeHookRelay(params: {
     runId: params.runId,
     ...(params.channelId ? { channelId: params.channelId } : {}),
     ...(params.requester ? { requester: params.requester } : {}),
+    deferStructuredPostToolUseToProjector: true,
     allowedEvents: params.events,
     preToolUseLoopDetection: params.loopDetectionPreToolUseRelay,
     ttlMs: resolveCodexNativeHookRelayTtlMs({

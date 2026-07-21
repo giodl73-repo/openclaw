@@ -4,14 +4,17 @@ import {
   abortAgentHarnessRun,
   invokeNativeHookRelay,
   nativeHookRelayTesting,
+  type AgentToolResultMiddlewareEvent,
   type NativeHookRelayRegistrationHandle,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import {
   onInternalDiagnosticEvent,
   type DiagnosticEventPayload,
 } from "openclaw/plugin-sdk/diagnostic-runtime";
+import { initializeGlobalHookRunner } from "openclaw/plugin-sdk/hook-runtime";
 import {
   createEmptyPluginRegistry,
+  createMockPluginRegistry,
   setActivePluginRegistry,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -63,9 +66,18 @@ function writeCodexAppServerBinding(...args: Parameters<typeof writeRawCodexAppS
 }
 
 describe("runCodexAppServerAttempt native hook relay", () => {
-  it("relays native tool results through Codex result middleware", async () => {
-    const middleware = vi.fn(async () => undefined);
-    const registry = createEmptyPluginRegistry();
+  it("runs Codex result middleware from structured command completion", async () => {
+    const middleware = vi.fn(async (event: AgentToolResultMiddlewareEvent) => {
+      const firstContent = event.result.content[0];
+      if (firstContent?.type === "text") {
+        firstContent.text = "rewritten by middleware";
+      }
+      return undefined;
+    });
+    const afterToolCall = vi.fn();
+    const registry = createMockPluginRegistry([
+      { hookName: "after_tool_call", handler: afterToolCall },
+    ]);
     registry.agentToolResultMiddlewares.push({
       pluginId: "tokenjuice",
       pluginName: "Tokenjuice",
@@ -75,11 +87,16 @@ describe("runCodexAppServerAttempt native hook relay", () => {
       source: "test",
     });
     setActivePluginRegistry(registry);
+    initializeGlobalHookRunner(registry);
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
     const harness = createStartedThreadHarness();
+    const params = createParams(sessionFile, workspaceDir);
+    params.messageChannel = "telegram";
+    params.messageProvider = "telegram";
+    params.currentChannelId = "telegram:-100123";
 
-    const run = runCodexAppServerAttempt(createParams(sessionFile, workspaceDir), {
+    const run = runCodexAppServerAttempt(params, {
       nativeHookRelay: {
         enabled: true,
         events: ["post_tool_use"],
@@ -92,6 +109,29 @@ describe("runCodexAppServerAttempt native hook relay", () => {
     expect(startConfig?.["hooks.PostToolUse"]).not.toEqual([]);
     const relayId = extractRelayIdFromThreadRequest(startRequest?.params);
 
+    await harness.notify({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "commandExecution",
+          id: "native-call-1",
+          command: "pnpm test",
+          cwd: workspaceDir,
+          processId: null,
+          source: "agent",
+          status: "completed",
+          commandActions: [],
+          aggregatedOutput: "ok",
+          exitCode: 0,
+          durationMs: 42,
+        },
+      },
+    });
+    expect(middleware).not.toHaveBeenCalled();
+    expect(afterToolCall).not.toHaveBeenCalled();
+
     await invokeNativeHookRelay({
       provider: "codex",
       relayId,
@@ -101,26 +141,49 @@ describe("runCodexAppServerAttempt native hook relay", () => {
         tool_name: "Bash",
         tool_use_id: "native-call-1",
         tool_input: { command: "pnpm test" },
-        tool_response: { output: "ok", exit_code: 0 },
+        tool_response: "ok",
       },
     });
 
-    expect(middleware).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolCallId: "native-call-1",
-        toolName: "exec",
-        args: { command: "pnpm test" },
-        result: {
-          content: [
-            {
-              type: "text",
-              text: '{\n  "output": "ok",\n  "exit_code": 0\n}',
+    await vi.waitFor(() =>
+      expect(middleware).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolCallId: "native-call-1",
+          toolName: "exec",
+          args: { command: "pnpm test" },
+          result: {
+            content: [{ type: "text", text: "rewritten by middleware" }],
+            details: {
+              status: "completed",
+              exitCode: 0,
+              durationMs: 42,
+              output: "ok",
             },
-          ],
-          details: { output: "ok", exit_code: 0 },
+          },
+        }),
+        expect.objectContaining({ runtime: "codex" }),
+      ),
+    );
+    await vi.waitFor(() => expect(afterToolCall).toHaveBeenCalledTimes(1));
+    expect(afterToolCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "exec",
+        params: { command: "pnpm test" },
+        result: {
+          content: [{ type: "text", text: "rewritten by middleware" }],
+          details: {
+            status: "completed",
+            exitCode: 0,
+            durationMs: 42,
+            output: "ok",
+          },
         },
       }),
-      expect.objectContaining({ runtime: "codex" }),
+      expect.objectContaining({
+        channelId: "-100123",
+        toolName: "exec",
+        toolCallId: "native-call-1",
+      }),
     );
 
     await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
