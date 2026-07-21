@@ -291,6 +291,10 @@ export function createDiagnosticsMetrics(meter: Meter) {
     unit: "1",
     description: "Diagnostic telemetry exporter lifecycle and failure events",
   });
+  const subagentEndedCounter = meter.createCounter("openclaw.subagent.ended", {
+    unit: "1",
+    description: "Subagent terminal lifecycle events by outcome, reason, and target kind",
+  });
   return {
     tokensCounter,
     genAiTokenUsageHistogram,
@@ -351,6 +355,7 @@ export function createDiagnosticsMetrics(meter: Meter) {
     livenessEventLoopUtilizationHistogram,
     livenessCpuCoreRatioHistogram,
     telemetryExporterCounter,
+    subagentEndedCounter,
   };
 }
 

@@ -17,6 +17,7 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_FILES = [
   "extensions/active-memory/index.ts",
   "extensions/clickclack/src/discussions/register.ts",
   "extensions/codex/index.ts",
+  "extensions/diagnostics-otel/index.ts",
   "extensions/diffs/src/plugin.ts",
   "extensions/discord/subagent-hooks-api.ts",
   "extensions/feishu/subagent-hooks-api.ts",
@@ -32,6 +33,7 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_GUARDS = {
   "extensions/active-memory/index.ts": ["before_prompt_build"],
   "extensions/clickclack/src/discussions/register.ts": ["before_tool_call"],
   "extensions/codex/index.ts": ["after_compaction", "inbound_claim", "session_end"],
+  "extensions/diagnostics-otel/index.ts": ["subagent_ended"],
   "extensions/diffs/src/plugin.ts": ["before_prompt_build"],
   "extensions/discord/subagent-hooks-api.ts": [
     "gateway_start",
