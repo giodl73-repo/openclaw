@@ -270,6 +270,7 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       cfg,
       agentId: resolvedAgentId,
       sessionKey: params.sessionKey,
+      runId: params.runId,
       policySessionKey: params.policySessionKey,
       conversationType: params.policyConversationType,
       isGroup:

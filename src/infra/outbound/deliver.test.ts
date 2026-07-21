@@ -5396,7 +5396,7 @@ describe("deliverOutboundPayloads", () => {
     expect(sentCall?.[1]?.channelId).toBe("matrix");
   });
 
-  it("threads sessionKey into the message_sending hook context when session is provided", async () => {
+  it("threads session and run identity into message_sending when provided", async () => {
     hookMocks.runner.hasHooks.mockImplementation(
       (hookName?: string) => hookName === "message_sending",
     );
@@ -5423,7 +5423,7 @@ describe("deliverOutboundPayloads", () => {
       channel: "matrix",
       to: "!room",
       payloads: [{ text: "hello" }],
-      session: { key: "agent:tank:main" },
+      session: { key: "agent:tank:main", runId: "run-outbound-1" },
     });
 
     expect(hookMocks.runner.runMessageSending).toHaveBeenCalledTimes(1);
@@ -5432,6 +5432,7 @@ describe("deliverOutboundPayloads", () => {
       expect.objectContaining({
         channelId: "matrix",
         sessionKey: "agent:tank:main",
+        runId: "run-outbound-1",
       }),
     );
   });
@@ -5480,6 +5481,70 @@ describe("deliverOutboundPayloads", () => {
     );
   });
 
+  it("keeps concurrent runs distinct within one outbound session", async () => {
+    hookMocks.runner.hasHooks.mockImplementation(
+      (hookName?: string) => hookName === "message_sending",
+    );
+    const sendText = vi.fn().mockResolvedValue({
+      channel: "matrix" as const,
+      messageId: "mx-concurrent",
+      roomId: "!room",
+    });
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "matrix",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "matrix",
+            outbound: { deliveryMode: "direct", sendText },
+          }),
+        },
+      ]),
+    );
+
+    await Promise.all([
+      deliverOutboundPayloads({
+        cfg: {},
+        channel: "matrix",
+        to: "!room",
+        payloads: [{ text: "first" }],
+        session: { key: "agent:tank:main", runId: "run-first" },
+      }),
+      deliverOutboundPayloads({
+        cfg: {},
+        channel: "matrix",
+        to: "!room",
+        payloads: [{ text: "second" }],
+        session: { key: "agent:tank:main", runId: "run-second" },
+      }),
+    ]);
+
+    const calls = (
+      hookMocks.runner.runMessageSending.mock.calls as Array<
+        [{ content?: string }, { sessionKey?: string; runId?: string }]
+      >
+    ).map(([event, ctx]) => ({
+      content: event.content,
+      sessionKey: ctx.sessionKey,
+      runId: ctx.runId,
+    }));
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        {
+          content: "first",
+          sessionKey: "agent:tank:main",
+          runId: "run-first",
+        },
+        {
+          content: "second",
+          sessionKey: "agent:tank:main",
+          runId: "run-second",
+        },
+      ]),
+    );
+  });
+
   it("omits sessionKey from the message_sending hook context when session is absent", async () => {
     hookMocks.runner.hasHooks.mockImplementation(
       (hookName?: string) => hookName === "message_sending",
@@ -5512,12 +5577,15 @@ describe("deliverOutboundPayloads", () => {
     expect(hookMocks.runner.runMessageSending).toHaveBeenCalledTimes(1);
     const ctx = hookMocks.runner.runMessageSending.mock.calls[0]?.[1] as {
       sessionKey?: string;
+      runId?: string;
     };
     expect(ctx?.sessionKey).toBeUndefined();
     expect(ctx).not.toHaveProperty("sessionKey");
+    expect(ctx?.runId).toBeUndefined();
+    expect(ctx).not.toHaveProperty("runId");
   });
 
-  it("threads sessionKey into the message_sent hook context when session is provided", async () => {
+  it("threads session and run identity into message_sent when provided", async () => {
     // Contract test for `message_sent`: the documented JSDoc says the
     // outbound delivery hooks mirror `OutboundSessionContext.key`. This
     // test pins `message_sent` to that contract so it cannot diverge
@@ -5546,17 +5614,68 @@ describe("deliverOutboundPayloads", () => {
       channel: "matrix",
       to: "!room",
       payloads: [{ text: "hello" }],
-      session: { key: "agent:tank:main" },
+      session: { key: "agent:tank:main", runId: "run-outbound-1" },
     });
 
     expect(hookMocks.runner.runMessageSent).toHaveBeenCalledTimes(1);
     expect(hookMocks.runner.runMessageSent).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "!room", content: "hello", success: true }),
+      expect.objectContaining({
+        to: "!room",
+        content: "hello",
+        success: true,
+        runId: "run-outbound-1",
+      }),
       expect.objectContaining({
         channelId: "matrix",
         sessionKey: "agent:tank:main",
+        runId: "run-outbound-1",
       }),
     );
+  });
+
+  it("keeps live run identity out of the durable recovery context", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    const sendText = vi.fn().mockResolvedValue({
+      channel: "matrix" as const,
+      messageId: "mx-durable-run",
+      roomId: "!room",
+    });
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "matrix",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "matrix",
+            outbound: { deliveryMode: "direct", sendText },
+          }),
+        },
+      ]),
+    );
+
+    await deliverOutboundPayloads({
+      cfg: {},
+      channel: "matrix",
+      to: "!room",
+      payloads: [{ text: "hello" }],
+      session: { key: "agent:tank:main", runId: "run-live-only" },
+    });
+
+    expect(hookMocks.runner.runMessageSending).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ runId: "run-live-only" }),
+    );
+    expect(queueMocks.enqueueDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: { key: "agent:tank:main" },
+      }),
+    );
+    const queuedSession = (
+      queueMocks.enqueueDelivery.mock.calls as unknown as Array<
+        [{ session?: { key?: string; runId?: string } }]
+      >
+    )[0]?.[0].session;
+    expect(queuedSession).not.toHaveProperty("runId");
   });
 
   it("omits sessionKey from the message_sent hook context when session is absent", async () => {
@@ -5589,8 +5708,11 @@ describe("deliverOutboundPayloads", () => {
     expect(hookMocks.runner.runMessageSent).toHaveBeenCalledTimes(1);
     const sentCtx = hookMocks.runner.runMessageSent.mock.calls[0]?.[1] as {
       sessionKey?: string;
+      runId?: string;
     };
     expect(sentCtx?.sessionKey).toBeUndefined();
+    expect(sentCtx?.runId).toBeUndefined();
+    expect(sentCtx).not.toHaveProperty("runId");
   });
 
   it("short-circuits lower-priority message_sending hooks after cancel=true", async () => {

@@ -839,6 +839,17 @@ function sessionKeyForDeliveryDiagnostics(params: {
   return params.mirror?.sessionKey ?? params.session?.key ?? params.session?.policyKey;
 }
 
+function durableOutboundSessionContext(
+  session: OutboundSessionContext | undefined,
+): OutboundSessionContext | undefined {
+  if (!session?.runId) {
+    return session;
+  }
+  const durable = { ...session };
+  delete durable.runId;
+  return Object.keys(durable).length > 0 ? durable : undefined;
+}
+
 function deliveryKindForPayload(
   payload: ReplyPayload,
   payloadSummary: NormalizedOutboundPayload,
@@ -1188,6 +1199,7 @@ function createMessageSentEmitter(params: {
   to: string;
   accountId?: string;
   sessionKeyForInternalHooks?: string;
+  runIdForInternalHooks?: string;
   mirrorIsGroup?: boolean;
   mirrorGroupId?: string;
 }): { emitMessageSent: (event: MessageSentEvent) => void; hasMessageSentHooks: boolean } {
@@ -1213,6 +1225,7 @@ function createMessageSentEmitter(params: {
       // keeps the contract documented in `PluginHookMessageContext`
       // honest for both outbound delivery hooks.
       sessionKey: params.sessionKeyForInternalHooks,
+      runId: params.runIdForInternalHooks,
       messageId: event.messageId,
       isGroup: params.mirrorIsGroup,
       groupId: params.mirrorGroupId,
@@ -1261,6 +1274,7 @@ async function applyMessageSendingHook(params: {
   replyToId?: string | null;
   threadId?: string | number | null;
   sessionKey?: string;
+  runId?: string;
 }): Promise<{
   cancelled: boolean;
   cancelReason?: string;
@@ -1295,6 +1309,7 @@ async function applyMessageSendingHook(params: {
         accountId: params.accountId ?? undefined,
         conversationId: params.to,
         ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+        ...(params.runId ? { runId: params.runId } : {}),
       },
     );
     if (sendingResult?.cancel) {
@@ -1588,7 +1603,7 @@ export async function deliverOutboundPayloadsInternal(
         replyPayloadSendingHook: params.replyPayloadSendingHook,
         silent: params.silent,
         mirror: params.mirror,
-        session: params.session,
+        session: durableOutboundSessionContext(params.session),
         gatewayClientScopes: params.gatewayClientScopes,
         preparedMessageId: params.preparedMessageId,
         deliveryCompletion: params.deliveryCompletion,
@@ -2352,6 +2367,7 @@ async function deliverOutboundPayloadsCore(
   // delivery target's policy, not the canonical control session, and
   // handing it to plugins that correlate against agent_end would be wrong.
   const sessionKeyForInternalHooks = params.mirror?.sessionKey ?? params.session?.key;
+  const runIdForInternalHooks = params.session?.runId;
   const mirrorIsGroup = params.mirror?.isGroup;
   const mirrorGroupId = params.mirror?.groupId;
   const { emitMessageSent, hasMessageSentHooks } = createMessageSentEmitter({
@@ -2360,6 +2376,7 @@ async function deliverOutboundPayloadsCore(
     to,
     accountId,
     sessionKeyForInternalHooks,
+    runIdForInternalHooks,
     mirrorIsGroup,
     mirrorGroupId,
   });
@@ -2451,6 +2468,7 @@ async function deliverOutboundPayloadsCore(
         replyToId: resolveCurrentReplyTo(deliveryPayload).replyToId,
         threadId: params.threadId,
         sessionKey: sessionKeyForInternalHooks,
+        runId: runIdForInternalHooks,
       });
       if (hookResult.cancelled) {
         const hookEffect =
