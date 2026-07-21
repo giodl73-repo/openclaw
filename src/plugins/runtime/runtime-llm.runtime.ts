@@ -5,8 +5,9 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { modelKey } from "../../agents/model-ref-shared.js";
 import { normalizeModelRef } from "../../agents/model-selection.js";
 import type { NormalizedUsage, UsageLike } from "../../agents/usage.js";
-import { normalizeUsage } from "../../agents/usage.js";
+import { derivePromptTokens, hasNonzeroUsage, normalizeUsage } from "../../agents/usage.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { emitTrustedDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import type { Api, Message } from "../../llm/types.js";
 import { getChildLogger } from "../../logging.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
@@ -439,6 +440,7 @@ export function createRuntimeLlm(
         }),
       };
 
+      const completionStartedAt = Date.now();
       const result = await completeWithPreparedSimpleCompletionModel({
         model: prepared.model,
         auth: prepared.auth,
@@ -464,6 +466,26 @@ export function createRuntimeLlm(
         provider: prepared.selection.provider,
         model: prepared.selection.modelId,
       });
+      const diagnosticUsage = {
+        input: normalizedUsage?.input,
+        output: normalizedUsage?.output,
+        cacheRead: normalizedUsage?.cacheRead,
+        cacheWrite: normalizedUsage?.cacheWrite,
+        promptTokens: derivePromptTokens(normalizedUsage),
+        total: usage.totalTokens,
+      };
+      if (isDiagnosticsEnabled(cfg) && hasNonzeroUsage(diagnosticUsage)) {
+        emitTrustedDiagnosticEvent({
+          type: "model.usage",
+          sessionKey: options.authority?.sessionKey,
+          agentId,
+          provider: prepared.selection.provider,
+          model: prepared.selection.modelId,
+          usage: diagnosticUsage,
+          costUsd: usage.costUsd,
+          durationMs: Date.now() - completionStartedAt,
+        });
+      }
 
       logger.info("plugin llm completion", {
         caller,

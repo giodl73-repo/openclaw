@@ -9,6 +9,7 @@ import type { RuntimeLogger } from "./types-core.js";
 const hoisted = vi.hoisted(() => ({
   prepareSimpleCompletionModelForAgent: vi.fn(),
   completeWithPreparedSimpleCompletionModel: vi.fn(),
+  emitTrustedDiagnosticEvent: vi.fn(),
   resolveSimpleCompletionSelectionForAgent: vi.fn(),
 }));
 
@@ -17,6 +18,14 @@ vi.mock("../../agents/simple-completion-runtime.js", () => ({
   completeWithPreparedSimpleCompletionModel: hoisted.completeWithPreparedSimpleCompletionModel,
   resolveSimpleCompletionSelectionForAgent: hoisted.resolveSimpleCompletionSelectionForAgent,
 }));
+
+vi.mock("../../infra/diagnostic-events.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../infra/diagnostic-events.js")>();
+  return {
+    ...actual,
+    emitTrustedDiagnosticEvent: hoisted.emitTrustedDiagnosticEvent,
+  };
+});
 
 const cfg = {
   agents: {
@@ -144,6 +153,7 @@ describe("runtime.llm.complete", () => {
   beforeEach(() => {
     hoisted.prepareSimpleCompletionModelForAgent.mockReset();
     hoisted.completeWithPreparedSimpleCompletionModel.mockReset();
+    hoisted.emitTrustedDiagnosticEvent.mockReset();
     hoisted.resolveSimpleCompletionSelectionForAgent.mockReset();
     primeCompletionMocks();
   });
@@ -615,6 +625,84 @@ describe("runtime.llm.complete", () => {
       },
     );
     expectFields(requireRecord(logPayload.usage, "log usage"), { costUsd: 0.0042 });
+  });
+
+  it("emits normalized model usage after a successful completion", async () => {
+    const llm = createRuntimeLlm({
+      getConfig: () => cfg,
+      authority: {
+        caller: { kind: "host", id: "runtime-test" },
+        allowComplete: true,
+        sessionKey: "agent:main:plugin",
+      },
+    });
+
+    await llm.complete({
+      messages: [{ role: "user", content: "Ping" }],
+    });
+
+    expect(hoisted.emitTrustedDiagnosticEvent).toHaveBeenCalledOnce();
+    expect(hoisted.emitTrustedDiagnosticEvent).toHaveBeenCalledWith({
+      type: "model.usage",
+      sessionKey: "agent:main:plugin",
+      agentId: "main",
+      provider: "openai",
+      model: "gpt-5.5",
+      usage: {
+        input: 11,
+        output: 7,
+        cacheRead: 5,
+        cacheWrite: 2,
+        promptTokens: 18,
+        total: 25,
+      },
+      costUsd: 0.0042,
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("does not emit model usage when diagnostics are disabled or usage is empty", async () => {
+    const disabled = createRuntimeLlm({
+      getConfig: () => ({ ...cfg, diagnostics: { enabled: false } }),
+      authority: { allowComplete: true },
+    });
+
+    await disabled.complete({
+      messages: [{ role: "user", content: "Ping" }],
+    });
+
+    hoisted.completeWithPreparedSimpleCompletionModel.mockResolvedValue({
+      content: [{ type: "text", text: "done" }],
+      usage: {},
+    });
+    const emptyUsage = createRuntimeLlm({
+      getConfig: () => cfg,
+      authority: { allowComplete: true },
+    });
+
+    await emptyUsage.complete({
+      messages: [{ role: "user", content: "Ping" }],
+    });
+
+    expect(hoisted.emitTrustedDiagnosticEvent).not.toHaveBeenCalled();
+  });
+
+  it("does not emit model usage when completion fails", async () => {
+    hoisted.completeWithPreparedSimpleCompletionModel.mockRejectedValue(
+      new Error("provider unavailable"),
+    );
+    const llm = createRuntimeLlm({
+      getConfig: () => cfg,
+      authority: { allowComplete: true },
+    });
+
+    await expect(
+      llm.complete({
+        messages: [{ role: "user", content: "Ping" }],
+      }),
+    ).rejects.toThrow("provider unavailable");
+
+    expect(hoisted.emitTrustedDiagnosticEvent).not.toHaveBeenCalled();
   });
 
   it("preserves the completion options shape when reasoning is omitted", async () => {
