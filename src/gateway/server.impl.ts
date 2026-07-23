@@ -2294,6 +2294,7 @@ export async function startGatewayServer(
       },
       commitTerminalConfig: (nextConfig) => {
         terminalLaunchPolicy.commitConfig();
+        readinessRuntimeSnapshot = { config: nextConfig, registry: pluginRegistry };
         workerLiveEvents?.rebindAll(nextConfig);
       },
       acceptTerminalConfig: terminalLaunchPolicy.acceptConfig,

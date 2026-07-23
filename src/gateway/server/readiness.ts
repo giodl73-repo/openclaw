@@ -344,8 +344,11 @@ function withEventLoopHealth(
 function mergeReadinessResults(
   gateway: ReadinessResult,
   runtime: CanonicalReadinessResult,
+  options?: { runtimeConditionsFirst?: boolean },
 ): CanonicalGatewayReadinessResult {
-  const conditions = [...(gateway.conditions ?? []), ...runtime.conditions];
+  const conditions = options?.runtimeConditionsFirst
+    ? [...runtime.conditions, ...(gateway.conditions ?? [])]
+    : [...(gateway.conditions ?? []), ...runtime.conditions];
   const failures = Array.from(
     new Set(
       conditions
@@ -389,6 +392,7 @@ export async function evaluateCanonicalGatewayReadiness(params: {
     return mergeReadinessResults(
       gateway ?? { ready: false, failing: [], uptimeMs: 0 },
       buildReadinessEvaluationFailure(error),
+      { runtimeConditionsFirst: true },
     );
   }
 }
