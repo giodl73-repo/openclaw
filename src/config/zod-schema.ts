@@ -29,6 +29,15 @@ import { HookMappingSchema, HooksGmailSchema, InternalHooksSchema } from "./zod-
 import { BrowserSnapshotDefaultsSchema, NodeHostAgentRunsSchema } from "./zod-schema.node-host.js";
 import { ProxyConfigSchema } from "./zod-schema.proxy.js";
 import { sensitive } from "./zod-schema.sensitive.js";
+
+const ReadinessCriterionIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(160)
+  .regex(/^(?:openclaw|plugin)\.[a-z0-9][a-z0-9._-]*$/, {
+    message: "criterion must be a namespaced openclaw.* or plugin.* identifier",
+  });
 import {
   CommandsSchema,
   MessagesSchema,
@@ -1198,8 +1207,8 @@ export const OpenClawSchema = z
           .optional(),
         readiness: z
           .strictObject({
-            requiredCriteria: z.array(z.string().trim().min(1).max(160)).max(64).optional(),
-            advisoryCriteria: z.array(z.string().trim().min(1).max(160)).max(64).optional(),
+            requiredCriteria: z.array(ReadinessCriterionIdSchema).max(64).optional(),
+            advisoryCriteria: z.array(ReadinessCriterionIdSchema).max(64).optional(),
           })
           .superRefine((value, ctx) => {
             const required = new Set(value.requiredCriteria ?? []);
