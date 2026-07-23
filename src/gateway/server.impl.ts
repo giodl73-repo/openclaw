@@ -1141,19 +1141,26 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   const resolveSelectedReadiness = createSelectedReadinessResolver();
+  let readinessRuntimeSnapshot = { config: cfgAtStart, registry: pluginRegistry };
   const evaluateRuntimeReadiness = async () => {
-    const config = getRuntimeConfig();
-    const additionalConditions = await resolveSelectedReadiness({
-      config,
-      registry: pluginRegistry,
-      env: process.env,
-    });
-    return buildRuntimeReadiness({
-      configLoaded: true,
-      gateway: "responding",
-      plugins: buildGatewayPluginReadinessInput(pluginRegistry),
-      additionalConditions,
-    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snapshot = readinessRuntimeSnapshot;
+      const additionalConditions = await resolveSelectedReadiness({
+        config: snapshot.config,
+        registry: snapshot.registry,
+        env: process.env,
+      });
+      if (snapshot !== readinessRuntimeSnapshot) {
+        continue;
+      }
+      return buildRuntimeReadiness({
+        configLoaded: true,
+        gateway: "responding",
+        plugins: buildGatewayPluginReadinessInput(snapshot.registry),
+        additionalConditions,
+      });
+    }
+    throw new Error("Readiness runtime changed while it was being evaluated.");
   };
   const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
     evaluateCanonicalGatewayReadiness({
@@ -1702,11 +1709,15 @@ export async function startGatewayServer(
       runtimeState.gatewayMethods.length,
       ...listAttachedGatewayMethods(),
     );
-    const replaceAttachedPluginRuntime = (loaded: {
-      pluginRegistry: typeof pluginRegistry;
-      gatewayMethods: string[];
-    }) => {
+    const replaceAttachedPluginRuntime = (
+      loaded: {
+        pluginRegistry: typeof pluginRegistry;
+        gatewayMethods: string[];
+      },
+      readinessConfig = getRuntimeConfig(),
+    ) => {
       pluginRegistry = loaded.pluginRegistry;
+      readinessRuntimeSnapshot = { config: readinessConfig, registry: pluginRegistry };
       baseGatewayMethods = loaded.gatewayMethods;
       for (const key of attachedPluginGatewayHandlerKeys) {
         delete attachedGatewayExtraHandlers[key];
@@ -1845,7 +1856,7 @@ export async function startGatewayServer(
         env: params.env,
         workspaceDir: defaultWorkspaceDir,
       });
-      replaceAttachedPluginRuntime(loaded);
+      replaceAttachedPluginRuntime(loaded, params.nextConfig);
       runtimeState.pluginServices = null;
       if (previousPluginServices) {
         await previousPluginServices.stop();
