@@ -504,6 +504,7 @@ describe("gateway run option collisions", () => {
       bind?: string;
       channelAutostartSuppression?: { reason?: string; message?: string };
       tryRecoverChannelAutostartSuppression?: () => boolean;
+      hostingProfileOverride?: string;
       ambientEnvTriggers?: "allow" | "suppress";
       startupConfigSnapshotRead?: { snapshot?: Record<string, unknown> };
       startupStartedAt?: number;

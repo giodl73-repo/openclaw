@@ -153,7 +153,7 @@ export async function prepareGatewayLifecycle(params: {
   nodeDesktopServiceRef.current = nodeDesktopService;
   bindDeviceNodeControl?.(nodeWorkerSupervisorTransport);
   bindWorkerNodeDesktopControl?.(nodeWorkerSupervisorTransport);
-  nodeReadiness.listConnected = () => nodeRegistry.listConnected();
+  nodeReadiness.listConnected = () => nodeRegistry.listCurrentConnectedSync();
   const { createWatchNodeHttpRuntime } = await import("./watch-node-http.js");
   const watchNodeHttpRuntime = createWatchNodeHttpRuntime({
     nodeRegistry,
