@@ -115,6 +115,10 @@ export async function prepareGatewayKernelState(params: {
   const pluginRuntime = {
     registry: pluginBootstrap.pluginRegistry,
     baseGatewayMethods: pluginBootstrap.baseGatewayMethods,
+    readinessSnapshot: {
+      config: cfgAtStart,
+      registry: pluginBootstrap.pluginRegistry,
+    },
   };
   const listGatewayStartupChannelPlugins = () =>
     listLoadedChannelPluginsForRegistry(pluginRuntime.registry);
@@ -457,18 +461,24 @@ export async function prepareGatewayKernelState(params: {
   });
   const resolveSelectedReadiness = createSelectedReadinessResolver();
   const evaluateRuntimeReadiness = async () => {
-    const config = getRuntimeConfig();
-    const additionalConditions = await resolveSelectedReadiness({
-      config,
-      registry: pluginRuntime.registry,
-      env: process.env,
-    });
-    return buildRuntimeReadiness({
-      configLoaded: true,
-      gateway: "responding",
-      plugins: buildGatewayPluginReadinessInput(pluginRuntime.registry),
-      additionalConditions,
-    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snapshot = pluginRuntime.readinessSnapshot;
+      const additionalConditions = await resolveSelectedReadiness({
+        config: snapshot.config,
+        registry: snapshot.registry,
+        env: process.env,
+      });
+      if (snapshot !== pluginRuntime.readinessSnapshot) {
+        continue;
+      }
+      return buildRuntimeReadiness({
+        configLoaded: true,
+        gateway: "responding",
+        plugins: buildGatewayPluginReadinessInput(snapshot.registry),
+        additionalConditions,
+      });
+    }
+    throw new Error("Readiness runtime changed while it was being evaluated.");
   };
   const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
     evaluateCanonicalGatewayReadiness({
