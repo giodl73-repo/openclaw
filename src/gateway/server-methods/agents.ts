@@ -898,7 +898,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     });
     respond(true, result, undefined);
   },
-  "agents.create": async ({ params, respond }) => {
+  "agents.create": async ({ params, respond, context }) => {
     if (!validateAgentsCreateParams(params)) {
       respondInvalidMethodParams(respond, "agents.create", validateAgentsCreateParams.errors);
       return;
