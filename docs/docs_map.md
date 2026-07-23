@@ -2006,6 +2006,15 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Auth resolution (--remote)
   - H2: Related
 
+## cli/ready.md
+
+- Route: /cli/ready
+- Headings:
+  - H1: openclaw ready
+  - H2: Options
+  - H2: Exit codes
+  - H2: Related
+
 ## cli/reset.md
 
 - Route: /cli/reset
@@ -3468,6 +3477,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: Codex harness plugin config
   - H2: Browser
   - H2: UI
+  - H2: Gateway readiness
   - H2: Gateway
   - H3: OpenAI-compatible endpoints
   - H3: Multi-instance isolation
@@ -3604,6 +3614,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Deep diagnostics
   - H2: Health monitor config
   - H2: Uptime monitoring
+  - H2: Selected readiness criteria
   - H3: Monitoring service setup examples
   - H2: When something fails
   - H2: Dedicated "health" command
@@ -7630,6 +7641,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: Capability registration
   - H3: Tools and commands
   - H3: Infrastructure
+  - H4: Readiness criteria
   - H4: Post-ack webhook work
   - H4: Requester-scoped MCP connections
   - H3: Host hooks for workflow plugins
