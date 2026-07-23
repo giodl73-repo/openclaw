@@ -142,6 +142,7 @@ export async function prepareGatewayKernelState(params: {
   const makeState = (config: OpenClawConfig, registry: typeof pluginBootstrap.pluginRegistry) => ({
     config,
     registry,
+    auth: getResolvedAuth(),
     executionCapabilities: captureExecutionCapabilityReadinessSnapshot(config),
   });
   const pluginRuntime = {
@@ -502,8 +503,13 @@ export async function prepareGatewayKernelState(params: {
   const evaluateRuntimeReadiness = async () => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const snapshot = pluginRuntime.readinessSnapshot;
-      const profile = resolveHostingProfile({ config: snapshot.config, env: process.env });
-      const auth = getResolvedAuth();
+      const profileSelection = resolveHostingProfileSelection({
+        config: snapshot.config,
+        env: process.env,
+        override: opts.hostingProfileOverride,
+      });
+      const profile = profileSelection?.profile;
+      const auth = snapshot.auth;
       const [nodeMode, contribution] = await Promise.all([
         profile === "node-mode"
           ? resolveNodeModeReadiness({
