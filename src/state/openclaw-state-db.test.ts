@@ -34,6 +34,7 @@ import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.j
 import { loadTaskRegistryStateFromSqlite } from "../tasks/task-registry.store.sqlite.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { VERSION } from "../version.js";
+import { getOpenClawStateDatabaseReadiness } from "./openclaw-state-db-readiness.js";
 import {
   readConfigMachineState,
   readConfigMachineStateWithMetadata,
@@ -57,6 +58,7 @@ import {
   OPENCLAW_SQLITE_BUSY_TIMEOUT_MS,
   openExistingOpenClawStateDatabaseReadOnly,
   openOpenClawStateDatabase,
+  recordOpenClawStateDatabaseOpenFailure,
   repairOpenClawStateDatabaseSchema,
   repairOpenClawStateDatabaseSchemaIfNeeded,
   runWithOpenClawStateBusyTimeout,
@@ -1927,6 +1929,29 @@ describe("openclaw state database", () => {
     } finally {
       after.close();
     }
+  });
+
+  it("publishes active and inactive lifecycle transitions", () => {
+    const stateDir = createTempStateDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    const pathname = resolveOpenClawStateSqlitePath(env);
+
+    expect(getOpenClawStateDatabaseReadiness(pathname)).toBe("inactive");
+    openOpenClawStateDatabase({ env });
+    expect(getOpenClawStateDatabaseReadiness(pathname)).toBe("active");
+    closeOpenClawStateDatabaseForTest();
+    expect(getOpenClawStateDatabaseReadiness(pathname)).toBe("inactive");
+  });
+
+  it("publishes terminal activation failure and repair transitions", () => {
+    const stateDir = createTempStateDir();
+    const pathname = resolveOpenClawStateSqlitePath({ OPENCLAW_STATE_DIR: stateDir });
+
+    recordOpenClawStateDatabaseOpenFailure(pathname, new Error("integrity failure"));
+    expect(getOpenClawStateDatabaseReadiness(pathname)).toBe("failed");
+
+    clearOpenClawStateDatabaseOpenFailure(pathname);
+    expect(getOpenClawStateDatabaseReadiness(pathname)).toBe("inactive");
   });
 
   it("resolves under the shared state database directory", () => {

@@ -487,6 +487,9 @@ export async function prepareGatewayKernelState(params: {
         registry: snapshot.registry,
         executionCapabilities: snapshot.executionCapabilities,
         env: process.env,
+        stateServices: {
+          scheduler: runtimeStateRef.current?.cronState.cron.getReadinessSnapshot(),
+        },
       });
       if (snapshot !== pluginRuntime.readinessSnapshot) {
         continue;
