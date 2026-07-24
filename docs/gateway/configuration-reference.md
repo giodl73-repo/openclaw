@@ -125,6 +125,12 @@ Moved to [Configuration — browser, UI, and desktop](/gateway/config-browser-ui
 - `requiredCriteria`: registered criteria that must report `True` for readiness.
 - `advisoryCriteria`: registered criteria included in diagnostics without blocking readiness.
 
+Built-in selectors include `openclaw.workspace-writable`,
+`openclaw.state-ready`, `openclaw.delivery-runtime-ready`, and
+`openclaw.scheduler-ready`. State and background-service selectors observe
+already-published lifecycle facts; they do not activate services from the probe
+path.
+
 Omitting `gateway.readiness` preserves the legacy Gateway readiness decision
 path. Adding the section opts into bounded canonical condition evaluation; an
 empty object enables canonical evaluation without selecting extra criteria.
