@@ -11,6 +11,7 @@ type BuiltInReadinessConditionType =
   | "ReadinessEvaluationComplete"
   | "ConfigLoaded"
   | "WorkspaceWritable"
+  | "HostBindingsReady"
   | "GatewayResponding"
   | "PluginsLoaded";
 

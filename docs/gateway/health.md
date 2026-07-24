@@ -62,7 +62,11 @@ conditions without selecting a hosting profile:
 {
   gateway: {
     readiness: {
-      requiredCriteria: ["openclaw.workspace-writable", "plugin.storage.backend"],
+      requiredCriteria: [
+        "openclaw.workspace-writable",
+        "openclaw.host-bindings-ready",
+        "plugin.storage.backend",
+      ],
       advisoryCriteria: ["plugin.metrics.exporter"],
     },
   },
@@ -79,6 +83,12 @@ Core selector IDs are configuration identifiers, not condition types. For
 example, selecting `openclaw.workspace-writable` emits the canonical
 `WorkspaceWritable` condition; plugin criteria use their namespaced ID as the
 condition type.
+
+`openclaw.host-bindings-ready` emits `HostBindingsReady` from the active host
+integration bundle and its owner-published status evidence. Required bindings
+must all be `ready`; optional degraded or unavailable bindings remain visible
+in the host integration inventory but do not block this condition. The check is
+in-memory and does not probe credentials, providers, or the network.
 
 - **DO use:** `GET /health` - instant response, no session created, no LLM call, returns `{"ok":true,"status":"live"}`
 - **DON'T use:** `/v1/chat/completions` for health checks - each request creates a full agent session with skill snapshot, context assembly, and LLM calls

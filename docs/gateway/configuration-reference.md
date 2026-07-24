@@ -527,7 +527,11 @@ See [Inferred commitments](/concepts/commitments).
 {
   gateway: {
     readiness: {
-      requiredCriteria: ["openclaw.workspace-writable", "plugin.storage.backend"],
+      requiredCriteria: [
+        "openclaw.workspace-writable",
+        "openclaw.host-bindings-ready",
+        "plugin.storage.backend",
+      ],
       advisoryCriteria: ["plugin.metrics.exporter"],
     },
   },

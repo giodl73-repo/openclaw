@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { clearCurrentHostIntegrationBundleSnapshotV1 } from "../hosting/host-integration-bundle.js";
 import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
 import { createSelectedReadinessResolver } from "./selection.js";
 
@@ -82,6 +83,27 @@ describe("createSelectedReadinessResolver", () => {
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+
+  it("fails closed when required host bindings have not published status", async () => {
+    clearCurrentHostIntegrationBundleSnapshotV1();
+    const resolve = createSelectedReadinessResolver();
+
+    await expect(
+      resolve({
+        config: {
+          gateway: { readiness: { requiredCriteria: ["openclaw.host-bindings-ready"] } },
+        },
+        registry: { readinessCriteria: [] },
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        type: "HostBindingsReady",
+        status: "Unknown",
+        requirement: "required",
+        reason: "HostIntegrationBundleUnavailable",
+      }),
+    ]);
   });
 
   it("fails closed for an unregistered required criterion", async () => {

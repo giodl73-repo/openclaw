@@ -5,6 +5,10 @@ import {
   type ReadinessCondition,
   type ReadinessRequirement,
 } from "./conditions.js";
+import {
+  buildHostBindingsReadinessCondition,
+  HOST_BINDINGS_READY_CRITERION_ID,
+} from "./host-bindings.js";
 import { createPluginReadinessResolver } from "./plugin-readiness.js";
 import {
   buildWorkspaceReadinessCondition,
@@ -70,6 +74,9 @@ export function createSelectedReadinessResolver() {
         WORKSPACE_WRITABLE_CRITERION_ID,
         buildWorkspaceReadinessCondition(workspaceEvidence),
       );
+    }
+    if (selectedIds.has(HOST_BINDINGS_READY_CRITERION_ID)) {
+      conditions.set(HOST_BINDINGS_READY_CRITERION_ID, buildHostBindingsReadinessCondition());
     }
     for (const condition of pluginConditions) {
       conditions.set(condition.type, condition);
