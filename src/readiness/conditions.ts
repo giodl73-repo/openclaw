@@ -12,7 +12,10 @@ type BuiltInReadinessConditionType =
   | "ConfigLoaded"
   | "WorkspaceWritable"
   | "GatewayResponding"
-  | "PluginsLoaded";
+  | "PluginsLoaded"
+  | "StateReady"
+  | "DeliveryRuntimeReady"
+  | "SchedulerReady";
 
 type ReadinessConditionType = BuiltInReadinessConditionType | (string & {});
 
