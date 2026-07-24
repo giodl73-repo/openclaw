@@ -1,9 +1,9 @@
-// Shared receipt SQLite store owns durable, cross-agent business outcome records.
+// Skill Memory stores durable, cross-agent facts about completed work.
 import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { Generated, Insertable, Selectable } from "kysely";
-import type { AgentToolReceipt } from "../../packages/agent-core/src/types.js";
+import type { AgentToolMemory } from "../../packages/agent-core/src/types.js";
 import { stableStringify } from "../agents/stable-stringify.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { sha256Hex } from "../infra/crypto-digest.js";
@@ -26,20 +26,20 @@ import {
 import { resolveOpenClawStateSqliteDir } from "../state/openclaw-state-db.paths.js";
 import { resolveUserPath } from "../utils.js";
 
-const RECEIPT_STORE_SCHEMA_VERSION = 1;
-const RECEIPT_STORE_DIR_MODE = 0o700;
-const RECEIPT_STORE_FILE_MODE = 0o600;
-const RECEIPT_STORE_BUSY_TIMEOUT_MS = 50;
-const RECEIPT_DATA_MAX_BYTES = 256 * 1024;
+const MEMORY_STORE_SCHEMA_VERSION = 1;
+const MEMORY_STORE_DIR_MODE = 0o700;
+const MEMORY_STORE_FILE_MODE = 0o600;
+const MEMORY_STORE_BUSY_TIMEOUT_MS = 50;
+const MEMORY_DATA_MAX_BYTES = 256 * 1024;
 
-type ReceiptTable = {
+type MemoryTable = {
   sequence: Generated<number>;
-  receipt_id: string;
+  memory_id: string;
   source_id: string;
   payload_sha256: string;
   schema_version: number;
-  receipt_type: string;
-  receipt_version: number | null;
+  memory_type: string;
+  memory_version: number | null;
   occurred_at: number;
   agent_id: string;
   session_id: string;
@@ -50,26 +50,26 @@ type ReceiptTable = {
   skill_digest: string | null;
   tool_name: string;
   tool_call_id: string;
-  receipt_index: number;
+  memory_index: number;
   subject_type: string | null;
   subject_id: string | null;
   data_json: string | null;
 };
 
-type ReceiptDatabase = { receipts: ReceiptTable };
-type ReceiptRow = Selectable<ReceiptTable>;
+type MemoryDatabase = { memories: MemoryTable };
+type MemoryRow = Selectable<MemoryTable>;
 
-type OpenReceiptDatabase = {
+type OpenMemoryDatabase = {
   db: DatabaseSync;
   path: string;
   walMaintenance: SqliteWalMaintenance;
 };
 
-export type RecordedAuditReceipt = {
-  receiptSchema: "openclaw-audit-receipt";
+export type RecordedSkillMemory = {
+  memorySchema: "openclaw-skill-memory";
   schemaVersion: 1;
   sequence: number;
-  receiptId: string;
+  memoryId: string;
   type: string;
   version?: number;
   occurredAt: number;
@@ -86,9 +86,9 @@ export type RecordedAuditReceipt = {
   data?: Record<string, unknown>;
 };
 
-export type RecordAuditReceiptInput = {
-  receipt: AgentToolReceipt;
-  receiptIndex: number;
+export type RecordSkillMemoryInput = {
+  memory: AgentToolMemory;
+  memoryIndex: number;
   occurredAt: number;
   agentId: string;
   sessionId: string;
@@ -101,7 +101,7 @@ export type RecordAuditReceiptInput = {
   toolCallId: string;
 };
 
-export type AuditReceiptFilters = {
+export type SkillMemoryFilters = {
   type?: string;
   agentIds?: string[];
   sessionKey?: string;
@@ -118,57 +118,57 @@ export type AuditReceiptFilters = {
   occurredBefore?: number;
 };
 
-export type AuditReceiptPage = {
-  receipts: RecordedAuditReceipt[];
+export type SkillMemoryPage = {
+  memories: RecordedSkillMemory[];
   nextCursor?: number;
 };
 
-type ReceiptStoreOptions = {
+type MemoryStoreOptions = {
   cfg?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   path?: string;
 };
 
-const openDatabases = new Map<string, OpenReceiptDatabase>();
+const openDatabases = new Map<string, OpenMemoryDatabase>();
 
-function hardenReceiptDatabaseFiles(databasePath: string): void {
+function hardenMemoryDatabaseFiles(databasePath: string): void {
   for (const candidate of resolveSqliteDatabaseFilePaths(databasePath)) {
     if (fs.existsSync(candidate)) {
-      applyPrivateModeSync(candidate, RECEIPT_STORE_FILE_MODE);
+      applyPrivateModeSync(candidate, MEMORY_STORE_FILE_MODE);
     }
   }
 }
 
-export function resolveAuditReceiptStorePath(options: ReceiptStoreOptions = {}): string {
-  const configured = options.path ?? options.cfg?.audit?.receipts?.store?.path;
+export function resolveSkillMemoryStorePath(options: MemoryStoreOptions = {}): string {
+  const configured = options.path ?? options.cfg?.skillMemory?.store?.path;
   return configured?.trim()
     ? path.resolve(resolveUserPath(configured.trim(), options.env))
-    : path.join(resolveOpenClawStateSqliteDir(options.env), "receipts.sqlite");
+    : path.join(resolveOpenClawStateSqliteDir(options.env), "skill-memory.sqlite");
 }
 
-export function isAuditReceiptStoreEnabled(cfg: OpenClawConfig | undefined): boolean {
-  return cfg?.audit?.receipts?.enabled !== false;
+export function isSkillMemoryStoreEnabled(cfg: OpenClawConfig | undefined): boolean {
+  return cfg?.skillMemory?.enabled !== false;
 }
 
-function ensureReceiptSchema(db: DatabaseSync, databasePath: string): void {
+function ensureMemorySchema(db: DatabaseSync, databasePath: string): void {
   const version = readSqliteUserVersion(db);
-  if (version > RECEIPT_STORE_SCHEMA_VERSION) {
+  if (version > MEMORY_STORE_SCHEMA_VERSION) {
     throw new Error(
-      `OpenClaw receipt database ${databasePath} uses schema version ${version}; this runtime supports up to ${RECEIPT_STORE_SCHEMA_VERSION}.`,
+      `OpenClaw memory database ${databasePath} uses schema version ${version}; this runtime supports up to ${MEMORY_STORE_SCHEMA_VERSION}.`,
     );
   }
   runSqliteImmediateTransactionSync(
     db,
     () => {
       db.exec(`
-        CREATE TABLE IF NOT EXISTS receipts (
+        CREATE TABLE IF NOT EXISTS memories (
       sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-      receipt_id TEXT NOT NULL UNIQUE,
+      memory_id TEXT NOT NULL UNIQUE,
       source_id TEXT NOT NULL UNIQUE,
       payload_sha256 TEXT NOT NULL,
       schema_version INTEGER NOT NULL,
-      receipt_type TEXT NOT NULL,
-      receipt_version INTEGER,
+      memory_type TEXT NOT NULL,
+      memory_version INTEGER,
       occurred_at INTEGER NOT NULL,
       agent_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
@@ -179,61 +179,61 @@ function ensureReceiptSchema(db: DatabaseSync, databasePath: string): void {
       skill_digest TEXT,
       tool_name TEXT NOT NULL,
       tool_call_id TEXT NOT NULL,
-      receipt_index INTEGER NOT NULL CHECK (receipt_index >= 0),
+      memory_index INTEGER NOT NULL CHECK (memory_index >= 0),
       subject_type TEXT,
       subject_id TEXT,
       data_json TEXT,
       CHECK ((subject_type IS NULL) = (subject_id IS NULL))
     );
-    CREATE INDEX IF NOT EXISTS idx_receipts_type_time
-      ON receipts(receipt_type, occurred_at DESC, sequence DESC);
-    CREATE INDEX IF NOT EXISTS idx_receipts_subject_time
-      ON receipts(subject_type, subject_id, occurred_at DESC, sequence DESC)
+    CREATE INDEX IF NOT EXISTS idx_memories_type_time
+      ON memories(memory_type, occurred_at DESC, sequence DESC);
+    CREATE INDEX IF NOT EXISTS idx_memories_subject_time
+      ON memories(subject_type, subject_id, occurred_at DESC, sequence DESC)
       WHERE subject_type IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_receipts_agent_time
-      ON receipts(agent_id, occurred_at DESC, sequence DESC);
-    CREATE INDEX IF NOT EXISTS idx_receipts_session_time
-      ON receipts(session_key, occurred_at DESC, sequence DESC)
+    CREATE INDEX IF NOT EXISTS idx_memories_agent_time
+      ON memories(agent_id, occurred_at DESC, sequence DESC);
+    CREATE INDEX IF NOT EXISTS idx_memories_session_time
+      ON memories(session_key, occurred_at DESC, sequence DESC)
       WHERE session_key IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_receipts_run_time
-      ON receipts(run_id, occurred_at, sequence);
-    CREATE INDEX IF NOT EXISTS idx_receipts_skill_time
-      ON receipts(skill_name, skill_digest, occurred_at DESC, sequence DESC)
+    CREATE INDEX IF NOT EXISTS idx_memories_run_time
+      ON memories(run_id, occurred_at, sequence);
+    CREATE INDEX IF NOT EXISTS idx_memories_skill_time
+      ON memories(skill_name, skill_digest, occurred_at DESC, sequence DESC)
       WHERE skill_name IS NOT NULL;
-        PRAGMA user_version = ${RECEIPT_STORE_SCHEMA_VERSION};
+        PRAGMA user_version = ${MEMORY_STORE_SCHEMA_VERSION};
       `);
     },
     {
-      busyTimeoutMs: RECEIPT_STORE_BUSY_TIMEOUT_MS,
-      databaseLabel: "audit-receipts",
+      busyTimeoutMs: MEMORY_STORE_BUSY_TIMEOUT_MS,
+      databaseLabel: "skill-memory",
       operationLabel: "schema",
     },
   );
 }
 
-function openAuditReceiptDatabase(options: ReceiptStoreOptions = {}): OpenReceiptDatabase {
-  const databasePath = resolveAuditReceiptStorePath(options);
+function openSkillMemoryDatabase(options: MemoryStoreOptions = {}): OpenMemoryDatabase {
+  const databasePath = resolveSkillMemoryStorePath(options);
   const existing = openDatabases.get(databasePath);
   if (existing?.db.isOpen) {
     return existing;
   }
-  fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: RECEIPT_STORE_DIR_MODE });
+  fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: MEMORY_STORE_DIR_MODE });
   if (!fs.existsSync(databasePath)) {
-    fs.closeSync(fs.openSync(databasePath, "a", RECEIPT_STORE_FILE_MODE));
+    fs.closeSync(fs.openSync(databasePath, "a", MEMORY_STORE_FILE_MODE));
   }
   const { DatabaseSync } = requireNodeSqlite();
   const db = new DatabaseSync(databasePath);
   let walMaintenance: SqliteWalMaintenance | undefined;
   try {
-    applyPrivateModeSync(databasePath, RECEIPT_STORE_FILE_MODE);
+    applyPrivateModeSync(databasePath, MEMORY_STORE_FILE_MODE);
     walMaintenance = configureSqliteConnectionPragmas(db, {
-      busyTimeoutMs: RECEIPT_STORE_BUSY_TIMEOUT_MS,
-      databaseLabel: "audit-receipts",
+      busyTimeoutMs: MEMORY_STORE_BUSY_TIMEOUT_MS,
+      databaseLabel: "skill-memory",
       databasePath,
       synchronous: "NORMAL",
     });
-    ensureReceiptSchema(db, databasePath);
-    hardenReceiptDatabaseFiles(databasePath);
+    ensureMemorySchema(db, databasePath);
+    hardenMemoryDatabaseFiles(databasePath);
     const opened = { db, path: databasePath, walMaintenance };
     openDatabases.set(databasePath, opened);
     return opened;
@@ -244,26 +244,26 @@ function openAuditReceiptDatabase(options: ReceiptStoreOptions = {}): OpenReceip
   }
 }
 
-function parseReceiptData(row: ReceiptRow): Record<string, unknown> | undefined {
+function parseMemoryData(row: MemoryRow): Record<string, unknown> | undefined {
   if (!row.data_json) {
     return undefined;
   }
   const parsed = JSON.parse(row.data_json) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`corrupt audit receipt row ${row.sequence}: data_json is not an object`);
+    throw new Error(`corrupt skill memory row ${row.sequence}: data_json is not an object`);
   }
   return parsed as Record<string, unknown>;
 }
 
-function rowToRecordedReceipt(row: ReceiptRow): RecordedAuditReceipt {
-  const data = parseReceiptData(row);
+function rowToRecordedMemory(row: MemoryRow): RecordedSkillMemory {
+  const data = parseMemoryData(row);
   return {
-    receiptSchema: "openclaw-audit-receipt",
+    memorySchema: "openclaw-skill-memory",
     schemaVersion: 1,
     sequence: row.sequence,
-    receiptId: row.receipt_id,
-    type: row.receipt_type,
-    ...(row.receipt_version === null ? {} : { version: row.receipt_version }),
+    memoryId: row.memory_id,
+    type: row.memory_type,
+    ...(row.memory_version === null ? {} : { version: row.memory_version }),
     occurredAt: row.occurred_at,
     agentId: row.agent_id,
     sessionId: row.session_id,
@@ -281,9 +281,9 @@ function rowToRecordedReceipt(row: ReceiptRow): RecordedAuditReceipt {
   };
 }
 
-function normalizedPayload(input: RecordAuditReceiptInput): string {
+function normalizedPayload(input: RecordSkillMemoryInput): string {
   return stableStringify({
-    receipt: input.receipt,
+    memory: input.memory,
     invocationId: input.invocationId ?? null,
     skillName: input.skillName ?? null,
     skillDigest: input.skillDigest ?? null,
@@ -291,28 +291,28 @@ function normalizedPayload(input: RecordAuditReceiptInput): string {
   });
 }
 
-function receiptDataJson(receipt: AgentToolReceipt): string | null {
-  if (!receipt.data) {
+function memoryDataJson(memory: AgentToolMemory): string | null {
+  if (!memory.data) {
     return null;
   }
-  const json = stableStringify(receipt.data);
-  if (Buffer.byteLength(json, "utf8") > RECEIPT_DATA_MAX_BYTES) {
-    throw new Error(`audit receipt data exceeds ${RECEIPT_DATA_MAX_BYTES} bytes`);
+  const json = stableStringify(memory.data);
+  if (Buffer.byteLength(json, "utf8") > MEMORY_DATA_MAX_BYTES) {
+    throw new Error(`skill memory data exceeds ${MEMORY_DATA_MAX_BYTES} bytes`);
   }
   return json;
 }
 
-type PreparedAuditReceipt = {
+type PreparedSkillMemory = {
   dataJson: string | null;
-  input: RecordAuditReceiptInput;
+  input: RecordSkillMemoryInput;
   payloadSha256: string;
-  receiptId: string;
+  memoryId: string;
   sourceId: string;
 };
 
-function prepareAuditReceipt(input: RecordAuditReceiptInput): PreparedAuditReceipt {
-  if (!Number.isInteger(input.receiptIndex) || input.receiptIndex < 0) {
-    throw new Error("audit receipt index must be a non-negative integer");
+function prepareSkillMemory(input: RecordSkillMemoryInput): PreparedSkillMemory {
+  if (!Number.isInteger(input.memoryIndex) || input.memoryIndex < 0) {
+    throw new Error("skill memory index must be a non-negative integer");
   }
   const sourceId = sha256Hex(
     JSON.stringify([
@@ -320,31 +320,31 @@ function prepareAuditReceipt(input: RecordAuditReceiptInput): PreparedAuditRecei
       input.sessionId,
       input.runId,
       input.toolCallId,
-      input.receiptIndex,
+      input.memoryIndex,
     ]),
   );
   return {
-    dataJson: receiptDataJson(input.receipt),
+    dataJson: memoryDataJson(input.memory),
     input,
     payloadSha256: sha256Hex(normalizedPayload(input)),
-    receiptId: `rcpt_${sourceId}`,
+    memoryId: `smem_${sourceId}`,
     sourceId,
   };
 }
 
-function insertPreparedAuditReceipt(
-  database: OpenReceiptDatabase,
-  prepared: PreparedAuditReceipt,
-): RecordedAuditReceipt {
-  const { dataJson, input, payloadSha256, receiptId, sourceId } = prepared;
-  const db = getNodeSqliteKysely<ReceiptDatabase>(database.db);
-  const values: Insertable<ReceiptTable> = {
-    receipt_id: receiptId,
+function insertPreparedSkillMemory(
+  database: OpenMemoryDatabase,
+  prepared: PreparedSkillMemory,
+): RecordedSkillMemory {
+  const { dataJson, input, payloadSha256, memoryId, sourceId } = prepared;
+  const db = getNodeSqliteKysely<MemoryDatabase>(database.db);
+  const values: Insertable<MemoryTable> = {
+    memory_id: memoryId,
     source_id: sourceId,
     payload_sha256: payloadSha256,
     schema_version: 1,
-    receipt_type: input.receipt.type,
-    receipt_version: input.receipt.version ?? null,
+    memory_type: input.memory.type,
+    memory_version: input.memory.version ?? null,
     occurred_at: input.occurredAt,
     agent_id: input.agentId,
     session_id: input.sessionId,
@@ -355,77 +355,77 @@ function insertPreparedAuditReceipt(
     skill_digest: input.skillDigest ?? null,
     tool_name: input.toolName,
     tool_call_id: input.toolCallId,
-    receipt_index: input.receiptIndex,
-    subject_type: input.receipt.subject?.type ?? null,
-    subject_id: input.receipt.subject?.id ?? null,
+    memory_index: input.memoryIndex,
+    subject_type: input.memory.subject?.type ?? null,
+    subject_id: input.memory.subject?.id ?? null,
     data_json: dataJson,
   };
   executeSqliteQuerySync(
     database.db,
     db
-      .insertInto("receipts")
+      .insertInto("memories")
       .values(values)
       .onConflict((conflict) => conflict.column("source_id").doNothing()),
   );
   const row = executeSqliteQueryTakeFirstSync(
     database.db,
-    db.selectFrom("receipts").selectAll().where("source_id", "=", sourceId),
+    db.selectFrom("memories").selectAll().where("source_id", "=", sourceId),
   );
   if (!row) {
-    throw new Error("audit receipt insert did not produce a durable row");
+    throw new Error("skill memory insert did not produce a durable row");
   }
   if (row.payload_sha256 !== payloadSha256) {
-    throw new Error("audit receipt source identity was reused with different content");
+    throw new Error("skill memory source identity was reused with different content");
   }
-  return rowToRecordedReceipt(row);
+  return rowToRecordedMemory(row);
 }
 
-/** Records one trusted tool outcome idempotently in the configured shared store. */
-export function recordAuditReceipt(
-  input: RecordAuditReceiptInput,
-  options: ReceiptStoreOptions = {},
-): RecordedAuditReceipt {
-  const prepared = prepareAuditReceipt(input);
-  const database = openAuditReceiptDatabase(options);
+/** Remembers one trusted tool fact idempotently in the configured shared store. */
+export function recordSkillMemory(
+  input: RecordSkillMemoryInput,
+  options: MemoryStoreOptions = {},
+): RecordedSkillMemory {
+  const prepared = prepareSkillMemory(input);
+  const database = openSkillMemoryDatabase(options);
   return runSqliteImmediateTransactionSync(
     database.db,
-    () => insertPreparedAuditReceipt(database, prepared),
+    () => insertPreparedSkillMemory(database, prepared),
     {
-      busyTimeoutMs: RECEIPT_STORE_BUSY_TIMEOUT_MS,
-      databaseLabel: "audit-receipts",
+      busyTimeoutMs: MEMORY_STORE_BUSY_TIMEOUT_MS,
+      databaseLabel: "skill-memory",
       operationLabel: "record",
     },
   );
 }
 
 /** Records one bounded tool-result batch under a single SQLite write lock. */
-export function recordAuditReceiptBatch(
-  inputs: RecordAuditReceiptInput[],
-  options: ReceiptStoreOptions = {},
-): RecordedAuditReceipt[] {
+export function recordSkillMemoryBatch(
+  inputs: RecordSkillMemoryInput[],
+  options: MemoryStoreOptions = {},
+): RecordedSkillMemory[] {
   if (inputs.length === 0) {
     return [];
   }
-  const prepared = inputs.map(prepareAuditReceipt);
-  const database = openAuditReceiptDatabase(options);
+  const prepared = inputs.map(prepareSkillMemory);
+  const database = openSkillMemoryDatabase(options);
   return runSqliteImmediateTransactionSync(
     database.db,
-    () => prepared.map((receipt) => insertPreparedAuditReceipt(database, receipt)),
+    () => prepared.map((memory) => insertPreparedSkillMemory(database, memory)),
     {
-      busyTimeoutMs: RECEIPT_STORE_BUSY_TIMEOUT_MS,
-      databaseLabel: "audit-receipts",
+      busyTimeoutMs: MEMORY_STORE_BUSY_TIMEOUT_MS,
+      databaseLabel: "skill-memory",
       operationLabel: "record-batch",
     },
   );
 }
 
-function buildFilteredReceiptQuery(
-  db: ReturnType<typeof getNodeSqliteKysely<ReceiptDatabase>>,
-  filters: AuditReceiptFilters,
+function buildFilteredMemoryQuery(
+  db: ReturnType<typeof getNodeSqliteKysely<MemoryDatabase>>,
+  filters: SkillMemoryFilters,
 ) {
-  let query = db.selectFrom("receipts");
+  let query = db.selectFrom("memories");
   if (filters.type) {
-    query = query.where("receipt_type", "=", filters.type);
+    query = query.where("memory_type", "=", filters.type);
   }
   if (filters.agentIds) {
     query =
@@ -472,31 +472,31 @@ function buildFilteredReceiptQuery(
   return query;
 }
 
-/** Resolves one full receipt by its harness-owned identifier. */
-export function getAuditReceipt(params: {
-  receiptId: string;
-  store?: ReceiptStoreOptions;
-}): RecordedAuditReceipt | undefined {
-  const database = openAuditReceiptDatabase(params.store);
-  const db = getNodeSqliteKysely<ReceiptDatabase>(database.db);
+/** Resolves one full memory by its harness-owned identifier. */
+export function getSkillMemory(params: {
+  memoryId: string;
+  store?: MemoryStoreOptions;
+}): RecordedSkillMemory | undefined {
+  const database = openSkillMemoryDatabase(params.store);
+  const db = getNodeSqliteKysely<MemoryDatabase>(database.db);
   const row = executeSqliteQueryTakeFirstSync(
     database.db,
-    db.selectFrom("receipts").selectAll().where("receipt_id", "=", params.receiptId),
+    db.selectFrom("memories").selectAll().where("memory_id", "=", params.memoryId),
   );
-  return row ? rowToRecordedReceipt(row) : undefined;
+  return row ? rowToRecordedMemory(row) : undefined;
 }
 
 /** Lists a bounded newest-first page using the store sequence as a stable cursor. */
-export function listAuditReceipts(params: {
-  filters?: AuditReceiptFilters;
+export function listSkillMemory(params: {
+  filters?: SkillMemoryFilters;
   cursor?: number;
   limit: number;
-  store?: ReceiptStoreOptions;
-}): AuditReceiptPage {
-  const database = openAuditReceiptDatabase(params.store);
-  const db = getNodeSqliteKysely<ReceiptDatabase>(database.db);
+  store?: MemoryStoreOptions;
+}): SkillMemoryPage {
+  const database = openSkillMemoryDatabase(params.store);
+  const db = getNodeSqliteKysely<MemoryDatabase>(database.db);
   const limit = Math.max(1, Math.min(500, Math.floor(params.limit)));
-  let query = buildFilteredReceiptQuery(db, params.filters ?? {});
+  let query = buildFilteredMemoryQuery(db, params.filters ?? {});
   if (params.cursor !== undefined) {
     query = query.where("sequence", "<", params.cursor);
   }
@@ -508,32 +508,32 @@ export function listAuditReceipts(params: {
       .limit(limit + 1),
   ).rows;
   const hasMore = rows.length > limit;
-  const receipts = rows.slice(0, limit).map(rowToRecordedReceipt);
+  const memories = rows.slice(0, limit).map(rowToRecordedMemory);
   return {
-    receipts,
-    ...(hasMore && receipts.length > 0
-      ? { nextCursor: receipts[receipts.length - 1]?.sequence }
+    memories,
+    ...(hasMore && memories.length > 0
+      ? { nextCursor: memories[memories.length - 1]?.sequence }
       : {}),
   };
 }
 
-/** Counts matching receipts without materializing payloads. */
-export function countAuditReceipts(params: {
-  filters?: AuditReceiptFilters;
-  store?: ReceiptStoreOptions;
+/** Counts matching memories without materializing payloads. */
+export function countSkillMemory(params: {
+  filters?: SkillMemoryFilters;
+  store?: MemoryStoreOptions;
 }): number {
-  const database = openAuditReceiptDatabase(params.store);
-  const db = getNodeSqliteKysely<ReceiptDatabase>(database.db);
+  const database = openSkillMemoryDatabase(params.store);
+  const db = getNodeSqliteKysely<MemoryDatabase>(database.db);
   const row = executeSqliteQueryTakeFirstSync(
     database.db,
-    buildFilteredReceiptQuery(db, params.filters ?? {}).select((eb) =>
+    buildFilteredMemoryQuery(db, params.filters ?? {}).select((eb) =>
       eb.fn.countAll<number>().as("count"),
     ),
   );
   return row?.count ?? 0;
 }
 
-function closeAuditReceiptStores(): void {
+function closeSkillMemoryStores(): void {
   for (const opened of openDatabases.values()) {
     opened.walMaintenance.close();
     clearNodeSqliteKyselyCacheForDatabase(opened.db);
@@ -542,8 +542,8 @@ function closeAuditReceiptStores(): void {
   openDatabases.clear();
 }
 
-export function closeAuditReceiptStoresForTest(): void {
-  closeAuditReceiptStores();
+export function closeSkillMemoryStoresForTest(): void {
+  closeSkillMemoryStores();
 }
 
-registerSqliteCacheExitClose(closeAuditReceiptStores);
+registerSqliteCacheExitClose(closeSkillMemoryStores);

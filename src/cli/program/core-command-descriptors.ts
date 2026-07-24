@@ -105,8 +105,8 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: false,
   },
   {
-    name: "receipts",
-    description: "Find and count durable typed outcomes recorded by trusted tools",
+    name: "skill-memory",
+    description: "Recall completed work remembered by trusted tools",
     hasSubcommands: false,
   },
   {

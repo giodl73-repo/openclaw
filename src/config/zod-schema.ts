@@ -12,7 +12,8 @@ import {
   isValidControlUiChatMessageMaxWidth,
   normalizeControlUiChatMessageMaxWidth,
 } from "./control-ui-css.js";
-import { AuditSchema } from "./schema.audit-receipts.js";
+import { AuditSchema } from "./schema.audit.js";
+import { SkillMemorySchema } from "./schema.skill-memory.js";
 import type { GatewayRemoteConfig } from "./types.gateway.js";
 import { SilentReplyPolicyConfigSchema } from "./zod-schema.agent-defaults.js";
 import { ToolsSchema } from "./zod-schema.agent-runtime.js";
@@ -728,6 +729,7 @@ export const OpenClawSchema = z
       })
       .optional(),
     audit: AuditSchema.optional(),
+    skillMemory: SkillMemorySchema.optional(),
     logging: z
       .strictObject({
         level: LoggingLevelSchema.optional(),

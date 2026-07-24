@@ -1206,13 +1206,6 @@ Notes:
   audit: {
     enabled: true,
     messages: "off", // off | direct | all
-    receipts: {
-      enabled: true,
-      store: {
-        type: "sqlite",
-        path: "~/.openclaw/state/receipts.sqlite",
-      },
-    },
   },
 }
 ```
@@ -1241,22 +1234,6 @@ and coverage limits.
   identifiers with installation-local keyed pseudonyms where correlation is
   available. These are correlation aids rather than anonymization; the state
   database stores the derivation key, but RPC and CLI exports do not.
-- `receipts.enabled`: record typed business outcomes attached by trusted tools
-  to successful results (default: `true`). Existing receipts remain readable
-  when new recording is disabled.
-- `receipts.store.type`: receipt store implementation. Version 1 supports
-  `"sqlite"`.
-- `receipts.store.path`: local SQLite path shared by agents on this Gateway host.
-  The default is `~/.openclaw/state/receipts.sqlite`. Keep the database on local
-  storage; network-filesystem and multi-host SQLite sharing are not supported.
-
-Receipt recording admits at most 16 candidates from one successful tool result
-and commits the accepted batch under one bounded SQLite write lock. Excess
-candidates are ignored with a warning. Full receipt data can contain sensitive
-business evidence; local users who can read the configured database can read
-that evidence. Restrict file, snapshot, and export access accordingly. The
-initial profile does not automate retention, backup/export, health repair, or
-corruption recovery.
 
 The running Gateway captures `audit.enabled` and `audit.messages` at startup;
 restart it after changing either setting. Message coverage currently includes
@@ -1265,6 +1242,45 @@ original logical outbound reply payload that reaches shared durable delivery.
 Plugin-local and direct-send paths that bypass those shared boundaries are not
 yet covered. The bounded background
 writer is best-effort, not a lossless compliance archive.
+
+---
+
+## Skill Memory
+
+```json5
+{
+  skillMemory: {
+    enabled: true,
+    store: {
+      type: "sqlite",
+      path: "~/.openclaw/state/skill-memory.sqlite",
+    },
+  },
+}
+```
+
+Skill Memory lets trusted tools remember completed work in a shared,
+searchable history. It is separate from semantic memory, workspace memory
+files, and vector search. Every entry carries a producer-owned business type
+plus OpenClaw-owned agent, session, run, tool, and time correlation.
+
+- `enabled`: remember new entries from successful trusted-tool results
+  (default: `true`). Existing entries remain readable when writes are disabled.
+- `store.type`: store implementation. Version 1 supports `"sqlite"`.
+- `store.path`: local SQLite path shared by agents on this Gateway host. The
+  default is `~/.openclaw/state/skill-memory.sqlite`.
+
+One successful tool result may contribute at most 16 entries. OpenClaw prepares
+the bounded batch before acquiring one SQLite write lock. Excess candidates are
+ignored with a warning. Entry data can include authorization codes and other
+sensitive business information, so restrict database, snapshot, and export
+access to the OpenClaw service boundary. Keep SQLite on local storage;
+network-filesystem and multi-host sharing are unsupported. The initial profile
+does not automate retention, backup/export, health repair, or corruption
+recovery.
+
+Use [`openclaw skill-memory`](/cli/skill-memory) to recall, filter, and count
+entries.
 
 ---
 

@@ -1,7 +1,8 @@
 // Defines user-facing config field help text for docs and UI surfaces.
 import { MEDIA_AUDIO_FIELD_HELP } from "./media-audio-field-metadata.js";
-import { AUDIT_RECEIPT_FIELD_HELP } from "./schema.audit-receipts.js";
+import { AUDIT_FIELD_HELP } from "./schema.audit.js";
 import { NODE_CAPABILITY_FIELD_HELP } from "./schema.node-capabilities.js";
+import { SKILL_MEMORY_FIELD_HELP } from "./schema.skill-memory.js";
 import { describeTalkSilenceTimeoutDefaults } from "./talk-defaults.js";
 export const FIELD_HELP: Record<string, string> = {
   "channels.discord.activities":
@@ -58,7 +59,8 @@ export const FIELD_HELP: Record<string, string> = {
     'Wizard execution mode recorded as "local" or "remote" for the most recent setup flow. Use this to understand whether setup targeted direct local runtime or remote gateway topology.',
   "wizard.securityAcknowledgedAt":
     "ISO timestamp for when the setup security acknowledgement was accepted on this config. Setup uses this to avoid repeating the acknowledgement on later wizard runs.",
-  ...AUDIT_RECEIPT_FIELD_HELP,
+  ...AUDIT_FIELD_HELP,
+  ...SKILL_MEMORY_FIELD_HELP,
   diagnostics:
     "Diagnostics controls for targeted tracing, telemetry export, and cache inspection during debugging. Keep baseline diagnostics minimal in production and enable deeper signals only when investigating issues.",
   "diagnostics.memoryPressureSnapshot":

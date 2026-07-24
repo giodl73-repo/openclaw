@@ -437,13 +437,13 @@ export interface AgentToolProgress {
   id?: string;
 }
 
-/** Typed business outcome evidence asserted by a successful tool result. */
-export interface AgentToolReceipt {
+/** A durable completed-work fact asserted by a successful trusted tool result. */
+export interface AgentToolMemory {
   /** Stable producer-owned exact-match type, for example `payment.authorized`. */
   type: string;
-  /** Optional producer schema version for this receipt type. */
+  /** Optional producer schema version for this memory type. */
   version?: number;
-  /** Optional business object affected by the outcome. */
+  /** Optional business object the remembered fact is about. */
   subject?: { type: string; id: string };
   /** Optional bounded, JSON-safe producer evidence. */
   data?: Record<string, unknown>;
@@ -455,8 +455,8 @@ export interface AgentToolResult<T> {
   content: (TextContent | ImageContent)[];
   /** Arbitrary structured details for logs or UI rendering. */
   details: T;
-  /** Typed business outcomes admitted only from successful trusted tool results. */
-  receipts?: AgentToolReceipt[];
+  /** Durable completed-work facts admitted only from successful trusted tool results. */
+  memories?: AgentToolMemory[];
   /** Optional public progress hint for partial tool updates; never model content. */
   progress?: AgentToolProgress;
   /**

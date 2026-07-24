@@ -7,9 +7,9 @@ const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
 }));
 
-vi.mock("../../../audit/receipt-store.sqlite.js", () => ({
-  isAuditReceiptStoreEnabled: mocks.enabled,
-  recordAuditReceiptBatch: mocks.record,
+vi.mock("../../../skill-memory/store.sqlite.js", () => ({
+  isSkillMemoryStoreEnabled: mocks.enabled,
+  recordSkillMemoryBatch: mocks.record,
 }));
 vi.mock("../../harness/selection.js", () => ({
   runAgentHarnessAttempt: mocks.runAttempt,
@@ -20,10 +20,10 @@ import { runEmbeddedAttemptWithBackend } from "./backend.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
 
 const recordedPayment = {
-  receiptSchema: "openclaw-audit-receipt" as const,
+  memorySchema: "openclaw-skill-memory" as const,
   schemaVersion: 1 as const,
   sequence: 1,
-  receiptId: "rcpt_payment",
+  memoryId: "smem_payment",
   type: "payment.authorized",
   occurredAt: 1_700_000_000_000,
   agentId: "billing",
@@ -47,7 +47,7 @@ function createParams(overrides: Record<string, unknown> = {}) {
   } as unknown as EmbeddedRunAttemptParams;
 }
 
-describe("embedded backend receipt composition", () => {
+describe("embedded backend memory composition", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enabled.mockReturnValue(true);
@@ -59,7 +59,7 @@ describe("embedded backend receipt composition", () => {
         result: {
           content: [{ type: "text", text: "authorized" }],
           details: {},
-          receipts: [
+          memories: [
             {
               type: "payment.authorized",
               subject: { type: "invoice", id: "INV-1042" },
@@ -87,14 +87,14 @@ describe("embedded backend receipt composition", () => {
           runId: "run-billing",
           toolName: "authorize_payment",
           toolCallId: "call-payment",
-          receipt: expect.objectContaining({ type: "payment.authorized" }),
+          memory: expect.objectContaining({ type: "payment.authorized" }),
         }),
       ],
       { cfg: {} },
     );
     expect(trajectoryRecorder.recordEvent).toHaveBeenCalledWith(
-      "audit.receipt.recorded",
-      expect.objectContaining({ receiptId: "rcpt_payment", type: "payment.authorized" }),
+      "skill.memory.remembered",
+      expect.objectContaining({ memoryId: "smem_payment", type: "payment.authorized" }),
     );
     expect(trajectoryRecorder.recordEvent.mock.calls[0]?.[1]).not.toHaveProperty("data");
   });
@@ -118,7 +118,7 @@ describe("embedded backend receipt composition", () => {
         toolCallId: "call-many",
         toolName: "authorize_payment",
         result: {
-          receipts: Array.from({ length: 19 }, (_, index) => ({
+          memories: Array.from({ length: 19 }, (_, index) => ({
             type: `payment.authorized.${index}`,
           })),
         },

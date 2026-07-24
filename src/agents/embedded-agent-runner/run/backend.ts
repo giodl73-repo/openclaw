@@ -1,13 +1,13 @@
+import { formatErrorMessage } from "../../../infra/errors.js";
+import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../../routing/session-key.js";
 /**
  * Dispatches embedded attempts to native harness or OpenClaw backend execution.
  */
 import {
-  isAuditReceiptStoreEnabled,
-  recordAuditReceiptBatch,
-} from "../../../audit/receipt-store.sqlite.js";
-import { formatErrorMessage } from "../../../infra/errors.js";
-import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../../routing/session-key.js";
-import { collectToolAuditReceipts } from "../../../trajectory/audit.js";
+  isSkillMemoryStoreEnabled,
+  recordSkillMemoryBatch,
+} from "../../../skill-memory/store.sqlite.js";
+import { collectToolSkillMemory } from "../../../trajectory/skill-memory.js";
 import { runAgentHarnessAttempt } from "../../harness/selection.js";
 import { log } from "../logger.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
@@ -22,28 +22,28 @@ export async function runEmbeddedAttemptWithBackend(
   return runAgentHarnessAttempt({
     ...params,
     onAgentToolResult: (event) => {
-      if (isAuditReceiptStoreEnabled(params.config)) {
-        const collected = collectToolAuditReceipts(event);
+      if (isSkillMemoryStoreEnabled(params.config)) {
+        const collected = collectToolSkillMemory(event);
         if (collected.omittedCandidateCount > 0) {
           log.warn(
-            `ignored ${collected.omittedCandidateCount} audit receipt candidates above the per-tool-result limit`,
+            `ignored ${collected.omittedCandidateCount} Skill Memory candidates above the per-tool-result limit`,
           );
         }
-        let recordedReceipts: ReturnType<typeof recordAuditReceiptBatch> = [];
+        let recordedMemories: ReturnType<typeof recordSkillMemoryBatch> = [];
         try {
           const occurredAt = Date.now();
-          recordedReceipts = recordAuditReceiptBatch(
-            collected.receipts.map((receipt, receiptIndex) =>
+          recordedMemories = recordSkillMemoryBatch(
+            collected.memories.map((memory, memoryIndex) =>
               Object.assign(
                 {
-                  receipt,
-                  receiptIndex,
+                  memory,
+                  memoryIndex,
                   occurredAt,
                   agentId: normalizeAgentId(params.agentId ?? DEFAULT_AGENT_ID),
                   sessionId: params.sessionId,
                   runId: params.runId,
-                  toolName: receipt.toolName,
-                  toolCallId: receipt.toolCallId,
+                  toolName: memory.toolName,
+                  toolCallId: memory.toolCallId,
                 },
                 params.sessionKey ? { sessionKey: params.sessionKey } : {},
               ),
@@ -51,19 +51,19 @@ export async function runEmbeddedAttemptWithBackend(
             { cfg: params.config },
           );
         } catch (error) {
-          log.warn(`failed to record audit receipt batch: ${formatErrorMessage(error)}`);
+          log.warn(`failed to remember Skill Memory batch: ${formatErrorMessage(error)}`);
         }
-        for (const recorded of recordedReceipts) {
+        for (const recorded of recordedMemories) {
           try {
-            params.trajectoryRecorder?.recordEvent("audit.receipt.recorded", {
-              receiptId: recorded.receiptId,
+            params.trajectoryRecorder?.recordEvent("skill.memory.remembered", {
+              memoryId: recorded.memoryId,
               type: recorded.type,
               ...(recorded.subject ? { subject: recorded.subject } : {}),
               toolName: recorded.toolName,
               toolCallId: recorded.toolCallId,
             });
           } catch (error) {
-            log.warn(`failed to record audit receipt reference: ${formatErrorMessage(error)}`);
+            log.warn(`failed to record Skill Memory reference: ${formatErrorMessage(error)}`);
           }
         }
       }

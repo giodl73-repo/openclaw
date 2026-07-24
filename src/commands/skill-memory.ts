@@ -1,21 +1,21 @@
-/** Local operator query surface for durable typed outcome receipts. */
+/** Local operator recall surface for durable Skill Memory entries. */
 import { timestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
 import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
-import {
-  countAuditReceipts,
-  getAuditReceipt,
-  listAuditReceipts,
-  type AuditReceiptFilters,
-  type RecordedAuditReceipt,
-} from "../audit/receipt-store.sqlite.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { parseStrictPositiveInteger } from "../infra/parse-finite-number.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
+import {
+  countSkillMemory,
+  getSkillMemory,
+  listSkillMemory,
+  type SkillMemoryFilters,
+  type RecordedSkillMemory,
+} from "../skill-memory/store.sqlite.js";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
-export type ReceiptsCommandOptions = {
+export type SkillMemoryCommandOptions = {
   id?: string;
   count?: boolean;
   type?: string;
@@ -45,7 +45,7 @@ function parsePositive(value: string | undefined, flag: string, fallback?: numbe
   return parsed;
 }
 
-function buildFilters(options: ReceiptsCommandOptions): AuditReceiptFilters {
+function buildFilters(options: SkillMemoryCommandOptions): SkillMemoryFilters {
   const subjectType = optionalTrimmed(options.subjectType);
   const subjectId = optionalTrimmed(options.subjectId);
   if (subjectId && !subjectType) {
@@ -65,21 +65,21 @@ function buildFilters(options: ReceiptsCommandOptions): AuditReceiptFilters {
   };
 }
 
-function formatReceipt(receipt: RecordedAuditReceipt): string {
-  const subject = receipt.subject ? ` ${receipt.subject.type}:${receipt.subject.id}` : "";
+function formatMemory(memory: RecordedSkillMemory): string {
+  const subject = memory.subject ? ` ${memory.subject.type}:${memory.subject.id}` : "";
   return sanitizeTerminalText(
-    `${timestampMsToIsoString(receipt.occurredAt) ?? receipt.occurredAt} ${receipt.type}${subject} ${receipt.receiptId} agent=${receipt.agentId} session=${receipt.sessionKey ?? receipt.sessionId} run=${receipt.runId}`,
+    `${timestampMsToIsoString(memory.occurredAt) ?? memory.occurredAt} ${memory.type}${subject} ${memory.memoryId} agent=${memory.agentId} session=${memory.sessionKey ?? memory.sessionId} run=${memory.runId}`,
   );
 }
 
-/** Get, list, or count receipts in the configured single-host store. */
-export async function receiptsCommand(
-  options: ReceiptsCommandOptions,
+/** Get, list, or count memories in the configured single-host store. */
+export async function skillMemoryCommand(
+  options: SkillMemoryCommandOptions,
   runtime: RuntimeEnv,
 ): Promise<void> {
   const cfg = getRuntimeConfig();
-  const receiptId = optionalTrimmed(options.id);
-  if (receiptId) {
+  const memoryId = optionalTrimmed(options.id);
+  if (memoryId) {
     if (
       options.count ||
       options.cursor ||
@@ -93,11 +93,11 @@ export async function receiptsCommand(
     ) {
       throw new Error("--id cannot be combined with list or count filters.");
     }
-    const receipt = getAuditReceipt({ receiptId, store: { cfg } });
-    if (!receipt) {
-      throw new Error(`receipt not found: ${receiptId}`);
+    const memory = getSkillMemory({ memoryId, store: { cfg } });
+    if (!memory) {
+      throw new Error(`memory not found: ${memoryId}`);
     }
-    writeRuntimeJson(runtime, receipt);
+    writeRuntimeJson(runtime, memory);
     return;
   }
 
@@ -106,7 +106,7 @@ export async function receiptsCommand(
     if (options.cursor || options.limit) {
       throw new Error("--count cannot be combined with --cursor or --limit.");
     }
-    const count = countAuditReceipts({ filters, store: { cfg } });
+    const count = countSkillMemory({ filters, store: { cfg } });
     if (options.json) {
       writeRuntimeJson(runtime, { count });
     } else {
@@ -120,15 +120,15 @@ export async function receiptsCommand(
     throw new Error(`--limit must be between 1 and ${MAX_LIMIT}.`);
   }
   const cursor = options.cursor ? parsePositive(options.cursor, "--cursor") : undefined;
-  const page = listAuditReceipts({ filters, limit, cursor, store: { cfg } });
+  const page = listSkillMemory({ filters, limit, cursor, store: { cfg } });
   if (options.json) {
     writeRuntimeJson(runtime, page);
     return;
   }
-  for (const receipt of page.receipts) {
-    runtime.log(formatReceipt(receipt));
+  for (const memory of page.memories) {
+    runtime.log(formatMemory(memory));
   }
   if (page.nextCursor !== undefined) {
-    runtime.log(`More receipts: --cursor ${page.nextCursor}`);
+    runtime.log(`More memories: --cursor ${page.nextCursor}`);
   }
 }

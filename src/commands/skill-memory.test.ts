@@ -7,24 +7,24 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
 }));
 
-vi.mock("../audit/receipt-store.sqlite.js", () => ({
-  countAuditReceipts: mocks.count,
-  getAuditReceipt: mocks.get,
-  listAuditReceipts: mocks.list,
+vi.mock("../skill-memory/store.sqlite.js", () => ({
+  countSkillMemory: mocks.count,
+  getSkillMemory: mocks.get,
+  listSkillMemory: mocks.list,
 }));
 vi.mock("../config/config.js", () => ({ getRuntimeConfig: () => ({}) }));
 
-import { receiptsCommand } from "./receipts.js";
+import { skillMemoryCommand } from "./skill-memory.js";
 
 function createRuntime(): RuntimeEnv {
   return { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
 }
 
-const paymentReceipt = {
-  receiptSchema: "openclaw-audit-receipt" as const,
+const paymentMemory = {
+  memorySchema: "openclaw-skill-memory" as const,
   schemaVersion: 1 as const,
   sequence: 8,
-  receiptId: "rcpt_payment",
+  memoryId: "smem_payment",
   type: "payment.authorized",
   occurredAt: 1_700_000_000_000,
   agentId: "billing",
@@ -37,14 +37,14 @@ const paymentReceipt = {
   data: { authorizationCode: "AUTH-9482" },
 };
 
-describe("receipts command", () => {
+describe("memories command", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("lists exact typed outcomes with session correlation", async () => {
-    mocks.list.mockReturnValue({ receipts: [paymentReceipt], nextCursor: 8 });
+  it("lists exact remembered facts with session correlation", async () => {
+    mocks.list.mockReturnValue({ memories: [paymentMemory], nextCursor: 8 });
     const runtime = createRuntime();
 
-    await receiptsCommand(
+    await skillMemoryCommand(
       { type: "payment.authorized", agent: "billing,support", limit: "25" },
       runtime,
     );
@@ -56,14 +56,14 @@ describe("receipts command", () => {
       }),
     );
     expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("payment.authorized"));
-    expect(runtime.log).toHaveBeenCalledWith("More receipts: --cursor 8");
+    expect(runtime.log).toHaveBeenCalledWith("More memories: --cursor 8");
   });
 
-  it("counts without loading receipt payloads", async () => {
+  it("counts without loading memory payloads", async () => {
     mocks.count.mockReturnValue(12);
     const runtime = createRuntime();
 
-    await receiptsCommand({ type: "case.resolved", count: true }, runtime);
+    await skillMemoryCommand({ type: "case.resolved", count: true }, runtime);
 
     expect(mocks.count).toHaveBeenCalledWith(
       expect.objectContaining({ filters: { type: "case.resolved" } }),
@@ -72,13 +72,13 @@ describe("receipts command", () => {
     expect(runtime.log).toHaveBeenCalledWith("12");
   });
 
-  it("gets full evidence by receipt id", async () => {
-    mocks.get.mockReturnValue(paymentReceipt);
+  it("gets full evidence by memory id", async () => {
+    mocks.get.mockReturnValue(paymentMemory);
     const runtime = createRuntime();
 
-    await receiptsCommand({ id: "rcpt_payment" }, runtime);
+    await skillMemoryCommand({ id: "smem_payment" }, runtime);
 
-    expect(mocks.get).toHaveBeenCalledWith(expect.objectContaining({ receiptId: "rcpt_payment" }));
+    expect(mocks.get).toHaveBeenCalledWith(expect.objectContaining({ memoryId: "smem_payment" }));
     expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("AUTH-9482"));
   });
 });
