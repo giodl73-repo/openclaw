@@ -36,7 +36,7 @@ import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
 import {
   createReadinessChecker,
   createStartupChecker,
-  evaluateCanonicalGatewayReadiness,
+  evaluateConfiguredGatewayReadiness,
   type CanonicalGatewayReadinessResult,
 } from "./server/readiness.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
@@ -481,7 +481,8 @@ export async function prepareGatewayKernelState(params: {
     throw new Error("Readiness runtime changed while it was being evaluated.");
   };
   const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
-    evaluateCanonicalGatewayReadiness({
+    evaluateConfiguredGatewayReadiness({
+      config: pluginRuntime.readinessSnapshot.config,
       evaluateGateway: getGatewayReadiness,
       evaluateRuntime: evaluateRuntimeReadiness,
     });
