@@ -18,7 +18,7 @@ function createSkillsSnapshot(): SkillSnapshot {
       {
         name: "resolve-case",
         skillDigest: "sha256:abc",
-        executionHints: { outcomes: ["case.resolved"] },
+        executionHints: { remembers: ["case.resolved"] },
       },
     ],
     resolvedSkills: [
@@ -69,7 +69,7 @@ describe("spawnManagedSkillDirect", () => {
           skillName: "resolve-case",
           skillSource: "workspace",
           skillDigest: "sha256:abc",
-          executionHints: { outcomes: ["case.resolved"] },
+          executionHints: { remembers: ["case.resolved"] },
           parentRunId: "run-parent",
         },
       }),
