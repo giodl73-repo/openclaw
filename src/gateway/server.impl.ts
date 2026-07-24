@@ -73,6 +73,10 @@ import { setCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-meta
 import type { PluginHookGatewayCronService } from "../plugins/hook-types.js";
 import { clearPluginMetadataLifecycleCaches } from "../plugins/plugin-metadata-lifecycle.js";
 import {
+  listActiveDegradedPlugins,
+  toPublicPluginVerificationDiagnostic,
+} from "../plugins/runtime-degraded-state.js";
+import {
   getActivePluginRegistry,
   pinActivePluginChannelRegistry,
   pinActivePluginHttpRouteRegistry,
@@ -80,6 +84,10 @@ import {
 } from "../plugins/runtime.js";
 import { getTotalQueueSize, isGatewayDraining } from "../process/command-queue.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
+import {
+  isReadinessCriterionSelected,
+  MODEL_ROUTE_READY_CRITERION_ID,
+} from "../readiness/activation.js";
 import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
 import { createSelectedReadinessResolver } from "../readiness/selection.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -244,7 +252,13 @@ function buildGatewayPluginReadinessInput(
       return error;
     })
     .toSorted((left, right) => left.id.localeCompare(right.id));
-  return { errors };
+  const unavailable = listActiveDegradedPlugins()
+    .map((plugin) => ({
+      id: plugin.pluginId,
+      diagnostic: toPublicPluginVerificationDiagnostic(plugin.diagnostic),
+    }))
+    .toSorted((left, right) => left.id.localeCompare(right.id));
+  return { errors, unavailable };
 }
 
 type GatewayStartupChannelPlugin = {
@@ -2500,6 +2514,9 @@ export async function startGatewayServer(
             sidecarStartup,
             providerAuthPrewarm: {
               getConfig: getRuntimeConfig,
+              ...(isReadinessCriterionSelected(cfgAtStart, MODEL_ROUTE_READY_CRITERION_ID)
+                ? { enabled: true }
+                : {}),
             },
           }),
       ),
