@@ -2,6 +2,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { registerPolicyCli } from "./src/cli.js";
 import { registerPolicyDoctorChecks } from "./src/doctor/register.js";
+import { createPolicyReadinessCriterion } from "./src/readiness.js";
 
 export default definePluginEntry({
   id: "policy",
@@ -22,6 +23,7 @@ export default definePluginEntry({
         ],
       },
     );
+    api.registerReadinessCriterion(createPolicyReadinessCriterion());
     registerPolicyDoctorChecks();
   },
 });
