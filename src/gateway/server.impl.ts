@@ -81,6 +81,7 @@ import {
 import { getTotalQueueSize, isGatewayDraining } from "../process/command-queue.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
 import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
+import { captureExecutionCapabilityReadinessSnapshot } from "../readiness/execution-capabilities.js";
 import { createSelectedReadinessResolver } from "../readiness/selection.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
@@ -1291,13 +1292,22 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   const resolveSelectedReadiness = createSelectedReadinessResolver();
-  let readinessRuntimeSnapshot = { config: cfgAtStart, registry: pluginRegistry };
+  const buildReadinessRuntimeSnapshot = (
+    config: OpenClawConfig,
+    registry: typeof pluginRegistry,
+  ) => ({
+    config,
+    registry,
+    executionCapabilities: captureExecutionCapabilityReadinessSnapshot(config),
+  });
+  let readinessRuntimeSnapshot = buildReadinessRuntimeSnapshot(cfgAtStart, pluginRegistry);
   const evaluateRuntimeReadiness = async () => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const snapshot = readinessRuntimeSnapshot;
       const additionalConditions = await resolveSelectedReadiness({
         config: snapshot.config,
         registry: snapshot.registry,
+        executionCapabilities: snapshot.executionCapabilities,
         env: process.env,
       });
       if (snapshot !== readinessRuntimeSnapshot) {
@@ -1959,7 +1969,7 @@ export async function startGatewayServer(
       readinessConfig = getRuntimeConfig(),
     ) => {
       pluginRegistry = loaded.pluginRegistry;
-      readinessRuntimeSnapshot = { config: readinessConfig, registry: pluginRegistry };
+      readinessRuntimeSnapshot = buildReadinessRuntimeSnapshot(readinessConfig, pluginRegistry);
       baseGatewayMethods = loaded.gatewayMethods;
       for (const key of attachedPluginGatewayHandlerKeys) {
         delete attachedGatewayExtraHandlers[key];
@@ -2597,7 +2607,7 @@ export async function startGatewayServer(
       },
       commitTerminalConfig: (nextConfig) => {
         terminalLaunchPolicy.commitConfig();
-        readinessRuntimeSnapshot = { config: nextConfig, registry: pluginRegistry };
+        readinessRuntimeSnapshot = buildReadinessRuntimeSnapshot(nextConfig, pluginRegistry);
         workerLiveEvents?.rebindAll(nextConfig);
       },
       acceptTerminalConfig: terminalLaunchPolicy.acceptConfig,
