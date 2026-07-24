@@ -446,10 +446,10 @@ export async function startGatewayCoreRuntime(input: {
     retireAttachedPluginRuntimeBindings = loaded.retireGatewayRuntimeBindings ?? (() => {});
     retirePreviousBindings();
     pluginRuntime.registry = loaded.pluginRegistry;
-    pluginRuntime.readinessSnapshot = {
-      config: readinessConfig,
-      registry: pluginRuntime.registry,
-    };
+    pluginRuntime.readinessSnapshot = pluginRuntime.buildReadinessRuntimeSnapshot(
+      readinessConfig,
+      pluginRuntime.registry,
+    );
     pluginRuntime.baseGatewayMethods = loaded.gatewayMethods;
     for (const key of attachedPluginGatewayHandlerKeys) {
       delete attachedGatewayExtraHandlers[key];
