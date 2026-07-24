@@ -6,6 +6,8 @@ import {
   buildHostIntegrationStatusInventoryV1,
   getCurrentHostIntegrationOwnerEvidenceV1,
 } from "../hosting/host-integration-status.js";
+import { getActivePluginRegistry } from "../plugins/runtime.js";
+import { buildReadinessCriterionCatalog } from "../readiness/catalog.js";
 import {
   buildRuntimeReadiness,
   buildUnobservedGatewayConditions,
@@ -144,6 +146,7 @@ export function buildStatusJsonPayload(params: {
           hostIntegration: buildHostIntegrationStatusInventoryV1({
             bundle: hostIntegrationBundle,
             ownerEvidence: getCurrentHostIntegrationOwnerEvidenceV1(),
+            availableCriteria: buildReadinessCriterionCatalog(getActivePluginRegistry()),
           }),
         }
       : {}),

@@ -41,7 +41,7 @@ function registerCurrentBinding() {
           id: "example/reverse-provider",
           version: "provider-request-dispatcher/v1",
           required: true,
-          readinessCriteria: ["provider.request.dispatch.example"],
+          readinessCriteria: ["plugin.example-host.provider-dispatch"],
         },
       ],
     },

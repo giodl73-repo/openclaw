@@ -209,6 +209,7 @@ advertised node command.
 | `api.registerNodeInvokePolicy(policy)`          | Allowlist/approval policy for node-invoked commands                    |
 | `api.registerSecurityAuditCollector(collector)` | Findings collector for `openclaw security audit`                       |
 | `api.registerReadinessCriterion(criterion)`     | Bounded advisory readiness observation                                 |
+| `api.registerHostIntegrationBundle(manifest)`   | Atomic host-binding inventory and readiness references                 |
 
 #### Readiness criteria
 
@@ -232,6 +233,17 @@ bounded timeout, caches the result briefly, and retains the descriptor in the
 active Gateway-pinned provider catalog for enumeration. Plugin criteria are
 advisory when registered. Only an operator can promote one to required through
 `gateway.readiness`; plugins cannot make their own checks block readiness.
+
+Host integration bundle contributions may reference these canonical selector
+IDs through `readinessCriteria`. References must use `openclaw.*` or
+`plugin.*` IDs and cannot point back to the aggregate
+`openclaw.host-bindings-ready` criterion. Selecting that aggregate adds the
+referenced detailed criteria as advisory conditions. An unavailable reference
+on a required contribution makes `HostBindingsReady` fail closed and appears
+as `unresolvedReadinessCriteria` in host-integration status; registration alone
+does not make any criterion required. A referenced required-contribution
+criterion that evaluates `False` or `Unknown` also fails the aggregate while
+remaining advisory in the detailed condition list.
 
 #### Requester-scoped MCP connections
 

@@ -39,7 +39,7 @@ function registerCurrentBinding() {
           id: DECLARATION.bindingId,
           version: DECLARATION.interfaceVersion,
           required: true,
-          readinessCriteria: ["provider.request.dispatch.example"],
+          readinessCriteria: ["plugin.example-host.provider-dispatch"],
         },
       ],
     },

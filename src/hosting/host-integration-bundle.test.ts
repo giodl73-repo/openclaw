@@ -81,7 +81,7 @@ describe("host integration bundle registration", () => {
           id: PROVIDER_ADAPTER_ID,
           version: PROVIDER_ADAPTER_VERSION,
           required: true,
-          readinessCriteria: ["example.provider.ready"],
+          readinessCriteria: ["plugin.example-host.provider-ready"],
           status: "resolved",
           resolvedVersion: PROVIDER_ADAPTER_VERSION,
           provenance: {
@@ -96,7 +96,7 @@ describe("host integration bundle registration", () => {
           id: PROVIDER_TOKEN_SLOT_ID,
           version: CREDENTIAL_SLOT_RESOLVER_VERSION,
           required: true,
-          readinessCriteria: ["example.provider.credentials"],
+          readinessCriteria: ["plugin.example-host.provider-credentials"],
           status: "resolved",
           resolvedVersion: CREDENTIAL_SLOT_RESOLVER_VERSION,
           provenance: {
@@ -111,7 +111,7 @@ describe("host integration bundle registration", () => {
           id: "example/reverse-provider",
           version: "provider-request-dispatcher/v1",
           required: true,
-          readinessCriteria: ["provider.request.dispatch.example"],
+          readinessCriteria: ["plugin.example-host.provider-dispatch"],
           status: "resolved",
           resolvedVersion: "provider-request-dispatcher/v1",
           provenance: {
@@ -231,6 +231,46 @@ describe("host integration bundle registration", () => {
         availableContributions: crossOwnerAvailable,
       }),
     ).toThrowError(expect.objectContaining({ code: "duplicate-available-contribution" }));
+  });
+
+  it("requires canonical non-recursive readiness selector ids", () => {
+    const legacy = cloneManifest();
+    legacy.contributions[0]!.readinessCriteria = ["ProviderReady"];
+    expect(() =>
+      prepareHostIntegrationBundleSnapshotV1({
+        manifest: legacy,
+        availableContributions: cloneAvailable(),
+      }),
+    ).toThrow(/canonical openclaw\.\* or plugin\.\* selector ids/);
+
+    const recursive = cloneManifest();
+    recursive.contributions[0]!.readinessCriteria = ["openclaw.host-bindings-ready"];
+    expect(() =>
+      prepareHostIntegrationBundleSnapshotV1({
+        manifest: recursive,
+        availableContributions: cloneAvailable(),
+      }),
+    ).toThrow(/cannot reference the aggregate host-bindings criterion/);
+  });
+
+  it("bounds readiness selector expansion across the bundle", () => {
+    const oversized = cloneManifest();
+    oversized.contributions[0]!.readinessCriteria = Array.from(
+      { length: 32 },
+      (_, index) => `plugin.example-host.provider-${index}`,
+    );
+    oversized.contributions[1]!.readinessCriteria = Array.from(
+      { length: 32 },
+      (_, index) => `plugin.example-host.credential-${index}`,
+    );
+    oversized.contributions[2]!.readinessCriteria = ["plugin.example-host.dispatch-extra"];
+
+    expect(() =>
+      prepareHostIntegrationBundleSnapshotV1({
+        manifest: oversized,
+        availableContributions: cloneAvailable(),
+      }),
+    ).toThrow(/cannot reference more than 64 readiness criteria/);
   });
 
   it("rejects an incompatible required contribution before publication", () => {

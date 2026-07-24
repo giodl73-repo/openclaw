@@ -1,5 +1,12 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import {
+  getCurrentHostIntegrationBundleStatusSnapshotV1,
+  MAX_HOST_INTEGRATION_READINESS_CRITERIA,
+  type HostIntegrationBundleSnapshotV1,
+} from "../hosting/host-integration-bundle.js";
+import { getCurrentHostIntegrationOwnerEvidenceV1 } from "../hosting/host-integration-status.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
+import { buildReadinessCriterionCatalog } from "./catalog.js";
 import {
   WORKSPACE_WRITABLE_CRITERION_ID,
   type ReadinessCondition,
@@ -20,7 +27,10 @@ type SelectedCriterion = {
   requirement: ReadinessRequirement;
 };
 
-function resolveSelectedReadinessCriteria(config: OpenClawConfig): SelectedCriterion[] {
+function resolveSelectedReadinessCriteria(
+  config: OpenClawConfig,
+  hostBundle?: HostIntegrationBundleSnapshotV1,
+): SelectedCriterion[] {
   const required = config.gateway?.readiness?.requiredCriteria ?? [];
   const advisory = config.gateway?.readiness?.advisoryCriteria ?? [];
   const selected = new Map<string, ReadinessRequirement>();
@@ -29,6 +39,23 @@ function resolveSelectedReadinessCriteria(config: OpenClawConfig): SelectedCrite
   }
   for (const id of required) {
     selected.set(id, "required");
+  }
+  if (selected.has(HOST_BINDINGS_READY_CRITERION_ID)) {
+    let implicitCriteria = 0;
+    for (const entry of hostBundle?.inventory ?? []) {
+      for (const id of entry.readinessCriteria) {
+        if (!selected.has(id)) {
+          selected.set(id, "advisory");
+          implicitCriteria += 1;
+          if (implicitCriteria >= MAX_HOST_INTEGRATION_READINESS_CRITERIA) {
+            break;
+          }
+        }
+      }
+      if (implicitCriteria >= MAX_HOST_INTEGRATION_READINESS_CRITERIA) {
+        break;
+      }
+    }
   }
   return Array.from(selected, ([id, requirement]) => ({ id, requirement }));
 }
@@ -52,12 +79,24 @@ export function createSelectedReadinessResolver() {
     registry: Pick<PluginRegistry, "readinessCriteria">;
     env?: NodeJS.ProcessEnv;
   }): Promise<ReadinessCondition[]> => {
-    const selected = resolveSelectedReadinessCriteria(params.config);
+    const readinessConfig = params.config.gateway?.readiness;
+    const hostBindingsSelected = [
+      ...(readinessConfig?.requiredCriteria ?? []),
+      ...(readinessConfig?.advisoryCriteria ?? []),
+    ].includes(HOST_BINDINGS_READY_CRITERION_ID);
+    const hostBundle = hostBindingsSelected
+      ? getCurrentHostIntegrationBundleStatusSnapshotV1()
+      : undefined;
+    const hostOwnerEvidence = hostBindingsSelected
+      ? getCurrentHostIntegrationOwnerEvidenceV1()
+      : [];
+    const selected = resolveSelectedReadinessCriteria(params.config, hostBundle);
     if (selected.length === 0) {
       return [];
     }
 
     const selectedIds = new Set(selected.map((entry) => entry.id));
+    const criterionCatalog = buildReadinessCriterionCatalog(params.registry);
     const pluginIds = new Set(
       selected.filter((entry) => entry.id.startsWith("plugin.")).map((entry) => entry.id),
     );
@@ -75,11 +114,19 @@ export function createSelectedReadinessResolver() {
         buildWorkspaceReadinessCondition(workspaceEvidence),
       );
     }
-    if (selectedIds.has(HOST_BINDINGS_READY_CRITERION_ID)) {
-      conditions.set(HOST_BINDINGS_READY_CRITERION_ID, buildHostBindingsReadinessCondition());
-    }
     for (const condition of pluginConditions) {
       conditions.set(condition.type, condition);
+    }
+    if (selectedIds.has(HOST_BINDINGS_READY_CRITERION_ID)) {
+      conditions.set(
+        HOST_BINDINGS_READY_CRITERION_ID,
+        buildHostBindingsReadinessCondition({
+          bundle: hostBundle ?? null,
+          ownerEvidence: hostOwnerEvidence,
+          availableCriteria: criterionCatalog,
+          criterionConditions: conditions,
+        }),
+      );
     }
 
     return selected.map(({ id, requirement }) => {

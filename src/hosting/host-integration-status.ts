@@ -48,6 +48,7 @@ export type HostIntegrationBindingStatusEntryV1 = HostIntegrationBundleInventory
   };
   reloadDisposition?: HostIntegrationReloadDispositionV1;
   authorityMode?: HostIntegrationAuthorityModeV1;
+  unresolvedReadinessCriteria?: readonly string[];
 };
 
 export type HostIntegrationStatusInventoryV1 = {
@@ -133,32 +134,60 @@ function resolveBundleState(entry: HostIntegrationBundleInventoryEntryV1): {
 export function buildHostIntegrationStatusInventoryV1(params: {
   bundle: HostIntegrationBundleSnapshotV1;
   ownerEvidence?: readonly HostIntegrationOwnerEvidenceV1[];
+  availableCriteria?: ReadonlySet<string>;
 }): HostIntegrationStatusInventoryV1 {
   const bundleGeneration = params.bundle.generation;
   const evidenceByContribution = new Map(
     (params.ownerEvidence ?? []).map((evidence) => [contributionKey(evidence), evidence]),
   );
+  const withCriterionCoverage = (
+    entry: HostIntegrationBundleInventoryEntryV1,
+    status: HostIntegrationBindingStatusEntryV1,
+  ): HostIntegrationBindingStatusEntryV1 => {
+    if (!params.availableCriteria) {
+      return status;
+    }
+    const unresolvedReadinessCriteria = entry.readinessCriteria.filter(
+      (criterion) => !params.availableCriteria?.has(criterion),
+    );
+    if (unresolvedReadinessCriteria.length === 0) {
+      return { ...status, unresolvedReadinessCriteria: Object.freeze([]) };
+    }
+    if (!entry.required || status.state !== "ready") {
+      return {
+        ...status,
+        unresolvedReadinessCriteria: Object.freeze(unresolvedReadinessCriteria),
+      };
+    }
+    return {
+      ...status,
+      state: "unavailable",
+      reason: "RequiredCriterionUnknown",
+      message: `Required contribution ${entry.id} references unavailable readiness criteria.`,
+      unresolvedReadinessCriteria: Object.freeze(unresolvedReadinessCriteria),
+    };
+  };
   const entries = params.bundle.inventory.map((entry): HostIntegrationBindingStatusEntryV1 => {
     const bundleState = resolveBundleState(entry);
     const evidence = evidenceByContribution.get(contributionKey(entry));
     if (bundleState) {
-      return {
+      return withCriterionCoverage(entry, {
         ...entry,
         ...bundleState,
         generations: { bundle: bundleGeneration },
-      };
+      });
     }
     if (!evidence) {
-      return {
+      return withCriterionCoverage(entry, {
         ...entry,
         state: "unresolved",
         reason: "OwnerEvidenceUnavailable",
         message: `Owner ${entry.owner} has not reported binding status for ${entry.id}.`,
         generations: { bundle: bundleGeneration },
-      };
+      });
     }
     if (evidence.bundleGeneration !== bundleGeneration) {
-      return {
+      return withCriterionCoverage(entry, {
         ...entry,
         state: "stale",
         reason: "OwnerEvidenceBundleGenerationMismatch",
@@ -172,9 +201,9 @@ export function buildHostIntegrationStatusInventoryV1(params: {
         },
         reloadDisposition: evidence.reloadDisposition,
         authorityMode: evidence.authorityMode,
-      };
+      });
     }
-    return {
+    return withCriterionCoverage(entry, {
       ...entry,
       state: evidence.state,
       reason: evidence.reason,
@@ -188,7 +217,7 @@ export function buildHostIntegrationStatusInventoryV1(params: {
       },
       reloadDisposition: evidence.reloadDisposition,
       authorityMode: evidence.authorityMode,
-    };
+    });
   });
   const state = entries.reduce<HostIntegrationBindingStateV1>(
     (current, entry) =>

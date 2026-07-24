@@ -550,6 +550,10 @@ baseline and do not require a hosting profile. See [Health checks](/gateway/heal
 for evaluation semantics and the [Plugin SDK](/plugins/sdk-overview#infrastructure)
 for plugin registration.
 
+Selecting `openclaw.host-bindings-ready` also includes criteria referenced by
+the active host integration bundle as advisory detail. Only the aggregate is
+required unless the operator explicitly promotes a referenced criterion.
+
 ## Gateway
 
 ```json5

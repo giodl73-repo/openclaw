@@ -89,6 +89,12 @@ integration bundle and its owner-published status evidence. Required bindings
 must all be `ready`; optional degraded or unavailable bindings remain visible
 in the host integration inventory but do not block this condition. The check is
 in-memory and does not probe credentials, providers, or the network.
+Bundle contributions reference canonical `openclaw.*` or `plugin.*` criterion
+IDs. Selecting the aggregate includes those detailed conditions as advisory;
+an unresolved reference on a required contribution fails the aggregate closed
+and is reported in host-integration status. A required contribution's detailed
+`False` or `Unknown` result also fails the aggregate without independently
+promoting that detailed condition to required.
 
 - **DO use:** `GET /health` - instant response, no session created, no LLM call, returns `{"ok":true,"status":"live"}`
 - **DON'T use:** `/v1/chat/completions` for health checks - each request creates a full agent session with skill snapshot, context assembly, and LLM calls

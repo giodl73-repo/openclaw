@@ -42,7 +42,7 @@ function inventory(
         id: "example/provider-adapter",
         version: "example-provider-adapter/v1",
         required: true,
-        readinessCriteria: ["ProviderReady"],
+        readinessCriteria: ["plugin.example-host.provider-ready"],
         status: "resolved",
         resolvedVersion: "example-provider-adapter/v1",
         state: "unresolved",
@@ -73,7 +73,7 @@ describe("host integration Doctor findings", () => {
             id: "example/provider-adapter",
             version: "example-provider-adapter/v1",
             required: true,
-            readinessCriteria: ["ProviderReady"],
+            readinessCriteria: ["plugin.example-host.provider-ready"],
           },
         ],
       },
@@ -116,7 +116,7 @@ describe("host integration Doctor findings", () => {
               id: "example/provider-adapter",
               version: "example-provider-adapter/v1",
               required: true,
-              readinessCriteria: ["ProviderReady"],
+              readinessCriteria: ["plugin.example-host.provider-ready"],
             },
           ],
         },
@@ -233,6 +233,26 @@ describe("host integration Doctor findings", () => {
         requirement: "CredentialSlotUnavailable",
         path: "plugins.entries.example-host",
         fixHint: "Correct plugins.entries.example-host, then restart OpenClaw.",
+      },
+    ]);
+  });
+
+  it("names unresolved readiness selectors without evaluating them", () => {
+    expect(
+      hostIntegrationStatusToHealthFindings(
+        inventory({
+          state: "unavailable",
+          reason: "RequiredCriterionUnknown",
+          message: "Required readiness criterion is unavailable.",
+          unresolvedReadinessCriteria: ["plugin.example-host.provider-ready"],
+        }),
+      ),
+    ).toMatchObject([
+      {
+        severity: "error",
+        requirement: "RequiredCriterionUnknown",
+        fixHint:
+          "Register plugin.example-host.provider-ready in the active readiness catalog, then reload owner model-provider.",
       },
     ]);
   });

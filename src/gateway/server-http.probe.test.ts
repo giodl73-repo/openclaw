@@ -1,16 +1,28 @@
 // Server HTTP probe tests cover readiness, health, disabled compat routes, and
 // auth handling through the in-memory HTTP harness.
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
+import {
+  clearCurrentHostIntegrationBundleSnapshotV1,
+  registerHostIntegrationBundleV1,
+} from "../hosting/host-integration-bundle.js";
+import {
+  clearCurrentHostIntegrationOwnerEvidenceV1,
+  publishHostIntegrationOwnerEvidenceV1,
+} from "../hosting/host-integration-status.js";
 import {
   prepareGatewaySuspend,
   resumeGatewaySuspend,
 } from "../infra/gateway-suspend-coordinator.js";
+import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
 import { isGatewayDraining } from "../process/command-queue.js";
 import {
   getActiveGatewayRootWorkCount,
   resetGatewayWorkAdmission,
 } from "../process/gateway-work-admission.js";
+import { buildRuntimeReadiness } from "../readiness/conditions.js";
+import { createSelectedReadinessResolver } from "../readiness/selection.js";
 import type { ChannelManager } from "./server-channels.js";
 import {
   AUTH_TOKEN,
@@ -20,11 +32,20 @@ import {
   dispatchRequest,
   withGatewayServer,
 } from "./server-http.test-harness.js";
-import { createReadinessChecker, type ReadinessChecker } from "./server/readiness.js";
+import {
+  createReadinessChecker,
+  evaluateConfiguredGatewayReadiness,
+  type ReadinessChecker,
+} from "./server/readiness.js";
 import { withTempConfig } from "./test-temp-config.js";
 
 type GatewayServerHarness = Parameters<typeof dispatchRequest>[0];
 type GatewayRequestOptions = Parameters<typeof createRequest>[0];
+
+afterEach(() => {
+  clearCurrentHostIntegrationBundleSnapshotV1();
+  clearCurrentHostIntegrationOwnerEvidenceV1();
+});
 
 async function sendGatewayRequest(server: GatewayServerHarness, options: GatewayRequestOptions) {
   const req = createRequest(options);
@@ -265,6 +286,97 @@ describe("gateway probe endpoints", () => {
           ],
           failures: [],
         });
+      },
+    });
+  });
+
+  it("returns 200, 503, then 200 as required host binding evidence recovers", async () => {
+    const config: OpenClawConfig = {
+      gateway: { readiness: { requiredCriteria: ["openclaw.host-bindings-ready"] } },
+    };
+    const detail: PluginReadinessCriterionRegistration = {
+      id: "plugin.example-host.provider-ready",
+      pluginId: "example-host",
+      source: "test",
+      criterion: {
+        id: "provider-ready",
+        description: "Reports provider binding readiness.",
+        check: () => ({
+          status: "True",
+          reason: "ProviderReady",
+          message: "Provider binding is ready.",
+        }),
+      },
+    };
+    const registry = { readinessCriteria: [detail] };
+    const bundle = registerHostIntegrationBundleV1({
+      manifest: {
+        version: "host-integration-bundle/v1",
+        id: "example/host",
+        bundleVersion: "1.0.0",
+        contributions: [
+          {
+            owner: "provider-request",
+            kind: "credential-slot-resolver",
+            id: "example/credentials",
+            version: "v1",
+            required: true,
+            readinessCriteria: [detail.id],
+          },
+        ],
+      },
+      availableContributions: [
+        {
+          owner: "provider-request",
+          kind: "credential-slot-resolver",
+          id: "example/credentials",
+          version: "v1",
+          provenance: { pluginId: "example-host", source: "test", origin: "bundled" },
+        },
+      ],
+    });
+    const publishEvidence = (bundleGeneration: string) =>
+      publishHostIntegrationOwnerEvidenceV1([
+        {
+          owner: "provider-request",
+          kind: "credential-slot-resolver",
+          id: "example/credentials",
+          bundleGeneration,
+          state: "ready",
+          reason: "OwnerReady",
+          message: "Owner binding is ready.",
+        },
+      ]);
+    publishEvidence(bundle.generation);
+
+    const resolveSelectedReadiness = createSelectedReadinessResolver();
+    const getReadiness: ReadinessChecker = () =>
+      evaluateConfiguredGatewayReadiness({
+        config,
+        evaluateGateway: () => ({ ready: true, failing: [], uptimeMs: 45_000 }),
+        evaluateRuntime: async () =>
+          buildRuntimeReadiness({
+            configLoaded: true,
+            gateway: "responding",
+            additionalConditions: await resolveSelectedReadiness({ config, registry }),
+          }),
+      });
+
+    await withGatewayServer({
+      prefix: "probe-host-bindings-recovery",
+      resolvedAuth: AUTH_NONE,
+      overrides: { getReadiness },
+      run: async (server) => {
+        const status = async () => {
+          const { res, getBody } = await sendGatewayRequest(server, { path: "/ready" });
+          return { statusCode: res.statusCode, body: JSON.parse(getBody()) as { ready: boolean } };
+        };
+
+        await expect(status()).resolves.toMatchObject({ statusCode: 200, body: { ready: true } });
+        publishEvidence("stale-bundle-generation");
+        await expect(status()).resolves.toMatchObject({ statusCode: 503, body: { ready: false } });
+        publishEvidence(bundle.generation);
+        await expect(status()).resolves.toMatchObject({ statusCode: 200, body: { ready: true } });
       },
     });
   });

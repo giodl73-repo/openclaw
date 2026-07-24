@@ -10,7 +10,7 @@
         "id": "example/provider-adapter",
         "version": "example-provider-adapter/v1",
         "required": true,
-        "readinessCriteria": ["example.provider.ready"]
+        "readinessCriteria": ["plugin.example-host.provider-ready"]
       },
       {
         "owner": "provider-request",
@@ -18,7 +18,7 @@
         "id": "example/provider-token",
         "version": "credential-slot-resolver/v1",
         "required": true,
-        "readinessCriteria": ["example.provider.credentials"]
+        "readinessCriteria": ["plugin.example-host.provider-credentials"]
       },
       {
         "owner": "provider-request",
@@ -26,7 +26,7 @@
         "id": "example/reverse-provider",
         "version": "provider-request-dispatcher/v1",
         "required": true,
-        "readinessCriteria": ["provider.request.dispatch.example"]
+        "readinessCriteria": ["plugin.example-host.provider-dispatch"]
       }
     ]
   },

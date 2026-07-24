@@ -6,6 +6,8 @@ import {
   type HostIntegrationBindingStatusEntryV1,
   type HostIntegrationStatusInventoryV1,
 } from "../hosting/host-integration-status.js";
+import { getActivePluginRegistry } from "../plugins/runtime.js";
+import { buildReadinessCriterionCatalog } from "../readiness/catalog.js";
 
 export const HOST_INTEGRATION_BINDINGS_CHECK_ID = "core/doctor/host-integration-bindings";
 
@@ -63,6 +65,10 @@ function resolveFixHint(
   if (reason === "OwnerEvidenceBundleGenerationMismatch") {
     return `Reload owner ${entry.owner} and its carrier so they publish status for bundle ${inventory.bundle.generation}.`;
   }
+  if (reason === "RequiredCriterionUnknown") {
+    const criteria = entry.unresolvedReadinessCriteria?.join(", ") ?? "the declared criterion";
+    return `Register ${criteria} in the active readiness catalog, then reload owner ${entry.owner}.`;
+  }
   if (entry.reloadDisposition === "restart-required") {
     return `Correct ${entry.config?.path ?? entry.id}, then restart OpenClaw.`;
   }
@@ -105,6 +111,7 @@ export function collectHostIntegrationHealthFindings(): HealthFinding[] {
     buildHostIntegrationStatusInventoryV1({
       bundle,
       ownerEvidence: getCurrentHostIntegrationOwnerEvidenceV1(),
+      availableCriteria: buildReadinessCriterionCatalog(getActivePluginRegistry()),
     }),
   );
 }

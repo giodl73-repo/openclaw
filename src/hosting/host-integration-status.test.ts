@@ -23,7 +23,7 @@ function bundle(status: "resolved" | "missing" | "incompatible" = "resolved") {
         id: "example/provider-adapter",
         version: "example-provider-adapter/v1",
         required: status !== "incompatible",
-        readinessCriteria: ["ProviderReady"],
+        readinessCriteria: ["plugin.example-host.provider-ready"],
         status,
         ...(status === "resolved"
           ? {
@@ -136,6 +136,25 @@ describe("host integration status inventory", () => {
           state: "stale",
           reason: "OwnerEvidenceBundleGenerationMismatch",
           generations: { bundle: "example/host@1.2.3#1", owner: "owner-7" },
+        },
+      ],
+    });
+  });
+
+  it("reports an unavailable criterion for a required ready contribution", () => {
+    expect(
+      buildHostIntegrationStatusInventoryV1({
+        bundle: bundle(),
+        ownerEvidence: [evidence("ready")],
+        availableCriteria: new Set(),
+      }),
+    ).toMatchObject({
+      state: "unavailable",
+      entries: [
+        {
+          state: "unavailable",
+          reason: "RequiredCriterionUnknown",
+          unresolvedReadinessCriteria: ["plugin.example-host.provider-ready"],
         },
       ],
     });

@@ -42,7 +42,7 @@ describe("plugin host-integration registration", () => {
           id: "example/provider-token",
           version: "credential-slot-resolver/v1",
           required: true,
-          readinessCriteria: ["example.provider.credentials"],
+          readinessCriteria: ["plugin.example-host.provider-credentials"],
         },
       ],
     });

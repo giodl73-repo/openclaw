@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe("status json host integration inventory", () => {
-  it("projects a registered bundle without probing its owners", () => {
+  it("surfaces a required readiness criterion that is not registered", () => {
     const bundle = registerHostIntegrationBundleV1({
       manifest: {
         version: "host-integration-bundle/v1",
@@ -28,7 +28,7 @@ describe("status json host integration inventory", () => {
             id: "example/provider-adapter",
             version: "example-provider-adapter/v1",
             required: true,
-            readinessCriteria: ["ProviderReady"],
+            readinessCriteria: ["plugin.example-host.provider-ready"],
           },
         ],
       },
@@ -84,11 +84,12 @@ describe("status json host integration inventory", () => {
     });
 
     expect(payload.hostIntegration).toMatchObject({
-      state: "ready",
+      state: "unavailable",
       entries: [
         {
           id: "example/provider-adapter",
-          reason: "ProviderReady",
+          reason: "RequiredCriterionUnknown",
+          unresolvedReadinessCriteria: ["plugin.example-host.provider-ready"],
           generations: { bundle: bundle.generation, owner: "owner-1" },
         },
       ],

@@ -1,4 +1,5 @@
 export const HOST_INTEGRATION_BUNDLE_VERSION = "host-integration-bundle/v1" as const;
+export const MAX_HOST_INTEGRATION_READINESS_CRITERIA = 64;
 
 export type HostIntegrationContributionTypeV1 =
   | {
@@ -83,7 +84,7 @@ export class HostIntegrationBundleError extends Error {
 
 const NAMESPACED_ID_RE = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._/-]*$/;
 const CONTRACT_VERSION_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
-const READINESS_CRITERION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const READINESS_CRITERION_RE = /^(?:openclaw|plugin)\.[a-z0-9][a-z0-9._-]*$/;
 const EXACT_SEMVER_RE =
   /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
@@ -159,7 +160,7 @@ function assertContributionType(value: unknown): HostIntegrationContributionType
 }
 
 function normalizeReadinessCriteria(values: unknown): string[] {
-  if (!Array.isArray(values)) {
+  if (!Array.isArray(values) || values.length > MAX_HOST_INTEGRATION_READINESS_CRITERIA) {
     throw new HostIntegrationBundleError(
       "invalid-manifest",
       "Host integration readiness criteria are invalid",
@@ -169,7 +170,13 @@ function normalizeReadinessCriteria(values: unknown): string[] {
   if (criteria.some((value) => !READINESS_CRITERION_RE.test(value))) {
     throw new HostIntegrationBundleError(
       "invalid-manifest",
-      "Host integration readiness criterion is invalid",
+      "Host integration readiness criteria must use canonical openclaw.* or plugin.* selector ids",
+    );
+  }
+  if (criteria.includes("openclaw.host-bindings-ready")) {
+    throw new HostIntegrationBundleError(
+      "invalid-manifest",
+      "Host integration contributions cannot reference the aggregate host-bindings criterion",
     );
   }
   if (new Set(criteria).size !== criteria.length) {
@@ -226,6 +233,7 @@ function normalizeManifest(manifest: unknown): HostIntegrationBundleManifestV1 {
   });
   const seen = new Set<string>();
   const seenIds = new Set<string>();
+  const readinessCriteria = new Set<string>();
   for (const contribution of contributions) {
     const key = contributionKey(contribution);
     if (seen.has(key) || seenIds.has(contribution.id)) {
@@ -237,6 +245,15 @@ function normalizeManifest(manifest: unknown): HostIntegrationBundleManifestV1 {
     }
     seen.add(key);
     seenIds.add(contribution.id);
+    for (const criterion of contribution.readinessCriteria) {
+      readinessCriteria.add(criterion);
+    }
+    if (readinessCriteria.size > MAX_HOST_INTEGRATION_READINESS_CRITERIA) {
+      throw new HostIntegrationBundleError(
+        "invalid-manifest",
+        `Host integration bundle cannot reference more than ${MAX_HOST_INTEGRATION_READINESS_CRITERIA} readiness criteria`,
+      );
+    }
   }
 
   return {
