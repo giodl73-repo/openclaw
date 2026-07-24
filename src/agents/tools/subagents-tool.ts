@@ -4,7 +4,7 @@
  * Lists, reads, and cancels background work in the caller's session tree.
  */
 import { Type } from "typebox";
-import type { listAuditReceipts } from "../../audit/receipt-store.sqlite.js";
+import type { listSkillMemory } from "../../skill-memory/store.sqlite.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { listTaskRecordsUnsorted } from "../../tasks/runtime-internal.js";
@@ -49,18 +49,18 @@ type SubagentsToolOptions = {
   config?: OpenClawConfig;
   getRun?: (controllerSessionKey: string, runId: string) => SubagentRunRecord | null;
   listRuns?: (controllerSessionKey: string) => SubagentRunRecord[];
-  listReceipts?: typeof listAuditReceipts;
+  listMemories?: typeof listSkillMemory;
   listTasks?: typeof listTaskRecordsUnsorted;
   cancelTask?: typeof cancelDetachedTaskRunById;
 };
 
-async function listManagedRunReceipts(
-  params: Parameters<typeof listAuditReceipts>[0],
-): Promise<ReturnType<typeof listAuditReceipts>> {
-  // Receipt SQLite is only needed for explicit result reads; keep ordinary
+async function listManagedRunMemories(
+  params: Parameters<typeof listSkillMemory>[0],
+): Promise<ReturnType<typeof listSkillMemory>> {
+  // Skill Memory SQLite is only needed for explicit result reads; keep ordinary
   // list/cancel tool construction on the lightweight agent path.
-  const receiptStore = await import("../../audit/receipt-store.sqlite.js");
-  return receiptStore.listAuditReceipts(params);
+  const memoryStore = await import("../../skill-memory/store.sqlite.js");
+  return memoryStore.listSkillMemory(params);
 }
 
 function taskUpdatedAt(task: TaskRecord): number {
@@ -130,13 +130,13 @@ export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTo
         if (!run) {
           return jsonResult({ status: "forbidden", error: "Run outside session tree." });
         }
-        const receiptParams = { filters: { runId }, limit: 500, store: { cfg } };
-        const receiptPage = opts.listReceipts
-          ? opts.listReceipts(receiptParams)
-          : await listManagedRunReceipts(receiptParams);
+        const memoryParams = { filters: { runId }, limit: 500, store: { cfg } };
+        const memoryPage = opts.listMemories
+          ? opts.listMemories(memoryParams)
+          : await listManagedRunMemories(memoryParams);
         const resolution = buildManagedSkillRunResult({
           run,
-          receipts: receiptPage.receipts,
+          memories: memoryPage.memories,
         });
         if (!resolution.ok) {
           return jsonResult({
@@ -150,8 +150,8 @@ export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTo
           status: "ok",
           action: "result",
           result: resolution.result,
-          ...(receiptPage.nextCursor !== undefined
-            ? { receiptsTruncated: true, nextReceiptCursor: receiptPage.nextCursor }
+          ...(memoryPage.nextCursor !== undefined
+            ? { memoriesTruncated: true, nextMemoryCursor: memoryPage.nextCursor }
             : {}),
         });
       }

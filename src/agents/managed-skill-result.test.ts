@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RecordedAuditReceipt } from "../audit/receipt-store.sqlite.js";
+import type { RecordedSkillMemory } from "../skill-memory/store.sqlite.js";
 import { buildManagedSkillRunResult } from "./managed-skill-result.js";
 import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
@@ -22,12 +22,12 @@ function managedRun(overrides: Partial<SubagentRunRecord> = {}): SubagentRunReco
   };
 }
 
-function receipt(overrides: Partial<RecordedAuditReceipt> = {}): RecordedAuditReceipt {
+function memory(overrides: Partial<RecordedSkillMemory> = {}): RecordedSkillMemory {
   return {
-    receiptSchema: "openclaw-audit-receipt",
+    memorySchema: "openclaw-skill-memory",
     schemaVersion: 1,
     sequence: 1,
-    receiptId: "receipt-1",
+    memoryId: "smem_1",
     type: "case.resolved",
     occurredAt: 300,
     agentId: "main",
@@ -43,14 +43,14 @@ function receipt(overrides: Partial<RecordedAuditReceipt> = {}): RecordedAuditRe
 }
 
 describe("buildManagedSkillRunResult", () => {
-  it("joins terminal native state and matching durable receipts", () => {
+  it("joins terminal native state and matching durable memories", () => {
     const result = buildManagedSkillRunResult({
       run: managedRun({
         startedAt: 120,
         endedAt: 280,
         outcome: { status: "ok" },
       }),
-      receipts: [receipt()],
+      memories: [memory()],
     });
 
     expect(result).toEqual({
@@ -59,7 +59,7 @@ describe("buildManagedSkillRunResult", () => {
         runId: "run-1",
         status: "completed",
         managedSkill: expect.objectContaining({ skillName: "resolve-case" }),
-        receipts: [expect.objectContaining({ type: "case.resolved" })],
+        memories: [expect.objectContaining({ type: "case.resolved" })],
       }),
     });
   });
@@ -72,29 +72,29 @@ describe("buildManagedSkillRunResult", () => {
           endedReason: SUBAGENT_ENDED_REASON_KILLED,
           outcome: { status: "error" },
         }),
-        receipts: [],
+        memories: [],
       }),
     ).toMatchObject({ ok: true, result: { status: "cancelled" } });
     expect(
       buildManagedSkillRunResult({
         run: managedRun({ endedAt: 280, outcome: { status: "timeout", error: "timed out" } }),
-        receipts: [],
+        memories: [],
       }),
     ).toMatchObject({ ok: true, result: { status: "failed", error: "timed out" } });
   });
 
   it("reports unavailable identity instead of inferring it", () => {
     expect(
-      buildManagedSkillRunResult({ run: managedRun({ managedSkill: undefined }), receipts: [] }),
+      buildManagedSkillRunResult({ run: managedRun({ managedSkill: undefined }), memories: [] }),
     ).toEqual({ ok: false, code: "managed_identity_unavailable", runId: "run-1" });
   });
 
-  it("rejects receipts correlated to another managed invocation", () => {
+  it("rejects memories correlated to another managed invocation", () => {
     expect(
       buildManagedSkillRunResult({
         run: managedRun(),
-        receipts: [receipt({ invocationId: "skill-other" })],
+        memories: [memory({ invocationId: "skill-other" })],
       }),
-    ).toEqual({ ok: false, code: "receipt_correlation_mismatch", runId: "run-1" });
+    ).toEqual({ ok: false, code: "memory_correlation_mismatch", runId: "run-1" });
   });
 });
