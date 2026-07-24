@@ -9,6 +9,10 @@ import { isNixMode } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
+import {
+  isReadinessCriterionSelected,
+  MODEL_ROUTE_READY_CRITERION_ID,
+} from "../readiness/activation.js";
 import { createLazyPromise } from "../shared/lazy-runtime.js";
 import { resolveGatewayAuth } from "./auth.js";
 import { diffGatewayReloadPaths } from "./config-diff.js";
@@ -345,6 +349,9 @@ export async function finishGatewayStartup(params: {
           activeWorkInspectors,
           providerAuthPrewarm: {
             getConfig: getRuntimeConfig,
+            ...(isReadinessCriterionSelected(cfgAtStart, MODEL_ROUTE_READY_CRITERION_ID)
+              ? { enabled: true }
+              : {}),
           },
         }),
       ),

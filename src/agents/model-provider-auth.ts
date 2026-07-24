@@ -35,6 +35,7 @@ import {
   prepareRuntimeAvailableProviderAuth,
   type RuntimeProviderAuthLookup,
 } from "./model-auth.js";
+import { buildDefaultModelRouteAuthEvidence } from "./model-provider-auth-default-route.js";
 import {
   cancelCurrentProviderAuthWarmWorker,
   claimCurrentProviderAuthStateGeneration,
@@ -340,11 +341,17 @@ function serializeProviderAuthStates(
   states: ReadonlyMap<string, PreparedProviderAuthState>,
 ): ProviderAuthWarmSnapshot {
   return {
-    agents: [...states.values()].map((state) => ({
-      agentId: state.agentId,
-      configFingerprint: state.configFingerprint,
-      providers: [...state.providers.entries()],
-    })),
+    agents: [...states.values()].map((state) => {
+      const serialized: ProviderAuthWarmSnapshot["agents"][number] = {
+        agentId: state.agentId,
+        configFingerprint: state.configFingerprint,
+        providers: [...state.providers.entries()],
+      };
+      if (state.defaultModelRoute) {
+        serialized.defaultModelRoute = state.defaultModelRoute;
+      }
+      return serialized;
+    }),
   };
 }
 
@@ -406,7 +413,11 @@ export async function buildCurrentProviderAuthStateSnapshot(
       // Worker warmup is the only path that may need to construct a read-only catalog generation.
       // Keep the lifecycle graph out of foreground provider-auth module initialization.
       const preparedOwner = syntheticAuth?.modelCatalog
-        ? { workspaceDir: syntheticAuth.workspaceDir, modelCatalog: syntheticAuth.modelCatalog }
+        ? {
+            workspaceDir: syntheticAuth.workspaceDir,
+            modelCatalog: syntheticAuth.modelCatalog,
+            metadataSnapshot: restorePluginMetadataSnapshot(syntheticAuth.metadataSnapshot),
+          }
         : await (
             await import("./prepared-model-catalog.js")
           ).loadPreparedModelCatalogOwnerSnapshot({
@@ -449,6 +460,16 @@ export async function buildCurrentProviderAuthStateSnapshot(
             config: cfg,
             externalCli,
           });
+      const defaultModelRoute = buildDefaultModelRouteAuthEvidence({
+        cfg,
+        agentId,
+        agentDir,
+        workspaceDir,
+        authStore: store,
+        runtimeAuthLookup,
+        metadataSnapshot: preparedOwner.metadataSnapshot,
+        modelCatalog: preparedOwner.modelCatalog,
+      });
       const state = new Map<string, boolean>();
       for (const provider of providers) {
         if (isWarmStale()) {
@@ -481,6 +502,7 @@ export async function buildCurrentProviderAuthStateSnapshot(
         agentId,
         configFingerprint,
         providers: state,
+        ...(defaultModelRoute ? { defaultModelRoute } : {}),
       });
     };
     await (syntheticAuth
