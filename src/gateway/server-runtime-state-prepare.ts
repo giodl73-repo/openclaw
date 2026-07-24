@@ -556,13 +556,21 @@ export async function prepareGatewayKernelState(params: {
     }
     throw new ReadinessEvaluationSupersededError();
   };
-  const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
-    evaluateConfiguredGatewayReadiness({
-      config: pluginRuntime.readinessSnapshot.config,
+  const getReadiness = (): Promise<CanonicalGatewayReadinessResult> => {
+    const snapshot = pluginRuntime.readinessSnapshot;
+    const profileSelection = resolveHostingProfileSelection({
+      config: snapshot.config,
+      env: process.env,
+      override: opts.hostingProfileOverride,
+    });
+    return evaluateConfiguredGatewayReadiness({
+      config: snapshot.config,
       identity: readinessIdentity,
+      canonicalEvaluationEnabled: profileSelection !== undefined,
       evaluateGateway: getGatewayReadiness,
       evaluateRuntime: evaluateRuntimeReadiness,
     });
+  };
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   } = {};
