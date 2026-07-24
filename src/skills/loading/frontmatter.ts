@@ -249,8 +249,8 @@ export function resolveSkillExecutionHints(
   frontmatter: ParsedSkillFrontmatter,
 ): SkillExecutionHints | undefined {
   const metadata = parseMetadataMap(frontmatter);
-  const outcomes = normalizeTrimmedStringList(
-    typeof metadata?.outcomes === "string" ? metadata.outcomes.split(/\s+/) : undefined,
+  const remembers = normalizeTrimmedStringList(
+    typeof metadata?.remembers === "string" ? metadata.remembers.split(/\s+/) : undefined,
   );
   const usesSkills = normalizeTrimmedStringList(
     typeof metadata?.["uses-skills"] === "string"
@@ -262,11 +262,11 @@ export function resolveSkillExecutionHints(
     isolation === "shared" || isolation === "preferred" || isolation === "required"
       ? isolation
       : undefined;
-  if (outcomes.length === 0 && usesSkills.length === 0 && !normalizedIsolation) {
+  if (remembers.length === 0 && usesSkills.length === 0 && !normalizedIsolation) {
     return undefined;
   }
   return {
-    ...(outcomes.length > 0 ? { outcomes } : {}),
+    ...(remembers.length > 0 ? { remembers } : {}),
     ...(usesSkills.length > 0 ? { usesSkills } : {}),
     ...(normalizedIsolation ? { isolation: normalizedIsolation } : {}),
   };

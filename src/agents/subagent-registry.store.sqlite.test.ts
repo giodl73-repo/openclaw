@@ -86,7 +86,7 @@ describe("subagent registry sqlite store", () => {
           invocationId: "skill_sqlite",
           skillName: "resolve-case",
           skillDigest: "sha256:abc",
-          executionHints: { outcomes: ["case.resolved"] },
+          executionHints: { remembers: ["case.resolved"] },
           parentRunId: "run-parent",
         },
         completion: { required: true, resultText: null, capturedAt: 250 },

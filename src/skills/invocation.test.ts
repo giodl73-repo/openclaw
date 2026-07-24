@@ -7,7 +7,7 @@ describe("createManagedSkillInvocation", () => {
       skillName: "resolve-case",
       skillSource: "workspace",
       skillDigest: "sha256:abc",
-      executionHints: { outcomes: ["case.resolved"], usesSkills: ["verify-customer"] },
+      executionHints: { remembers: ["case.resolved"], usesSkills: ["verify-customer"] },
       parentRunId: "run-parent",
     });
 
@@ -16,7 +16,7 @@ describe("createManagedSkillInvocation", () => {
       skillName: "resolve-case",
       skillSource: "workspace",
       skillDigest: "sha256:abc",
-      executionHints: { outcomes: ["case.resolved"], usesSkills: ["verify-customer"] },
+      executionHints: { remembers: ["case.resolved"], usesSkills: ["verify-customer"] },
       parentRunId: "run-parent",
     });
   });

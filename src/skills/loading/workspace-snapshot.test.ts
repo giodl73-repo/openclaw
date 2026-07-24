@@ -210,7 +210,7 @@ describe("buildWorkspaceSkillSnapshot", () => {
       name: "resolve-case",
       description: "Resolve a support case.",
       frontmatterExtra: `metadata:
-  outcomes: "case.resolved customer.notified"
+  remembers: "case.resolved customer.notified"
   uses-skills: "verify-customer"
   isolation: "preferred"`,
     });
@@ -223,7 +223,7 @@ describe("buildWorkspaceSkillSnapshot", () => {
       requiredEnv: undefined,
       skillDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
       executionHints: {
-        outcomes: ["case.resolved", "customer.notified"],
+        remembers: ["case.resolved", "customer.notified"],
         usesSkills: ["verify-customer"],
         isolation: "preferred",
       },

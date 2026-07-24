@@ -349,7 +349,7 @@ describe("sessions_spawn tool", () => {
           {
             name: "resolve-case",
             skillDigest: "sha256:abc",
-            executionHints: { outcomes: ["case.resolved"] },
+            executionHints: { remembers: ["case.resolved"] },
           },
         ],
         resolvedSkills: [
@@ -382,7 +382,7 @@ describe("sessions_spawn tool", () => {
       skillName: "resolve-case",
       skillSource: "workspace",
       skillDigest: "sha256:abc",
-      executionHints: { outcomes: ["case.resolved"] },
+      executionHints: { remembers: ["case.resolved"] },
       parentRunId: "run-parent",
     });
   });

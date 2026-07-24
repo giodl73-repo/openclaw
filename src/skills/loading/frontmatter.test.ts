@@ -13,14 +13,14 @@ describe("resolveSkillExecutionHints", () => {
 name: issue-refund
 description: Issue an approved refund.
 metadata:
-  outcomes: "payment.refunded customer.notified"
+  remembers: "payment.refunded customer.notified"
   uses-skills: "verify-customer check-refund-policy"
   isolation: "required"
 ---
 `);
 
     expect(resolveSkillExecutionHints(frontmatter)).toEqual({
-      outcomes: ["payment.refunded", "customer.notified"],
+      remembers: ["payment.refunded", "customer.notified"],
       usesSkills: ["verify-customer", "check-refund-policy"],
       isolation: "required",
     });
@@ -29,12 +29,12 @@ metadata:
   it("ignores unknown, empty, and non-string hints", () => {
     expect(
       resolveSkillExecutionHints({
-        metadata: '{"outcomes":[],"uses-skills":{"name":"verify-customer"}}',
+        metadata: '{"remembers":[],"uses-skills":{"name":"verify-customer"}}',
       }),
     ).toBeUndefined();
     expect(
       resolveSkillExecutionHints({
-        metadata: '{"outcomes":"  ","isolation":"sometimes"}',
+        metadata: '{"remembers":"  ","isolation":"sometimes"}',
       }),
     ).toBeUndefined();
   });

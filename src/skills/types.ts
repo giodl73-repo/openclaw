@@ -38,9 +38,9 @@ export type SkillInvocationPolicy = {
   disableModelInvocation: boolean;
 };
 
-/** Portable Agent Skills hints for outcomes and managed composition. */
+/** Portable Agent Skills hints for Skill Memory and managed composition. */
 export type SkillExecutionHints = {
-  outcomes?: string[];
+  remembers?: string[];
   usesSkills?: string[];
   isolation?: "shared" | "preferred" | "required";
 };
