@@ -91,6 +91,7 @@ type RuntimeReadinessInput = {
   configLoaded: boolean;
   gateway: "responding" | "not-checked" | "unavailable";
   plugins?: PluginReadinessInput;
+  pluginsRequired?: boolean;
   coreConditions?: ReadinessCondition[];
   additionalConditions?: ReadinessCondition[];
   additionalSubjects?: ReadinessSubject[];
@@ -147,13 +148,16 @@ function resolvePluginFailures(plugins: PluginReadinessInput): string[] {
   return [...loadFailures, ...unavailable];
 }
 
-function buildPluginCondition(plugins: PluginReadinessInput | undefined): ReadinessCondition {
+function buildPluginCondition(
+  plugins: PluginReadinessInput | undefined,
+  requirement: ReadinessRequirement = "advisory",
+): ReadinessCondition {
   if (!plugins) {
     return {
       type: "PluginsLoaded",
       subjectRef: CORE_READINESS_SUBJECT_REFS.plugins,
       status: "Unknown",
-      requirement: "advisory",
+      requirement,
       reason: "PluginStatusUnavailable",
       message: "Plugin registry status is not available on this surface.",
     };
@@ -163,7 +167,7 @@ function buildPluginCondition(plugins: PluginReadinessInput | undefined): Readin
     type: "PluginsLoaded",
     subjectRef: CORE_READINESS_SUBJECT_REFS.plugins,
     status: failures.length === 0 ? "True" : "False",
-    requirement: "advisory",
+    requirement,
     reason: failures.length === 0 ? "PluginsLoaded" : "PluginLoadFailures",
     message:
       failures.length === 0
@@ -229,7 +233,7 @@ export function buildRuntimeReadiness(input: RuntimeReadinessInput): CanonicalRe
     },
     ...workspaceConditions,
     buildGatewayCondition(input.gateway),
-    buildPluginCondition(input.plugins),
+    buildPluginCondition(input.plugins, input.pluginsRequired ? "required" : "advisory"),
     ...remainingConditions,
   ];
   const failures = conditions
