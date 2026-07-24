@@ -127,9 +127,9 @@ Moved to [Configuration — browser, UI, and desktop](/gateway/config-browser-ui
 
 Built-in selectors include `openclaw.workspace-writable`,
 `openclaw.state-ready`, `openclaw.delivery-runtime-ready`, and
-`openclaw.scheduler-ready`. State and background-service selectors observe
-already-published lifecycle facts; they do not activate services from the probe
-path.
+`openclaw.scheduler-ready`. `openclaw.session-storage-ready` adds a bounded
+write, flush, and cleanup probe over the state root and configured session-store
+parents. The lifecycle selectors only observe already-published owner facts.
 
 Omitting `gateway.readiness` preserves the legacy Gateway readiness decision
 path. Adding the section opts into bounded canonical condition evaluation; an
