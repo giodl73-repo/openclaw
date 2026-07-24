@@ -77,6 +77,22 @@ example, selecting `openclaw.workspace-writable` emits the canonical
 `WorkspaceWritable` condition; plugin criteria use their namespaced ID as the
 condition type.
 
+Built-in state and background-service lifecycle selectors are observational.
+They never open a database, install a delivery callback, start cron, or run
+recovery from a readiness request. Session storage is the one active check in
+this group and only creates bounded temporary probes:
+
+- `openclaw.state-ready` reports whether the shared state database is active.
+- `openclaw.session-storage-ready` verifies the state root and configured
+  session-store parents with bounded, cached write, flush, and cleanup probes.
+- `openclaw.delivery-runtime-ready` reports whether durable session delivery
+  recovery has an active runtime owner.
+- `openclaw.scheduler-ready` reports the scheduler lifecycle and startup
+  recovery state. A scheduler disabled by configuration is satisfied.
+
+These criteria are not evaluated until selected. Put them in
+`requiredCriteria` only when that service is required by the deployment.
+
 - **DO use:** `GET /health` - instant response, no session created, no LLM call, returns `{"ok":true,"status":"live"}`
 - **DON'T use:** `/v1/chat/completions` for health checks - each request creates a full agent session with skill snapshot, context assembly, and LLM calls
 

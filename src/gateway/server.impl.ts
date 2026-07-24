@@ -1299,6 +1299,9 @@ export async function startGatewayServer(
         config: snapshot.config,
         registry: snapshot.registry,
         env: process.env,
+        stateServices: {
+          scheduler: runtimeState?.cronState.cron.getReadinessSnapshot(),
+        },
       });
       if (snapshot !== readinessRuntimeSnapshot) {
         continue;

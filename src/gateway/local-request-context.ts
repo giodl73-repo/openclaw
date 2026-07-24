@@ -37,6 +37,11 @@ const unavailableCron: GatewayCronServiceContract = {
     cronUnavailable();
   },
   stop: () => {},
+  getReadinessSnapshot: () => ({
+    enabled: false,
+    phase: "disabled",
+    recoveryPending: false,
+  }),
   pauseScheduling: () => {},
   resumeScheduling: () => {},
   status: async () => cronUnavailable(),

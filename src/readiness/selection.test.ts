@@ -101,4 +101,54 @@ describe("createSelectedReadinessResolver", () => {
       }),
     ]);
   });
+
+  it("promotes selected scheduler lifecycle evidence to required", async () => {
+    const resolve = createSelectedReadinessResolver();
+
+    await expect(
+      resolve({
+        config: {
+          gateway: { readiness: { requiredCriteria: ["openclaw.scheduler-ready"] } },
+        },
+        registry: { readinessCriteria: [] },
+        stateServices: {
+          scheduler: { enabled: true, phase: "starting", recoveryPending: false },
+        },
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        type: "SchedulerReady",
+        status: "False",
+        requirement: "required",
+        reason: "SchedulerStarting",
+      }),
+    ]);
+  });
+
+  it("maps selected session storage evidence to its canonical condition", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-selected-state-"));
+    const resolve = createSelectedReadinessResolver();
+
+    try {
+      await expect(
+        resolve({
+          config: {
+            gateway: {
+              readiness: { requiredCriteria: ["openclaw.session-storage-ready"] },
+            },
+          },
+          registry: { readinessCriteria: [] },
+          env: { OPENCLAW_STATE_DIR: stateDir },
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          type: "SessionStorageReady",
+          status: "True",
+          requirement: "required",
+        }),
+      ]);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
 });
