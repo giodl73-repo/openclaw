@@ -82,7 +82,12 @@ function isProviderAuthWarmSnapshot(value: unknown): value is ProviderAuthWarmSn
           entry.length === 2 &&
           typeof entry[0] === "string" &&
           typeof entry[1] === "boolean",
-      ),
+      ) &&
+      (agent.defaultModelRoute === undefined ||
+        (isRecord(agent.defaultModelRoute) &&
+          typeof agent.defaultModelRoute.provider === "string" &&
+          typeof agent.defaultModelRoute.modelId === "string" &&
+          typeof agent.defaultModelRoute.available === "boolean")),
   );
 }
 

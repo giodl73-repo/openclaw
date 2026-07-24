@@ -9,6 +9,10 @@ import { isTruthyEnvValue } from "../infra/env.js";
 import { loadGatewayTlsServerRuntime } from "../infra/tls/gateway.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { runtimeForLogger } from "../logging/subsystem.js";
+import {
+  listActiveDegradedPlugins,
+  toPublicPluginVerificationDiagnostic,
+} from "../plugins/runtime-degraded-state.js";
 import { isGatewayDraining } from "../process/command-queue.js";
 import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
 import { createSelectedReadinessResolver } from "../readiness/selection.js";
@@ -65,7 +69,13 @@ function buildGatewayPluginReadinessInput(
       return error;
     })
     .toSorted((left, right) => left.id.localeCompare(right.id));
-  return { errors };
+  const unavailable = listActiveDegradedPlugins()
+    .map((plugin) => ({
+      id: plugin.pluginId,
+      diagnostic: toPublicPluginVerificationDiagnostic(plugin.diagnostic),
+    }))
+    .toSorted((left, right) => left.id.localeCompare(right.id));
+  return { errors, unavailable };
 }
 
 export async function prepareGatewayKernelState(params: {
