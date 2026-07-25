@@ -157,6 +157,20 @@ function isSubagentRunVisibleToSession(entry: SubagentRunRecord, sessionKey: str
   return controllerKey === sessionKey || requesterKey === sessionKey;
 }
 
+/** Resolves one exact retained run when it is visible to the requesting session. */
+export function getVisibleSubagentRunById(
+  sessionKey: string,
+  runId: string,
+): SubagentRunRecord | null {
+  const key = sessionKey.trim();
+  const id = runId.trim();
+  if (!key || !id) {
+    return null;
+  }
+  const entry = getSubagentRunsSnapshotForRead(subagentRuns).get(id);
+  return entry && isSubagentRunVisibleToSession(entry, key) ? entry : null;
+}
+
 /** Lists latest child runs controlled by a session key. */
 export function listControlledSubagentRuns(controllerSessionKey: string): SubagentRunRecord[] {
   const key = controllerSessionKey.trim();
