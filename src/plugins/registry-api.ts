@@ -84,6 +84,7 @@ export function createPluginApiFactory(
     registerNodeHostCommand,
     registerNodeInvokePolicy,
     registerSecurityAuditCollector,
+    registerProviderRequestTrafficPolicy,
     registerInteractiveHandler,
     registerConversationBindingResolvedHandler,
     registerCommand,
@@ -223,6 +224,8 @@ export function createPluginApiFactory(
                 registerNodeInvokePolicy(record, policy, params.pluginConfig),
               registerSecurityAuditCollector: (collector) =>
                 registerSecurityAuditCollector(record, collector),
+              registerProviderRequestTrafficPolicy: (policy) =>
+                registerProviderRequestTrafficPolicy(record, policy),
               registerInteractiveHandler: (registration) =>
                 registerInteractiveHandler(record, registration),
               onConversationBindingResolved: (handler) =>

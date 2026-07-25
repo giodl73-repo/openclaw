@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  getCurrentProviderRequestTrafficPolicyV1,
+  registerProviderRequestTrafficPolicyV1,
+  type ProviderRequestTrafficPolicyRegistrationV1,
+} from "../agents/provider-request-traffic-policy.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { clearPluginHostRuntimeState } from "./host-hook-runtime.js";
 import { listPluginSessionSchedulerJobs } from "./host-hook-runtime.test-fixtures.js";
@@ -179,4 +184,45 @@ describe("plugin registration transaction", () => {
     expect(failed.pluginRegistry.registry.sessionSchedulerJobs).toStrictEqual([]);
     expect(active.pluginRegistry.registry.sessionSchedulerJobs).toHaveLength(1);
   });
+});
+
+function trafficPolicy(generation: string): ProviderRequestTrafficPolicyRegistrationV1 {
+  return {
+    version: "provider-request-traffic-policy/v1",
+    id: "example/enterprise-egress",
+    generation,
+    required: true,
+    provenance: { source: "test", revision: generation },
+    routeProfiles: [{ id: "example/direct", dispatcherPolicy: { mode: "direct" } }],
+    rules: [
+      {
+        id: "example-llm",
+        match: { providers: ["example"] },
+        outcome: {
+          action: "allow",
+          routeProfileId: "example/direct",
+          allowedOrigins: ["https://provider.example.test"],
+          allowPrivateNetwork: false,
+        },
+      },
+    ],
+  };
+}
+
+it("clears traffic policy before repeated active plugin activation", () => {
+  registerProviderRequestTrafficPolicyV1(trafficPolicy("active"));
+
+  clearActivatedPluginRuntimeState();
+
+  expect(getCurrentProviderRequestTrafficPolicyV1()).toBeUndefined();
+});
+
+it("restores the prior traffic policy when plugin activation rolls back", () => {
+  registerProviderRequestTrafficPolicyV1(trafficPolicy("active"));
+  const transaction = createPluginRegistrationTransaction({});
+  registerProviderRequestTrafficPolicyV1(trafficPolicy("replacement"));
+
+  transaction.rollback();
+
+  expect(getCurrentProviderRequestTrafficPolicyV1()?.generation).toBe("active");
 });

@@ -1,4 +1,5 @@
 import type { AgentHarness } from "../agents/harness/types.js";
+import type { ProviderRequestTrafficPolicyRegistrationV1 } from "../agents/provider-request-traffic-policy.js";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ContextEngineFactory } from "../context-engine/registry.js";
@@ -252,6 +253,10 @@ export type OpenClawPluginApi = {
   registerNodeHostCommand: (command: OpenClawPluginNodeHostCommand) => void;
   registerNodeInvokePolicy: (policy: OpenClawPluginNodeInvokePolicy) => void;
   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;
+  /** Register the active provider-request traffic-policy generation for this plugin lifecycle. */
+  registerProviderRequestTrafficPolicy: (
+    policy: ProviderRequestTrafficPolicyRegistrationV1,
+  ) => () => void;
   registerService: (service: OpenClawPluginService) => void;
   /** Register a local gateway discovery advertiser such as mDNS/Bonjour. */
   registerGatewayDiscoveryService: (service: OpenClawGatewayDiscoveryService) => void;

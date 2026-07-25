@@ -3,6 +3,7 @@
  *
  * Applies request timeouts, proxy/TLS overrides, SSRF policy, local-service leases, retry hints, and SSE normalization.
  */
+import { isDeepStrictEqual } from "node:util";
 import { parseRetryAfterHttpDateMs } from "@openclaw/ai/internal/retry-after";
 import { emitModelTransportDebug } from "@openclaw/ai/transports";
 import { formatModelTransportDebugUrl } from "@openclaw/ai/transports";
@@ -49,6 +50,7 @@ import {
   mergeModelProviderRequestOverrides,
   resolveProviderRequestPolicyConfig,
 } from "./provider-request-config.js";
+import { evaluateCurrentProviderRequestTrafficPolicyV1 } from "./provider-request-traffic-policy.js";
 
 const DEFAULT_MAX_SDK_RETRY_WAIT_SECONDS = 60;
 const OPENAI_SDK_STREAM_CONTENT_SNIFF_BYTES = 2 * 1024;
@@ -784,7 +786,7 @@ export function buildGuardedModelFetch(
   options?: { sanitizeSse?: boolean },
 ): typeof fetch {
   const requestConfig = resolveModelRequestPolicy(model);
-  const dispatcherPolicy = buildProviderRequestDispatcherPolicy(requestConfig);
+  const configuredDispatcherPolicy = buildProviderRequestDispatcherPolicy(requestConfig);
   const requestTimeoutMs = resolveModelRequestTimeoutMs(model, timeoutMs);
   const summarizeError = (error: unknown): string => {
     if (!error || typeof error !== "object") {
@@ -822,14 +824,70 @@ export function buildGuardedModelFetch(
       headers: rawHeaders,
     });
     const url = swappedEgress.url;
+    const evaluateTrafficPolicy = (targetUrl: string) =>
+      evaluateCurrentProviderRequestTrafficPolicyV1({
+        provider: model.provider,
+        capability: "llm",
+        transport: "stream",
+        endpointClass: requestConfig.policy?.endpointClass ?? "default",
+        url: targetUrl,
+        allowPrivateNetwork: requestConfig.allowPrivateNetwork,
+        timeoutMs: requestTimeoutMs,
+        dispatcherPolicy: configuredDispatcherPolicy,
+      });
+    const trafficPolicyDecision = evaluateTrafficPolicy(url);
+    if (trafficPolicyDecision?.action === "deny") {
+      throw new Error(
+        `Provider request denied by traffic policy ${trafficPolicyDecision.policyId} (${trafficPolicyDecision.reason})`,
+      );
+    }
+    const validateTrafficPolicyUrl =
+      trafficPolicyDecision?.action === "allow"
+        ? (redirectUrl: URL) => {
+            const redirectDecision = evaluateTrafficPolicy(redirectUrl.toString());
+            if (redirectDecision?.action === "deny") {
+              throw new Error(
+                `Provider request redirect denied by traffic policy ${redirectDecision.policyId} (${redirectDecision.reason})`,
+              );
+            }
+            if (
+              redirectDecision?.action !== "allow" ||
+              redirectDecision.policyId !== trafficPolicyDecision.policyId ||
+              redirectDecision.policyGeneration !== trafficPolicyDecision.policyGeneration ||
+              redirectDecision.routeProfileId !== trafficPolicyDecision.routeProfileId ||
+              redirectDecision.dispatchBindingId !== trafficPolicyDecision.dispatchBindingId ||
+              redirectDecision.allowPrivateNetwork !== trafficPolicyDecision.allowPrivateNetwork ||
+              redirectDecision.timeoutMs !== trafficPolicyDecision.timeoutMs ||
+              !isDeepStrictEqual(
+                redirectDecision.dispatcherPolicy,
+                trafficPolicyDecision.dispatcherPolicy,
+              )
+            ) {
+              throw new Error("Provider request redirect changed the traffic policy decision");
+            }
+          }
+        : undefined;
+    const dispatcherPolicy =
+      trafficPolicyDecision?.action === "allow"
+        ? trafficPolicyDecision.dispatcherPolicy
+        : configuredDispatcherPolicy;
+    const effectiveTimeoutMs =
+      trafficPolicyDecision?.action === "allow"
+        ? trafficPolicyDecision.timeoutMs
+        : requestTimeoutMs;
+    const effectiveAllowPrivateNetwork =
+      trafficPolicyDecision?.action === "allow"
+        ? trafficPolicyDecision.allowPrivateNetwork
+        : requestConfig.allowPrivateNetwork;
     const policy = resolveProviderTransportSsrFPolicy({
       baseUrl: model.baseUrl,
       url,
-      allowPrivateNetwork: requestConfig.allowPrivateNetwork,
+      allowPrivateNetwork: effectiveAllowPrivateNetwork,
       // Only operator-configured custom/local endpoints get exact-origin trust;
       // known public/native providers keep the default rebinding checks.
       trustConfiguredBaseUrlOrigin:
         !requestConfig.privateNetworkExplicitlyDenied &&
+        (trafficPolicyDecision?.action !== "allow" || trafficPolicyDecision.allowPrivateNetwork) &&
         (requestConfig.policy?.endpointClass === "custom" ||
           requestConfig.policy?.endpointClass === "local"),
     });
@@ -848,7 +906,7 @@ export function buildGuardedModelFetch(
       (swappedEgress.headers && init ? { ...init, headers: swappedEgress.headers } : init);
     const synthesizeJsonAsSse = await requestBodyHasStreamTrue(request, baseInit);
     const baseSignal = baseInit?.signal ?? undefined;
-    const localServiceSignal = buildModelRequestSignal(baseSignal, requestTimeoutMs);
+    const localServiceSignal = buildModelRequestSignal(baseSignal, effectiveTimeoutMs);
     const guardedFetchOptions = {
       url,
       init: baseInit,
@@ -860,7 +918,8 @@ export function buildGuardedModelFetch(
         },
       },
       dispatcherPolicy,
-      timeoutMs: requestTimeoutMs,
+      timeoutMs: effectiveTimeoutMs,
+      ...(validateTrafficPolicyUrl ? { validateUrl: validateTrafficPolicyUrl } : {}),
       ...(baseSignal ? { signal: baseSignal } : {}),
       // Provider transport intentionally keeps the secure default and never
       // replays unsafe request bodies across cross-origin redirects.
@@ -874,7 +933,7 @@ export function buildGuardedModelFetch(
       log,
       `[model-fetch] start provider=${model.provider} api=${model.api} model=${model.id} ` +
         // Log the pre-swap URL: the swapped URL can carry an injected credential in its path.
-        `method=${baseInit?.method ?? "GET"} url=${formatModelTransportDebugUrl(rawUrl)} timeoutMs=${requestTimeoutMs} ` +
+        `method=${baseInit?.method ?? "GET"} url=${formatModelTransportDebugUrl(rawUrl)} timeoutMs=${effectiveTimeoutMs} ` +
         `proxy=${dispatcherPolicy ? "configured" : useEnvProxy ? "env" : "none"} ` +
         `policy=${policy ? "custom" : "default"}`,
     );

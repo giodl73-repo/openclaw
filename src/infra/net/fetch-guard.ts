@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- guarded fetch remains a grandfathered owner module. */
 // Guarded fetch runtime enforces SSRF checks, DNS pinning, redirect policy, and
 // trusted proxy modes around provider/network requests.
 import type { Dispatcher } from "undici";
@@ -91,6 +92,8 @@ export type GuardedFetchOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   requireHttps?: boolean;
+  /** Validate every request URL, including each redirect target, before dispatch. */
+  validateUrl?: (url: URL) => void;
   policy?: SsrFPolicy;
   lookupFn?: LookupFn;
   dispatcherPolicy?: PinnedDispatcherPolicy;
@@ -595,6 +598,7 @@ async function fetchWithSsrFGuardInternal(
         signal,
       );
     try {
+      params.validateUrl?.(parsedUrl);
       const usesTrustedExplicitProxyMode =
         mode === GUARDED_FETCH_MODE.TRUSTED_EXPLICIT_PROXY &&
         dispatcherPolicy?.mode === "explicit-proxy";
