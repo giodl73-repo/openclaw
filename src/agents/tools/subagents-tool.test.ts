@@ -35,12 +35,27 @@ function task(params: {
   };
 }
 
+function managedRun(runId: string, overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord {
+  return {
+    runId,
+    childSessionKey: `agent:main:subagent:${runId}`,
+    requesterSessionKey: "agent:main:main",
+    requesterDisplayKey: "agent:main:main",
+    task: "A managed step",
+    cleanup: "keep",
+    createdAt: 100,
+    endedAt: 200,
+    managedSkill: { invocationId: `skill-${runId}`, skillName: "managed-step" },
+    ...overrides,
+  };
+}
+
 describe("subagents tool", () => {
   it("advertises the unified task ledger", () => {
     const tool = createSubagentsTool();
 
     expect(tool.description).toBe(
-      "Background work: subagents, media gen, cron runs. list/result/cancel.",
+      "Background work: subagents, media gen, cron runs. list/result/usage/cancel.",
     );
   });
 
@@ -104,7 +119,10 @@ describe("subagents tool", () => {
     );
   });
 
-  it("does not expose results outside the caller session tree", async () => {
+  it.each([
+    ["result", { action: "result", runId: "run-other" }],
+    ["usage", { action: "usage", runIds: ["run-other"] }],
+  ])("does not expose %s outside the caller session tree", async (_action, args) => {
     const listMemories = vi.fn(() => ({ memories: [] }));
     const tool = createSubagentsTool({
       agentSessionKey: "agent:main:main",
@@ -114,10 +132,84 @@ describe("subagents tool", () => {
       listTasks: () => [],
     });
 
-    const response = await tool.execute("result", { action: "result", runId: "run-other" });
+    const response = await tool.execute("read", args);
 
     expect(response.details).toMatchObject({ status: "forbidden" });
     expect(listMemories).not.toHaveBeenCalled();
+  });
+
+  it("accounts exact managed runs once and evaluates an optional token ceiling", async () => {
+    const runs = new Map<string, SubagentRunRecord>([
+      [
+        "run-1",
+        managedRun("run-1", {
+          usage: { input: 60, output: 20, cacheRead: 10, total: 90 },
+        }),
+      ],
+      [
+        "run-2",
+        managedRun("run-2", {
+          usage: { input: 40, output: 15, cacheWrite: 5 },
+        }),
+      ],
+    ]);
+    const listMemories = vi.fn(() => ({ memories: [] }));
+    const tool = createSubagentsTool({
+      agentSessionKey: "agent:main:main",
+      config: {},
+      getRun: (_controller, runId) => runs.get(runId) ?? null,
+      listMemories,
+      listTasks: () => [],
+    });
+
+    const response = await tool.execute("usage", {
+      action: "usage",
+      runIds: ["run-1", "run-1", "run-2"],
+      maxTokens: 145,
+    });
+
+    expect(response.details).toEqual({
+      status: "ok",
+      action: "usage",
+      runIds: ["run-1", "run-2"],
+      usage: { input: 100, output: 35, cacheRead: 10, cacheWrite: 5, total: 145 },
+      budget: { maxTokens: 145, remainingTokens: 0, decision: "limit_reached" },
+    });
+    expect(listMemories).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "is still running",
+      run: { endedAt: undefined, usage: { total: 10 } },
+      reason: "run_not_terminal",
+    },
+    {
+      label: "has no exact usage",
+      run: { endedAt: 200, usage: undefined },
+      reason: "usage_unavailable",
+    },
+    {
+      label: "has no managed skill identity",
+      run: { endedAt: 200, usage: { total: 10 }, managedSkill: undefined },
+      reason: "managed_identity_unavailable",
+    },
+  ])("reports accounting unavailable when a managed run $label", async ({ run, reason }) => {
+    const tool = createSubagentsTool({
+      agentSessionKey: "agent:main:main",
+      config: {},
+      getRun: () => managedRun("run-1", run),
+      listTasks: () => [],
+    });
+
+    const response = await tool.execute("usage", { action: "usage", runIds: ["run-1"] });
+
+    expect(response.details).toEqual({
+      status: "accounting_unavailable",
+      action: "usage",
+      runId: "run-1",
+      reason,
+    });
   });
 
   it("lists cross-runtime tasks in the caller session tree", async () => {
