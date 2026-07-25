@@ -362,6 +362,72 @@ describe("subagent registry seam flow", () => {
     vi.useRealTimers();
   });
 
+  it("snapshots terminal usage on the exact native run", async () => {
+    mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+      request.method === "agent.wait"
+        ? {
+            status: "ok",
+            startedAt: 111,
+            endedAt: 222,
+            usage: { input: 120, output: 30, cacheRead: 80, total: 230 },
+          }
+        : {},
+    );
+
+    mod.registerSubagentRun({
+      runId: "run-usage-snapshot",
+      childSessionKey: "agent:main:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "measure this run",
+      cleanup: "keep",
+    });
+
+    await waitForFast(() => {
+      const run = mod
+        .listSubagentRunsForRequester("agent:main:main")
+        .find((entry) => entry.runId === "run-usage-snapshot");
+      expect(run?.usage).toEqual({ input: 120, output: 30, cacheRead: 80, total: 230 });
+      expect(run?.endedAt).toBe(222);
+    });
+  });
+
+  it("snapshots usage when the lifecycle fallback completes first", async () => {
+    mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+      request.method === "agent.wait" ? { status: "pending" } : {},
+    );
+    mod.registerSubagentRun({
+      runId: "run-lifecycle-usage",
+      childSessionKey: "agent:main:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "measure lifecycle completion",
+      cleanup: "keep",
+    });
+    const lifecycleHandler = mocks.onAgentEvent.mock.calls.at(-1)?.[0];
+    const endedAt = Date.now() + 100;
+    expect(lifecycleHandler).toBeTypeOf("function");
+    lifecycleHandler?.({
+      runId: "run-lifecycle-usage",
+      seq: 1,
+      stream: "lifecycle",
+      ts: endedAt,
+      data: {
+        phase: "end",
+        endedAt,
+        usage: { input: 40, output: 10, total: 50 },
+      },
+    });
+
+    await waitForFast(() => {
+      const run = mod
+        .listSubagentRunsForRequester("agent:main:main")
+        .find((entry) => entry.runId === "run-lifecycle-usage");
+      expect(run?.usage).toEqual({ input: 40, output: 10, total: 50 });
+      expect(run?.endedAt).toBe(endedAt);
+    });
+  });
+
   it("keeps a sweeper archive mutation root-admitted until deletion settles", async () => {
     const now = Date.now();
     let releaseDelete: (() => void) | undefined;

@@ -110,7 +110,7 @@ export function createAgentCommandLifecycle(params: {
         },
       });
     },
-    emitEnd(terminal: EmbeddedAgentRunEntryTerminal) {
+    emitEnd(runResult: AgentAttemptResult, terminal: EmbeddedAgentRunEntryTerminal) {
       if (params.state.lifecycleEnded) {
         return;
       }
@@ -130,6 +130,7 @@ export function createAgentCommandLifecycle(params: {
           endedAt: Date.now(),
           aborted: terminal.metadata.aborted ?? false,
           stopReason,
+          usage: runResult.meta.agentMeta?.usage,
           ...resolveAgentRunAbortLifecycleFields(params.abortSignal),
         },
       });
@@ -158,6 +159,7 @@ export function createAgentCommandLifecycle(params: {
           error,
           ...terminal.metadata,
           ...(fallbackExhausted ? { fallbackExhaustedFailure: true } : {}),
+          usage: runResult.meta.agentMeta?.usage,
         },
       });
     },

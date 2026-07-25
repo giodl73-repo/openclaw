@@ -59,6 +59,7 @@ describe("agent.wait gateway dedupe observations", () => {
       pendingError: undefined,
       timeoutPhase: undefined,
       providerStarted: undefined,
+      usage: undefined,
     };
     expect(first.respond).toHaveBeenCalledWith(true, expected);
     expect(second.respond).toHaveBeenCalledWith(true, expected);
@@ -85,6 +86,41 @@ describe("agent.wait gateway dedupe observations", () => {
     expect(completed.respond).toHaveBeenCalledWith(
       true,
       expect.objectContaining({ runId, status: "ok", endedAt: 200 }),
+    );
+  });
+
+  it("returns cumulative usage from the completed native run", async () => {
+    const runId = "run-public-usage";
+    const dedupe = new Map<string, DedupeEntry>();
+    setGatewayDedupeEntry({
+      dedupe,
+      key: `agent:${runId}`,
+      entry: {
+        ts: Date.now(),
+        ok: true,
+        payload: {
+          runId,
+          status: "ok",
+          result: {
+            meta: {
+              agentMeta: {
+                usage: { input: 120, output: 30, cacheRead: 80, total: 230 },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const completed = waitThroughGateway({ runId, timeoutMs: 0 });
+    await completed.promise;
+    expect(completed.respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        runId,
+        status: "ok",
+        usage: { input: 120, output: 30, cacheRead: 80, total: 230 },
+      }),
     );
   });
 });

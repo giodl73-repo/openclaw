@@ -4,6 +4,7 @@
  * output, cache, reasoning, and total token accounting fields.
  */
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
+import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Usage } from "../llm/types.js";
 
 export type ContextUsage = NonNullable<Usage["contextUsage"]>;
@@ -63,6 +64,19 @@ export type NormalizedUsage = {
   reasoningTokens?: number;
   total?: number;
 };
+
+/** Cumulative billing-oriented usage for one native agent run. */
+export type AgentRunUsage = Omit<NormalizedUsage, "contextUsage">;
+
+/** Normalize an untrusted cumulative native-run usage payload. */
+export function normalizeAgentRunUsage(value: unknown): AgentRunUsage | undefined {
+  const normalized = normalizeUsage(asOptionalRecord(value) as UsageLike | undefined);
+  if (!normalized) {
+    return undefined;
+  }
+  const { contextUsage: _contextUsage, ...usage } = normalized;
+  return usage;
+}
 
 /** OpenAI chat-completions compatible usage shape. */
 export type OpenAiChatCompletionsUsage = {

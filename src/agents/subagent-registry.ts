@@ -112,6 +112,7 @@ import {
 import { resolveSwarmConfig } from "./swarm-config.js";
 import { enqueueSwarmRun } from "./swarm-scheduler.js";
 import { resolveAgentTimeoutMs } from "./timeout.js";
+import { normalizeAgentRunUsage } from "./usage.js";
 
 export type { SubagentRunRecord } from "./subagent-registry.types.js";
 const log = createSubsystemLogger("agents/subagent-registry");
@@ -2046,6 +2047,10 @@ function ensureListener() {
           persistSubagentRuns();
         }
         return;
+      }
+      const usage = normalizeAgentRunUsage(evt.data?.usage);
+      if (usage) {
+        entry.usage = usage;
       }
       if (isAbortedAgentStopReason(stopReason)) {
         clearPendingLifecycleError(evt.runId);
