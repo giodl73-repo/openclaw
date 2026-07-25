@@ -160,6 +160,47 @@ describe("credential slot bindings", () => {
     expect(resolve).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves guarded-fetch timeout when a resolver ignores cancellation", async () => {
+    const bindings = prepareCredentialSlotBindingsV1({
+      definitions: [createDefinition()],
+      resolvers: [createResolver(async () => await new Promise(() => {}))],
+    });
+    const fetchImpl = vi.fn(async () => new Response("ok"));
+
+    await expect(
+      fetchWithCredentialSlotsAndSsrFGuard({
+        url: ORIGIN + "/slow",
+        fetchImpl,
+        credentialSlots: bindings,
+        credentialSlotRefs: [SLOT_ID],
+        timeoutMs: 10,
+      }),
+    ).rejects.toThrow(/timed out/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("preserves caller cancellation when a resolver ignores its signal", async () => {
+    const bindings = prepareCredentialSlotBindingsV1({
+      definitions: [createDefinition()],
+      resolvers: [createResolver(async () => await new Promise(() => {}))],
+    });
+    const fetchImpl = vi.fn(async () => new Response("ok"));
+    const controller = new AbortController();
+    const reason = new Error("caller cancelled credential fetch");
+
+    const pending = fetchWithCredentialSlotsAndSsrFGuard({
+      url: ORIGIN + "/cancel",
+      fetchImpl,
+      credentialSlots: bindings,
+      credentialSlotRefs: [SLOT_ID],
+      signal: controller.signal,
+    });
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("rejects a mismatched initial origin before guarded fetch dispatch", async () => {
     const resolve = vi.fn(async () => ({ value: "Bearer protected-value" }));
     const bindings = prepareCredentialSlotBindingsV1({

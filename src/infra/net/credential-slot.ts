@@ -195,6 +195,38 @@ function normalizeResolver(resolver: CredentialSlotResolverV1): CredentialSlotRe
   };
 }
 
+async function resolveCredentialWithAbort<T>(
+  resolve: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) {
+    return await resolve();
+  }
+  if (signal.aborted) {
+    throw signal.reason ?? new DOMException("Credential resolution aborted", "AbortError");
+  }
+  return await new Promise<T>((resolveResult, reject) => {
+    const onAbort = () => {
+      reject(signal.reason ?? new DOMException("Credential resolution aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    void resolve().then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolveResult(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function assertCompatible(
   definition: CredentialSlotDefinitionV1,
   resolver: CredentialSlotResolverV1,
@@ -335,11 +367,15 @@ export function prepareCredentialSlotBindingsV1(params: {
       }
 
       for (const { definition, resolver } of requested) {
-        const credential = await resolver.resolve({
-          slotId: definition.slotId,
-          origin,
+        const credential = await resolveCredentialWithAbort(
+          async () =>
+            await resolver.resolve({
+              slotId: definition.slotId,
+              origin,
+              signal,
+            }),
           signal,
-        });
+        );
         if (!credential) {
           if (definition.required) {
             throw new CredentialSlotError(
