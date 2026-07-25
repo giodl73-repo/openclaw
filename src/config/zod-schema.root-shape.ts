@@ -1,6 +1,7 @@
 import { normalizeStringifiedOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { z } from "zod";
 import { parseDurationMs } from "../cli/parse-duration.js";
+import { SkillMemorySchema } from "./schema.skill-memory.js";
 import { SilentReplyPolicyConfigSchema } from "./zod-schema.agent-defaults.js";
 import { ToolsSchema } from "./zod-schema.agent-runtime.js";
 import { AgentsSchema, BindingsSchema, BroadcastSchema } from "./zod-schema.agents.js";
@@ -144,6 +145,7 @@ export const OpenClawSchemaShape = {
       messages: z.union([z.literal("off"), z.literal("direct"), z.literal("all")]).optional(),
     })
     .optional(),
+  skillMemory: SkillMemorySchema.optional(),
   logging: z
     .strictObject({
       level: LoggingLevelSchema.optional(),

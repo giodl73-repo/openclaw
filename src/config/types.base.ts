@@ -342,6 +342,18 @@ export type AuditConfig = {
   messages?: "off" | "direct" | "all";
 };
 
+/** Durable memory of completed work, distinct from semantic memory and vector search. */
+export type SkillMemoryConfig = {
+  /** Remember new completed-work facts. Default: true. */
+  enabled?: boolean;
+  /** Shared Skill Memory store. Version 1 supports local SQLite only. */
+  store?: {
+    type: "sqlite";
+    /** Optional database path. Defaults to skill-memory.sqlite in shared state. */
+    path?: string;
+  };
+};
+
 export type DiagnosticsConfig = {
   enabled?: boolean;
   /** Optional ad-hoc diagnostics flags (e.g. "telegram.http"). */

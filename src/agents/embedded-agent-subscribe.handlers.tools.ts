@@ -1398,6 +1398,7 @@ export async function handleToolExecutionEnd(
   }
   try {
     ctx.params.onAgentToolResult?.({
+      toolCallId,
       toolName,
       result: sanitizedResult,
       isError: observerIsError,

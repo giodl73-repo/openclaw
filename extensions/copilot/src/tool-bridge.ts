@@ -476,9 +476,9 @@ function convertOpenClawToolToSdkTool(
   }
 
   let sequentialLock = Promise.resolve();
-  const notifyToolResult = (result: unknown, isError: boolean) => {
+  const notifyToolResult = (toolCallId: string, result: unknown, isError: boolean) => {
     try {
-      ctx.onAgentToolResult?.({ toolName: sourceTool.name, result, isError });
+      ctx.onAgentToolResult?.({ toolCallId, toolName: sourceTool.name, result, isError });
     } catch (error) {
       console.warn("[copilot-tool-bridge] onAgentToolResult handler threw; continuing", error);
     }
@@ -510,6 +510,7 @@ function convertOpenClawToolToSdkTool(
       failure: { error: errorMessage },
     });
     notifyToolResult(
+      invocation.toolCallId,
       sanitizeToolResult({
         content: [{ type: "text", text: message }],
         details: { status: "failed", error: errorMessage },
@@ -601,7 +602,7 @@ function convertOpenClawToolToSdkTool(
       outcome: resultIsError ? "failure" : "success",
       ...(resultIsError ? { failure: { error: resultError ?? "tool returned an error" } } : {}),
     });
-    notifyToolResult(sanitizedResult, resultIsError);
+    notifyToolResult(invocation.toolCallId, sanitizedResult, resultIsError);
     notifyToolCompleted({
       toolName: sourceTool.name,
       toolCallId: invocation.toolCallId,
@@ -693,6 +694,7 @@ async function executeCatalogTool(
       ...(error ? { failure: { error } } : {}),
     });
     input.attemptParams?.onAgentToolResult?.({
+      toolCallId: params.toolCallId,
       toolName: params.toolName,
       result: sanitizedResult,
       isError,
@@ -725,6 +727,7 @@ async function executeCatalogTool(
       details: { status: "failed", error: message },
     });
     input.attemptParams?.onAgentToolResult?.({
+      toolCallId: params.toolCallId,
       toolName: params.toolName,
       result: failure,
       isError: true,

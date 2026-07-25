@@ -105,6 +105,11 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: false,
   },
   {
+    name: "skill-memory",
+    description: "Recall completed work remembered by trusted tools",
+    hasSubcommands: false,
+  },
+  {
     name: "sessions",
     description: "List stored conversation sessions",
     hasSubcommands: true,
