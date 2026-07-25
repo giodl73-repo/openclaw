@@ -4,6 +4,7 @@ import { AUTOMATION_FIELD_HELP } from "./schema.help.automation.js";
 import { CORE_FIELD_HELP } from "./schema.help.core.js";
 import { MODEL_FIELD_HELP } from "./schema.help.models.js";
 import { RUNTIME_FIELD_HELP } from "./schema.help.runtime.js";
+import { SKILL_MEMORY_FIELD_HELP } from "./schema.skill-memory.js";
 
 export const FIELD_HELP: Record<string, string> = {
   ...CORE_FIELD_HELP,
@@ -11,4 +12,5 @@ export const FIELD_HELP: Record<string, string> = {
   ...MODEL_FIELD_HELP,
   ...AGENT_FIELD_HELP,
   ...AUTOMATION_FIELD_HELP,
+  ...SKILL_MEMORY_FIELD_HELP,
 };

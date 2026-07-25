@@ -80,6 +80,11 @@ const coreEntrySpecs: readonly CommandGroupDescriptorSpec<
         exportName: "registerAuditCommand",
       },
       {
+        commandNames: ["skill-memory"],
+        loadModule: () => import("./register.skill-memory.js"),
+        exportName: "registerSkillMemoryCommand",
+      },
+      {
         commandNames: ["doctor", "dashboard", "reset", "uninstall"],
         loadModule: () => import("./register.maintenance.js"),
         exportName: "registerMaintenanceCommands",

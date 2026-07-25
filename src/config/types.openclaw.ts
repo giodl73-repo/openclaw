@@ -11,6 +11,7 @@ import type {
   DiagnosticsConfig,
   LoggingConfig,
   SessionConfig,
+  SkillMemoryConfig,
   WebConfig,
 } from "./types.base.js";
 import type { BrowserConfig } from "./types.browser.js";
@@ -149,6 +150,8 @@ export type OpenClawConfig = {
   logging?: LoggingConfig;
   /** Metadata-only agent activity audit ledger settings. */
   audit?: AuditConfig;
+  /** Durable memory of completed work recorded by trusted tools. */
+  skillMemory?: SkillMemoryConfig;
   /** Security audit suppressions and security policy settings. */
   security?: SecurityConfig;
   /** CLI defaults and command-specific settings. */

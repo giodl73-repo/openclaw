@@ -54,7 +54,12 @@ export type SubscribeEmbeddedAgentSessionParams = {
   /** Reports source delivery observed through bridged tool lifecycle events. */
   onDeliveredMessageToolOnlySourceReply?: () => void;
   onToolResult?: (payload: ReplyPayload) => void | Promise<void>;
-  onAgentToolResult?: (event: { toolName: string; result: unknown; isError: boolean }) => void;
+  onAgentToolResult?: (event: {
+    toolCallId: string;
+    toolName: string;
+    result: unknown;
+    isError: boolean;
+  }) => void;
   observeToolTerminal?: EmbeddedRunAttemptParams["observeToolTerminal"];
   onReasoningStream?: (payload: ReasoningStreamPayload) => void | Promise<void>;
   /** Expands window reasoning beyond "stream" mode for callers with their own display gate. */

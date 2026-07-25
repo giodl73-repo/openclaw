@@ -1,6 +1,7 @@
 // Defines user-facing config field labels used by schema metadata.
 import { MEDIA_AUDIO_FIELD_LABELS } from "./media-audio-field-metadata.js";
 import { NODE_CAPABILITY_FIELD_LABELS } from "./schema.node-capabilities.js";
+import { SKILL_MEMORY_FIELD_LABELS } from "./schema.skill-memory.js";
 
 export const FIELD_LABELS: Record<string, string> = {
   "channels.discord.activities": "Discord Activities",
@@ -35,9 +36,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "wizard.lastRunMode": "Wizard Last Run Mode",
   "wizard.localModelLeanAutoModel": "Wizard Auto-Set Lean Model",
   "wizard.securityAcknowledgedAt": "Wizard Security Acknowledgement Timestamp",
-  audit: "Audit Ledger",
-  "audit.enabled": "Audit Ledger Enabled",
-  "audit.messages": "Message Audit Scope",
+  ...SKILL_MEMORY_FIELD_LABELS,
   diagnostics: "Diagnostics",
   "diagnostics.otel": "OpenTelemetry",
   "diagnostics.cacheTrace": "Cache Trace",

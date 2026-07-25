@@ -160,6 +160,7 @@ async function runEmbeddedAgentViaCliBackend(
       isError,
     });
     onAgentToolResult?.({
+      toolCallId,
       toolName,
       result: evt.data.result,
       isError,

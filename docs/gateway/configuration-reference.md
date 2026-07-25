@@ -1227,6 +1227,45 @@ writer is best-effort, not a lossless compliance archive.
 
 ---
 
+## Skill Memory
+
+```json5
+{
+  skillMemory: {
+    enabled: true,
+    store: {
+      type: "sqlite",
+      path: "~/.openclaw/state/skill-memory.sqlite",
+    },
+  },
+}
+```
+
+Skill Memory lets trusted tools remember completed work in a shared,
+searchable history. It is separate from semantic memory, workspace memory
+files, and vector search. Every entry carries a producer-owned business type
+plus OpenClaw-owned agent, session, run, tool, and time correlation.
+
+- `enabled`: remember new entries from successful trusted-tool results
+  (default: `true`). Existing entries remain readable when writes are disabled.
+- `store.type`: store implementation. Version 1 supports `"sqlite"`.
+- `store.path`: local SQLite path shared by agents on this Gateway host. The
+  default is `~/.openclaw/state/skill-memory.sqlite`.
+
+One successful tool result may contribute at most 16 entries. OpenClaw prepares
+the bounded batch before acquiring one SQLite write lock. Excess candidates are
+ignored with a warning. Entry data can include authorization codes and other
+sensitive business information, so restrict database, snapshot, and export
+access to the OpenClaw service boundary. Keep SQLite on local storage;
+network-filesystem and multi-host sharing are unsupported. The initial profile
+does not automate retention, backup/export, health repair, or corruption
+recovery.
+
+Use [`openclaw skill-memory`](/cli/skill-memory) to recall, filter, and count
+entries.
+
+---
+
 ## Logging
 
 ```json5
