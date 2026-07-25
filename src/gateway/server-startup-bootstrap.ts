@@ -26,6 +26,7 @@ import type { GatewayAuthConfig } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isSecretRef } from "../config/types.secrets.js";
 import { getActiveCronJobCount } from "../cron/active-jobs.js";
+import { resolveHostingProfileSelection } from "../hosting/profiles.js";
 import {
   isDiagnosticsEnabled,
   setDiagnosticsEnabledForProcess,
@@ -43,7 +44,6 @@ import { setGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-meta
 import { getGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-state.js";
 import { getTotalQueueSize } from "../process/command-queue.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
-import { resolveHostingProfile } from "../hosting/profiles.js";
 import { createLazyPromise } from "../shared/lazy-runtime.js";
 import { withArtifactPreservingStateReads } from "../state/openclaw-state-db-readonly.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
@@ -188,7 +188,10 @@ export async function prepareGatewayServerBootstrap(input: {
       docsUrl: OPENCLAW_DATABASE_SCHEMA_DOCS_URL,
     });
   }
-  resolveHostingProfile({ env: process.env });
+  resolveHostingProfileSelection({
+    env: process.env,
+    override: opts.hostingProfileOverride,
+  });
   const { bootstrapGatewayNetworkRuntime } = await startupTrace.measure(
     "runtime.network-imports",
     () => import("./server-network-runtime.js"),
