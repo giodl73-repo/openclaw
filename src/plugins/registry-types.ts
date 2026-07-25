@@ -22,6 +22,7 @@ import type {
   PluginToolMetadataRegistration,
   PluginTrustedToolPolicyRegistration,
 } from "./host-hooks.js";
+import type { PluginManifestHostIntegrationBundle } from "./host-integration-bundle.js";
 import type {
   PluginBundleFormat,
   PluginConfigUiHint,
@@ -469,6 +470,7 @@ export type PluginRecord = {
   configUiHints?: Record<string, PluginConfigUiHint>;
   configJsonSchema?: JsonSchemaObject;
   contracts?: PluginManifestContracts;
+  hostIntegrationBundle?: PluginManifestHostIntegrationBundle;
   dashboard?: PluginManifestDashboard;
   mcpServers?: Record<string, PluginManifestMcpServer>;
   memorySlotSelected?: boolean;
