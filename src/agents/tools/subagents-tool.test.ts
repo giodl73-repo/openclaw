@@ -1,6 +1,8 @@
-// Subagents tool tests cover requester-scoped task listing and cancellation.
+// Subagents tool tests cover requester-scoped task listing, results, and cancellation.
 import { describe, expect, it, vi } from "vitest";
+import type { RecordedSkillMemory } from "../../skill-memory/store.sqlite.js";
 import type { TaskRecord, TaskRuntime, TaskStatus } from "../../tasks/task-registry.types.js";
+import type { SubagentRunRecord } from "../subagent-registry.types.js";
 import { createSubagentsTool } from "./subagents-tool.js";
 
 function task(params: {
@@ -37,7 +39,85 @@ describe("subagents tool", () => {
   it("advertises the unified task ledger", () => {
     const tool = createSubagentsTool();
 
-    expect(tool.description).toBe("Background work: subagents, media gen, cron runs. list/cancel.");
+    expect(tool.description).toBe(
+      "Background work: subagents, media gen, cron runs. list/result/cancel.",
+    );
+  });
+
+  it("returns a managed run result with durable memories", async () => {
+    const run: SubagentRunRecord = {
+      runId: "run-1",
+      childSessionKey: "agent:main:subagent:child",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "agent:main:main",
+      task: "Resolve the case",
+      cleanup: "keep",
+      createdAt: 100,
+      endedAt: 200,
+      outcome: { status: "ok" },
+      managedSkill: { invocationId: "skill-1", skillName: "resolve-case" },
+    };
+    const memory: RecordedSkillMemory = {
+      memorySchema: "openclaw-skill-memory",
+      schemaVersion: 1,
+      sequence: 1,
+      memoryId: "smem_1",
+      type: "case.resolved",
+      occurredAt: 190,
+      agentId: "main",
+      sessionId: "child",
+      runId: "run-1",
+      invocationId: "skill-1",
+      skillName: "resolve-case",
+      toolName: "case.resolve",
+      toolCallId: "call-1",
+    };
+    const listMemories = vi.fn(() => ({ memories: [memory], nextCursor: 17 }));
+    const tool = createSubagentsTool({
+      agentSessionKey: "agent:main:main",
+      config: {},
+      getRun: () => run,
+      listMemories,
+      listTasks: () => [],
+    });
+
+    const response = await tool.execute("result", {
+      action: "result",
+      runId: "run-1",
+      memoryCursor: 42,
+    });
+
+    expect(response.details).toMatchObject({
+      status: "ok",
+      action: "result",
+      result: {
+        runId: "run-1",
+        status: "completed",
+        managedSkill: { skillName: "resolve-case" },
+        memories: [{ type: "case.resolved" }],
+      },
+      memoriesTruncated: true,
+      nextMemoryCursor: 17,
+    });
+    expect(listMemories).toHaveBeenCalledWith(
+      expect.objectContaining({ filters: { runId: "run-1" }, cursor: 42, limit: 500 }),
+    );
+  });
+
+  it("does not expose results outside the caller session tree", async () => {
+    const listMemories = vi.fn(() => ({ memories: [] }));
+    const tool = createSubagentsTool({
+      agentSessionKey: "agent:main:main",
+      config: {},
+      getRun: () => null,
+      listMemories,
+      listTasks: () => [],
+    });
+
+    const response = await tool.execute("result", { action: "result", runId: "run-other" });
+
+    expect(response.details).toMatchObject({ status: "forbidden" });
+    expect(listMemories).not.toHaveBeenCalled();
   });
 
   it("lists cross-runtime tasks in the caller session tree", async () => {

@@ -16,6 +16,7 @@ import type { CallGatewayOptions } from "../gateway/call.js";
 import { SUBAGENT_KILL_TASK_ERROR } from "../tasks/detached-task-runtime-contract.js";
 import {
   testing,
+  getVisibleSubagentRunById,
   killAllControlledSubagentRuns,
   killControlledSubagentRun,
   killSubagentRunAdmin,
@@ -2233,5 +2234,30 @@ describe("listControlledSubagentRuns", () => {
       }
     },
   );
+
+  it("resolves an exact retained run id after a newer child run exists", () => {
+    const childSessionKey = "agent:main:subagent:result-history";
+    for (const [runId, createdAt] of [
+      ["run-older", 100],
+      ["run-newer", 200],
+    ] as const) {
+      addSubagentRunForTests({
+        runId,
+        childSessionKey,
+        controllerSessionKey: "agent:main:main",
+        requesterSessionKey: "agent:main:channel:thread",
+        requesterDisplayKey: "agent:main:channel:thread",
+        task: runId,
+        cleanup: "keep",
+        createdAt,
+      });
+    }
+
+    expect(getVisibleSubagentRunById("agent:main:main", "run-older")?.runId).toBe("run-older");
+    expect(getVisibleSubagentRunById("agent:main:channel:thread", "run-older")?.runId).toBe(
+      "run-older",
+    );
+    expect(getVisibleSubagentRunById("agent:other:main", "run-older")).toBeNull();
+  });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

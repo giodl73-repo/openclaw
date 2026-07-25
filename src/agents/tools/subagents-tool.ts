@@ -1,31 +1,39 @@
 /**
  * subagents built-in tool.
  *
- * Lists and cancels background work in the caller's session tree.
+ * Lists, reads, and cancels background work in the caller's session tree.
  */
 import { Type } from "typebox";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { listSkillMemory } from "../../skill-memory/store.sqlite.js";
 import { listTaskRecordsUnsorted } from "../../tasks/runtime-internal.js";
 import { cancelDetachedTaskRunById } from "../../tasks/task-executor.js";
 import type { TaskRecord, TaskStatus } from "../../tasks/task-registry.types.js";
+import { buildManagedSkillRunResult } from "../managed-skill-result.js";
 import { optionalPositiveIntegerSchema, optionalStringEnum } from "../schema/typebox.js";
 import {
   DEFAULT_RECENT_MINUTES,
+  getVisibleSubagentRunById,
   listControlledSubagentRuns,
   MAX_RECENT_MINUTES,
   resolveSubagentController,
 } from "../subagent-control.js";
 import { buildSubagentList } from "../subagent-list.js";
+import type { SubagentRunRecord } from "../subagent-registry.types.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readPositiveIntegerParam, readStringParam } from "./common.js";
 
-const SUBAGENT_ACTIONS = ["list", "cancel"] as const;
+const SUBAGENT_ACTIONS = ["list", "result", "cancel"] as const;
 type SubagentAction = (typeof SUBAGENT_ACTIONS)[number];
 
 const SubagentsToolSchema = Type.Object({
   action: optionalStringEnum(SUBAGENT_ACTIONS),
   recentMinutes: optionalPositiveIntegerSchema(),
+  runId: Type.Optional(Type.String({ description: "Managed subagent run id" })),
+  memoryCursor: Type.Optional(
+    Type.Integer({ description: "Cursor from a previous managed result page", minimum: 1 }),
+  ),
   taskId: Type.Optional(Type.String({ description: "Task id" })),
 });
 
@@ -42,9 +50,21 @@ const STATUS_MAP: Record<TaskStatus, string> = {
 type SubagentsToolOptions = {
   agentSessionKey?: string;
   config?: OpenClawConfig;
+  getRun?: (controllerSessionKey: string, runId: string) => SubagentRunRecord | null;
+  listRuns?: (controllerSessionKey: string) => SubagentRunRecord[];
+  listMemories?: typeof listSkillMemory;
   listTasks?: typeof listTaskRecordsUnsorted;
   cancelTask?: typeof cancelDetachedTaskRunById;
 };
+
+async function listManagedRunMemories(
+  params: Parameters<typeof listSkillMemory>[0],
+): Promise<ReturnType<typeof listSkillMemory>> {
+  // Skill Memory SQLite is only needed for explicit result reads; keep ordinary
+  // list/cancel tool construction on the lightweight agent path.
+  const memoryStore = await import("../../skill-memory/store.sqlite.js");
+  return memoryStore.listSkillMemory(params);
+}
 
 function taskUpdatedAt(task: TaskRecord): number {
   return task.lastEventAt ?? task.endedAt ?? task.startedAt ?? task.createdAt;
@@ -89,7 +109,7 @@ export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTo
   return {
     label: "Subagents",
     name: "subagents",
-    description: "Background work: subagents, media gen, cron runs. list/cancel.",
+    description: "Background work: subagents, media gen, cron runs. list/result/cancel.",
     parameters: SubagentsToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -104,8 +124,49 @@ export function createSubagentsTool(opts: SubagentsToolOptions = {}): AnyAgentTo
         cfg,
         agentSessionKey: opts?.agentSessionKey,
       });
+      if (action === "result") {
+        const runId = readStringParam(params, "runId", { required: true });
+        const run = (opts.getRun ?? getVisibleSubagentRunById)(
+          controller.controllerSessionKey,
+          runId,
+        );
+        if (!run) {
+          return jsonResult({ status: "forbidden", error: "Run outside session tree." });
+        }
+        const memoryCursor = readPositiveIntegerParam(params, "memoryCursor");
+        const memoryParams = {
+          filters: { runId },
+          limit: 500,
+          ...(memoryCursor !== undefined ? { cursor: memoryCursor } : {}),
+          store: { cfg },
+        };
+        const memoryPage = opts.listMemories
+          ? opts.listMemories(memoryParams)
+          : await listManagedRunMemories(memoryParams);
+        const resolution = buildManagedSkillRunResult({
+          run,
+          memories: memoryPage.memories,
+        });
+        if (!resolution.ok) {
+          return jsonResult({
+            status: "error",
+            action: "result",
+            runId,
+            errorCode: resolution.code,
+          });
+        }
+        return jsonResult({
+          status: "ok",
+          action: "result",
+          result: resolution.result,
+          ...(memoryPage.nextCursor !== undefined
+            ? { memoriesTruncated: true, nextMemoryCursor: memoryPage.nextCursor }
+            : {}),
+        });
+      }
+
       // The caller only sees subagents controlled by its effective controller session.
-      const runs = listControlledSubagentRuns(controller.controllerSessionKey);
+      const runs = (opts.listRuns ?? listControlledSubagentRuns)(controller.controllerSessionKey);
       const treeTasks = listTreeTasks(
         (opts.listTasks ?? listTaskRecordsUnsorted)(),
         controller.controllerSessionKey,
