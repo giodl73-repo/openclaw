@@ -12,10 +12,8 @@ import {
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
-import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
+import { parseAgentSessionKey } from "../../routing/session-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
-import { createManagedSkillInvocation } from "../../skills/invocation.js";
-import { resolveSkillTelemetrySource } from "../../skills/loading/source.js";
 import type { SkillSnapshot } from "../../skills/types.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import {
@@ -24,6 +22,7 @@ import {
   formatAcpInheritedToolAllowError,
   formatAcpInheritedToolDenyError,
 } from "../inherited-tool-deny.js";
+import { spawnManagedSkillDirect } from "../managed-skill-spawn.js";
 import { optionalStringEnum } from "../schema/typebox.js";
 import type { SpawnedToolContext } from "../spawned-context.js";
 import { resolveAcpSessionsSpawnImageAttachments } from "../subagent-attachments.js";
@@ -342,30 +341,6 @@ export function createSessionsSpawnTool(
       }
       const task = readStringParam(params, "task", { required: true });
       const requestedSkillName = readStringParam(params, "skill");
-      const availableSkillNames = new Set(
-        (opts?.skillsSnapshot?.skills ?? []).map((skill) => skill.name.trim()),
-      );
-      const matchingSkills = requestedSkillName
-        ? (opts?.skillsSnapshot?.resolvedSkills ?? []).filter(
-            (skill) =>
-              skill.name.trim() === requestedSkillName &&
-              availableSkillNames.has(skill.name.trim()) &&
-              !skill.disableModelInvocation,
-          )
-        : [];
-      if (requestedSkillName && matchingSkills.length !== 1) {
-        return jsonResult({
-          status: "error",
-          error:
-            matchingSkills.length === 0
-              ? `Skill "${requestedSkillName}" is not available in this run.`
-              : `Skill "${requestedSkillName}" is ambiguous in this run.`,
-        });
-      }
-      const requestedSkill = matchingSkills[0];
-      const requestedSkillMetadata = requestedSkillName
-        ? opts?.skillsSnapshot?.skills.find((skill) => skill.name.trim() === requestedSkillName)
-        : undefined;
       const taskNameResult = normalizeSubagentTaskName(params.taskName);
       if (taskNameResult.error) {
         return jsonResult({
@@ -380,17 +355,6 @@ export function createSessionsSpawnTool(
         throw new ToolInputError('sessions_spawn collect=true supports runtime="subagent" only.');
       }
       const requestedAgentId = readStringParam(params, "agentId");
-      if (
-        requestedSkill &&
-        requestedAgentId &&
-        normalizeAgentId(requestedAgentId) !== normalizeAgentId(requesterAgentId)
-      ) {
-        return jsonResult({
-          status: "error",
-          error: "Managed skill invocation currently requires the child to use the current agent.",
-          role: requestedAgentId,
-        });
-      }
       const resumeSessionId = readStringParam(params, "resumeSessionId");
       const modelOverride = normalizeToolModelOverride(readStringParam(params, "model"));
       const thinkingOverrideRaw = readStringParam(params, "thinking");
@@ -405,23 +369,86 @@ export function createSessionsSpawnTool(
       const streamTo = runtime === "acp" && params.streamTo === "parent" ? "parent" : undefined;
       const lightContext = params.lightContext === true;
       const roleContext = requestedAgentId ? { role: requestedAgentId } : {};
-      if (requestedSkill && runtime !== "subagent") {
-        return jsonResult({
-          status: "error",
-          error: 'Managed skill invocation currently requires runtime="subagent".',
-          ...roleContext,
-        });
-      }
-      if (
-        requestedSkill &&
-        (mode === "session" || params.thread === true || params.visible === true)
-      ) {
-        return jsonResult({
-          status: "error",
-          error:
-            'Managed skill invocation is one background run; omit visible and thread, and use mode="run".',
-          ...roleContext,
-        });
+      const thread = params.thread === true;
+      const attachments = Array.isArray(params.attachments)
+        ? (params.attachments as Array<{
+            name: string;
+            content: string;
+            encoding?: "utf8" | "base64";
+            mimeType?: string;
+          }>)
+        : undefined;
+      const attachMountPath =
+        params.attachAs && typeof params.attachAs === "object"
+          ? readStringParam(params.attachAs as Record<string, unknown>, "mountPath")
+          : undefined;
+
+      if (requestedSkillName) {
+        const result = await spawnManagedSkillDirect(
+          {
+            skillName: requestedSkillName,
+            task,
+            runtime,
+            visible: params.visible === true,
+            thread,
+            taskName,
+            label: label || undefined,
+            agentId: requestedAgentId,
+            model: modelOverride,
+            thinking: thinkingOverrideRaw,
+            collect: hasCollectParam ? collect : undefined,
+            outputSchema:
+              params.outputSchema && typeof params.outputSchema === "object"
+                ? (params.outputSchema as Record<string, unknown>)
+                : undefined,
+            fastMode:
+              params.fastMode === true || params.fastMode === false || params.fastMode === "auto"
+                ? params.fastMode
+                : undefined,
+            groupId: readStringParam(params, "groupId"),
+            swarmLaunchReplayKey:
+              typeof params[SWARM_CODE_MODE_IDEMPOTENCY_KEY] === "string"
+                ? params[SWARM_CODE_MODE_IDEMPOTENCY_KEY]
+                : undefined,
+            swarmLaunchRequestFingerprint:
+              typeof params[SWARM_CODE_MODE_REQUEST_FINGERPRINT] === "string"
+                ? params[SWARM_CODE_MODE_REQUEST_FINGERPRINT]
+                : undefined,
+            cwd,
+            mode,
+            cleanup,
+            sandbox,
+            context,
+            lightContext,
+            expectsCompletionMessage,
+            attachments,
+            attachMountPath,
+          },
+          {
+            agentSessionKey: opts?.agentSessionKey,
+            requesterTurnRunId: opts?.requesterTurnRunId,
+            completionOwnerKey: opts?.completionOwnerKey,
+            agentChannel: opts?.agentChannel,
+            agentAccountId: opts?.agentAccountId,
+            agentTo: opts?.agentTo,
+            agentThreadId: opts?.agentThreadId,
+            currentMessagingTarget: opts?.currentMessagingTarget ?? opts?.currentChannelId,
+            currentChannelId: opts?.currentChannelId,
+            currentMessageId: opts?.currentMessageId,
+            agentGroupId: opts?.agentGroupId,
+            agentGroupChannel: opts?.agentGroupChannel,
+            agentGroupSpace: opts?.agentGroupSpace,
+            agentMemberRoleIds: opts?.agentMemberRoleIds,
+            requesterAgentIdOverride: opts?.requesterAgentIdOverride,
+            workspaceDir: opts?.workspaceDir,
+            inheritedToolAllowlist: opts?.inheritedToolAllowlist,
+            inheritedToolDenylist: opts?.inheritedToolDenylist,
+            requesterRunId: opts?.requesterRunId,
+            skillsSnapshot: opts?.skillsSnapshot,
+            parentRunId: opts?.parentRunId,
+          },
+        );
+        return jsonResult(addRoleToFailureResult(result, requestedAgentId));
       }
       const visibleResult = await maybeSpawnVisibleSession({
         raw: params,
@@ -473,16 +500,6 @@ export function createSessionsSpawnTool(
       if (runtime === "acp" && context === "fork") {
         throw new Error('context="fork" is only supported for runtime="subagent".');
       }
-      const thread = params.thread === true;
-      const attachments = Array.isArray(params.attachments)
-        ? (params.attachments as Array<{
-            name: string;
-            content: string;
-            encoding?: "utf8" | "base64";
-            mimeType?: string;
-          }>)
-        : undefined;
-
       if (runtime === "acp") {
         const { spawnAcpDirect } = await loadAcpSpawnModule();
         const acpAttachments = resolveAcpSessionsSpawnImageAttachments({
@@ -537,22 +554,9 @@ export function createSessionsSpawnTool(
         return jsonResult(addRoleToFailureResult(result, requestedAgentId));
       }
 
-      const managedSkill = requestedSkill
-        ? createManagedSkillInvocation({
-            skillName: requestedSkill.name,
-            skillSource: resolveSkillTelemetrySource(requestedSkill),
-            skillDigest: requestedSkill.contentDigest ?? requestedSkillMetadata?.skillDigest,
-            executionHints: requestedSkillMetadata?.executionHints,
-            parentRunId: opts?.parentRunId,
-          })
-        : undefined;
-      const childTask = requestedSkill
-        ? `Use the ${requestedSkill.name} skill to complete this task:\n\n${task}`
-        : task;
       const result = await spawnSubagentDirect(
         {
-          task: childTask,
-          managedSkill,
+          task,
           taskName,
           label: label || undefined,
           agentId: requestedAgentId,
@@ -585,10 +589,7 @@ export function createSessionsSpawnTool(
           lightContext,
           expectsCompletionMessage,
           attachments,
-          attachMountPath:
-            params.attachAs && typeof params.attachAs === "object"
-              ? readStringParam(params.attachAs as Record<string, unknown>, "mountPath")
-              : undefined,
+          attachMountPath,
         },
         {
           agentSessionKey: opts?.agentSessionKey,

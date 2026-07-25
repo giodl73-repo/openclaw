@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   enabled: vi.fn(() => true),
   record: vi.fn(),
   runAttempt: vi.fn(),
+  getRun: vi.fn(),
   warn: vi.fn(),
 }));
 
@@ -13,6 +14,9 @@ vi.mock("../../../skill-memory/store.sqlite.js", () => ({
 }));
 vi.mock("../../harness/selection.js", () => ({
   runAgentHarnessAttempt: mocks.runAttempt,
+}));
+vi.mock("../../subagent-registry.js", () => ({
+  getSubagentRunByRunId: mocks.getRun,
 }));
 vi.mock("../logger.js", () => ({ log: { warn: mocks.warn } }));
 
@@ -51,6 +55,7 @@ describe("embedded backend memory composition", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enabled.mockReturnValue(true);
+    mocks.getRun.mockReturnValue(undefined);
     mocks.record.mockReturnValue([recordedPayment]);
     mocks.runAttempt.mockImplementation(async (params: EmbeddedRunAttemptParams) => {
       params.onAgentToolResult?.({
@@ -97,6 +102,29 @@ describe("embedded backend memory composition", () => {
       expect.objectContaining({ memoryId: "smem_payment", type: "payment.authorized" }),
     );
     expect(trajectoryRecorder.recordEvent.mock.calls[0]?.[1]).not.toHaveProperty("data");
+  });
+
+  it("adds managed skill identity owned by the child run registry", async () => {
+    mocks.getRun.mockReturnValue({
+      managedSkill: {
+        invocationId: "skill-payment",
+        skillName: "authorize-payment",
+        skillDigest: "sha256:abc",
+      },
+    });
+
+    await runEmbeddedAttemptWithBackend(createParams());
+
+    expect(mocks.record).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          invocationId: "skill-payment",
+          skillName: "authorize-payment",
+          skillDigest: "sha256:abc",
+        }),
+      ],
+      { cfg: {} },
+    );
   });
 
   it("contains recording failure without changing the tool observation", async () => {
