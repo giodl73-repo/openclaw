@@ -344,6 +344,31 @@ describe("credential slot bindings", () => {
     expect(JSON.stringify(error)).not.toContain(protectedValue);
   });
 
+  it("rejects invalid credential headers without exposing their value", async () => {
+    const protectedValue = "Bearer must-not-leak\r\nx-leak: yes";
+    const bindings = prepareCredentialSlotBindingsV1({
+      definitions: [createDefinition()],
+      resolvers: [createResolver(async () => ({ value: protectedValue }))],
+    });
+
+    let error: unknown;
+    try {
+      await bindings.apply({
+        slotRefs: [SLOT_ID],
+        url: `${ORIGIN}/v1`,
+        init: {},
+      });
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toBeInstanceOf(CredentialSlotError);
+    expect(error).toMatchObject({ code: "credential-unavailable", slotId: SLOT_ID });
+    expect(String(error)).not.toContain(protectedValue);
+    expect(String(error)).not.toContain("must-not-leak");
+    expect(JSON.stringify(error)).not.toContain(protectedValue);
+    expect(JSON.stringify(error)).not.toContain("must-not-leak");
+  });
+
   it("never overwrites a caller-provided protected header", async () => {
     const resolve = vi.fn(async () => ({ value: "Bearer protected-value" }));
     const bindings = prepareCredentialSlotBindingsV1({
