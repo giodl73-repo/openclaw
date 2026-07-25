@@ -403,7 +403,15 @@ export function prepareCredentialSlotBindingsV1(params: {
             definition.slotId,
           );
         }
-        headers.set(definition.headerName, credential.value);
+        try {
+          headers.set(definition.headerName, credential.value);
+        } catch {
+          throw new CredentialSlotError(
+            "credential-unavailable",
+            `Credential slot "${definition.slotId}" returned an invalid header value`,
+            definition.slotId,
+          );
+        }
       }
 
       return { ...init, headers };
