@@ -9,6 +9,7 @@ import {
   mergeAgentRunTerminalOutcome,
   type AgentRunTerminalOutcome,
 } from "../../agents/agent-run-terminal-outcome.js";
+import { normalizeAgentRunUsage, type AgentRunUsage } from "../../agents/usage.js";
 import { onAgentEvent } from "../../infra/agent-events.js";
 import { isNonTerminalAgentRunStatus } from "../../shared/agent-run-status.js";
 import { setSafeTimeout } from "../../utils/timer-delay.js";
@@ -28,6 +29,7 @@ type AgentJobTerminalSnapshot = {
   pendingError?: boolean;
   timeoutPhase?: AgentRunTerminalOutcome["timeoutPhase"];
   providerStarted?: boolean;
+  usage?: AgentRunUsage;
 };
 
 type AgentJobSource = "agent" | "chat" | "lifecycle";
@@ -256,6 +258,7 @@ function createSnapshotFromLifecycleEvent(params: {
     startedAt,
     endedAt,
   });
+  const usage = normalizeAgentRunUsage(data?.usage);
   return {
     runId,
     source: "lifecycle",
@@ -271,6 +274,7 @@ function createSnapshotFromLifecycleEvent(params: {
     ...(terminalOutcome.providerStarted !== undefined
       ? { providerStarted: terminalOutcome.providerStarted }
       : {}),
+    ...(usage ? { usage } : {}),
     version: nextAgentRunVersion(),
   };
 }
@@ -353,6 +357,8 @@ function parseDedupeObservation(entry: DedupeEntry): DedupeObservation {
   }
 
   const resultMeta = asOptionalRecord(asOptionalRecord(payload?.result)?.meta);
+  const agentMeta = asOptionalRecord(resultMeta?.agentMeta);
+  const usage = normalizeAgentRunUsage(agentMeta?.usage);
   const startedAt = asFiniteNumber(payload?.startedAt);
   const endedAt = asFiniteNumber(payload?.endedAt) ?? entry.ts;
   const stopReason = asString(payload?.stopReason) ?? asString(resultMeta?.stopReason);
@@ -386,6 +392,7 @@ function parseDedupeObservation(entry: DedupeEntry): DedupeObservation {
       ...(terminalOutcome.providerStarted !== undefined
         ? { providerStarted: terminalOutcome.providerStarted }
         : {}),
+      ...(usage ? { usage } : {}),
     },
   };
 }
@@ -510,6 +517,7 @@ function publicSnapshot(snapshot: AgentRunObservation): AgentJobTerminalSnapshot
     pendingError: snapshot.pendingError,
     timeoutPhase: snapshot.timeoutPhase,
     providerStarted: snapshot.providerStarted,
+    usage: snapshot.usage,
   };
 }
 

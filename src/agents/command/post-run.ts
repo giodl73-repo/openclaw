@@ -348,7 +348,7 @@ export async function finalizeEmbeddedAgentCommand(params: {
     if (fallbackExhausted || lifecycle.resolveResultError(result, false)) {
       lifecycle.emitResultError(result, fallbackExhausted, terminal);
     } else {
-      lifecycle.emitEnd(terminal);
+      lifecycle.emitEnd(result, terminal);
     }
     return {
       deliveryResult,

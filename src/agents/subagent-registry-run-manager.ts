@@ -508,6 +508,9 @@ export function createSubagentRunManager(params: {
         startedAt: observedStartedAt ?? entry.startedAt,
         endedAt,
       });
+      if (wait.usage) {
+        entry.usage = wait.usage;
+      }
       completionForRetry = {
         runId,
         endedAt,
@@ -715,6 +718,7 @@ export function createSubagentRunManager(params: {
       wakeOnDescendantSettle: undefined,
       requesterSettleWake: undefined,
       outcome: undefined,
+      usage: undefined,
       execution: {
         status: "running",
         startedAt: now,

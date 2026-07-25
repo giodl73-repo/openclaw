@@ -31,6 +31,7 @@ import {
   type AgentRunTimeoutPhase,
 } from "./run-timeout-attribution.js";
 import { extractAssistantText, stripToolMessages } from "./tools/chat-history-text.js";
+import { normalizeAgentRunUsage, type AgentRunUsage } from "./usage.js";
 
 type GatewayCaller = typeof callGateway;
 
@@ -66,6 +67,7 @@ export type AgentWaitResult = {
   pendingError?: boolean;
   timeoutPhase?: AgentRunTimeoutPhase;
   providerStarted?: boolean;
+  usage?: AgentRunUsage;
 };
 
 /** Summary returned after waiting for a dynamic set of pending runs to drain. */
@@ -86,6 +88,7 @@ type RawAgentWaitResponse = {
   pendingError?: unknown;
   timeoutPhase?: unknown;
   providerStarted?: unknown;
+  usage?: unknown;
 };
 
 function normalizeAgentWaitResult(
@@ -106,6 +109,7 @@ function normalizeAgentWaitResult(
     pendingError: wait?.pendingError === true ? true : undefined,
     timeoutPhase: normalizeAgentRunTimeoutPhase(wait?.timeoutPhase),
     providerStarted: normalizeProviderStarted(wait?.providerStarted),
+    usage: normalizeAgentRunUsage(wait?.usage),
   };
 }
 

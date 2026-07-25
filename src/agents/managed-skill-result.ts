@@ -11,6 +11,7 @@ export type ManagedSkillRunResult = {
   endedAt?: number;
   error?: string;
   memories: RecordedSkillMemory[];
+  usage?: SubagentRunRecord["usage"];
 };
 
 export type ManagedSkillRunResultResolution =
@@ -66,6 +67,7 @@ export function buildManagedSkillRunResult(params: {
       ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
       ...(run.outcome?.error ? { error: run.outcome.error } : {}),
       memories: params.memories,
+      ...(run.usage ? { usage: run.usage } : {}),
     },
   };
 }

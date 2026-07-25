@@ -49,6 +49,7 @@ describe("buildManagedSkillRunResult", () => {
         startedAt: 120,
         endedAt: 280,
         outcome: { status: "ok" },
+        usage: { input: 120, output: 30, cacheRead: 80, total: 230 },
       }),
       memories: [memory()],
     });
@@ -60,6 +61,7 @@ describe("buildManagedSkillRunResult", () => {
         status: "completed",
         managedSkill: expect.objectContaining({ skillName: "resolve-case" }),
         memories: [expect.objectContaining({ type: "case.resolved" })],
+        usage: { input: 120, output: 30, cacheRead: 80, total: 230 },
       }),
     });
   });
