@@ -228,6 +228,12 @@ describe("buildSubagentList", () => {
       requesterSessionKey: "agent:main:main",
       requesterDisplayKey: "main",
       task: "do thing",
+      managedSkill: {
+        invocationId: "skill_test",
+        skillName: "resolve-case",
+        skillDigest: "sha256:abc",
+        parentRunId: "run-parent",
+      },
       cleanup: "keep",
       createdAt: 1000,
       startedAt: 1000,
@@ -245,6 +251,9 @@ describe("buildSubagentList", () => {
         inputTokens: 12,
         outputTokens: 1000,
         totalTokens: 197000,
+        cacheRead: 150000,
+        cacheWrite: 9000,
+        estimatedCostUsd: 0.0042,
         model: "opencode/claude-opus-4-6",
       },
     );
@@ -265,6 +274,19 @@ describe("buildSubagentList", () => {
     expect(list.active[0]?.line).toMatch(/tokens 1(\.0)?k \(in 12 \/ out 1(\.0)?k\)/);
     expect(list.active[0]?.line).toContain("prompt/cache 197k");
     expect(list.active[0]?.line).not.toContain("1k io");
+    expect(list.active[0]?.managedSkill).toMatchObject({
+      invocationId: "skill_test",
+      skillName: "resolve-case",
+      parentRunId: "run-parent",
+    });
+    expect(list.active[0]?.usage).toEqual({
+      input: 12,
+      output: 1000,
+      total: 1012,
+      cacheRead: 150000,
+      cacheWrite: 9000,
+      estimatedCostUsd: 0.0042,
+    });
   });
 
   it("keeps stale unended runs out of active and recent list output", () => {

@@ -12,6 +12,8 @@ export interface Skill {
   baseDir: string;
   /** Deterministic marker for the SKILL.md content rendered as <version>. */
   promptVersion?: string;
+  /** Full content identity recorded for explicit managed invocations. */
+  contentDigest?: string;
   sourceInfo: SourceInfo;
   disableModelInvocation: boolean;
   // Preserve legacy source reads while keeping the canonical upstream shape.

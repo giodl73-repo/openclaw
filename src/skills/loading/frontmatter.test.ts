@@ -4,7 +4,41 @@ import {
   parseFrontmatter,
   resolveOpenClawMetadata,
   resolveSkillInvocationPolicy,
+  resolveSkillExecutionHints,
 } from "./frontmatter.js";
+
+describe("resolveSkillExecutionHints", () => {
+  it("parses portable string-valued Agent Skills metadata", () => {
+    const frontmatter = parseFrontmatter(`---
+name: issue-refund
+description: Issue an approved refund.
+metadata:
+  remembers: "payment.refunded customer.notified"
+  uses-skills: "verify-customer check-refund-policy"
+  isolation: "required"
+---
+`);
+
+    expect(resolveSkillExecutionHints(frontmatter)).toEqual({
+      remembers: ["payment.refunded", "customer.notified"],
+      usesSkills: ["verify-customer", "check-refund-policy"],
+      isolation: "required",
+    });
+  });
+
+  it("ignores unknown, empty, and non-string hints", () => {
+    expect(
+      resolveSkillExecutionHints({
+        metadata: '{"remembers":[],"uses-skills":{"name":"verify-customer"}}',
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveSkillExecutionHints({
+        metadata: '{"remembers":"  ","isolation":"sometimes"}',
+      }),
+    ).toBeUndefined();
+  });
+});
 
 describe("resolveSkillInvocationPolicy", () => {
   it("defaults to enabled behaviors", () => {

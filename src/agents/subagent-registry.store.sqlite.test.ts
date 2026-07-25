@@ -89,6 +89,13 @@ describe("subagent registry sqlite store", () => {
         endedReason: "subagent-error",
         outcome: { status: "error", error: "restart interrupted run", endedAt: 250 },
         terminalOwner: "interrupted-recovery",
+        managedSkill: {
+          invocationId: "skill_sqlite",
+          skillName: "resolve-case",
+          skillDigest: "sha256:abc",
+          executionHints: { remembers: ["case.resolved"] },
+          parentRunId: "run-parent",
+        },
         completion: { required: true, resultText: null, capturedAt: 250 },
         requesterSettleWake: {
           status: "dispatching",
@@ -118,6 +125,7 @@ describe("subagent registry sqlite store", () => {
         endedAt: run.endedAt,
         outcome: run.outcome,
         terminalOwner: "interrupted-recovery",
+        managedSkill: run.managedSkill,
         completion: run.completion,
         delivery: run.delivery,
         requesterSettleWake: run.requesterSettleWake,
