@@ -18,6 +18,10 @@ import {
   normalizeManifestCommandAliases,
   type PluginManifestCommandAlias,
 } from "./manifest-command-aliases.js";
+import {
+  parsePluginManifestHostIntegrationBundle,
+  type PluginManifestHostIntegrationBundle,
+} from "./host-integration-bundle.js";
 import type { PluginConfigUiHint } from "./manifest-types.js";
 import { createPluginCacheKey, PluginLruCache } from "./plugin-cache-primitives.js";
 import type { PluginKind } from "./plugin-kind.types.js";
@@ -415,6 +419,8 @@ export type PluginManifest = {
    * compat wiring, and contract coverage without importing plugin runtime.
    */
   contracts?: PluginManifestContracts;
+  /** Atomic, inert host contribution inventory owned by this plugin manifest. */
+  hostIntegrationBundle?: PluginManifestHostIntegrationBundle;
   /** Cheap media-understanding provider defaults without importing plugin runtime. */
   mediaUnderstandingProviderMetadata?: Record<
     string,
@@ -2015,6 +2021,16 @@ export function loadPluginManifest(
   const activation = normalizeManifestActivation(raw.activation);
   const setup = normalizeManifestSetup(raw.setup);
   const qaRunners = normalizeManifestQaRunners(raw.qaRunners);
+  const hostIntegrationBundleResult = parsePluginManifestHostIntegrationBundle(
+    raw.hostIntegrationBundle,
+  );
+  if (!hostIntegrationBundleResult.ok) {
+    return cacheResult({
+      ok: false,
+      error: `invalid plugin manifest: ${hostIntegrationBundleResult.error}`,
+      manifestPath,
+    });
+  }
   const dashboardResult = normalizeManifestDashboard(raw.dashboard);
   if (!dashboardResult.ok) {
     return cacheResult({
@@ -2088,6 +2104,7 @@ export function loadPluginManifest(
       version,
       uiHints,
       contracts,
+      hostIntegrationBundle: hostIntegrationBundleResult.bundle,
       mediaUnderstandingProviderMetadata,
       imageGenerationProviderMetadata,
       videoGenerationProviderMetadata,
