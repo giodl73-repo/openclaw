@@ -39,6 +39,7 @@ import {
   HOSTING_PROFILE_ENV,
   parseHostingProfileId,
 } from "../../hosting/profiles.js";
+import type { HostingProfileId } from "../../hosting/types.js";
 import { isTruthyEnvValue } from "../../infra/env.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import {
@@ -728,6 +729,7 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
   }
   setVerbose(Boolean(opts.verbose));
   const hostingProfileRaw = toOptionString(opts.hostingProfile);
+  let hostingProfileOverride: HostingProfileId | undefined;
   if (hostingProfileRaw !== undefined) {
     const hostingProfile = parseHostingProfileId(hostingProfileRaw);
     if (!hostingProfile) {
@@ -735,6 +737,7 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
       defaultRuntime.exit(1);
       return;
     }
+    hostingProfileOverride = hostingProfile;
     process.env[HOSTING_PROFILE_ENV] = hostingProfile;
   }
   if (opts.cliBackendLogs || opts.claudeCliLogs) {
@@ -1233,6 +1236,7 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
         }
         return await startGatewayServer(port, {
           bind,
+          ...(hostingProfileOverride ? { hostingProfileOverride } : {}),
           auth: authOverride,
           tailscale: tailscaleOverride,
           startupStartedAt,
