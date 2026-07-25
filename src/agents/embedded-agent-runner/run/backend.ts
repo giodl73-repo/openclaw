@@ -9,6 +9,7 @@ import {
 } from "../../../skill-memory/store.sqlite.js";
 import { collectToolSkillMemory } from "../../../trajectory/skill-memory.js";
 import { runAgentHarnessAttempt } from "../../harness/selection.js";
+import { getSubagentRunByRunId } from "../../subagent-registry.js";
 import { log } from "../logger.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 
@@ -35,6 +36,7 @@ export async function runEmbeddedAttemptWithBackend(
         let recordedMemories: ReturnType<typeof recordSkillMemoryBatch> = [];
         try {
           const occurredAt = Date.now();
+          const managedSkill = getSubagentRunByRunId(params.runId)?.managedSkill;
           recordedMemories = recordSkillMemoryBatch(
             collected.memories.map((memory, memoryIndex) =>
               Object.assign(
@@ -47,6 +49,15 @@ export async function runEmbeddedAttemptWithBackend(
                   runId: params.runId,
                   toolName: memory.toolName,
                   toolCallId: memory.toolCallId,
+                  ...(managedSkill
+                    ? {
+                        invocationId: managedSkill.invocationId,
+                        skillName: managedSkill.skillName,
+                        ...(managedSkill.skillDigest
+                          ? { skillDigest: managedSkill.skillDigest }
+                          : {}),
+                      }
+                    : {}),
                 },
                 params.sessionKey ? { sessionKey: params.sessionKey } : {},
               ),

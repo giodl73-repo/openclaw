@@ -155,7 +155,7 @@ const SUBAGENT_CONTROL_GATEWAY_TIMEOUT_MS = 60_000;
 const DEFAULT_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 60_000;
 const MAX_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 300_000;
 
-type SpawnSubagentParams = {
+export type SpawnSubagentParams = {
   task: string;
   /** Trusted identity when this child is an explicitly managed skill run. */
   managedSkill?: ManagedSkillInvocation;
@@ -190,7 +190,7 @@ type SpawnSubagentParams = {
   attachMountPath?: string;
 };
 
-type SpawnSubagentContext = {
+export type SpawnSubagentContext = {
   agentSessionKey?: string;
   requesterTurnRunId?: string;
   /** Separate key used only for completion routing, not sandbox policy. */
@@ -214,7 +214,7 @@ type SpawnSubagentContext = {
   requesterRunId?: string;
 };
 
-type SpawnSubagentResult = {
+export type SpawnSubagentResult = {
   status: "accepted" | "forbidden" | "error";
   childSessionKey?: string;
   sessionKey?: string;
