@@ -27,6 +27,7 @@ import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
 import { isValidAgentId, normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import { recordSubagentSpawned } from "../sessions/session-state-events.js";
 import type { FastMode } from "../shared/fast-mode.js";
+import type { ManagedSkillInvocation } from "../skills/invocation.js";
 import { resolveUserPath } from "../utils.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import { listAgentIds, resolveAgentDir } from "./agent-scope-config.js";
@@ -156,6 +157,8 @@ const MAX_SUBAGENT_AGENT_GATEWAY_TIMEOUT_MS = 300_000;
 
 type SpawnSubagentParams = {
   task: string;
+  /** Trusted identity when this child is an explicitly managed skill run. */
+  managedSkill?: ManagedSkillInvocation;
   label?: string;
   agentId?: string;
   model?: string;
@@ -216,6 +219,7 @@ type SpawnSubagentResult = {
   childSessionKey?: string;
   sessionKey?: string;
   runId?: string;
+  skillInvocationId?: string;
   mode?: SpawnSubagentMode;
   taskName?: string;
   note?: string;
@@ -1746,6 +1750,7 @@ export async function spawnSubagentDirect(
           requesterDisplayKey: ownership.completionRequesterDisplayKey,
           task,
           taskName,
+          managedSkill: params.managedSkill,
           agentId: targetAgentId,
           requesterAgentId,
           cleanup,
@@ -1879,6 +1884,7 @@ export async function spawnSubagentDirect(
         childSessionKey,
         sessionKey: childSessionKey,
         runId: childRunId,
+        skillInvocationId: params.managedSkill?.invocationId,
         mode: spawnMode,
         taskName,
         note: preparedSpawnContext.forkFallbackNote
@@ -1908,6 +1914,7 @@ export async function spawnSubagentDirect(
       status: "accepted",
       childSessionKey,
       runId: childRunId,
+      skillInvocationId: params.managedSkill?.invocationId,
       mode: spawnMode,
       taskName,
       note: preparedSpawnContext.forkFallbackNote

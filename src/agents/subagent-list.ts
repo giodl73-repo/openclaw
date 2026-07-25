@@ -41,6 +41,7 @@ type SubagentListItem = {
   runId: string;
   sessionKey: string;
   taskName?: string;
+  managedSkill?: SubagentRunRecord["managedSkill"];
   label: string;
   task: string;
   status: string;
@@ -50,6 +51,14 @@ type SubagentListItem = {
   childSessions?: string[];
   model?: string;
   totalTokens?: number;
+  usage?: {
+    input?: number;
+    output?: number;
+    total?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    estimatedCostUsd?: number;
+  };
   startedAt?: number;
   endedAt?: number;
 };
@@ -209,6 +218,25 @@ function resolveModelDisplay(entry?: SessionEntry, fallbackModel?: string) {
   });
 }
 
+function resolveRunUsage(entry?: SessionEntry): SubagentListItem["usage"] {
+  if (!entry) {
+    return undefined;
+  }
+  const finite = (value: number | undefined) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const input = finite(entry.inputTokens);
+  const output = finite(entry.outputTokens);
+  const usage = {
+    input,
+    output,
+    total: input !== undefined || output !== undefined ? (input ?? 0) + (output ?? 0) : undefined,
+    cacheRead: finite(entry.cacheRead),
+    cacheWrite: finite(entry.cacheWrite),
+    estimatedCostUsd: finite(entry.estimatedCostUsd),
+  };
+  return Object.values(usage).some((value) => value !== undefined) ? usage : undefined;
+}
+
 function buildListText(params: {
   active: Array<{ line: string }>;
   recent: Array<{ line: string }>;
@@ -263,6 +291,7 @@ export function buildSubagentList(params: {
       cache,
     }).entry;
     const totalTokens = resolveTotalTokens(sessionEntry);
+    const usage = entry.managedSkill ? resolveRunUsage(sessionEntry) : undefined;
     const usageText = formatTokenUsageDisplay(sessionEntry);
     const pendingDescendants = pendingDescendantCount(entry.childSessionKey);
     const status = resolveRunStatus(entry, {
@@ -281,6 +310,7 @@ export function buildSubagentList(params: {
       runId: entry.runId,
       sessionKey: entry.childSessionKey,
       ...(taskName ? { taskName } : {}),
+      ...(entry.managedSkill ? { managedSkill: entry.managedSkill } : {}),
       label,
       task,
       status,
@@ -290,6 +320,7 @@ export function buildSubagentList(params: {
       ...(childSessions.length > 0 ? { childSessions } : {}),
       model: resolveModelRef(sessionEntry, entry.model),
       totalTokens,
+      ...(usage ? { usage } : {}),
       startedAt: getSubagentSessionStartedAt(entry),
       ...(entry.endedAt ? { endedAt: entry.endedAt } : {}),
     };

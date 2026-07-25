@@ -486,6 +486,99 @@ describe("sessions_spawn tool", () => {
     });
   });
 
+  it("starts an available skill as a managed child run", async () => {
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+      parentRunId: "run-parent",
+      skillsSnapshot: {
+        prompt: "",
+        skills: [
+          {
+            name: "resolve-case",
+            skillDigest: "sha256:abc",
+            executionHints: { remembers: ["case.resolved"] },
+          },
+        ],
+        resolvedSkills: [
+          {
+            name: "resolve-case",
+            description: "Resolve a support case.",
+            filePath: "/skills/resolve-case/SKILL.md",
+            baseDir: "/skills/resolve-case",
+            contentDigest: "sha256:abc",
+            source: "workspace",
+            sourceInfo: {} as never,
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+
+    await tool.execute("managed-skill", {
+      task: "Resolve case CAS-1042",
+      skill: "resolve-case",
+      mode: "run",
+    });
+
+    const spawn = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 0, "spawn subagent");
+    expect(spawn.task).toBe(
+      "Use the resolve-case skill to complete this task:\n\nResolve case CAS-1042",
+    );
+    expect(spawn.managedSkill).toMatchObject({
+      invocationId: expect.stringMatching(/^skill_/),
+      skillName: "resolve-case",
+      skillSource: "workspace",
+      skillDigest: "sha256:abc",
+      executionHints: { remembers: ["case.resolved"] },
+      parentRunId: "run-parent",
+    });
+  });
+
+  it("rejects unavailable and non-run managed skill targets", async () => {
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+      skillsSnapshot: { prompt: "", skills: [], resolvedSkills: [] },
+    });
+
+    const unavailable = await tool.execute("managed-missing", {
+      task: "Resolve case",
+      skill: "missing",
+    });
+    expect(unavailable.details).toMatchObject({
+      status: "error",
+      error: 'Skill "missing" is not available in this run.',
+    });
+
+    const availableTool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+      skillsSnapshot: {
+        prompt: "",
+        skills: [{ name: "resolve-case" }],
+        resolvedSkills: [
+          {
+            name: "resolve-case",
+            description: "Resolve a support case.",
+            filePath: "/skills/resolve-case/SKILL.md",
+            baseDir: "/skills/resolve-case",
+            source: "workspace",
+            sourceInfo: {} as never,
+            disableModelInvocation: false,
+          },
+        ],
+      },
+    });
+    const threaded = await availableTool.execute("managed-thread", {
+      task: "Resolve case",
+      skill: "resolve-case",
+      thread: true,
+    });
+    expect(threaded.details).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("one background run"),
+    });
+    expect(hoisted.spawnSubagentDirectMock).not.toHaveBeenCalled();
+  });
+
   it("requires visible sessions for worktree options", async () => {
     const tool = createSessionsSpawnTool({ agentSessionKey: "agent:main:main" });
 

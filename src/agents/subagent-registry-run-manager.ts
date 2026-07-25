@@ -8,6 +8,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway } from "../gateway/call.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runWithGatewayIndependentRootWorkAdmission } from "../process/gateway-work-admission.js";
+import type { ManagedSkillInvocation } from "../skills/invocation.js";
 import {
   SUBAGENT_KILL_TASK_ERROR,
   type DetachedTaskFindResult,
@@ -213,6 +214,7 @@ export type RegisterSubagentRunParams = {
   requesterDisplayKey: string;
   task: string;
   taskName?: string;
+  managedSkill?: ManagedSkillInvocation;
   agentId?: string;
   requesterAgentId?: string;
   cleanup: "delete" | "keep";
@@ -816,6 +818,7 @@ export function createSubagentRunManager(params: {
       requesterAgentId: registerParams.requesterAgentId,
       task: registerParams.task,
       taskName: registerParams.taskName,
+      managedSkill: registerParams.managedSkill,
       cleanup: registerParams.cleanup,
       expectsCompletionMessage: registerParams.expectsCompletionMessage,
       spawnMode,

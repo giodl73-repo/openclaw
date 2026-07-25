@@ -38,6 +38,13 @@ export type SkillInvocationPolicy = {
   disableModelInvocation: boolean;
 };
 
+/** Portable Agent Skills hints for Skill Memory and managed composition. */
+export type SkillExecutionHints = {
+  remembers?: string[];
+  usesSkills?: string[];
+  isolation?: "shared" | "preferred" | "required";
+};
+
 type SkillCommandDispatchSpec = {
   kind: "tool";
   /** Name of the tool to invoke (AnyAgentTool.name). */
@@ -68,6 +75,10 @@ export type SkillCommandSpec = {
   description: string;
   /** Bounded source label used for diagnostics. */
   skillSource?: SkillTelemetrySource;
+  /** Exact SHA-256 identity of the loaded SKILL.md content. */
+  skillDigest?: string;
+  /** Portable author hints consumed by managed invocation. */
+  executionHints?: SkillExecutionHints;
   /** Localized descriptions for native command surfaces that support them. */
   descriptionLocalizations?: Record<string, string>;
   /** Optional deterministic dispatch behavior for this command. */
@@ -125,6 +136,8 @@ export type SkillSnapshot = {
     skillKey?: string;
     primaryEnv?: string;
     requiredEnv?: string[];
+    skillDigest?: string;
+    executionHints?: SkillExecutionHints;
   }>;
   /** Normalized agent-level filter used to build this snapshot; undefined means unrestricted. */
   skillFilter?: string[];
