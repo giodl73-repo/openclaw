@@ -14,6 +14,7 @@ import {
   shouldResolveConfiguredLocalOriginManagedProxyBypass,
   type ConfiguredLocalOriginManagedProxyBypass,
 } from "./configured-local-origin-bypass.js";
+import type { PreparedCredentialSlotBindingsV1 } from "./credential-slot.js";
 import {
   createLocalOneHopFetchDispatcher,
   type FetchLike,
@@ -104,7 +105,14 @@ export type GuardedFetchResult = {
   refreshTimeout?: () => void;
 };
 
+export type GuardedCredentialFetchOptions = GuardedFetchOptions & {
+  credentialSlots: PreparedCredentialSlotBindingsV1;
+  credentialSlotRefs: string[];
+};
+
 type GuardedFetchInternalOptions = GuardedFetchOptions & {
+  credentialSlots?: PreparedCredentialSlotBindingsV1;
+  initialCredentialSlotRefs?: string[];
   managedProxyBypass?: ConfiguredLocalOriginManagedProxyBypass;
   resolveDispatcherPolicy?: (url: URL) => PinnedDispatcherPolicy | undefined;
   /** Preserve ambient Undici env-proxy routing for each eligible URL while keeping strict checks otherwise. */
@@ -458,17 +466,47 @@ function rewriteRedirectInitForCrossOrigin(params: {
 export { fetchWithRuntimeDispatcher } from "./runtime-fetch.js";
 
 export async function fetchWithSsrFGuard(params: GuardedFetchOptions): Promise<GuardedFetchResult> {
-  const { managedProxyBypass: _ignoredManagedProxyBypass, ...publicParams } =
-    params as GuardedFetchOptions & {
-      managedProxyBypass?: unknown;
-    };
+  const {
+    managedProxyBypass: _ignoredManagedProxyBypass,
+    credentialSlots: _ignoredCredentialSlots,
+    credentialSlotRefs: _ignoredCredentialSlotRefs,
+    ...publicParams
+  } = params as GuardedFetchOptions & {
+    managedProxyBypass?: unknown;
+    credentialSlots?: unknown;
+    credentialSlotRefs?: unknown;
+  };
   return await fetchWithSsrFGuardInternal(publicParams);
 }
 
-export async function fetchConfiguredLocalOriginWithSsrFGuard({
-  configuredLocalOriginBaseUrl,
+/**
+ * Internal owner path for exact-origin credentials. Prepared values apply only to the initial
+ * request hop; redirects always continue without credential slot references.
+ */
+export async function fetchWithCredentialSlotsAndSsrFGuard({
+  credentialSlots,
+  credentialSlotRefs,
   ...params
-}: GuardedFetchConfiguredLocalOriginOptions): Promise<GuardedFetchResult> {
+}: GuardedCredentialFetchOptions): Promise<GuardedFetchResult> {
+  return await fetchWithSsrFGuardInternal({
+    ...params,
+    credentialSlots,
+    initialCredentialSlotRefs: [...credentialSlotRefs],
+  });
+}
+
+export async function fetchConfiguredLocalOriginWithSsrFGuard(
+  options: GuardedFetchConfiguredLocalOriginOptions,
+): Promise<GuardedFetchResult> {
+  const {
+    configuredLocalOriginBaseUrl,
+    credentialSlots: _ignoredCredentialSlots,
+    credentialSlotRefs: _ignoredCredentialSlotRefs,
+    ...params
+  } = options as GuardedFetchConfiguredLocalOriginOptions & {
+    credentialSlots?: unknown;
+    credentialSlotRefs?: unknown;
+  };
   return await fetchWithSsrFGuardInternal({
     ...params,
     managedProxyBypass: {
@@ -516,6 +554,7 @@ async function fetchWithSsrFGuardInternal(
   );
   const visited = new Set<string>([getRedirectVisitKey(currentUrl, currentInit)]);
   let redirectCount = 0;
+  let isInitialHop = true;
 
   while (true) {
     let parsedUrl: URL;
@@ -641,10 +680,13 @@ async function fetchWithSsrFGuardInternal(
       const shouldUseRuntimeFetch = Boolean(dispatcher) && !supportsDispatcherInit;
       const oneHopDispatcher: OneHopFetchDispatcher = createLocalOneHopFetchDispatcher(
         shouldUseRuntimeFetch ? fetchWithRuntimeDispatcher : defaultFetch,
+        { credentialSlots: params.credentialSlots },
       );
       const response = await oneHopDispatcher.dispatch({
         url: parsedUrl.toString(),
         init,
+        credentialSlotRefs: isInitialHop ? params.initialCredentialSlotRefs : undefined,
+      });
       });
       const capturedByGlobalFetchPatch =
         !shouldUseRuntimeFetch &&
@@ -705,6 +747,7 @@ async function fetchWithSsrFGuardInternal(
         void response.body?.cancel().catch(() => undefined);
         await closeDispatcher(dispatcher);
         currentUrl = nextUrl;
+        isInitialHop = false;
         continue;
       }
 
