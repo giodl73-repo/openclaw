@@ -7,6 +7,7 @@ import {
   type CredentialSlotResolverV1,
   prepareCredentialSlotBindingsV1,
 } from "./credential-slot.js";
+import { fetchWithCredentialSlotsAndSsrFGuard } from "./fetch-guard.js";
 import {
   NETWORK_GUARD_PROFILE_VERSION,
   type NetworkGuardProfileV1,
@@ -125,6 +126,58 @@ describe("credential slot bindings", () => {
       origin: ORIGIN,
       signal: undefined,
     });
+  });
+
+  it("applies prepared slots through guarded fetch only on the initial hop", async () => {
+    const resolve = vi.fn(async () => ({ value: "Bearer protected-value" }));
+    const bindings = prepareCredentialSlotBindingsV1({
+      definitions: [createDefinition()],
+      resolvers: [createResolver(resolve)],
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://other.example.com/final" },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("ok"));
+
+    const result = await fetchWithCredentialSlotsAndSsrFGuard({
+      url: ORIGIN + "/start",
+      fetchImpl,
+      credentialSlots: bindings,
+      credentialSlotRefs: [SLOT_ID],
+    });
+    await result.release();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer protected-value",
+    );
+    expect(new Headers(fetchImpl.mock.calls[1]?.[1]?.headers).get("authorization")).toBeNull();
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a mismatched initial origin before guarded fetch dispatch", async () => {
+    const resolve = vi.fn(async () => ({ value: "Bearer protected-value" }));
+    const bindings = prepareCredentialSlotBindingsV1({
+      definitions: [createDefinition()],
+      resolvers: [createResolver(resolve)],
+    });
+    const fetchImpl = vi.fn(async () => new Response("ok"));
+
+    await expect(
+      fetchWithCredentialSlotsAndSsrFGuard({
+        url: "https://other.example.com/v1",
+        fetchImpl,
+        credentialSlots: bindings,
+        credentialSlotRefs: [SLOT_ID],
+      }),
+    ).rejects.toMatchObject({ code: "origin-denied", slotId: SLOT_ID });
+    expect(resolve).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("rejects cross-origin use before invoking the resolver or fetch", async () => {
