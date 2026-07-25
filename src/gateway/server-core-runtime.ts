@@ -446,7 +446,7 @@ export async function startGatewayCoreRuntime(input: {
     retireAttachedPluginRuntimeBindings = loaded.retireGatewayRuntimeBindings ?? (() => {});
     retirePreviousBindings();
     pluginRuntime.registry = loaded.pluginRegistry;
-    pluginRuntime.readinessSnapshot = pluginRuntime.buildReadinessRuntimeSnapshot(
+    pluginRuntime.readinessSnapshot = pluginRuntime.makeState(
       readinessConfig,
       pluginRuntime.registry,
     );
