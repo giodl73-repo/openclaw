@@ -1,0 +1,86 @@
+name: Readiness catalog proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - user/giodl/readiness-catalog-proof
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Verify immutable implementation parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=e0a8269967307b02debc006461b1e5e53364ab59
+          actual="$(git rev-parse HEAD^)"
+          test "$actual" = "$expected"
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Check formatting
+        shell: bash
+        run: >-
+          pnpm exec oxfmt --check
+          docs/cli/ready.md
+          src/cli/program/register.status-health-sessions.ts
+          src/commands/ready.ts
+          src/commands/ready.test.ts
+          src/gateway/methods/core-descriptors.ts
+          src/gateway/server-methods/health.ts
+          src/gateway/server-methods/health.readiness.test.ts
+          src/gateway/server-methods/shared-types.ts
+          src/gateway/server-methods.ts
+          src/gateway/server-methods-list.test.ts
+          src/gateway/server-request-context.ts
+          src/gateway/server-runtime-state-prepare.ts
+          src/gateway/server-startup-finish.ts
+          src/gateway/server-startup-plugin-quarantine.test.ts
+          src/readiness/catalog.ts
+          src/readiness/catalog.test.ts
+
+      - name: Run focused tests
+        shell: bash
+        run: >-
+          pnpm exec vitest run
+          src/readiness/catalog.test.ts
+          src/commands/ready.test.ts
+          src/gateway/server-methods/health.readiness.test.ts
+          src/gateway/server-methods-list.test.ts
+          src/cli/program/register.status-health-sessions.test.ts
+          src/gateway/server-startup-plugin-quarantine.test.ts
+
+      - name: Run type-aware lint
+        shell: bash
+        run: >-
+          node scripts/run-oxlint.mjs --type-aware
+          src/readiness/catalog.ts
+          src/readiness/catalog.test.ts
+          src/commands/ready.ts
+          src/commands/ready.test.ts
+          src/gateway/server-methods/health.ts
+          src/gateway/server-methods/health.readiness.test.ts
+          src/gateway/server-methods/shared-types.ts
+          src/gateway/server-request-context.ts
+          src/gateway/server-runtime-state-prepare.ts
+          src/gateway/server-startup-finish.ts
+          src/gateway/server-startup-plugin-quarantine.test.ts
+          src/cli/program/register.status-health-sessions.ts
