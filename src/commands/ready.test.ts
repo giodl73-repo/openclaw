@@ -44,6 +44,17 @@ function createRuntime() {
   return { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
 }
 
+function createWatchProcess() {
+  const handlers = new Map<string, () => void>();
+  return {
+    handlers,
+    process: {
+      on: vi.fn((signal: string, handler: () => void) => handlers.set(signal, handler)),
+      off: vi.fn((signal: string) => handlers.delete(signal)),
+    },
+  };
+}
+
 describe("readyCommand", () => {
   it("writes the canonical result as JSON and keeps advisory-only results successful", async () => {
     const runtime = createRuntime();
@@ -120,6 +131,161 @@ describe("readyCommand", () => {
 
     expect(runtime.log.mock.calls[0]?.[0]).toContain("Producer: legacy Gateway");
     expect(runtime.exit).not.toHaveBeenCalled();
+  });
+
+  it("watches semantic transitions as JSON Lines and ignores timestamp churn", async () => {
+    const runtime = createRuntime();
+    const watchProcess = createWatchProcess();
+    const unavailableWorkspace: CanonicalReadinessResult = {
+      ...ready,
+      evaluatedAtMs: 3_000,
+      ready: false,
+      conditions: [
+        ready.conditions[0],
+        {
+          type: "WorkspaceWritable",
+          subjectRef: "openclaw/workspace/default",
+          status: "False",
+          requirement: "required",
+          reason: "WorkspaceUnavailable",
+          message: "Workspace is unavailable.",
+        },
+      ],
+      failures: ["WorkspaceUnavailable"],
+    };
+    const callReady = vi
+      .fn()
+      .mockResolvedValueOnce(ready)
+      .mockResolvedValueOnce({
+        ...ready,
+        evaluatedAtMs: 2_000,
+        conditions: ready.conditions.map((condition) => ({
+          ...condition,
+          observedAtMs: 2_000,
+        })),
+      })
+      .mockResolvedValueOnce(unavailableWorkspace);
+    let delays = 0;
+
+    await readyCommand({ watch: true, json: true, intervalMs: 25, timeoutMs: 500 }, runtime, {
+      callReady,
+      process: watchProcess.process,
+      now: () => 10_000 + delays,
+      delay: async (intervalMs) => {
+        expect(intervalMs).toBe(25);
+        delays += 1;
+        if (delays === 3) {
+          watchProcess.handlers.get("SIGINT")?.();
+        }
+      },
+    });
+
+    expect(callReady).toHaveBeenCalledTimes(3);
+    expect(callReady).toHaveBeenCalledWith({
+      timeoutMs: 500,
+      signal: expect.any(AbortSignal),
+    });
+    const events = runtime.log.mock.calls.map(([line]) => JSON.parse(String(line)));
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ eventVersion: 1, event: "snapshot", ready: true });
+    expect(events[1]).toMatchObject({ eventVersion: 1, event: "transition", ready: false });
+    expect(events[1].changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "ready", before: true, after: false }),
+        expect.objectContaining({ kind: "condition", change: "added" }),
+      ]),
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(130);
+    expect(watchProcess.process.off).toHaveBeenCalledTimes(2);
+    expect(watchProcess.handlers.size).toBe(0);
+  });
+
+  it("keeps watching through Gateway unavailability and recovery", async () => {
+    const runtime = createRuntime();
+    const watchProcess = createWatchProcess();
+    const recoveredNotReady: CanonicalReadinessResult = {
+      ...ready,
+      ready: false,
+      conditions: [
+        {
+          ...ready.conditions[0],
+          status: "False",
+          reason: "GatewayDegraded",
+          message: "Gateway recovered but remains degraded.",
+        },
+      ],
+      failures: ["GatewayDegraded"],
+    };
+    const callReady = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("connection refused"))
+      .mockResolvedValueOnce(recoveredNotReady);
+    let delays = 0;
+
+    await readyCommand({ watch: true }, runtime, {
+      callReady,
+      process: watchProcess.process,
+      now: () => 20_000 + delays,
+      delay: async () => {
+        delays += 1;
+        if (delays === 2) {
+          watchProcess.handlers.get("SIGTERM")?.();
+        }
+      },
+    });
+
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("Ready: unavailable");
+    expect(runtime.log.mock.calls[1]?.[0]).toContain("availability unavailable -> available");
+    expect(runtime.log.mock.calls[1]?.[0]).toContain("Ready: no");
+    expect(runtime.log.mock.calls[1]?.[0]).toContain("GatewayDegraded");
+    expect(runtime.exit).toHaveBeenCalledWith(143);
+  });
+
+  it("cancels an active Gateway call without emitting a false unavailable result", async () => {
+    const runtime = createRuntime();
+    const watchProcess = createWatchProcess();
+    const delay = vi.fn();
+
+    await readyCommand({ watch: true }, runtime, {
+      process: watchProcess.process,
+      delay,
+      callReady: async ({ signal }) =>
+        await new Promise<CanonicalReadinessResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          watchProcess.handlers.get("SIGINT")?.();
+        }),
+    });
+
+    expect(runtime.log).not.toHaveBeenCalled();
+    expect(delay).not.toHaveBeenCalled();
+    expect(runtime.exit).toHaveBeenCalledWith(130);
+    expect(watchProcess.handlers.size).toBe(0);
+  });
+
+  it("shows the Gateway error when an available watch becomes unavailable", async () => {
+    const runtime = createRuntime();
+    const watchProcess = createWatchProcess();
+    const callReady = vi
+      .fn()
+      .mockResolvedValueOnce(ready)
+      .mockRejectedValueOnce(new Error("connection reset"));
+    let delays = 0;
+
+    await readyCommand({ watch: true }, runtime, {
+      callReady,
+      process: watchProcess.process,
+      delay: async () => {
+        delays += 1;
+        if (delays === 2) {
+          watchProcess.handlers.get("SIGINT")?.();
+        }
+      },
+    });
+
+    expect(runtime.log.mock.calls[1]?.[0]).toContain("availability available -> unavailable");
+    expect(runtime.log.mock.calls[1]?.[0]).toContain(
+      "GatewayReadinessUnavailable: connection reset",
+    );
   });
 });
 

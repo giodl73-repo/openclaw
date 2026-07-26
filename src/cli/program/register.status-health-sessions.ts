@@ -8,6 +8,8 @@ import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
 import { parsePositiveIntOrUndefined, parseStrictPositiveIntOrUndefined } from "./helpers.js";
 
+const MIN_READY_WATCH_INTERVAL_MS = 250;
+
 function resolveVerbose(opts: { verbose?: boolean; debug?: boolean }): boolean {
   return Boolean(opts.verbose || opts.debug);
 }
@@ -77,6 +79,16 @@ function parseTimeoutMs(timeout: unknown): number | null | undefined {
   const parsed = parsePositiveIntOrUndefined(timeout);
   if (timeout !== undefined && parsed === undefined) {
     defaultRuntime.error("--timeout must be a positive integer (milliseconds)");
+    defaultRuntime.exit(1);
+    return null;
+  }
+  return parsed;
+}
+
+function parseReadyWatchIntervalMs(interval: unknown): number | null | undefined {
+  const parsed = parsePositiveIntOrUndefined(interval);
+  if (interval !== undefined && (parsed === undefined || parsed < MIN_READY_WATCH_INTERVAL_MS)) {
+    defaultRuntime.error(`--interval must be at least ${MIN_READY_WATCH_INTERVAL_MS} milliseconds`);
     defaultRuntime.exit(1);
     return null;
   }
@@ -186,14 +198,18 @@ export function registerStatusHealthSessionsCommands(program: Command) {
   program
     .command("ready")
     .description("Check whether the running gateway is ready to accept work")
-    .option("--json", "Output the canonical readiness result as JSON", false)
+    .option("--json", "Output JSON; with --watch, emit one event per line", false)
     .option("--timeout <ms>", "Connection timeout in milliseconds", "10000")
+    .option("--watch", "Keep watching and emit semantic readiness transitions", false)
+    .option("--interval <ms>", "Watch interval in milliseconds (default: 2000)")
     .addHelpText(
       "after",
       () =>
         `\n${theme.heading("Examples:")}\n${formatHelpExamples([
           ["openclaw ready", "Show readiness conditions and findings."],
           ["openclaw ready --json", "Output the canonical readiness result."],
+          ["openclaw ready --watch", "Show readiness changes until interrupted."],
+          ["openclaw ready --watch --json", "Stream versioned JSON Lines events."],
           ["openclaw ready --timeout 2500", "Tighten the Gateway connection timeout."],
         ])}`,
     )
@@ -204,8 +220,20 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     )
     .action(async (opts) => {
       await runWithVerboseAndTimeout(opts, async ({ timeoutMs }) => {
+        const intervalMs = parseReadyWatchIntervalMs(opts.interval);
+        if (intervalMs === null) {
+          return;
+        }
+        if (intervalMs !== undefined && !opts.watch) {
+          defaultRuntime.error("--interval requires --watch");
+          defaultRuntime.exit(1);
+          return;
+        }
         const { readyCommand } = await import("../../commands/ready.js");
-        await readyCommand({ json: Boolean(opts.json), timeoutMs }, defaultRuntime);
+        await readyCommand(
+          { json: Boolean(opts.json), timeoutMs, watch: Boolean(opts.watch), intervalMs },
+          defaultRuntime,
+        );
       });
     });
 

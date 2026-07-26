@@ -11,14 +11,18 @@ Fetch the canonical readiness result from the running Gateway. This is the CLI p
 
 ## Options
 
-| Flag             | Default | Description                                   |
-| ---------------- | ------- | --------------------------------------------- |
-| `--json`         | `false` | Print the canonical readiness result as JSON. |
-| `--timeout <ms>` | `10000` | Gateway connection timeout in milliseconds.   |
+| Flag              | Default | Description                                                    |
+| ----------------- | ------- | -------------------------------------------------------------- |
+| `--json`          | `false` | Print JSON; with `--watch`, emit one event per line.           |
+| `--timeout <ms>`  | `10000` | Gateway connection timeout for each evaluation.                |
+| `--watch`         | `false` | Emit the initial result and then semantic readiness changes.   |
+| `--interval <ms>` | `2000`  | Delay between evaluations (minimum `250`); requires `--watch`. |
 
 ```bash
 openclaw ready
 openclaw ready --json
+openclaw ready --watch
+openclaw ready --watch --json --interval 500
 openclaw ready --timeout 2500
 ```
 
@@ -35,14 +39,34 @@ owner-defined revision of the same subject, such as active config or pairing
 state. A Gateway keeps one ID across readiness evaluations, reload, and drain,
 and receives a new ID when its serving lifecycle restarts.
 
+## Watch mode
+
+Watch mode continues through not-ready results and temporary Gateway
+unavailability so operators can observe recovery. Evaluations run sequentially
+and retain the independent `--timeout` bound. Signals cancel the active Gateway
+call as well as the polling delay. Timestamp-only churn is ignored;
+conditions are compared by `(subjectRef, type)` and subjects by `ref`. A new
+subject `id` or `generation` is reported as replacement at a new lifetime.
+
+With `--watch --json`, output is versioned JSON Lines: one complete `snapshot`
+or `transition` event per line. Each event contains the current canonical
+result or the structured Gateway-unavailable error. The watch facility polls
+the existing readiness contract; it does not introduce a separate streaming
+Gateway protocol.
+
 When the Gateway cannot be reached or does not expose the readiness contract, `--json` returns `ready: false` with a structured `error.reason` and `error.message` instead of emitting a partial condition set.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | The Gateway reported ready. Advisory findings may still be present.                                                                    |
-| `1`  | A required condition failed or was unknown, the Gateway was unavailable, or the running Gateway did not expose the readiness contract. |
+| Code  | Meaning                                                                                                                                |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`   | The Gateway reported ready. Advisory findings may still be present.                                                                    |
+| `1`   | A required condition failed or was unknown, the Gateway was unavailable, or the running Gateway did not expose the readiness contract. |
+| `130` | Watch mode was interrupted by `SIGINT`.                                                                                                |
+| `143` | Watch mode was interrupted by `SIGTERM`.                                                                                               |
+
+In watch mode, not-ready and unavailable states are observations rather than
+process exits; the command remains active to report recovery.
 
 ## Related
 
