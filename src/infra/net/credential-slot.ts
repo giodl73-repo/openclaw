@@ -162,7 +162,9 @@ function normalizeDefinition(definition: CredentialSlotDefinitionV1): Credential
   };
 }
 
-function normalizeResolver(resolver: CredentialSlotResolverV1): CredentialSlotResolverV1 {
+export function compileCredentialSlotResolverV1(
+  resolver: CredentialSlotResolverV1,
+): CredentialSlotResolverV1 {
   if (resolver.version !== CREDENTIAL_SLOT_RESOLVER_VERSION) {
     throw new CredentialSlotError(
       "incompatible-resolver",
@@ -186,13 +188,14 @@ function normalizeResolver(resolver: CredentialSlotResolverV1): CredentialSlotRe
       slotId || undefined,
     );
   }
-  return {
+  const allowedOrigins = Object.freeze(normalizeOrigins(resolver.allowedOrigins)) as string[];
+  return Object.freeze({
     ...resolver,
     resolverId,
     slotId,
     headerName: normalizeHeaderName(resolver.headerName),
-    allowedOrigins: normalizeOrigins(resolver.allowedOrigins),
-  };
+    allowedOrigins,
+  });
 }
 
 async function resolveCredentialWithAbort<T>(
@@ -252,7 +255,7 @@ export function prepareCredentialSlotBindingsV1(params: {
 }): PreparedCredentialSlotBindingsV1 {
   const resolversById = new Map<string, CredentialSlotResolverV1>();
   for (const rawResolver of params.resolvers) {
-    const resolver = normalizeResolver(rawResolver);
+    const resolver = compileCredentialSlotResolverV1(rawResolver);
     if (resolversById.has(resolver.resolverId)) {
       throw new CredentialSlotError(
         "duplicate-resolver",

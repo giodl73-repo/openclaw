@@ -202,6 +202,10 @@ export type OpenClawPluginApi = {
   registerHttpRoute: (params: OpenClawPluginHttpRouteParams) => void;
   /** Register a plugin-owned resolver for browser-style hosted media URLs. */
   registerHostedMediaResolver: (resolver: OpenClawPluginHostedMediaResolver) => void;
+  /** Register a lifecycle-scoped implementation for a declared credential slot. */
+  registerCredentialSlotResolver: (
+    resolver: import("../infra/net/credential-slot.js").CredentialSlotResolverV1,
+  ) => void;
   /** Bind a declared MCP server's transport to the trusted message requester. */ registerMcpServerConnectionResolver: (
     resolver: import("./types.mcp-connection.js").OpenClawPluginMcpServerConnectionResolver,
   ) => void;

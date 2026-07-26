@@ -3,6 +3,7 @@ import type { AgentHarness } from "../agents/harness/types.js";
 import type { GatewayMethodDescriptor } from "../gateway/methods/descriptor.js";
 import type { GatewayRequestHandlers } from "../gateway/server-methods/types.js";
 import type { HookEntry } from "../hooks/types.js";
+import type { CredentialSlotResolverV1 } from "../infra/net/credential-slot.js";
 import type { JsonSchemaObject } from "../shared/json-schema.types.js";
 import type {
   AgentToolResultMiddleware,
@@ -129,6 +130,14 @@ type PluginHostedMediaResolverRegistration = {
   pluginId: string;
   pluginName?: string;
   resolver: OpenClawPluginHostedMediaResolver;
+  source: string;
+  rootDir?: string;
+};
+
+export type PluginCredentialSlotResolverRegistration = {
+  pluginId: string;
+  pluginName?: string;
+  resolver: CredentialSlotResolverV1;
   source: string;
   rootDir?: string;
 };
@@ -511,6 +520,7 @@ export type PluginRegistry = {
   coreGatewayMethodNames: string[];
   httpRoutes: PluginHttpRouteRegistration[];
   hostedMediaResolvers: PluginHostedMediaResolverRegistration[];
+  credentialSlotResolvers: PluginCredentialSlotResolverRegistration[];
   mcpServerConnectionResolvers: PluginMcpServerConnectionResolverRegistration[];
   cliRegistrars: PluginCliRegistration[];
   reloads: PluginReloadRegistration[];
