@@ -588,6 +588,9 @@ export async function prepareGatewayKernelState(params: {
         configLoaded: true,
         gateway: "responding",
         plugins: buildGatewayPluginReadinessInput(snapshot.registry),
+        pluginsRequired:
+          profile !== undefined &&
+          requiredCriteriaForHostingProfile(profile).includes("openclaw.plugins-loaded"),
         additionalConditions: [...profileConditions, ...contribution.conditions],
         additionalSubjects: [...profileSubjects, ...contribution.subjects],
       });
