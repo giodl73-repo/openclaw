@@ -75,6 +75,26 @@ describe("Gateway startup plugin quarantine", () => {
     );
     expect(rpcReadiness.ready).toBe(true);
     expect(rpcReadiness.conditions.map((condition) => condition.type)).toContain("ConfigLoaded");
+
+    const catalog = await callGateway<{
+      catalogVersion: number;
+      criteria: Array<{ id: string; registered: boolean; selection: string }>;
+    }>({
+      url: `ws://127.0.0.1:${port}`,
+      method: "readiness.catalog",
+      params: {},
+      token,
+      timeoutMs: 5_000,
+      deviceIdentity: null,
+    });
+    expect(catalog.catalogVersion).toBe(1);
+    expect(catalog.criteria).toContainEqual(
+      expect.objectContaining({
+        id: "openclaw.workspace-writable",
+        registered: true,
+        selection: "unselected",
+      }),
+    );
   });
 
   it("reaches readiness without importing one broken configured plugin", async () => {

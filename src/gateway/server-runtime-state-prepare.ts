@@ -9,6 +9,7 @@ import { isTruthyEnvValue } from "../infra/env.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { runtimeForLogger } from "../logging/subsystem.js";
 import { isGatewayDraining } from "../process/command-queue.js";
+import { buildReadinessCriterionCatalog } from "../readiness/catalog.js";
 import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
 import { createSelectedReadinessResolver } from "../readiness/selection.js";
 import { createGatewayReadinessIdentity } from "../readiness/subjects.js";
@@ -386,6 +387,13 @@ export async function prepareGatewayRuntimeState(params: {
       evaluateGateway: getGatewayReadiness,
       evaluateRuntime: evaluateRuntimeReadiness,
     });
+  const getReadinessCatalog = () => {
+    const snapshot = pluginRuntime.readinessSnapshot;
+    return buildReadinessCriterionCatalog({
+      config: snapshot.config,
+      registry: snapshot.registry,
+    });
+  };
   log.info("starting HTTP server...");
   const pluginGatewayContext: { current: GatewayRequestContext | undefined } = {
     current: undefined,
@@ -510,6 +518,7 @@ export async function prepareGatewayRuntimeState(params: {
     sidecarStartup,
     isGatewayStartupPending,
     getReadiness,
+    getReadinessCatalog,
     pluginGatewayContext,
     watchNodeRequestHandler,
     releasePluginRouteRegistry,

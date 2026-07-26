@@ -195,7 +195,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
       });
     });
 
-  program
+  const readyCmd = program
     .command("ready")
     .description("Check whether the running gateway is ready to accept work")
     .option("--json", "Output JSON; with --watch, emit one event per line", false)
@@ -234,6 +234,34 @@ export function registerStatusHealthSessionsCommands(program: Command) {
           { json: Boolean(opts.json), timeoutMs, watch: Boolean(opts.watch), intervalMs },
           defaultRuntime,
         );
+      });
+    });
+
+  const readyCriteriaCmd = readyCmd
+    .command("criteria")
+    .description("List or inspect active readiness criteria");
+
+  readyCriteriaCmd
+    .command("list")
+    .description("List active readiness criterion descriptors")
+    .option("--json", "Output JSON instead of text", false)
+    .option("--timeout <ms>", "Connection timeout in milliseconds", "10000")
+    .action(async (opts) => {
+      await runWithVerboseAndTimeout(opts, async ({ timeoutMs }) => {
+        const { readyCriteriaCommand } = await import("../../commands/ready.js");
+        await readyCriteriaCommand({ json: Boolean(opts.json), timeoutMs }, defaultRuntime);
+      });
+    });
+
+  readyCriteriaCmd
+    .command("inspect <id>")
+    .description("Inspect one active readiness criterion descriptor")
+    .option("--json", "Output JSON instead of text", false)
+    .option("--timeout <ms>", "Connection timeout in milliseconds", "10000")
+    .action(async (id, opts) => {
+      await runWithVerboseAndTimeout(opts, async ({ timeoutMs }) => {
+        const { readyCriteriaCommand } = await import("../../commands/ready.js");
+        await readyCriteriaCommand({ id, json: Boolean(opts.json), timeoutMs }, defaultRuntime);
       });
     });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CanonicalReadinessResult } from "../readiness/conditions.js";
-import { readyCommand } from "./ready.js";
+import { readyCommand, readyCriteriaCommand } from "./ready.js";
 
 const ready: CanonicalReadinessResult = {
   contractVersion: 1,
@@ -286,6 +286,55 @@ describe("readyCommand", () => {
     expect(runtime.log.mock.calls[1]?.[0]).toContain(
       "GatewayReadinessUnavailable: connection reset",
     );
+  });
+});
+
+describe("readyCriteriaCommand", () => {
+  const catalog = {
+    catalogVersion: 1 as const,
+    criteria: [
+      {
+        id: "openclaw.workspace-writable",
+        description: "Checks workspace writes.",
+        owner: { kind: "core" as const },
+        registered: true,
+        selection: "required" as const,
+      },
+    ],
+  };
+
+  it("lists the live descriptor catalog without evaluating readiness", async () => {
+    const runtime = createRuntime();
+    const callCatalog = vi.fn().mockResolvedValue(catalog);
+
+    await readyCriteriaCommand({}, runtime, { callCatalog });
+
+    expect(callCatalog).toHaveBeenCalledWith({ timeoutMs: undefined });
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("openclaw.workspace-writable");
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("required");
+  });
+
+  it("inspects one descriptor as JSON", async () => {
+    const runtime = createRuntime();
+
+    await readyCriteriaCommand({ id: "openclaw.workspace-writable", json: true }, runtime, {
+      callCatalog: async () => catalog,
+    });
+
+    expect(runtime.log).toHaveBeenCalledWith(JSON.stringify(catalog.criteria[0], null, 2));
+  });
+
+  it("fails when an inspected descriptor is absent", async () => {
+    const runtime = createRuntime();
+
+    await readyCriteriaCommand({ id: "plugin.missing.check" }, runtime, {
+      callCatalog: async () => catalog,
+    });
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      "Readiness criterion not found: plugin.missing.check",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
   });
 });
 

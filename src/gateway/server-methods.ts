@@ -431,7 +431,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
     loadHandlers: loadVoicewakeRoutingHandlers,
   }),
   ...createLazyCoreHandlers({
-    methods: ["health", "ready", "status"],
+    methods: ["health", "ready", "readiness.catalog", "status"],
     loadHandlers: loadHealthHandlers,
   }),
   ...createLazyCoreHandlers({

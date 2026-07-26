@@ -41,6 +41,7 @@ type GatewayRequestContextParams = {
   loadGatewayModelCatalogSnapshot: GatewayRequestContext["loadGatewayModelCatalogSnapshot"];
   getHealthCache: GatewayRequestContext["getHealthCache"];
   getReadiness?: GatewayRequestContext["getReadiness"];
+  getReadinessCatalog?: GatewayRequestContext["getReadinessCatalog"];
   refreshHealthSnapshot: GatewayRequestContext["refreshHealthSnapshot"];
   logHealth: GatewayRequestContext["logHealth"];
   logGateway: GatewayRequestContext["logGateway"];
@@ -182,6 +183,7 @@ export function createGatewayRequestContext(
     loadGatewayModelCatalogSnapshot: params.loadGatewayModelCatalogSnapshot,
     getHealthCache: params.getHealthCache,
     getReadiness: params.getReadiness,
+    getReadinessCatalog: params.getReadinessCatalog,
     refreshHealthSnapshot: params.refreshHealthSnapshot,
     logHealth: params.logHealth,
     logGateway: params.logGateway,
