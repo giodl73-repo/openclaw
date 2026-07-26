@@ -1,4 +1,5 @@
 import type { AgentHarness } from "../agents/harness/types.js";
+import type { ProviderRequestDispatcherRegistrationV1 } from "../agents/provider-request-dispatcher.js";
 import type { ProviderRequestTrafficPolicyRegistrationV1 } from "../agents/provider-request-traffic-policy.js";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -253,6 +254,10 @@ export type OpenClawPluginApi = {
   registerNodeHostCommand: (command: OpenClawPluginNodeHostCommand) => void;
   registerNodeInvokePolicy: (policy: OpenClawPluginNodeInvokePolicy) => void;
   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;
+  /** Register one policy-generation-fenced provider-request dispatcher binding. */
+  registerProviderRequestDispatcher: (
+    dispatcher: ProviderRequestDispatcherRegistrationV1,
+  ) => () => void;
   /** Register the active provider-request traffic-policy generation for this plugin lifecycle. */
   registerProviderRequestTrafficPolicy: (
     policy: ProviderRequestTrafficPolicyRegistrationV1,

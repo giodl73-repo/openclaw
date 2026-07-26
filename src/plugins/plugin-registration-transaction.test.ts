@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  clearProviderRequestDispatchersV1,
+  registerProviderRequestDispatcherForOwnerV1,
+  resolveProviderRequestDispatcherV1,
+} from "../agents/provider-request-dispatcher.js";
+import {
   getCurrentProviderRequestTrafficPolicyV1,
   registerProviderRequestTrafficPolicyV1,
   type ProviderRequestTrafficPolicyRegistrationV1,
@@ -225,4 +230,45 @@ it("restores the prior traffic policy when plugin activation rolls back", () => 
   transaction.rollback();
 
   expect(getCurrentProviderRequestTrafficPolicyV1()?.generation).toBe("active");
+});
+
+function dispatcherBinding(id: string) {
+  return {
+    version: "provider-request-dispatcher/v1" as const,
+    id,
+    trafficPolicyId: "example/enterprise-egress",
+    trafficPolicyGeneration: "active",
+    dispatch: vi.fn(async () => new Response("ok")),
+  };
+}
+
+function resolveDispatcher(id: string) {
+  return resolveProviderRequestDispatcherV1({
+    bindingId: id,
+    trafficPolicyId: "example/enterprise-egress",
+    trafficPolicyGeneration: "active",
+  });
+}
+
+it("clears dispatcher bindings before repeated active plugin activation", () => {
+  registerProviderRequestDispatcherForOwnerV1("plugin:active", dispatcherBinding("example/active"));
+
+  clearActivatedPluginRuntimeState();
+
+  expect(() => resolveDispatcher("example/active")).toThrow("unavailable");
+});
+
+it("restores the prior dispatcher set when plugin activation rolls back", () => {
+  registerProviderRequestDispatcherForOwnerV1("plugin:active", dispatcherBinding("example/active"));
+  const transaction = createPluginRegistrationTransaction({});
+  registerProviderRequestDispatcherForOwnerV1(
+    "plugin:replacement",
+    dispatcherBinding("example/replacement"),
+  );
+
+  transaction.rollback();
+
+  expect(resolveDispatcher("example/active").owner).toBe("plugin:active");
+  expect(() => resolveDispatcher("example/replacement")).toThrow("unavailable");
+  clearProviderRequestDispatchersV1();
 });

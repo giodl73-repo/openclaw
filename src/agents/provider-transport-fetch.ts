@@ -20,6 +20,7 @@ import {
 } from "@openclaw/normalization-core/number-coercion";
 import {
   fetchWithSsrFGuard,
+  fetchWithOneHopDispatcherAndSsrFGuard,
   withTrustedEnvProxyGuardedFetchMode,
 } from "../infra/net/fetch-guard.js";
 import { wrapGuardedBodyStream } from "../infra/net/guarded-body-stream.js";
@@ -50,6 +51,7 @@ import {
   mergeModelProviderRequestOverrides,
   resolveProviderRequestPolicyConfig,
 } from "./provider-request-config.js";
+import { resolveProviderRequestDispatcherV1 } from "./provider-request-dispatcher.js";
 import { evaluateCurrentProviderRequestTrafficPolicyV1 } from "./provider-request-traffic-policy.js";
 
 const DEFAULT_MAX_SDK_RETRY_WAIT_SECONDS = 60;
@@ -879,6 +881,14 @@ export function buildGuardedModelFetch(
       trafficPolicyDecision?.action === "allow"
         ? trafficPolicyDecision.allowPrivateNetwork
         : requestConfig.allowPrivateNetwork;
+    const selectedDispatcher =
+      trafficPolicyDecision?.action === "allow" && trafficPolicyDecision.dispatchBindingId
+        ? resolveProviderRequestDispatcherV1({
+            bindingId: trafficPolicyDecision.dispatchBindingId,
+            trafficPolicyId: trafficPolicyDecision.policyId,
+            trafficPolicyGeneration: trafficPolicyDecision.policyGeneration,
+          })
+        : undefined;
     const policy = resolveProviderTransportSsrFPolicy({
       baseUrl: model.baseUrl,
       url,
@@ -943,11 +953,15 @@ export function buildGuardedModelFetch(
         rawHeaders,
         localServiceSignal,
       );
-      result = await fetchWithSsrFGuard(
-        useEnvProxy
-          ? withTrustedEnvProxyGuardedFetchMode(guardedFetchOptions)
-          : guardedFetchOptions,
-      );
+      const effectiveGuardedFetchOptions = useEnvProxy
+        ? withTrustedEnvProxyGuardedFetchMode(guardedFetchOptions)
+        : guardedFetchOptions;
+      result = selectedDispatcher
+        ? await fetchWithOneHopDispatcherAndSsrFGuard({
+            ...effectiveGuardedFetchOptions,
+            oneHopDispatcher: selectedDispatcher,
+          })
+        : await fetchWithSsrFGuard(effectiveGuardedFetchOptions);
     } catch (error) {
       log.warn(
         `[model-fetch] error provider=${model.provider} api=${model.api} model=${model.id} ` +

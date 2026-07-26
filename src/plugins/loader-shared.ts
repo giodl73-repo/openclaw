@@ -3,6 +3,7 @@ import path from "node:path";
 import { err as resultError, ok, type Result } from "@openclaw/normalization-core/result";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { clearAgentHarnesses } from "../agents/harness/registry.js";
+import { clearProviderRequestDispatchersV1 } from "../agents/provider-request-dispatcher.js";
 import { clearCurrentProviderRequestTrafficPolicyV1 } from "../agents/provider-request-traffic-policy.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -171,6 +172,7 @@ export function clearActivatedPluginRuntimeState(): void {
   clearAgentHarnesses();
   clearPluginCommands();
   clearCompactionProviders();
+  clearProviderRequestDispatchersV1();
   clearCurrentProviderRequestTrafficPolicyV1();
   clearDetachedTaskLifecycleRuntimeRegistration();
   clearPluginInteractiveHandlers();

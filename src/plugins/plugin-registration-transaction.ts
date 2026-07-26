@@ -4,6 +4,10 @@ import {
   restoreRegisteredAgentHarnesses,
 } from "../agents/harness/registry.js";
 import {
+  restoreProviderRequestDispatcherProcessStateV1,
+  snapshotProviderRequestDispatcherProcessStateV1,
+} from "../agents/provider-request-dispatcher.js";
+import {
   restoreProviderRequestTrafficPolicyProcessStateV1,
   snapshotProviderRequestTrafficPolicyProcessStateV1,
 } from "../agents/provider-request-traffic-policy.js";
@@ -53,6 +57,7 @@ export type PluginProcessGlobalState = {
   memoryEmbeddingProviders: ReturnType<typeof listRegisteredMemoryEmbeddingProviders>;
   memoryPromptPreparations: ReturnType<typeof listMemoryPromptPreparations>;
   memoryPromptSupplements: ReturnType<typeof listMemoryPromptSupplements>;
+  providerRequestDispatchers: ReturnType<typeof snapshotProviderRequestDispatcherProcessStateV1>;
   providerRequestTrafficPolicy: ReturnType<
     typeof snapshotProviderRequestTrafficPolicyProcessStateV1
   >;
@@ -72,6 +77,7 @@ export function snapshotPluginProcessGlobalState(): PluginProcessGlobalState {
     memoryEmbeddingProviders: listRegisteredMemoryEmbeddingProviders(),
     memoryPromptPreparations: listMemoryPromptPreparations(),
     memoryPromptSupplements: listMemoryPromptSupplements(),
+    providerRequestDispatchers: snapshotProviderRequestDispatcherProcessStateV1(),
     providerRequestTrafficPolicy: snapshotProviderRequestTrafficPolicyProcessStateV1(),
     sessionDiscussionProvider: getSessionDiscussionProvider(),
   };
@@ -91,6 +97,7 @@ export function restorePluginProcessGlobalState(state: PluginProcessGlobalState)
     promptPreparations: state.memoryPromptPreparations,
     promptSupplements: state.memoryPromptSupplements,
   });
+  restoreProviderRequestDispatcherProcessStateV1(state.providerRequestDispatchers);
   restoreProviderRequestTrafficPolicyProcessStateV1(state.providerRequestTrafficPolicy);
   restoreSessionDiscussionProvider(state.sessionDiscussionProvider);
 }
