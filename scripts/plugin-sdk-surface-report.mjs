@@ -210,7 +210,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +45: restore typed session-catalog and tool-results exports promised to plugins.
       // +1: forwarding-routed approver-restricted native approval capability factory.
       // +1: shared inbound-event delivery correlation factory for channel plugins.
-      4822,
+      // +4: composable readiness criterion, result, subject input, and collector contracts.
+      4826,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
