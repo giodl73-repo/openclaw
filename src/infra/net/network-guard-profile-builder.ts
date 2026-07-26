@@ -82,7 +82,7 @@ export function buildNetworkGuardProfileV1(params: {
         enforcement:
           params.resolutionMode === "pinned"
             ? "local-pinned"
-            : params.resolutionMode === "proxy"
+            : params.resolutionMode === "proxy" || params.resolutionMode === "connection-owner"
               ? "connection-owner-required"
               : "not-enforced",
       },

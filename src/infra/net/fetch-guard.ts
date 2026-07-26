@@ -20,6 +20,7 @@ import {
   buildNetworkGuardProfileV1,
   resolveNetworkGuardRouteV1,
 } from "./network-guard-profile-builder.js";
+import { assertConnectionOwnerNetworkGuardPrepared } from "./network-guard-profile.js";
 import {
   createLocalOneHopFetchDispatcher,
   type FetchLike,
@@ -128,6 +129,7 @@ type GuardedFetchInternalOptions = GuardedFetchOptions & {
   resolveDispatcherPolicy?: (url: URL) => PinnedDispatcherPolicy | undefined;
   /** Preserve ambient Undici env-proxy routing for each eligible URL while keeping strict checks otherwise. */
   useEnvProxyForEligibleUrls?: boolean;
+  oneHopDispatcher?: OneHopFetchDispatcher;
 };
 
 type GuardedFetchConfiguredLocalOriginOptions = GuardedFetchOptions & {
@@ -481,11 +483,13 @@ export async function fetchWithSsrFGuard(params: GuardedFetchOptions): Promise<G
     managedProxyBypass: _ignoredManagedProxyBypass,
     credentialSlots: _ignoredCredentialSlots,
     credentialSlotRefs: _ignoredCredentialSlotRefs,
+    oneHopDispatcher: _ignoredOneHopDispatcher,
     ...publicParams
   } = params as GuardedFetchOptions & {
     managedProxyBypass?: unknown;
     credentialSlots?: unknown;
     credentialSlotRefs?: unknown;
+    oneHopDispatcher?: unknown;
   };
   return await fetchWithSsrFGuardInternal(publicParams);
 }
@@ -503,6 +507,17 @@ export async function fetchWithCredentialSlotsAndSsrFGuard({
     ...params,
     credentialSlots,
     initialCredentialSlotRefs: [...credentialSlotRefs],
+  });
+}
+
+/** Internal owner path for a policy-selected, redirect-disabled one-hop dispatcher. */
+export async function fetchWithOneHopDispatcherAndSsrFGuard(
+  params: GuardedFetchOptions & { oneHopDispatcher: OneHopFetchDispatcher },
+): Promise<GuardedFetchResult> {
+  const { oneHopDispatcher, ...guardedFetchOptions } = params;
+  return await fetchWithSsrFGuardInternal({
+    ...guardedFetchOptions,
+    oneHopDispatcher,
   });
 }
 
@@ -607,7 +622,9 @@ async function fetchWithSsrFGuardInternal(
         dispatcherPolicy,
         usesTrustedExplicitProxyMode ? false : params.pinDns,
       );
-      await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy, signal);
+      if (!params.oneHopDispatcher) {
+        await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy, signal);
+      }
       const isStrictManagedProxyActive =
         mode === GUARDED_FETCH_MODE.STRICT && isManagedProxyActive();
       const shouldCheckManagedProxyBypass =
@@ -637,11 +654,21 @@ async function fetchWithSsrFGuardInternal(
 
       // Trusted env-proxy, managed proxy, and pinDns=false can skip local DNS
       // pinning, so keep the pre-DNS hostname/IP policy checks from the pinned path.
-      if (canUseTrustedEnvProxy || canUseManagedProxy || params.pinDns === false) {
+      if (
+        params.oneHopDispatcher ||
+        canUseTrustedEnvProxy ||
+        canUseManagedProxy ||
+        params.pinDns === false
+      ) {
         assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
       }
 
-      if (canUseTrustedEnvProxy) {
+      if (params.oneHopDispatcher) {
+        ({ routeMode, resolutionMode } = resolveNetworkGuardRouteV1(
+          dispatcherPolicy,
+          "connection-owner",
+        ));
+      } else if (canUseTrustedEnvProxy) {
         routeMode = "environment-proxy";
         resolutionMode = "proxy";
         dispatcher = createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
@@ -722,10 +749,18 @@ async function fetchWithSsrFGuardInternal(
           ? await fetchWithRuntimeDispatcher(url, localInit)
           : await defaultFetch(url, localInit);
       };
-      const oneHopDispatcher: OneHopFetchDispatcher = createLocalOneHopFetchDispatcher(localFetch, {
-        hasPreparedDispatcher: Boolean(dispatcher),
-        credentialSlots: params.credentialSlots,
-      });
+      if (params.oneHopDispatcher) {
+        assertConnectionOwnerNetworkGuardPrepared({
+          profile: networkGuard,
+          requestUrl: parsedUrl.toString(),
+        });
+      }
+      const oneHopDispatcher =
+        params.oneHopDispatcher ??
+        createLocalOneHopFetchDispatcher(localFetch, {
+          hasPreparedDispatcher: Boolean(dispatcher),
+          credentialSlots: params.credentialSlots,
+        });
       const response = await oneHopDispatcher.dispatch({
         url: parsedUrl.toString(),
         init,

@@ -91,6 +91,7 @@ export function createPluginRegistryState(registryParams: PluginRegistryParams) 
     >(),
     pluginsWithChannelRegistrationConflict: new Set<string>(),
     pluginSideEffectGuards: new Map<string, Set<PluginSideEffectGuard>>(),
+    pluginProviderRequestDispatcherDisposers: new Map<string, Set<() => void>>(),
     pluginProviderRequestTrafficPolicyDisposers: new Map<string, Set<() => void>>(),
     pushDiagnostic,
     ...modelCatalogRegistrars,

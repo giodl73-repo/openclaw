@@ -45,6 +45,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     clearCodeModeNamespacesForPlugin(pluginId);
     clearContextEnginesForOwner(`plugin:${pluginId}`);
     registrars.rollbackHooks(pluginId);
+    registrars.rollbackProviderRequestDispatchers(pluginId);
     registrars.rollbackProviderRequestTrafficPolicies(pluginId);
 
     // Roll back live session-scheduler records created during a failed registration.
@@ -104,6 +105,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     registerReload: registrars.registerReload,
     registerNodeHostCommand: registrars.registerNodeHostCommand,
     registerSecurityAuditCollector: registrars.registerSecurityAuditCollector,
+    registerProviderRequestDispatcher: registrars.registerProviderRequestDispatcher,
     registerProviderRequestTrafficPolicy: registrars.registerProviderRequestTrafficPolicy,
     registerService: registrars.registerService,
     registerCommand: registrars.registerCommand,

@@ -5,6 +5,10 @@ import type { Model } from "openclaw/plugin-sdk/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mintSecretSentinel } from "../secrets/sentinel.js";
 import {
+  clearProviderRequestDispatchersV1,
+  registerProviderRequestDispatcherForOwnerV1,
+} from "./provider-request-dispatcher.js";
+import {
   clearCurrentProviderRequestTrafficPolicyV1,
   registerProviderRequestTrafficPolicyV1,
 } from "./provider-request-traffic-policy.js";
@@ -21,6 +25,7 @@ type ProviderRequestPolicyConfigMockResult = {
 const {
   buildProviderRequestDispatcherPolicyMock,
   fetchWithSsrFGuardMock,
+  fetchWithOneHopDispatcherAndSsrFGuardMock,
   ensureModelProviderLocalServiceMock,
   mergeModelProviderRequestOverridesMock,
   resolveProviderRequestPolicyConfigMock,
@@ -63,6 +68,7 @@ const {
       (_request?: unknown) => { mode: "direct" } | undefined
     >(() => undefined),
     fetchWithSsrFGuardMock: vi.fn(),
+    fetchWithOneHopDispatcherAndSsrFGuardMock: vi.fn(),
     ensureModelProviderLocalServiceMock: vi.fn(),
     mergeModelProviderRequestOverridesMock: vi.fn((current, overrides) => ({
       ...current,
@@ -84,6 +90,7 @@ const {
 
 vi.mock("../infra/net/fetch-guard.js", () => ({
   fetchWithSsrFGuard: fetchWithSsrFGuardMock,
+  fetchWithOneHopDispatcherAndSsrFGuard: fetchWithOneHopDispatcherAndSsrFGuardMock,
   withTrustedEnvProxyGuardedFetchMode: withTrustedEnvProxyGuardedFetchModeMock,
 }));
 
@@ -165,6 +172,11 @@ describe("buildGuardedModelFetch", () => {
       finalUrl: "https://api.openai.com/v1/responses",
       release: vi.fn(async () => undefined),
     });
+    fetchWithOneHopDispatcherAndSsrFGuardMock.mockReset().mockResolvedValue({
+      response: new Response("ok", { status: 200 }),
+      finalUrl: "https://api.openai.com/v1/responses",
+      release: vi.fn(async () => undefined),
+    });
     ensureModelProviderLocalServiceMock.mockReset().mockResolvedValue(undefined);
     buildProviderRequestDispatcherPolicyMock.mockClear().mockReturnValue(undefined);
     mergeModelProviderRequestOverridesMock.mockClear();
@@ -179,6 +191,7 @@ describe("buildGuardedModelFetch", () => {
   });
 
   afterEach(() => {
+    clearProviderRequestDispatchersV1();
     clearCurrentProviderRequestTrafficPolicyV1();
     delete process.env.OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS;
   });
@@ -242,6 +255,57 @@ describe("buildGuardedModelFetch", () => {
       (validateUrl as (url: URL) => void)(new URL("https://other.example/v1/responses")),
     ).toThrow("redirect denied by traffic policy");
     expect(withTrustedEnvProxyGuardedFetchModeMock).not.toHaveBeenCalled();
+  });
+
+  it("dispatches through the policy-selected binding", async () => {
+    const dispatch = vi.fn(async () => new Response("bound"));
+    registerProviderRequestDispatcherForOwnerV1("plugin:example-host", {
+      version: "provider-request-dispatcher/v1",
+      id: "example/egress",
+      trafficPolicyId: "example/enterprise-egress",
+      trafficPolicyGeneration: "policy-1",
+      dispatch,
+    });
+    registerProviderRequestTrafficPolicyV1({
+      version: "provider-request-traffic-policy/v1",
+      id: "example/enterprise-egress",
+      generation: "policy-1",
+      required: true,
+      provenance: { source: "test", revision: "1" },
+      routeProfiles: [
+        {
+          id: "example/hosted",
+          dispatcherPolicy: { mode: "direct" },
+          dispatchBindingId: "example/egress",
+        },
+      ],
+      rules: [
+        {
+          id: "openai",
+          match: { providers: ["openai"] },
+          outcome: {
+            action: "allow",
+            routeProfileId: "example/hosted",
+            allowedOrigins: ["https://api.openai.com"],
+            allowPrivateNetwork: false,
+          },
+        },
+      ],
+    });
+
+    const response = await buildGuardedModelFetch(sentinelModel())(
+      "https://api.openai.com/v1/responses",
+    );
+    await response.text();
+
+    expect(fetchWithSsrFGuardMock).not.toHaveBeenCalled();
+    expect(fetchWithOneHopDispatcherAndSsrFGuardMock).toHaveBeenCalledOnce();
+    const params = fetchWithOneHopDispatcherAndSsrFGuardMock.mock.calls[0]?.[0];
+    expect(params.oneHopDispatcher).toMatchObject({
+      id: "example/egress",
+      trafficPolicyGeneration: "policy-1",
+    });
+    expect(params.oneHopDispatcher.dispatch).toBe(dispatch);
   });
 
   it("swaps sentinels in Request-form headers", async () => {

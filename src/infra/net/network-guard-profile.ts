@@ -8,7 +8,7 @@ export type NetworkGuardRouteMode =
   | "explicit-proxy"
   | "managed-proxy";
 
-export type NetworkGuardResolutionMode = "pinned" | "proxy" | "caller";
+export type NetworkGuardResolutionMode = "pinned" | "proxy" | "caller" | "connection-owner";
 
 export type NetworkGuardAddressMode = "public-only" | "trusted-host" | "allow-private-network";
 
@@ -153,7 +153,7 @@ export function assertNetworkGuardProfileV1(
   if (!routeModes.includes(profile.route.mode)) {
     throw new Error("Invalid network guard route mode");
   }
-  const resolutionModes: readonly unknown[] = ["pinned", "proxy", "caller"];
+  const resolutionModes: readonly unknown[] = ["pinned", "proxy", "caller", "connection-owner"];
   if (!resolutionModes.includes(profile.route.resolution)) {
     throw new Error("Invalid network guard resolution mode");
   }
@@ -202,7 +202,7 @@ export function assertNetworkGuardProfileV1(
   const expectedEnforcement =
     profile.route.resolution === "pinned"
       ? "local-pinned"
-      : profile.route.resolution === "proxy"
+      : profile.route.resolution === "proxy" || profile.route.resolution === "connection-owner"
         ? "connection-owner-required"
         : "not-enforced";
   if (profile.addressPolicy.dnsRebinding.enforcement !== expectedEnforcement) {
@@ -236,7 +236,8 @@ export function assertLocalNetworkGuardPrepared(params: {
   const expectedEnforcement =
     params.profile.route.resolution === "pinned"
       ? "local-pinned"
-      : params.profile.route.resolution === "proxy"
+      : params.profile.route.resolution === "proxy" ||
+          params.profile.route.resolution === "connection-owner"
         ? "connection-owner-required"
         : "not-enforced";
   if (params.profile.addressPolicy.dnsRebinding.enforcement !== expectedEnforcement) {
@@ -244,5 +245,21 @@ export function assertLocalNetworkGuardPrepared(params: {
   }
   if (expectedEnforcement === "local-pinned" && !params.hasDispatcher) {
     throw new Error("Pinned network guard profile requires a prepared local dispatcher");
+  }
+  if (params.profile.route.resolution === "connection-owner") {
+    throw new Error("Connection-owner network guard profile requires the selected dispatcher");
+  }
+}
+
+export function assertConnectionOwnerNetworkGuardPrepared(params: {
+  profile: NetworkGuardProfileV1;
+  requestUrl: string;
+}): void {
+  assertNetworkGuardProfileTarget(params.profile, params.requestUrl);
+  if (
+    params.profile.route.resolution !== "connection-owner" ||
+    params.profile.addressPolicy.dnsRebinding.enforcement !== "connection-owner-required"
+  ) {
+    throw new Error("Selected dispatcher requires a connection-owner network guard profile");
   }
 }
