@@ -79,6 +79,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     registerTool: registrars.registerTool,
     registerChannel: registrars.registerChannel,
     registerHostedMediaResolver: registrars.registerHostedMediaResolver,
+    registerCredentialSlotResolver: registrars.registerCredentialSlotResolver,
     registerMcpServerConnectionResolver: registrars.registerMcpServerConnectionResolver,
     registerProvider: registrars.registerProvider,
     registerWorkerProvider: registrars.registerWorkerProvider,

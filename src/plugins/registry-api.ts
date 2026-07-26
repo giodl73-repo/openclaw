@@ -56,6 +56,7 @@ export function createPluginApiFactory(
     registerHook,
     registerHttpRoute,
     registerHostedMediaResolver,
+    registerCredentialSlotResolver,
     registerMcpServerConnectionResolver,
     registerProvider,
     registerWorkerProvider,
@@ -181,6 +182,8 @@ export function createPluginApiFactory(
               registerHttpRoute: (routeParams) => registerHttpRoute(record, routeParams),
               registerHostedMediaResolver: (resolver) =>
                 registerHostedMediaResolver(record, resolver),
+              registerCredentialSlotResolver: (resolver) =>
+                registerCredentialSlotResolver(record, resolver),
               registerMcpServerConnectionResolver: (resolver) =>
                 registerMcpServerConnectionResolver(record, resolver),
               registerProvider: (provider) => registerProvider(record, provider),
