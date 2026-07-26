@@ -1,5 +1,9 @@
 /** Static, manifest-owned inventory for one host integration bundle. */
 import { isRecord } from "../utils.js";
+import {
+  PLUGIN_READINESS_LOCAL_ID_PATTERN,
+  pluginReadinessCriterionPrefix,
+} from "./readiness-id.js";
 
 export const HOST_INTEGRATION_BUNDLE_CONTRACT_VERSION = "host-integration-bundle/v1" as const;
 
@@ -15,6 +19,7 @@ export type PluginManifestHostIntegrationContribution = Readonly<{
   kind: string;
   id: string;
   contractVersion: string;
+  readinessCriterion?: string;
 }>;
 
 export type PluginManifestHostIntegrationBundle = Readonly<{
@@ -48,6 +53,7 @@ function readRequiredString(value: Record<string, unknown>, key: string): string
  */
 export function parsePluginManifestHostIntegrationBundle(
   value: unknown,
+  pluginId: string,
 ): HostIntegrationBundleParseResult {
   if (value === undefined) {
     return { ok: true, bundle: undefined };
@@ -86,7 +92,13 @@ export function parsePluginManifestHostIntegrationBundle(
   for (const [index, rawContribution] of value.contributions.entries()) {
     if (
       !isRecord(rawContribution) ||
-      !hasOnlyKeys(rawContribution, ["owner", "kind", "id", "contractVersion"])
+      !hasOnlyKeys(rawContribution, [
+        "owner",
+        "kind",
+        "id",
+        "contractVersion",
+        "readinessCriterion",
+      ])
     ) {
       return {
         ok: false,
@@ -97,6 +109,10 @@ export function parsePluginManifestHostIntegrationBundle(
     const kind = readRequiredString(rawContribution, "kind");
     const contributionId = readRequiredString(rawContribution, "id");
     const contributionContractVersion = readRequiredString(rawContribution, "contractVersion");
+    const readinessCriterion =
+      rawContribution.readinessCriterion === undefined
+        ? undefined
+        : readRequiredString(rawContribution, "readinessCriterion");
     if (!owner || !TOKEN_PATTERN.test(owner)) {
       return {
         ok: false,
@@ -134,6 +150,19 @@ export function parsePluginManifestHostIntegrationBundle(
         error: `hostIntegrationBundle.contributions[${index}].contractVersion must be a versioned contract id`,
       };
     }
+    const pluginCriterionPrefix = pluginReadinessCriterionPrefix(pluginId);
+    const readinessCriterionValid = Boolean(
+      readinessCriterion?.startsWith(pluginCriterionPrefix) &&
+      PLUGIN_READINESS_LOCAL_ID_PATTERN.test(
+        readinessCriterion.slice(pluginCriterionPrefix.length),
+      ),
+    );
+    if (rawContribution.readinessCriterion !== undefined && !readinessCriterionValid) {
+      return {
+        ok: false,
+        error: `hostIntegrationBundle.contributions[${index}].readinessCriterion must be a canonical criterion id`,
+      };
+    }
     ids.add(contributionId);
     contributions.push(
       Object.freeze({
@@ -141,6 +170,7 @@ export function parsePluginManifestHostIntegrationBundle(
         kind,
         id: contributionId,
         contractVersion: contributionContractVersion,
+        ...(readinessCriterion ? { readinessCriterion } : {}),
       }),
     );
   }

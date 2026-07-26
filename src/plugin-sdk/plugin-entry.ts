@@ -29,6 +29,7 @@ import type {
   OpenClawPluginNodeInvokePolicyContext as _OpenClawPluginNodeInvokePolicyContext,
   OpenClawPluginNodeInvokePolicyResult as _OpenClawPluginNodeInvokePolicyResult,
   OpenClawPluginReloadRegistration as _OpenClawPluginReloadRegistration,
+  OpenClawPluginReadinessCriterion as _OpenClawPluginReadinessCriterion,
   OpenClawPluginSecurityAuditCollector as _OpenClawPluginSecurityAuditCollector,
   OpenClawPluginSecurityAuditContext as _OpenClawPluginSecurityAuditContext,
   OpenClawPluginService as _OpenClawPluginService,
@@ -165,6 +166,7 @@ export type OpenClawPluginNodeInvokePolicy = _OpenClawPluginNodeInvokePolicy;
 export type OpenClawPluginNodeInvokePolicyContext = _OpenClawPluginNodeInvokePolicyContext;
 export type OpenClawPluginNodeInvokePolicyResult = _OpenClawPluginNodeInvokePolicyResult;
 export type OpenClawPluginReloadRegistration = _OpenClawPluginReloadRegistration;
+export type OpenClawPluginReadinessCriterion = _OpenClawPluginReadinessCriterion;
 export type OpenClawPluginSecurityAuditCollector = _OpenClawPluginSecurityAuditCollector;
 export type OpenClawPluginSecurityAuditContext = _OpenClawPluginSecurityAuditContext;
 export type OpenClawPluginService = _OpenClawPluginService;

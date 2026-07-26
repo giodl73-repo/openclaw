@@ -39,6 +39,7 @@ import type {
 } from "./manifest.js";
 import type { MemoryEmbeddingProviderAdapter } from "./memory-embedding-providers.js";
 import type { PluginKind } from "./plugin-kind.types.js";
+import type { OpenClawPluginReadinessCriterion } from "./readiness-types.js";
 import type { PluginRuntime } from "./runtime/types.js";
 import type { SessionCatalogProvider } from "./session-catalog.js";
 import type { PluginDependencyStatus } from "./status-dependencies-core.js";
@@ -141,6 +142,15 @@ export type PluginCredentialSlotResolverRegistration = {
   resolver: CredentialSlotResolverV1;
   source: string;
   rootDir?: string;
+};
+
+export type PluginReadinessCriterionRegistration = {
+  id: string;
+  pluginId: string;
+  pluginName?: string;
+  criterion: OpenClawPluginReadinessCriterion;
+  pluginConfig?: Record<string, unknown>;
+  source: string;
 };
 
 export type PluginChannelRegistration = {
@@ -523,6 +533,7 @@ export type PluginRegistry = {
   httpRoutes: PluginHttpRouteRegistration[];
   hostedMediaResolvers: PluginHostedMediaResolverRegistration[];
   credentialSlotResolvers: PluginCredentialSlotResolverRegistration[];
+  readinessCriteria: PluginReadinessCriterionRegistration[];
   mcpServerConnectionResolvers: PluginMcpServerConnectionResolverRegistration[];
   cliRegistrars: PluginCliRegistration[];
   reloads: PluginReloadRegistration[];

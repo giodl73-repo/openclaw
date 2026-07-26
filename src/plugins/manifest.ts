@@ -15,13 +15,13 @@ import type { JsonSchemaObject } from "../shared/json-schema.types.js";
 import { isRecord } from "../utils.js";
 import { parseJsonWithJson5Fallback } from "../utils/parse-json-compat.js";
 import {
-  normalizeManifestCommandAliases,
-  type PluginManifestCommandAlias,
-} from "./manifest-command-aliases.js";
-import {
   parsePluginManifestHostIntegrationBundle,
   type PluginManifestHostIntegrationBundle,
 } from "./host-integration-bundle.js";
+import {
+  normalizeManifestCommandAliases,
+  type PluginManifestCommandAlias,
+} from "./manifest-command-aliases.js";
 import type { PluginConfigUiHint } from "./manifest-types.js";
 import { createPluginCacheKey, PluginLruCache } from "./plugin-cache-primitives.js";
 import type { PluginKind } from "./plugin-kind.types.js";
@@ -2023,6 +2023,7 @@ export function loadPluginManifest(
   const qaRunners = normalizeManifestQaRunners(raw.qaRunners);
   const hostIntegrationBundleResult = parsePluginManifestHostIntegrationBundle(
     raw.hostIntegrationBundle,
+    id,
   );
   if (!hostIntegrationBundleResult.ok) {
     return cacheResult({

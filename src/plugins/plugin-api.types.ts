@@ -75,6 +75,7 @@ import type {
 } from "./plugin-registration.types.js";
 import type { UnifiedModelCatalogProviderPlugin } from "./provider-catalog.types.js";
 import type { ProviderPlugin } from "./provider-plugin.types.js";
+import type { OpenClawPluginReadinessCriterion } from "./readiness-types.js";
 import type { PluginRuntime } from "./runtime/types.js";
 import type { SessionCatalogProvider } from "./session-catalog.js";
 import type {
@@ -258,6 +259,8 @@ export type OpenClawPluginApi = {
   registerNodeHostCommand: (command: OpenClawPluginNodeHostCommand) => void;
   registerNodeInvokePolicy: (policy: OpenClawPluginNodeInvokePolicy) => void;
   registerSecurityAuditCollector: (collector: OpenClawPluginSecurityAuditCollector) => void;
+  /** Register an advisory, lifecycle-scoped readiness criterion for this plugin. */
+  registerReadinessCriterion: (criterion: OpenClawPluginReadinessCriterion) => void;
   /** Register one policy-generation-fenced provider-request dispatcher binding. */
   registerProviderRequestDispatcher: (
     dispatcher: ProviderRequestDispatcherRegistrationV1,

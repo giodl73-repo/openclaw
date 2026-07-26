@@ -6,6 +6,7 @@ import { createOperationRegistrars } from "./registry-registrars-operations.js";
 import { createProviderRequestDispatcherRegistrars } from "./registry-registrars-provider-request-dispatcher.js";
 import { createProviderRequestTrafficPolicyRegistrars } from "./registry-registrars-provider-traffic-policy.js";
 import { createProviderRegistrars } from "./registry-registrars-providers.js";
+import { createReadinessRegistrars } from "./registry-registrars-readiness.js";
 import { createToolHookRegistrars } from "./registry-registrars-tools-hooks.js";
 import type { PluginRegistryState } from "./registry-state.js";
 
@@ -18,6 +19,7 @@ export function createPluginRegistrars(state: PluginRegistryState) {
     ...createProviderRegistrars(state),
     ...createProviderRequestDispatcherRegistrars(state),
     ...createProviderRequestTrafficPolicyRegistrars(state),
+    ...createReadinessRegistrars(state),
     ...createOperationRegistrars(state),
     ...createHostRegistrars(state),
     ...createMemoryRegistrars(state),

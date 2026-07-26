@@ -635,7 +635,8 @@ Use `hostIntegrationBundle` when one host plugin needs to publish a coherent inv
         "owner": "model-provider",
         "kind": "model-provider-adapter",
         "id": "acme/inference",
-        "contractVersion": "model-provider-adapter/v1"
+        "contractVersion": "model-provider-adapter/v1",
+        "readinessCriterion": "plugin.acme-host.inference-ready"
       },
       {
         "owner": "provider-request",
@@ -657,9 +658,9 @@ The bundle object has these fields:
 | `version`         | `string`   | Yes      | Exact SemVer; ranges such as `^1.0.0` are rejected.           |
 | `contributions`   | `object[]` | Yes      | Non-empty. Contribution ids must be unique within the bundle. |
 
-Each contribution requires `owner`, `kind`, `id`, and `contractVersion`. The owner and kind are lowercase canonical tokens. The id is lowercase and namespaced. The contribution contract version uses a versioned id such as `credential-slot-resolver/v1`.
+Each contribution requires `owner`, `kind`, `id`, and `contractVersion`. The owner and kind are lowercase canonical tokens. The id is lowercase and namespaced. The contribution contract version uses a versioned id such as `credential-slot-resolver/v1`. An optional `readinessCriterion` names a canonical criterion owned by the declaring plugin. Missing declarations or registrations remain `Unknown`; declaring a selector does not activate or probe the contribution.
 
-The schema is closed: unknown bundle or contribution fields make the plugin manifest invalid. This prevents a declaration from implying unsupported activation or readiness behavior. If multiple plugins declare the same bundle id, OpenClaw records an error and rejects every conflicting bundle declaration instead of choosing a winner. Enabled, non-failed declarations retain loader-owned plugin id, source, root, and origin provenance in the current plugin registry snapshot.
+The schema is closed: unknown bundle or contribution fields make the plugin manifest invalid. This prevents a declaration from implying unsupported activation or a successful readiness result. If multiple plugins declare the same bundle id, OpenClaw records an error and rejects every conflicting bundle declaration instead of choosing a winner. Enabled, non-failed declarations retain loader-owned plugin id, source, root, and origin provenance in the current plugin registry snapshot.
 
 ## contracts reference
 

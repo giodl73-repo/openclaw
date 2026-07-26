@@ -106,6 +106,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     registerReload: registrars.registerReload,
     registerNodeHostCommand: registrars.registerNodeHostCommand,
     registerSecurityAuditCollector: registrars.registerSecurityAuditCollector,
+    registerReadinessCriterion: registrars.registerReadinessCriterion,
     registerProviderRequestDispatcher: registrars.registerProviderRequestDispatcher,
     registerProviderRequestTrafficPolicy: registrars.registerProviderRequestTrafficPolicy,
     registerService: registrars.registerService,

@@ -209,6 +209,7 @@ advertised node command.
 | `api.registerMemoryCorpusSupplement(adapter)`   | Additive memory search/read corpus                                     |
 | `api.registerHostedMediaResolver(resolver)`     | Resolver for browser-style hosted media URLs                           |
 | `api.registerCredentialSlotResolver(resolver)`  | Lifecycle-scoped implementation for a declared credential slot         |
+| `api.registerReadinessCriterion(criterion)`     | Bounded advisory readiness criterion owned by this plugin              |
 | `api.registerMcpServerConnectionResolver(...)`  | Per-requester MCP transport (`url`/`headers`) for a static server name |
 | `api.registerTextTransforms(transforms)`        | Plugin-owned prompt/message compatibility text rewrites                |
 | `api.registerConfigMigration(migrate)`          | Lightweight config migration run before plugin runtime loads           |
@@ -218,6 +219,20 @@ advertised node command.
 | `api.registerNodeHostCommand(command)`          | Command handler exposed to paired nodes                                |
 | `api.registerNodeInvokePolicy(policy)`          | Allowlist/approval policy for node-invoked commands                    |
 | `api.registerSecurityAuditCollector(collector)` | Findings collector for `openclaw security audit`                       |
+
+#### Readiness criteria
+
+Plugins register a local criterion id and a bounded check:
+
+```ts
+api.registerReadinessCriterion({
+  id: "inference-ready",
+  description: "Reports whether the configured inference owner can accept work.",
+  check: async ({ signal }) => inspectInferenceOwner({ signal }),
+});
+```
+
+The runtime registry records the id as `plugin.<plugin-namespace>.<id>`. Lowercase plugin IDs containing letters, numbers, dots, dashes, or underscores keep their ID as the namespace. Other valid manifest IDs use `x-` plus the lowercase UTF-8 hex encoding of the plugin ID. Checks are advisory, cancellable, time-bounded, cached per registry/config snapshot, and normalized to `Unknown` when they throw, time out, or return malformed evidence. The versioned host-bundle inventory builder evaluates referenced criteria only when a caller requests a snapshot; registration does not add a Status, Doctor, health, startup-gating, or readiness-route side effect.
 
 #### Credential slot resolvers
 

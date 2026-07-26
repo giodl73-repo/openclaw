@@ -82,6 +82,7 @@ describe("host integration bundle manifest", () => {
         },
         contribution("lobster/capi-token"),
       ]),
+      "lobster-host",
     );
 
     expect(result.ok).toBe(true);
@@ -120,7 +121,9 @@ describe("host integration bundle manifest", () => {
       ]),
     ],
   ])("rejects %s", (_label, value) => {
-    expect(parsePluginManifestHostIntegrationBundle(value)).toMatchObject({ ok: false });
+    expect(parsePluginManifestHostIntegrationBundle(value, "lobster-host")).toMatchObject({
+      ok: false,
+    });
   });
 
   it("loads the declaration from openclaw.plugin.json without importing runtime code", () => {
@@ -161,7 +164,7 @@ describe("host integration bundle manifest", () => {
   });
 
   it("returns only enabled, non-failed bundles with loader-owned provenance", () => {
-    const parsed = parsePluginManifestHostIntegrationBundle(bundle());
+    const parsed = parsePluginManifestHostIntegrationBundle(bundle(), "lobster-host");
     if (!parsed.ok || !parsed.bundle) {
       throw new Error("expected bundle");
     }
