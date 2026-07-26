@@ -30,6 +30,7 @@ describe("fetchWithOneHopDispatcherAndSsrFGuard", () => {
       fetchImpl: localFetch,
       lookupFn,
       oneHopDispatcher: { dispatch },
+      credentialSlotRefs: ["example/token"],
     });
 
     expect(await result.response.text()).toBe("ok");
@@ -55,6 +56,7 @@ describe("fetchWithOneHopDispatcherAndSsrFGuard", () => {
       },
     });
     expect(new Headers(first?.init.headers).get("authorization")).toBe("Bearer protected");
+    expect(first?.credentialSlotRefs).toEqual(["example/token"]);
     expect(second).toMatchObject({
       url: "https://other.example/final",
       init: { redirect: "manual" },
@@ -72,6 +74,7 @@ describe("fetchWithOneHopDispatcherAndSsrFGuard", () => {
     const redirectedHeaders = new Headers(second?.init.headers);
     expect(redirectedHeaders.get("authorization")).toBeNull();
     expect(redirectedHeaders.get("accept")).toBe("application/json");
+    expect(second?.credentialSlotRefs).toBeUndefined();
 
     await result.release();
   });

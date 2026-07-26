@@ -512,12 +512,16 @@ export async function fetchWithCredentialSlotsAndSsrFGuard({
 
 /** Internal owner path for a policy-selected, redirect-disabled one-hop dispatcher. */
 export async function fetchWithOneHopDispatcherAndSsrFGuard(
-  params: GuardedFetchOptions & { oneHopDispatcher: OneHopFetchDispatcher },
+  params: GuardedFetchOptions & {
+    oneHopDispatcher: OneHopFetchDispatcher;
+    credentialSlotRefs?: readonly string[];
+  },
 ): Promise<GuardedFetchResult> {
-  const { oneHopDispatcher, ...guardedFetchOptions } = params;
+  const { oneHopDispatcher, credentialSlotRefs, ...guardedFetchOptions } = params;
   return await fetchWithSsrFGuardInternal({
     ...guardedFetchOptions,
     oneHopDispatcher,
+    ...(credentialSlotRefs ? { initialCredentialSlotRefs: [...credentialSlotRefs] } : {}),
   });
 }
 

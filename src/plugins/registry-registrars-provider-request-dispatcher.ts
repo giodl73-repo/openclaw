@@ -16,6 +16,12 @@ export function createProviderRequestDispatcherRegistrars(state: PluginRegistryS
     const dispose = registerProviderRequestDispatcherForOwnerV1(
       `plugin:${record.id}`,
       registration,
+      {
+        credentialSlotResolvers: () =>
+          state.registry.credentialSlotResolvers
+            .filter((entry) => entry.pluginId === record.id)
+            .map((entry) => entry.resolver),
+      },
     );
     const disposers =
       state.pluginProviderRequestDispatcherDisposers.get(record.id) ?? new Set<() => void>();
