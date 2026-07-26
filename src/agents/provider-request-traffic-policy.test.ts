@@ -220,14 +220,17 @@ describe("provider request traffic policy", () => {
       ),
     ).toThrow("cannot disable TLS verification");
 
+    const baseOutcome = registration().rules[0]!.outcome;
+    if (baseOutcome.action !== "allow") {
+      throw new Error("Expected the test policy to allow provider traffic");
+    }
     registerProviderRequestTrafficPolicyV1(
       registration({
         rules: [
           {
             ...registration().rules[0]!,
             outcome: {
-              ...registration().rules[0]!.outcome,
-              action: "allow",
+              ...baseOutcome,
               allowPrivateNetwork: true,
             },
           },
