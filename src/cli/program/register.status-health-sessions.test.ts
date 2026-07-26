@@ -226,7 +226,36 @@ describe("registerStatusHealthSessionsCommands", () => {
 
   it("runs ready command with JSON and parsed timeout", async () => {
     await runCli(["ready", "--json", "--timeout", "2500"]);
-    expectCommandOptions(readyCommand, { json: true, timeoutMs: 2500 });
+    expectCommandOptions(readyCommand, {
+      json: true,
+      timeoutMs: 2500,
+      watch: false,
+      intervalMs: undefined,
+    });
+  });
+
+  it("runs ready watch with a parsed interval", async () => {
+    await runCli(["ready", "--watch", "--json", "--interval", "250"]);
+    expectCommandOptions(readyCommand, {
+      json: true,
+      timeoutMs: 10000,
+      watch: true,
+      intervalMs: 250,
+    });
+  });
+
+  it("rejects a ready interval without watch", async () => {
+    await runCli(["ready", "--interval", "250"]);
+    expect(runtime.error).toHaveBeenCalledWith("--interval requires --watch");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(readyCommand).not.toHaveBeenCalled();
+  });
+
+  it.each(["nope", "249"])("rejects invalid ready watch interval %s", async (interval) => {
+    await runCli(["ready", "--watch", "--interval", interval]);
+    expect(runtime.error).toHaveBeenCalledWith("--interval must be at least 250 milliseconds");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(readyCommand).not.toHaveBeenCalled();
   });
 
   it("rejects invalid ready timeout without calling ready command", async () => {
