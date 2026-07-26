@@ -208,6 +208,7 @@ advertised node command.
 | `api.registerMemoryPromptPreparation(prepare)`  | Async preparation for a memory-adjacent prompt section                 |
 | `api.registerMemoryCorpusSupplement(adapter)`   | Additive memory search/read corpus                                     |
 | `api.registerHostedMediaResolver(resolver)`     | Resolver for browser-style hosted media URLs                           |
+| `api.registerCredentialSlotResolver(resolver)`  | Lifecycle-scoped implementation for a declared credential slot         |
 | `api.registerMcpServerConnectionResolver(...)`  | Per-requester MCP transport (`url`/`headers`) for a static server name |
 | `api.registerTextTransforms(transforms)`        | Plugin-owned prompt/message compatibility text rewrites                |
 | `api.registerConfigMigration(migrate)`          | Lightweight config migration run before plugin runtime loads           |
@@ -217,6 +218,29 @@ advertised node command.
 | `api.registerNodeHostCommand(command)`          | Command handler exposed to paired nodes                                |
 | `api.registerNodeInvokePolicy(policy)`          | Allowlist/approval policy for node-invoked commands                    |
 | `api.registerSecurityAuditCollector(collector)` | Findings collector for `openclaw security audit`                       |
+
+#### Credential slot resolvers
+
+A host owns credential slot declarations; a plugin may supply the matching implementation:
+
+```ts
+api.registerCredentialSlotResolver({
+  version: "credential-slot-resolver/v1",
+  resolverId: "lobster.workspace",
+  slotId: "lobster.workspace.token",
+  placement: "header",
+  headerName: "authorization",
+  allowedOrigins: ["https://api.example.com"],
+  resolve: async ({ signal }) => loadWorkspaceToken({ signal }),
+});
+```
+
+Registration validates and records metadata but does not call `resolve`. Credential acquisition
+happens only when a prepared binding applies a referenced slot to an allowed exact origin. Resolver
+registrations follow the plugin registry lifecycle, so failed registration rolls back the resolver
+and registry replacement removes it. A resolver ID has one plugin owner: another plugin cannot
+replace it based on load order, while the owning plugin may replace its own implementation during
+registration.
 
 #### Post-ack webhook work
 

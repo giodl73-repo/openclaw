@@ -3,6 +3,10 @@ import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
 import { createPluginGatewayMethodDescriptor } from "../gateway/methods/registry.js";
 import type { OperatorScope } from "../gateway/operator-scopes.js";
 import type { GatewayRequestHandler, RespondFn } from "../gateway/server-methods/types.js";
+import {
+  compileCredentialSlotResolverV1,
+  type CredentialSlotResolverV1,
+} from "../infra/net/credential-slot.js";
 import { normalizePluginGatewayMethodScope } from "../shared/gateway-method-policy.js";
 import { normalizeRegisteredChannelPlugin } from "./channel-validation.js";
 import { normalizePluginHttpPath } from "./http-path.js";
@@ -229,6 +233,51 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
     });
   };
 
+  const registerCredentialSlotResolver = (
+    record: PluginRecord,
+    rawResolver: CredentialSlotResolverV1,
+  ) => {
+    let resolver: CredentialSlotResolverV1;
+    try {
+      resolver = compileCredentialSlotResolverV1(rawResolver);
+    } catch {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: "credential slot resolver registration rejected: invalid resolver contract",
+      });
+      return;
+    }
+    const existingIndex = registry.credentialSlotResolvers.findIndex(
+      (entry) => entry.resolver.resolverId === resolver.resolverId,
+    );
+    const registration = {
+      pluginId: record.id,
+      pluginName: record.name,
+      resolver,
+      source: record.source,
+      rootDir: record.rootDir,
+    };
+    if (existingIndex >= 0) {
+      const existing = registry.credentialSlotResolvers[existingIndex];
+      // Resolver ownership controls credential authority. Cross-plugin takeover
+      // is rejected so the selected implementation cannot depend on load order.
+      if (existing && existing.pluginId !== record.id) {
+        pushDiagnostic({
+          level: "error",
+          pluginId: record.id,
+          source: record.source,
+          message: `credential slot resolver "${resolver.resolverId}" rejected: already registered by plugin "${existing.pluginId}"`,
+        });
+        return;
+      }
+      registry.credentialSlotResolvers[existingIndex] = registration;
+      return;
+    }
+    registry.credentialSlotResolvers.push(registration);
+  };
+
   const registerMcpServerConnectionResolver = (
     record: PluginRecord,
     resolver: OpenClawPluginMcpServerConnectionResolver,
@@ -383,6 +432,7 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
     registerSessionCatalog,
     registerHttpRoute,
     registerHostedMediaResolver,
+    registerCredentialSlotResolver,
     registerMcpServerConnectionResolver,
     registerChannel,
   };
