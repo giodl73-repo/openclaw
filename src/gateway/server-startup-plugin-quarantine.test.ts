@@ -35,15 +35,16 @@ describe("Gateway startup plugin quarantine", () => {
 
   it("opts into canonical runtime conditions only when readiness is configured", async () => {
     const { writeConfigFile } = await import("../config/config.js");
+    const token = "readiness-rpc-test-token";
     const gateway = {
       mode: "local" as const,
       bind: "loopback" as const,
-      auth: { mode: "none" as const },
+      auth: { mode: "token" as const, token },
     };
 
     await writeConfigFile({ gateway });
     let port = await getFreePort();
-    server = await startGatewayServer(port, { auth: { mode: "none" } });
+    server = await startGatewayServer(port, { auth: { mode: "token", token } });
     const legacyResponse = await fetch(`http://127.0.0.1:${port}/readyz`);
     expect(legacyResponse.status).toBe(200);
     const legacy = (await legacyResponse.json()) as { conditions?: Array<{ type: string }> };
@@ -53,7 +54,7 @@ describe("Gateway startup plugin quarantine", () => {
     server = undefined;
     await writeConfigFile({ gateway: { ...gateway, readiness: {} } });
     port = await getFreePort();
-    server = await startGatewayServer(port, { auth: { mode: "none" } });
+    server = await startGatewayServer(port, { auth: { mode: "token", token } });
     const canonicalResponse = await fetch(`http://127.0.0.1:${port}/readyz`);
     expect(canonicalResponse.status).toBe(200);
     const canonical = (await canonicalResponse.json()) as {
@@ -67,6 +68,7 @@ describe("Gateway startup plugin quarantine", () => {
         url: `ws://127.0.0.1:${port}`,
         method: "ready",
         params: {},
+        token,
         timeoutMs: 5_000,
         deviceIdentity: null,
       },
