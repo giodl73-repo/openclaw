@@ -960,6 +960,9 @@ export function buildGuardedModelFetch(
         ? await fetchWithOneHopDispatcherAndSsrFGuard({
             ...effectiveGuardedFetchOptions,
             oneHopDispatcher: selectedDispatcher,
+            ...(selectedDispatcher.credentialSlotRefs.length > 0
+              ? { credentialSlotRefs: selectedDispatcher.credentialSlotRefs }
+              : {}),
           })
         : await fetchWithSsrFGuard(effectiveGuardedFetchOptions);
     } catch (error) {

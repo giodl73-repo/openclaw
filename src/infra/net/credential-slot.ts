@@ -125,7 +125,7 @@ function normalizeDefinition(definition: CredentialSlotDefinitionV1): Credential
   if (definition.version !== CREDENTIAL_SLOT_VERSION) {
     throw new CredentialSlotError(
       "invalid-definition",
-      `Unsupported credential slot version: ${definition.version}`,
+      `Unsupported credential slot version: ${String(definition.version)}`,
       definition.slotId,
     );
   }
@@ -168,7 +168,7 @@ export function compileCredentialSlotResolverV1(
   if (resolver.version !== CREDENTIAL_SLOT_RESOLVER_VERSION) {
     throw new CredentialSlotError(
       "incompatible-resolver",
-      `Unsupported credential resolver version: ${resolver.version}`,
+      `Unsupported credential resolver version: ${String(resolver.version)}`,
       resolver.slotId,
     );
   }
@@ -202,15 +202,29 @@ async function resolveCredentialWithAbort<T>(
   resolve: () => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
+  const rejectionError = (reason: unknown, fallback: Error): Error =>
+    reason instanceof Error
+      ? reason
+      : reason === undefined
+        ? fallback
+        : new Error(fallback.message, { cause: reason });
   if (!signal) {
     return await resolve();
   }
   if (signal.aborted) {
-    throw signal.reason ?? new DOMException("Credential resolution aborted", "AbortError");
+    throw rejectionError(
+      signal.reason,
+      new DOMException("Credential resolution aborted", "AbortError"),
+    );
   }
   return await new Promise<T>((resolveResult, reject) => {
     const onAbort = () => {
-      reject(signal.reason ?? new DOMException("Credential resolution aborted", "AbortError"));
+      reject(
+        rejectionError(
+          signal.reason,
+          new DOMException("Credential resolution aborted", "AbortError"),
+        ),
+      );
     };
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) {
@@ -224,7 +238,7 @@ async function resolveCredentialWithAbort<T>(
       },
       (error: unknown) => {
         signal.removeEventListener("abort", onAbort);
-        reject(error);
+        reject(rejectionError(error, new Error("Credential resolution failed")));
       },
     );
   });
@@ -250,9 +264,10 @@ function assertCompatible(
 }
 
 export function prepareCredentialSlotBindingsV1(params: {
-  definitions: CredentialSlotDefinitionV1[];
-  resolvers: CredentialSlotResolverV1[];
+  definitions: readonly CredentialSlotDefinitionV1[];
+  resolvers: readonly CredentialSlotResolverV1[];
 }): PreparedCredentialSlotBindingsV1 {
+  const definitions = compileCredentialSlotDefinitionsV1(params.definitions);
   const resolversById = new Map<string, CredentialSlotResolverV1>();
   for (const rawResolver of params.resolvers) {
     const resolver = compileCredentialSlotResolverV1(rawResolver);
@@ -267,16 +282,7 @@ export function prepareCredentialSlotBindingsV1(params: {
   }
 
   const slots = new Map<string, PreparedCredentialSlot>();
-  const headerOwners = new Map<string, string>();
-  for (const rawDefinition of params.definitions) {
-    const definition = normalizeDefinition(rawDefinition);
-    if (slots.has(definition.slotId)) {
-      throw new CredentialSlotError(
-        "duplicate-slot",
-        `Duplicate credential slot "${definition.slotId}"`,
-        definition.slotId,
-      );
-    }
+  for (const definition of definitions) {
     const resolver = resolversById.get(definition.resolverId);
     if (!resolver) {
       throw new CredentialSlotError(
@@ -286,18 +292,6 @@ export function prepareCredentialSlotBindingsV1(params: {
       );
     }
     assertCompatible(definition, resolver);
-    for (const origin of definition.allowedOrigins) {
-      const headerKey = `${origin}\n${definition.headerName}`;
-      const existingSlotId = headerOwners.get(headerKey);
-      if (existingSlotId) {
-        throw new CredentialSlotError(
-          "ambiguous-header",
-          `Credential slots "${existingSlotId}" and "${definition.slotId}" target the same header and origin`,
-          definition.slotId,
-        );
-      }
-      headerOwners.set(headerKey, definition.slotId);
-    }
     slots.set(definition.slotId, { definition, resolver });
   }
 
@@ -420,4 +414,37 @@ export function prepareCredentialSlotBindingsV1(params: {
       return { ...init, headers };
     },
   };
+}
+
+export function compileCredentialSlotDefinitionsV1(
+  rawDefinitions: readonly CredentialSlotDefinitionV1[],
+): readonly CredentialSlotDefinitionV1[] {
+  const definitions: CredentialSlotDefinitionV1[] = [];
+  const slotIds = new Set<string>();
+  const headerOwners = new Map<string, string>();
+  for (const rawDefinition of rawDefinitions) {
+    const definition = normalizeDefinition(rawDefinition);
+    if (slotIds.has(definition.slotId)) {
+      throw new CredentialSlotError(
+        "duplicate-slot",
+        `Duplicate credential slot "${definition.slotId}"`,
+        definition.slotId,
+      );
+    }
+    slotIds.add(definition.slotId);
+    for (const origin of definition.allowedOrigins) {
+      const headerKey = `${origin}\n${definition.headerName}`;
+      const existingSlotId = headerOwners.get(headerKey);
+      if (existingSlotId) {
+        throw new CredentialSlotError(
+          "ambiguous-header",
+          `Credential slots "${existingSlotId}" and "${definition.slotId}" target the same header and origin`,
+          definition.slotId,
+        );
+      }
+      headerOwners.set(headerKey, definition.slotId);
+    }
+    definitions.push(Object.freeze(definition));
+  }
+  return Object.freeze(definitions);
 }

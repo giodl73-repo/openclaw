@@ -259,13 +259,40 @@ describe("buildGuardedModelFetch", () => {
 
   it("dispatches through the policy-selected binding", async () => {
     const dispatch = vi.fn(async () => new Response("bound"));
-    registerProviderRequestDispatcherForOwnerV1("plugin:example-host", {
-      version: "provider-request-dispatcher/v1",
-      id: "example/egress",
-      trafficPolicyId: "example/enterprise-egress",
-      trafficPolicyGeneration: "policy-1",
-      dispatch,
-    });
+    registerProviderRequestDispatcherForOwnerV1(
+      "plugin:example-host",
+      {
+        version: "provider-request-dispatcher/v1",
+        id: "example/egress",
+        trafficPolicyId: "example/enterprise-egress",
+        trafficPolicyGeneration: "policy-1",
+        credentialSlots: [
+          {
+            version: "credential-slot/v1",
+            slotId: "example/token",
+            placement: "header",
+            headerName: "x-example-host-token",
+            allowedOrigins: ["https://api.openai.com"],
+            required: true,
+            resolverId: "example/token-resolver",
+          },
+        ],
+        dispatch,
+      },
+      {
+        credentialSlotResolvers: [
+          {
+            version: "credential-slot-resolver/v1",
+            resolverId: "example/token-resolver",
+            slotId: "example/token",
+            placement: "header",
+            headerName: "x-example-host-token",
+            allowedOrigins: ["https://api.openai.com"],
+            resolve: async () => ({ value: "Bearer prepared" }),
+          },
+        ],
+      },
+    );
     registerProviderRequestTrafficPolicyV1({
       version: "provider-request-traffic-policy/v1",
       id: "example/enterprise-egress",
@@ -305,7 +332,7 @@ describe("buildGuardedModelFetch", () => {
       id: "example/egress",
       trafficPolicyGeneration: "policy-1",
     });
-    expect(params.oneHopDispatcher.dispatch).toBe(dispatch);
+    expect(params.credentialSlotRefs).toEqual(["example/token"]);
   });
 
   it("swaps sentinels in Request-form headers", async () => {

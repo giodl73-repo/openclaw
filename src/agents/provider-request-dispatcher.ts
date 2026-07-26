@@ -1,3 +1,9 @@
+import {
+  compileCredentialSlotDefinitionsV1,
+  prepareCredentialSlotBindingsV1,
+  type CredentialSlotDefinitionV1,
+  type CredentialSlotResolverV1,
+} from "../infra/net/credential-slot.js";
 import type { OneHopFetchDispatcher } from "../infra/net/one-hop-fetch-dispatcher.js";
 
 export const PROVIDER_REQUEST_DISPATCHER_VERSION = "provider-request-dispatcher/v1" as const;
@@ -7,11 +13,15 @@ export type ProviderRequestDispatcherRegistrationV1 = {
   id: string;
   trafficPolicyId: string;
   trafficPolicyGeneration: string;
+  credentialSlots?: readonly CredentialSlotDefinitionV1[];
   dispatch: OneHopFetchDispatcher["dispatch"];
 };
 
 export type ProviderRequestDispatcherBindingV1 = Readonly<
-  ProviderRequestDispatcherRegistrationV1 & { owner: string }
+  Omit<ProviderRequestDispatcherRegistrationV1, "credentialSlots"> & {
+    owner: string;
+    credentialSlotRefs: readonly string[];
+  }
 >;
 
 export type ProviderRequestDispatcherFailureCode =
@@ -55,6 +65,7 @@ function normalizeId(value: string, label: string): string {
 function compileBinding(
   owner: string,
   registration: ProviderRequestDispatcherRegistrationV1,
+  resolveCredentialSlotResolvers: () => readonly CredentialSlotResolverV1[],
 ): ProviderRequestDispatcherBindingV1 {
   const normalizedOwner = owner.trim();
   if (!normalizedOwner) {
@@ -78,6 +89,36 @@ function compileBinding(
       registration.id,
     );
   }
+  const credentialSlotDefinitions = compileCredentialSlotDefinitionsV1(
+    registration.credentialSlots ?? [],
+  );
+  const credentialSlotRefs = Object.freeze(credentialSlotDefinitions.map((entry) => entry.slotId));
+  const dispatch: OneHopFetchDispatcher["dispatch"] =
+    credentialSlotDefinitions.length > 0
+      ? async (request) => {
+          const refs = request.credentialSlotRefs ?? [];
+          const credentialSlots =
+            refs.length > 0
+              ? prepareCredentialSlotBindingsV1({
+                  definitions: credentialSlotDefinitions,
+                  resolvers: resolveCredentialSlotResolvers(),
+                })
+              : undefined;
+          const init = credentialSlots
+            ? // Existing owner headers remain protected. A slot is explicit authority
+              // to fill an absent header, never to replace SDK- or caller-supplied auth.
+              ((await credentialSlots.apply({
+                slotRefs: refs,
+                url: request.url,
+                init: request.init,
+                signal: request.init.signal ?? undefined,
+              })) as typeof request.init)
+            : request.init;
+          // Slot references are OpenClaw authority. The connection owner receives
+          // only the materialized request and cannot resolve or replay credentials.
+          return await registration.dispatch({ ...request, init, credentialSlotRefs: [] });
+        }
+      : registration.dispatch;
   return Object.freeze({
     version: PROVIDER_REQUEST_DISPATCHER_VERSION,
     id: normalizeId(registration.id, "Provider request dispatcher ID"),
@@ -89,7 +130,8 @@ function compileBinding(
       registration.trafficPolicyGeneration,
       "Provider request dispatcher traffic-policy generation",
     ),
-    dispatch: registration.dispatch,
+    credentialSlotRefs,
+    dispatch,
     owner: normalizedOwner,
   });
 }
@@ -97,8 +139,18 @@ function compileBinding(
 export function registerProviderRequestDispatcherForOwnerV1(
   owner: string,
   registration: ProviderRequestDispatcherRegistrationV1,
+  options: {
+    credentialSlotResolvers?:
+      | readonly CredentialSlotResolverV1[]
+      | (() => readonly CredentialSlotResolverV1[]);
+  } = {},
 ): () => void {
-  const binding = compileBinding(owner, registration);
+  const configuredCredentialSlotResolvers = options.credentialSlotResolvers;
+  const resolveCredentialSlotResolvers =
+    typeof configuredCredentialSlotResolvers === "function"
+      ? configuredCredentialSlotResolvers
+      : () => configuredCredentialSlotResolvers ?? [];
+  const binding = compileBinding(owner, registration, resolveCredentialSlotResolvers);
   const current = bindings.get(binding.id);
   if (current) {
     throw new ProviderRequestDispatcherError(
