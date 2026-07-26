@@ -272,10 +272,30 @@ export type OpenClawPluginService = {
   stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 };
 
-type OpenClawPluginReadinessResult = {
+export type OpenClawPluginReadinessResult = {
+  /** Primary subject returned by ctx.subjects.declare; defaults to this criterion. */
+  subjectRef?: string;
+  /** Other declared or documented core subjects involved in this observation. */
+  relatedSubjectRefs?: string[];
+  /** Owner-captured observation time in Unix epoch milliseconds. */
+  observedAtMs?: number;
   status: "True" | "False" | "Unknown";
   reason: string;
   message: string;
+};
+
+export type OpenClawPluginReadinessSubjectInput = {
+  kind: string;
+  key: string;
+  identity?: {
+    id?: string;
+    generation?: string;
+  };
+  parentRef?: string;
+};
+
+export type OpenClawPluginReadinessSubjectCollector = {
+  declare: (input: OpenClawPluginReadinessSubjectInput) => string;
 };
 
 export type OpenClawPluginReadinessCriterion = {
@@ -287,6 +307,7 @@ export type OpenClawPluginReadinessCriterion = {
     config: OpenClawConfig;
     pluginConfig?: Record<string, unknown>;
     signal: AbortSignal;
+    subjects: OpenClawPluginReadinessSubjectCollector;
   }) => OpenClawPluginReadinessResult | Promise<OpenClawPluginReadinessResult>;
 };
 

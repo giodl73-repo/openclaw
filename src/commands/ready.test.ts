@@ -3,10 +3,25 @@ import type { CanonicalReadinessResult } from "../readiness/conditions.js";
 import { readyCommand } from "./ready.js";
 
 const ready: CanonicalReadinessResult = {
+  contractVersion: 1,
+  evaluatedAtMs: 1_000,
+  identity: {
+    producerRef: "openclaw/gateway/current",
+    subjects: [
+      {
+        ref: "openclaw/gateway/current",
+        kind: "openclaw.gateway",
+        id: "gateway-1",
+      },
+      { ref: "openclaw/plugins/active", kind: "openclaw.plugins" },
+      { ref: "openclaw/workspace/default", kind: "openclaw.workspace" },
+    ],
+  },
   ready: true,
   conditions: [
     {
       type: "GatewayResponding",
+      subjectRef: "openclaw/gateway/current",
       status: "True",
       requirement: "required",
       reason: "GatewayResponding",
@@ -14,6 +29,7 @@ const ready: CanonicalReadinessResult = {
     },
     {
       type: "PluginsLoaded",
+      subjectRef: "openclaw/plugins/active",
       status: "False",
       requirement: "advisory",
       reason: "PluginLoadFailed",
@@ -49,6 +65,7 @@ describe("readyCommand", () => {
         ...ready.conditions,
         {
           type: "openclaw.workspace-writable",
+          subjectRef: "openclaw/workspace/default",
           status: "False",
           requirement: "required",
           reason: "WorkspaceStorageFull",
@@ -89,6 +106,21 @@ describe("readyCommand", () => {
     );
     expect(runtime.exit).toHaveBeenCalledWith(1);
   });
+
+  it("renders a legacy result from an older Gateway without crashing", async () => {
+    const runtime = createRuntime();
+    await readyCommand({}, runtime, {
+      callReady: async () => ({
+        ready: true,
+        conditions: [],
+        failures: [],
+        advisories: [],
+      }),
+    });
+
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("Producer: legacy Gateway");
+    expect(runtime.exit).not.toHaveBeenCalled();
+  });
 });
 
 describe("readyCommand", () => {
@@ -98,9 +130,11 @@ describe("readyCommand", () => {
 
     const output = String(runtime.log.mock.calls[0]?.[0]);
     expect(output).toContain("Ready: yes");
+    expect(output).toContain("Producer: openclaw/gateway/current (gateway-1)");
     expect(output).toContain("Required: 1/1");
     expect(output).toContain("Advisories: 1");
     expect(output).toContain("WARN");
     expect(output).toContain("PluginLoadFailed");
+    expect(output).toContain("openclaw/plugins/active");
   });
 });

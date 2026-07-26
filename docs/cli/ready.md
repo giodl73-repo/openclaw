@@ -22,7 +22,18 @@ openclaw ready --json
 openclaw ready --timeout 2500
 ```
 
-Human output summarizes required/advisory counts, then lists every condition with its status, requirement, stable reason, and diagnostic message. `--json` returns the canonical `ready`, `conditions`, `failures`, and `advisories` fields unchanged.
+Human output identifies the producer, summarizes required/advisory counts, then
+lists every condition with its subject, status, requirement, stable reason, and
+diagnostic message. `--json` returns the complete canonical result unchanged,
+including `contractVersion`, `evaluatedAtMs`, the reconciled `identity.subjects` package, condition
+subject references, `failures`, and `advisories`.
+
+Repeated JSON results can be compared by `(subjectRef, type)`. Subject `id`
+tracks the lifetime owned by that subject: host workload, process, Gateway
+serving lifecycle, plugin resource, or node. `generation` tracks an
+owner-defined revision of the same subject, such as active config or pairing
+state. A Gateway keeps one ID across readiness evaluations, reload, and drain,
+and receives a new ID when its serving lifecycle restarts.
 
 When the Gateway cannot be reached or does not expose the readiness contract, `--json` returns `ready: false` with a structured `error.reason` and `error.message` instead of emitting a partial condition set.
 
