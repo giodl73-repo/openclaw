@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   resolveStatusGatewayHealth,
   resolveStatusGatewayHealthSafe,
+  resolveStatusHostIntegrationSafe,
   resolveStatusRuntimeSnapshot,
   resolveStatusSecurityAudit,
   resolveStatusServiceSummaries,
@@ -370,6 +371,53 @@ describe("status-runtime-shared", () => {
       url: "ws://127.0.0.1:18789",
       token: "tok",
     });
+  });
+
+  it("reads host integration status only from a reachable Gateway", async () => {
+    mocks.callGateway.mockResolvedValueOnce({
+      version: "host-integration-runtime-inventory/v1",
+      status: "True",
+      bundles: [{ id: "example/host" }],
+    });
+
+    await expect(
+      resolveStatusHostIntegrationSafe({
+        config: { gateway: {} },
+        timeoutMs: 4321,
+        gatewayReachable: true,
+        callOverrides: { url: "ws://127.0.0.1:18789", token: "tok" },
+      }),
+    ).resolves.toMatchObject({ status: "True", bundles: [{ id: "example/host" }] });
+    expect(mocks.callGateway).toHaveBeenCalledWith({
+      method: "hostIntegration.status",
+      params: {},
+      timeoutMs: 4321,
+      config: { gateway: {} },
+      url: "ws://127.0.0.1:18789",
+      token: "tok",
+    });
+  });
+
+  it("omits empty or unreachable host integration inventories", async () => {
+    await expect(
+      resolveStatusHostIntegrationSafe({
+        config: { gateway: {} },
+        gatewayReachable: false,
+      }),
+    ).resolves.toBeUndefined();
+    expect(mocks.callGateway).not.toHaveBeenCalled();
+
+    mocks.callGateway.mockResolvedValueOnce({
+      version: "host-integration-runtime-inventory/v1",
+      status: "Unknown",
+      bundles: [],
+    });
+    await expect(
+      resolveStatusHostIntegrationSafe({
+        config: { gateway: {} },
+        gatewayReachable: true,
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("resolves daemon summaries together", async () => {

@@ -2107,6 +2107,7 @@ export async function startGatewayServer(
           deps,
           runtimeState,
           getRuntimeConfig,
+          getPluginRegistry: () => pluginRegistry,
           sessionObserver,
           getMcpAppSandboxPort,
           ensureSandboxHostPort,

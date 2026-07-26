@@ -23,6 +23,7 @@ type GatewayRequestContextParams = {
   deps: GatewayRequestContext["deps"];
   runtimeState: Pick<GatewayServerLiveState, "cronState" | "configReloader">;
   getRuntimeConfig: GatewayRequestContext["getRuntimeConfig"];
+  getPluginRegistry?: GatewayRequestContext["getPluginRegistry"];
   sessionObserver: SessionObserverService;
   getMcpAppSandboxPort?: GatewayRequestContext["getMcpAppSandboxPort"];
   ensureSandboxHostPort?: GatewayRequestContext["ensureSandboxHostPort"];
@@ -158,6 +159,7 @@ export function createGatewayRequestContext(
       return params.runtimeState.cronState.storePath;
     },
     getRuntimeConfig: params.getRuntimeConfig,
+    ...(params.getPluginRegistry ? { getPluginRegistry: params.getPluginRegistry } : {}),
     sessionObserver: params.sessionObserver,
     notifyPluginMetadataChanged: () =>
       params.runtimeState.configReloader.notifyPluginMetadataChanged(),

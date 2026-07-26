@@ -83,6 +83,11 @@ describe("status-json-payload", () => {
         health: { ok: true },
         usage: { providers: [] },
         lastHeartbeat: { status: "ok" },
+        hostIntegration: {
+          version: "host-integration-runtime-inventory/v1",
+          status: "True",
+          bundles: [],
+        },
         pluginCompatibility: [
           {
             pluginId: "legacy",
@@ -124,6 +129,11 @@ describe("status-json-payload", () => {
       health: { ok: true },
       usage: { providers: [] },
       lastHeartbeat: { status: "ok" },
+      hostIntegration: {
+        version: "host-integration-runtime-inventory/v1",
+        status: "True",
+        bundles: [],
+      },
       pluginCompatibility: {
         count: 1,
         warnings: [

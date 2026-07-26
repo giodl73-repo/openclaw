@@ -8,6 +8,7 @@ import { resolveDefaultModelForAgent } from "../agents/model-selection.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../agents/openai-routing.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
+import type { HostIntegrationRuntimeInventoryV1 } from "../plugins/host-integration-runtime-inventory.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import {
   buildCodexSyntheticUsageAuth,
@@ -202,6 +203,33 @@ export async function resolveStatusGatewayDiagnosticsSafe(params: {
   }).catch(() => null);
 }
 
+/** Reads the explicit host-integration inventory from a running Gateway without local plugin load. */
+export async function resolveStatusHostIntegrationSafe(params: {
+  config: OpenClawConfig;
+  timeoutMs?: number;
+  gatewayReachable: boolean;
+  callOverrides?: {
+    url: string;
+    token?: string;
+    password?: string;
+  };
+}): Promise<HostIntegrationRuntimeInventoryV1 | undefined> {
+  if (!params.gatewayReachable) {
+    return undefined;
+  }
+  const { callGateway } = await loadGatewayCallModule();
+  const inventory = await callGateway<HostIntegrationRuntimeInventoryV1>({
+    method: "hostIntegration.status",
+    params: {},
+    timeoutMs: params.timeoutMs,
+    config: params.config,
+    ...params.callOverrides,
+  }).catch(() => undefined);
+  // Keep ordinary installations byte-compatible: the optional status field appears only
+  // when a running Gateway actually owns at least one host integration bundle.
+  return inventory?.bundles.length ? inventory : undefined;
+}
+
 /** Reads the most recent gateway heartbeat only when the gateway probe succeeded. */
 async function resolveStatusLastHeartbeat(params: {
   config: OpenClawConfig;
@@ -247,6 +275,12 @@ async function resolveStatusRuntimeDetails(params: {
   usage?: boolean;
   deep?: boolean;
   gatewayReachable: boolean;
+  includeHostIntegration?: boolean;
+  gatewayCallOverrides?: {
+    url: string;
+    token?: string;
+    password?: string;
+  };
   suppressHealthErrors?: boolean;
   resolveUsage?: (input: StatusUsageSummaryOptions) => Promise<StatusUsageSummary>;
   resolveHealth?: (input: {
@@ -281,11 +315,20 @@ async function resolveStatusRuntimeDetails(params: {
         gatewayReachable: params.gatewayReachable,
       })
     : null;
+  const hostIntegration = params.includeHostIntegration
+    ? await resolveStatusHostIntegrationSafe({
+        config: params.config,
+        timeoutMs: params.timeoutMs,
+        gatewayReachable: params.gatewayReachable,
+        callOverrides: params.gatewayCallOverrides,
+      })
+    : undefined;
   const [gatewayService, nodeService] = await resolveStatusServiceSummaries(params.timeoutMs);
   const result = {
     usage,
     health,
     lastHeartbeat,
+    ...(hostIntegration ? { hostIntegration } : {}),
     gatewayService,
     nodeService,
   };
@@ -293,6 +336,7 @@ async function resolveStatusRuntimeDetails(params: {
     usage?: StatusUsageSummary;
     health?: StatusGatewayHealth;
     lastHeartbeat: StatusLastHeartbeat;
+    hostIntegration?: HostIntegrationRuntimeInventoryV1;
     gatewayService: StatusGatewayServiceSummary;
     nodeService: StatusNodeServiceSummary;
   };
@@ -306,6 +350,12 @@ export async function resolveStatusRuntimeSnapshot(params: {
   usage?: boolean;
   deep?: boolean;
   gatewayReachable: boolean;
+  includeHostIntegration?: boolean;
+  gatewayCallOverrides?: {
+    url: string;
+    token?: string;
+    password?: string;
+  };
   includeSecurityAudit?: boolean;
   suppressHealthErrors?: boolean;
   resolveSecurityAudit?: (input: {
@@ -332,6 +382,8 @@ export async function resolveStatusRuntimeSnapshot(params: {
     usage: params.usage,
     deep: params.deep,
     gatewayReachable: params.gatewayReachable,
+    includeHostIntegration: params.includeHostIntegration,
+    gatewayCallOverrides: params.gatewayCallOverrides,
     suppressHealthErrors: params.suppressHealthErrors,
     resolveUsage: params.resolveUsage,
     resolveHealth: params.resolveHealth,
@@ -344,6 +396,7 @@ export async function resolveStatusRuntimeSnapshot(params: {
     usage?: StatusUsageSummary;
     health?: StatusGatewayHealth;
     lastHeartbeat: StatusLastHeartbeat;
+    hostIntegration?: HostIntegrationRuntimeInventoryV1;
     gatewayService: StatusGatewayServiceSummary;
     nodeService: StatusNodeServiceSummary;
   };

@@ -19,6 +19,7 @@ import type {
 } from "../../infra/plugin-approvals.js";
 import type { SystemAgentApprovalRequestPayload } from "../../infra/system-agent-approvals.js";
 import type { createSubsystemLogger } from "../../logging/subsystem.js";
+import type { PluginRegistry } from "../../plugins/registry-types.js";
 import type { RuntimePluginToolGrant } from "../../plugins/runtime/tool-grant.js";
 import type { SystemAgentOperation } from "../../system-agent/operation-types.js";
 import type { WizardSession } from "../../wizard/session.js";
@@ -155,6 +156,8 @@ export type GatewayRequestContext = {
   cron: GatewayCronServiceContract;
   cronStorePath: string;
   getRuntimeConfig: () => OpenClawConfig;
+  /** Returns the current lifecycle-owned registry without loading or activating plugins. */
+  getPluginRegistry?: () => PluginRegistry;
   sessionObserver?: SessionObserverService;
   notifyPluginMetadataChanged: () => void;
   getMcpAppSandboxPort?: () => number | undefined;
