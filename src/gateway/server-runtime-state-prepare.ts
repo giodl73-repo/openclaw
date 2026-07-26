@@ -509,6 +509,7 @@ export async function prepareGatewayRuntimeState(params: {
     channelManager,
     sidecarStartup,
     isGatewayStartupPending,
+    getReadiness,
     pluginGatewayContext,
     watchNodeRequestHandler,
     releasePluginRouteRegistry,
