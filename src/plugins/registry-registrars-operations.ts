@@ -335,10 +335,10 @@ export function createOperationRegistrars(state: PluginRegistryState) {
     pluginConfig?: Record<string, unknown>,
   ) => {
     const localId = criterion.id.trim().toLowerCase();
-    if (!/^[a-z0-9][a-z0-9._-]*$/.test(localId)) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(localId) || record.id.length > 64) {
       reportRegistrationError(
         record,
-        `readiness criterion id must use lowercase letters, numbers, dots, dashes, or underscores: ${criterion.id}`,
+        `readiness criterion and plugin ids must be 1-64 lowercase letters, numbers, dots, dashes, or underscores: ${criterion.id}`,
       );
       return;
     }

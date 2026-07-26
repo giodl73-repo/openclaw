@@ -5,7 +5,6 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ReadinessCondition, CanonicalReadinessResult } from "../../readiness/conditions.js";
 import {
   CORE_READINESS_SUBJECT_REFS,
-  createGatewayReadinessIdentity,
   normalizeRelatedSubjectRefs,
   reconcileReadinessIdentity,
   type ReadinessIdentity,
@@ -32,9 +31,7 @@ type ReadinessResult = {
   advisories?: string[];
 };
 
-export type CanonicalGatewayReadinessResult = ReadinessResult &
-  Omit<CanonicalReadinessResult, "evaluatedAtMs" | "identity"> &
-  Partial<Pick<CanonicalReadinessResult, "evaluatedAtMs" | "identity">>;
+export type CanonicalGatewayReadinessResult = ReadinessResult & CanonicalReadinessResult;
 
 /** Function form used by HTTP readiness endpoints and tests. */
 export type ReadinessChecker = () => ReadinessResult | Promise<ReadinessResult>;
@@ -123,6 +120,7 @@ function buildReadinessEvaluationFailure(
       : "Readiness evaluation could not be completed.",
   };
   return {
+    contractVersion: 1,
     evaluatedAtMs: Date.now(),
     identity: reconcileReadinessIdentity({
       base: identity,
@@ -418,6 +416,7 @@ function withEventLoopHealth(
 function mergeReadinessResults(
   gateway: ReadinessResult,
   runtime: CanonicalReadinessResult,
+  identity: ReadinessIdentity,
   options?: { runtimeConditionsFirst?: boolean },
 ): CanonicalGatewayReadinessResult {
   const gatewayConditions: ReadinessCondition[] = [];
@@ -461,9 +460,11 @@ function mergeReadinessResults(
   );
   return {
     ...gateway,
+    contractVersion: 1,
     evaluatedAtMs: runtime.evaluatedAtMs,
     identity: reconcileReadinessIdentity({
-      base: runtime.identity,
+      base: identity,
+      subjects: runtime.identity.subjects,
       references: conditions as Array<ReadinessCondition & { subjectRef: string }>,
     }),
     ready: failures.length === 0,
@@ -474,10 +475,25 @@ function mergeReadinessResults(
   };
 }
 
-function projectLegacyGatewayReadiness(gateway: ReadinessResult): CanonicalGatewayReadinessResult {
-  const conditions = gateway.conditions ?? [];
+function projectLegacyGatewayReadiness(
+  gateway: ReadinessResult,
+  identity: ReadinessIdentity,
+): CanonicalGatewayReadinessResult {
+  const conditions: ReadinessCondition[] = [];
+  for (const condition of gateway.conditions ?? []) {
+    conditions.push({
+      ...condition,
+      subjectRef: condition.subjectRef ?? CORE_READINESS_SUBJECT_REFS.gateway,
+    });
+  }
   return {
     ...gateway,
+    contractVersion: 1,
+    evaluatedAtMs: Date.now(),
+    identity: reconcileReadinessIdentity({
+      base: identity,
+      references: conditions as Array<ReadinessCondition & { subjectRef: string }>,
+    }),
     conditions,
     failures: Array.from(
       new Set(
@@ -502,17 +518,26 @@ function projectLegacyGatewayReadiness(gateway: ReadinessResult): CanonicalGatew
 
 export async function evaluateConfiguredGatewayReadiness(params: {
   config: OpenClawConfig;
-  identity?: ReadinessIdentity;
+  identity: ReadinessIdentity;
   evaluateGateway: ReadinessChecker;
   evaluateRuntime: () => Promise<CanonicalReadinessResult>;
   timeoutMs?: number;
 }): Promise<CanonicalGatewayReadinessResult> {
   if (params.config.gateway?.readiness === undefined) {
-    return projectLegacyGatewayReadiness(await params.evaluateGateway());
+    try {
+      return projectLegacyGatewayReadiness(await params.evaluateGateway(), params.identity);
+    } catch (error) {
+      return mergeReadinessResults(
+        { ready: false, failing: [], uptimeMs: 0 },
+        buildReadinessEvaluationFailure(error, params.identity),
+        params.identity,
+        { runtimeConditionsFirst: true },
+      );
+    }
   }
   return evaluateCanonicalGatewayReadiness({
     ...params,
-    identity: params.identity ?? createGatewayReadinessIdentity(),
+    identity: params.identity,
   });
 }
 
@@ -528,7 +553,7 @@ async function evaluateCanonicalGatewayReadiness(params: {
       Promise.resolve().then(async () => {
         gateway = await params.evaluateGateway();
         const runtime = await params.evaluateRuntime();
-        return mergeReadinessResults(gateway, runtime);
+        return mergeReadinessResults(gateway, runtime, params.identity);
       }),
       params.timeoutMs,
     );
@@ -536,6 +561,7 @@ async function evaluateCanonicalGatewayReadiness(params: {
     return mergeReadinessResults(
       gateway ?? { ready: false, failing: [], uptimeMs: 0 },
       buildReadinessEvaluationFailure(error, params.identity),
+      params.identity,
       { runtimeConditionsFirst: true },
     );
   }
