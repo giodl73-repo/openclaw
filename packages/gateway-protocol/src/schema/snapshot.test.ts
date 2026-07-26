@@ -66,6 +66,7 @@ describe("SnapshotSchema", () => {
       ...snapshotWithPresence({ ts: 1 }),
       health: {
         readiness: {
+          contractVersion: 1,
           evaluatedAtMs: 1_000,
           identity: {
             producerRef: "openclaw/gateway/current",
@@ -96,5 +97,23 @@ describe("SnapshotSchema", () => {
     };
 
     expect(Value.Check(SnapshotSchema, snapshot)).toBe(true);
+  });
+
+  it("rejects a partial unversioned canonical readiness package", () => {
+    const snapshot = {
+      ...snapshotWithPresence({ ts: 1 }),
+      health: {
+        readiness: {
+          evaluatedAtMs: 1_000,
+          identity: { producerRef: "openclaw/gateway/current", subjects: [] },
+          ready: true,
+          conditions: [],
+          failures: [],
+          advisories: [],
+        },
+      },
+    };
+
+    expect(Value.Check(SnapshotSchema, snapshot)).toBe(false);
   });
 });
