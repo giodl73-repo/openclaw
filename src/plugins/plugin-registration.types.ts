@@ -272,7 +272,7 @@ export type OpenClawPluginService = {
   stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 };
 
-type OpenClawPluginReadinessResult = {
+export type OpenClawPluginReadinessResult = {
   /** Primary subject returned by ctx.subjects.declare; defaults to this criterion. */
   subjectRef?: string;
   /** Other declared or documented core subjects involved in this observation. */
@@ -284,7 +284,7 @@ type OpenClawPluginReadinessResult = {
   message: string;
 };
 
-type OpenClawPluginReadinessSubjectInput = {
+export type OpenClawPluginReadinessSubjectInput = {
   kind: string;
   key: string;
   identity?: {

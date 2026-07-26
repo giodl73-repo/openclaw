@@ -179,7 +179,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: native approval messaging target resolver.
       // +1: shared plugin SecretRef setup plan helper.
       // +1: shared multi-claim ingress lifecycle fan-in.
-      4724,
+      // +4: composable readiness criterion, result, subject input, and collector contracts.
+      4728,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
