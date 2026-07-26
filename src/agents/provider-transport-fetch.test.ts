@@ -4,6 +4,10 @@ import { Stream } from "openai/streaming";
 import type { Model } from "openclaw/plugin-sdk/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mintSecretSentinel } from "../secrets/sentinel.js";
+import {
+  clearCurrentProviderRequestTrafficPolicyV1,
+  registerProviderRequestTrafficPolicyV1,
+} from "./provider-request-traffic-policy.js";
 import { buildGuardedModelFetch } from "./provider-transport-fetch.js";
 
 type ProviderRequestPolicyConfigMockResult = {
@@ -175,6 +179,7 @@ describe("buildGuardedModelFetch", () => {
   });
 
   afterEach(() => {
+    clearCurrentProviderRequestTrafficPolicyV1();
     delete process.env.OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS;
   });
 
@@ -186,6 +191,58 @@ describe("buildGuardedModelFetch", () => {
       baseUrl: "https://api.openai.com/v1",
     } as unknown as Model<"openai-responses">;
   }
+
+  it("applies an explicit traffic-policy snapshot before guarded dispatch", async () => {
+    resolveProviderRequestPolicyConfigMock.mockReturnValue({
+      allowPrivateNetwork: true,
+      policy: { endpointClass: "custom" },
+    });
+    shouldUseEnvHttpProxyForUrlMock.mockReturnValue(true);
+    registerProviderRequestTrafficPolicyV1({
+      version: "provider-request-traffic-policy/v1",
+      id: "example/enterprise-egress",
+      generation: "policy-1",
+      required: true,
+      provenance: { source: "test", revision: "1" },
+      routeProfiles: [{ id: "example/direct", dispatcherPolicy: { mode: "direct" } }],
+      rules: [
+        {
+          id: "openai",
+          match: { providers: ["openai"], endpointClasses: ["custom"] },
+          outcome: {
+            action: "allow",
+            routeProfileId: "example/direct",
+            allowedOrigins: ["https://api.openai.com"],
+            allowPrivateNetwork: false,
+            maximumTimeoutMs: 10_000,
+          },
+        },
+      ],
+    });
+
+    const response = await buildGuardedModelFetch(
+      sentinelModel(),
+      30_000,
+    )("https://api.openai.com/v1/responses");
+    await response.text();
+
+    expect(latestGuardedFetchParams()).toMatchObject({
+      dispatcherPolicy: { mode: "direct" },
+      timeoutMs: 10_000,
+    });
+    expect(latestGuardedFetchParams().policy).not.toMatchObject({
+      allowPrivateNetwork: true,
+    });
+    const validateUrl = latestGuardedFetchParams().validateUrl;
+    expect(validateUrl).toBeTypeOf("function");
+    expect(() =>
+      (validateUrl as (url: URL) => void)(new URL("https://api.openai.com/v1/redirected")),
+    ).not.toThrow();
+    expect(() =>
+      (validateUrl as (url: URL) => void)(new URL("https://other.example/v1/responses")),
+    ).toThrow("redirect denied by traffic policy");
+    expect(withTrustedEnvProxyGuardedFetchModeMock).not.toHaveBeenCalled();
+  });
 
   it("swaps sentinels in Request-form headers", async () => {
     const sentinel = mintSecretSentinel("request-form-secret", { label: "request-form" });

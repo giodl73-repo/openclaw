@@ -1,0 +1,132 @@
+{
+  "version": "provider-request-traffic-policy-fixtures/v1",
+  "registration": {
+    "version": "provider-request-traffic-policy/v1",
+    "id": "lobster/enterprise-egress",
+    "generation": "policy-7",
+    "required": true,
+    "provenance": {
+      "source": "lobster-managed-policy",
+      "revision": "revision-4"
+    },
+    "routeProfiles": [
+      {
+        "id": "lobster/managed",
+        "dispatcherPolicy": {
+          "mode": "explicit-proxy",
+          "proxyUrl": "https://proxy.example.test"
+        },
+        "dispatchBindingId": "lobster/egress"
+      }
+    ],
+    "rules": [
+      {
+        "id": "blocked-provider",
+        "match": {
+          "providers": ["blocked-provider"]
+        },
+        "outcome": {
+          "action": "deny",
+          "reason": "DestinationSuspended"
+        }
+      },
+      {
+        "id": "capi",
+        "match": {
+          "providers": ["microsoft-capi"],
+          "capabilities": ["llm"],
+          "transports": ["stream"],
+          "endpointClasses": ["custom"]
+        },
+        "outcome": {
+          "action": "allow",
+          "routeProfileId": "lobster/managed",
+          "allowedOrigins": ["https://capi.example.test"],
+          "allowPrivateNetwork": false,
+          "maximumTimeoutMs": 20000
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "managed-capi",
+      "facts": {
+        "provider": "microsoft-capi",
+        "capability": "llm",
+        "transport": "stream",
+        "endpointClass": "custom",
+        "url": "https://capi.example.test/v1/messages",
+        "allowPrivateNetwork": true,
+        "timeoutMs": 60000
+      },
+      "expected": {
+        "action": "allow",
+        "policyId": "lobster/enterprise-egress",
+        "policyGeneration": "policy-7",
+        "routeProfileId": "lobster/managed",
+        "dispatchBindingId": "lobster/egress",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 20000,
+        "dispatcherPolicy": {
+          "mode": "explicit-proxy",
+          "proxyUrl": "https://proxy.example.test/"
+        }
+      }
+    },
+    {
+      "id": "explicit-deny",
+      "facts": {
+        "provider": "blocked-provider",
+        "capability": "llm",
+        "transport": "stream",
+        "endpointClass": "custom",
+        "url": "https://blocked.example.test/v1/messages",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 30000
+      },
+      "expected": {
+        "action": "deny",
+        "policyId": "lobster/enterprise-egress",
+        "policyGeneration": "policy-7",
+        "reason": "DestinationSuspended"
+      }
+    },
+    {
+      "id": "required-no-match",
+      "facts": {
+        "provider": "openai",
+        "capability": "llm",
+        "transport": "stream",
+        "endpointClass": "openai-public",
+        "url": "https://api.openai.com/v1/responses",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 30000
+      },
+      "expected": {
+        "action": "deny",
+        "policyId": "lobster/enterprise-egress",
+        "policyGeneration": "policy-7",
+        "reason": "RequiredPolicyNoMatch"
+      }
+    },
+    {
+      "id": "destination-outside-policy",
+      "facts": {
+        "provider": "microsoft-capi",
+        "capability": "llm",
+        "transport": "stream",
+        "endpointClass": "custom",
+        "url": "https://other.example.test/v1/messages",
+        "allowPrivateNetwork": false,
+        "timeoutMs": 30000
+      },
+      "expected": {
+        "action": "deny",
+        "policyId": "lobster/enterprise-egress",
+        "policyGeneration": "policy-7",
+        "reason": "DestinationOutsidePolicy"
+      }
+    }
+  ]
+}

@@ -751,6 +751,57 @@ describe("fetchWithSsrFGuard hardening", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("validates every redirect target before dispatch", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(redirectResponse("https://other.example/resource"));
+    const validateUrl = vi.fn((url: URL) => {
+      if (url.origin !== "https://public.example") {
+        throw new Error("redirect outside policy");
+      }
+    });
+
+    await expect(
+      fetchWithSsrFGuard({
+        url: "https://public.example/start",
+        fetchImpl,
+        validateUrl,
+      }),
+    ).rejects.toThrow("redirect outside policy");
+    expect(validateUrl.mock.calls.map(([url]) => url.toString())).toEqual([
+      "https://public.example/start",
+      "https://other.example/resource",
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans up the timeout when redirect validation rejects a target", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(redirectResponse("https://other.example/resource"));
+
+    try {
+      await expect(
+        fetchWithSsrFGuard({
+          url: "https://public.example/start",
+          fetchImpl,
+          timeoutMs: 60_000,
+          validateUrl: (url) => {
+            if (url.origin !== "https://public.example") {
+              throw new Error("redirect outside policy");
+            }
+          },
+        }),
+      ).rejects.toThrow("redirect outside policy");
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not carry exact-origin trust across private-host redirects to another port", async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(redirectResponse("http://127.0.0.1:11435/"));
 
