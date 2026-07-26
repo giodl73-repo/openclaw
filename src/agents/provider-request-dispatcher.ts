@@ -63,10 +63,11 @@ function compileBinding(
       "Provider request dispatcher owner is required",
     );
   }
-  if (registration.version !== PROVIDER_REQUEST_DISPATCHER_VERSION) {
+  const receivedVersion: unknown = registration.version;
+  if (receivedVersion !== PROVIDER_REQUEST_DISPATCHER_VERSION) {
     throw new ProviderRequestDispatcherError(
       "invalid-registration",
-      `Unsupported provider request dispatcher version: ${registration.version}`,
+      `Unsupported provider request dispatcher version: ${String(receivedVersion)}`,
       registration.id,
     );
   }
