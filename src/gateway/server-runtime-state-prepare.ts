@@ -153,6 +153,43 @@ export async function prepareGatewayRuntimeState(params: {
     ambientAutostartSuppressedChannelIds,
     minimalTestGateway,
   } = bootstrap;
+  const runtimeConfig = await startupTrace.measure("runtime.config", async () => {
+    const { resolveGatewayRuntimeConfig } = await import("./server-runtime-config.js");
+    return resolveGatewayRuntimeConfig({
+      cfg: cfgAtStart,
+      port,
+      bind: opts.bind,
+      host: opts.host,
+      controlUiEnabled: opts.controlUiEnabled,
+      openAiChatCompletionsEnabled: opts.openAiChatCompletionsEnabled,
+      openResponsesEnabled: opts.openResponsesEnabled,
+      auth: resolvedStartupAuthOverride,
+      tailscale: startupTailscaleOverride,
+    });
+  });
+  const {
+    bindHost,
+    controlUiEnabled,
+    openAiChatCompletionsEnabled,
+    openAiChatCompletionsConfig,
+    openResponsesEnabled,
+    openResponsesConfig,
+    strictTransportSecurityHeader,
+    controlUiBasePath,
+    controlUiRoot: controlUiRootOverride,
+    resolvedAuth,
+    tailscaleConfig,
+    tailscaleMode,
+  } = runtimeConfig;
+  const getResolvedAuth = () =>
+    resolveGatewayAuth({
+      authConfig:
+        getActiveSecretsRuntimeConfigSnapshot()?.config.gateway?.auth ??
+        getRuntimeConfig().gateway?.auth,
+      authOverride: resolvedStartupAuthOverride,
+      env: process.env,
+      tailscaleMode,
+    });
   const makeState = (config: OpenClawConfig, registry: typeof pluginBootstrap.pluginRegistry) => {
     const profile = resolveHostingProfileSelection({
       config,
@@ -263,43 +300,6 @@ export async function prepareGatewayRuntimeState(params: {
         (workerPlacementDispatchAvailable || method !== "sessions.dispatch") &&
         (workerPlacementControlAvailable || method !== "sessions.reclaim"),
     );
-  const runtimeConfig = await startupTrace.measure("runtime.config", async () => {
-    const { resolveGatewayRuntimeConfig } = await import("./server-runtime-config.js");
-    return resolveGatewayRuntimeConfig({
-      cfg: cfgAtStart,
-      port,
-      bind: opts.bind,
-      host: opts.host,
-      controlUiEnabled: opts.controlUiEnabled,
-      openAiChatCompletionsEnabled: opts.openAiChatCompletionsEnabled,
-      openResponsesEnabled: opts.openResponsesEnabled,
-      auth: resolvedStartupAuthOverride,
-      tailscale: startupTailscaleOverride,
-    });
-  });
-  const {
-    bindHost,
-    controlUiEnabled,
-    openAiChatCompletionsEnabled,
-    openAiChatCompletionsConfig,
-    openResponsesEnabled,
-    openResponsesConfig,
-    strictTransportSecurityHeader,
-    controlUiBasePath,
-    controlUiRoot: controlUiRootOverride,
-    resolvedAuth,
-    tailscaleConfig,
-    tailscaleMode,
-  } = runtimeConfig;
-  const getResolvedAuth = () =>
-    resolveGatewayAuth({
-      authConfig:
-        getActiveSecretsRuntimeConfigSnapshot()?.config.gateway?.auth ??
-        getRuntimeConfig().gateway?.auth,
-      authOverride: resolvedStartupAuthOverride,
-      env: process.env,
-      tailscaleMode,
-    });
   const resolveSharedGatewaySessionGenerationForConfig = (config: OpenClawConfig) =>
     resolveSharedGatewaySessionGeneration(
       resolveGatewayAuth({
