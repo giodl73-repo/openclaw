@@ -90,13 +90,27 @@
         { "type": "dispatch-started" },
         { "type": "cancel", "reason": "caller-aborted" },
         { "type": "response-open", "status": 200, "statusText": "Late", "headers": {} },
+        { "type": "terminal", "outcome": "failed", "certainty": "response-started", "failureCode": "cancelled" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "response-started", "failureCode": "cancelled" },
+        "cancelled": true,
+        "ignoredFrames": 0
+      }
+    },
+    {
+      "id": "cancellation-races-with-dispatch",
+      "frames": [
+        { "type": "cancel", "reason": "caller-aborted" },
+        { "type": "dispatch-started" },
         { "type": "terminal", "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "cancelled" }
       ],
       "expected": {
         "ok": true,
         "terminal": { "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "cancelled" },
         "cancelled": true,
-        "ignoredFrames": 1
+        "ignoredFrames": 0
       }
     },
     {

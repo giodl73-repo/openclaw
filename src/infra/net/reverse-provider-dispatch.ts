@@ -357,6 +357,10 @@ function assertOperationOpen(record: Record<string, unknown>): void {
     throw new Error("operation-open.request.method must be supported by Fetch");
   }
   const url = requireNonEmptyString(request, "url", "operation-open.request");
+  const parsedUrl = new URL(url);
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new Error("operation-open.request.url must not contain credentials");
+  }
   requireHeaderRecord(request.headers, "operation-open.request.headers");
   requireString(request, "routeProfile", "operation-open.request");
   requireString(request, "auditCorrelation", "operation-open.request");

@@ -207,6 +207,16 @@ describe("reverse provider dispatch v1 fixtures", () => {
     expect(() =>
       assertReverseProviderDispatchFrameV1({
         ...operation.base,
+        ...operation.open,
+        request: {
+          ...(operation.open.request as Record<string, unknown>),
+          url: "https://user:password@api.dispatch.test/v1",
+        },
+      }),
+    ).toThrow("must not contain credentials");
+    expect(() =>
+      assertReverseProviderDispatchFrameV1({
+        ...operation.base,
         type: "response-open",
         status: 199,
         statusText: "Informational",
