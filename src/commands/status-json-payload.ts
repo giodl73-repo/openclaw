@@ -1,6 +1,7 @@
 // Builds the stable JSON payload for `openclaw status --json`.
 // Optional deep fields are included only when their upstream probes actually ran.
 
+import type { HostIntegrationRuntimeInventoryV1 } from "../plugins/host-integration-runtime-inventory.js";
 import {
   buildRuntimeReadiness,
   buildUnobservedGatewayConditions,
@@ -106,6 +107,7 @@ export function buildStatusJsonPayload(params: {
   health?: unknown;
   usage?: unknown;
   lastHeartbeat?: unknown;
+  hostIntegration?: HostIntegrationRuntimeInventoryV1;
   pluginCompatibility?: Array<Record<string, unknown>> | null | undefined;
 }) {
   const channelInfo = resolveStatusUpdateChannelInfo({
@@ -140,6 +142,7 @@ export function buildStatusJsonPayload(params: {
     agents: params.agents,
     secretDiagnostics: params.secretDiagnostics,
     ...(params.securityAudit ? { securityAudit: params.securityAudit } : {}),
+    ...(params.hostIntegration ? { hostIntegration: params.hostIntegration } : {}),
     ...(params.pluginCompatibility
       ? {
           // Keep warnings grouped with a count so consumers can test compatibility status cheaply.

@@ -17,6 +17,7 @@ const CURRENT_TRAIN_METHODS = [
   "session.suggestions.list",
   "session.suggestions.resolve",
   "session.typing",
+  "hostIntegration.status",
   "session.visibility.set",
   "board.prompt.authorize",
   "board.data.read",

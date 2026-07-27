@@ -199,6 +199,7 @@ export async function finishGatewayStartup(params: {
       runtimeState,
       sessionCompanion,
       getRuntimeConfig,
+      getPluginRegistry: () => pluginRuntime.registry,
       sessionObserver,
       getMcpAppSandboxPort,
       ensureSandboxHostPort,

@@ -153,6 +153,10 @@ const loadHealthHandlers = lazyHandlerModule(
   () => import("./server-methods/health.js"),
   (module) => module.healthHandlers,
 );
+const loadHostIntegrationStatusHandlers = lazyHandlerModule(
+  () => import("./server-methods/host-integration-status.js"),
+  (module) => module.hostIntegrationStatusHandlers,
+);
 const loadLogsHandlers = lazyHandlerModule(
   () => import("./server-methods/logs.js"),
   (module) => module.logsHandlers,
@@ -668,6 +672,10 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
   ...createLazyCoreHandlers({
     methods: ["tools.effective"],
     loadHandlers: loadToolsEffectiveHandlers,
+  }),
+  ...createLazyCoreHandlers({
+    methods: ["hostIntegration.status"],
+    loadHandlers: loadHostIntegrationStatusHandlers,
   }),
   ...createLazyCoreHandlers({
     methods: ["tools.invoke"],
