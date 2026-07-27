@@ -40,6 +40,23 @@ const ready: CanonicalReadinessResult = {
   advisories: ["PluginLoadFailed"],
 };
 
+const notReady: CanonicalReadinessResult = {
+  ...ready,
+  ready: false,
+  conditions: [
+    ...ready.conditions,
+    {
+      type: "openclaw.workspace-writable",
+      subjectRef: "openclaw/workspace/default",
+      status: "False",
+      requirement: "required",
+      reason: "WorkspaceStorageFull",
+      message: "The effective workspace is full.",
+    },
+  ],
+  failures: ["WorkspaceStorageFull"],
+};
+
 function createRuntime() {
   return { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
 }
@@ -69,22 +86,6 @@ describe("readyCommand", () => {
 
   it("prints structured findings and exits one for required failures", async () => {
     const runtime = createRuntime();
-    const notReady: CanonicalReadinessResult = {
-      ...ready,
-      ready: false,
-      conditions: [
-        ...ready.conditions,
-        {
-          type: "openclaw.workspace-writable",
-          subjectRef: "openclaw/workspace/default",
-          status: "False",
-          requirement: "required",
-          reason: "WorkspaceStorageFull",
-          message: "The effective workspace is full.",
-        },
-      ],
-      failures: ["WorkspaceStorageFull"],
-    };
     await readyCommand({}, runtime, {
       callReady: async () => notReady,
     });
@@ -131,6 +132,96 @@ describe("readyCommand", () => {
 
     expect(runtime.log.mock.calls[0]?.[0]).toContain("Producer: legacy Gateway");
     expect(runtime.exit).not.toHaveBeenCalled();
+  });
+
+  it("waits through unavailable and not-ready observations until ready", async () => {
+    const runtime = createRuntime();
+    const callReady = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("connection refused"))
+      .mockResolvedValueOnce(notReady)
+      .mockResolvedValueOnce(ready);
+    let nowMs = 0;
+
+    await readyCommand({ waitMs: 2_000, intervalMs: 500, timeoutMs: 700 }, runtime, {
+      callReady,
+      now: () => nowMs,
+      delay: async (ms) => {
+        nowMs += ms;
+      },
+    });
+
+    expect(callReady).toHaveBeenCalledTimes(3);
+    expect(callReady).toHaveBeenCalledWith({
+      timeoutMs: 700,
+      signal: expect.any(AbortSignal),
+    });
+    expect(runtime.log).toHaveBeenCalledTimes(1);
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("Ready: yes");
+    expect(runtime.exit).not.toHaveBeenCalled();
+  });
+
+  it("caps each call by the remaining wait budget and emits the last result", async () => {
+    const runtime = createRuntime();
+    const callReady = vi.fn().mockResolvedValue(notReady);
+    let nowMs = 0;
+
+    await readyCommand({ waitMs: 750, intervalMs: 500, timeoutMs: 1_000 }, runtime, {
+      callReady,
+      now: () => nowMs,
+      delay: async (ms) => {
+        nowMs += ms;
+      },
+    });
+
+    expect(callReady.mock.calls.map(([params]) => params.timeoutMs)).toEqual([750, 250]);
+    expect(runtime.log).toHaveBeenCalledTimes(1);
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("WorkspaceStorageFull");
+    expect(runtime.error).toHaveBeenCalledWith(
+      "Timed out after 750ms waiting for Gateway readiness.",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("returns a structured timeout when the Gateway is never reachable", async () => {
+    const runtime = createRuntime();
+    let nowMs = 0;
+
+    await readyCommand({ waitMs: 500, json: true }, runtime, {
+      callReady: async () => {
+        throw new Error("connection refused");
+      },
+      now: () => nowMs,
+      delay: async (ms) => {
+        nowMs += ms;
+      },
+    });
+
+    expect(runtime.log.mock.calls[0]?.[0]).toContain('"reason": "GatewayReadinessTimeout"');
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("connection refused");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("aborts slow pre-request setup at the total wait deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = createRuntime();
+      const pending = readyCommand({ waitMs: 500, json: true }, runtime, {
+        callReady: async ({ signal }) =>
+          await new Promise<CanonicalReadinessResult>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          }),
+      });
+
+      await vi.advanceTimersByTimeAsync(500);
+      await pending;
+
+      expect(runtime.log.mock.calls[0]?.[0]).toContain('"reason": "GatewayReadinessTimeout"');
+      expect(runtime.exit).toHaveBeenCalledWith(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("watches semantic transitions as JSON Lines and ignores timestamp churn", async () => {

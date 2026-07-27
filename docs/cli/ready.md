@@ -11,18 +11,21 @@ Fetch the canonical readiness result from the running Gateway. This is the CLI p
 
 ## Options
 
-| Flag              | Default | Description                                                    |
-| ----------------- | ------- | -------------------------------------------------------------- |
-| `--json`          | `false` | Print JSON; with `--watch`, emit one event per line.           |
-| `--timeout <ms>`  | `10000` | Gateway connection timeout for each evaluation.                |
-| `--watch`         | `false` | Emit the initial result and then semantic readiness changes.   |
-| `--interval <ms>` | `2000`  | Delay between evaluations (minimum `250`); requires `--watch`. |
+| Flag                | Default      | Description                                                                |
+| ------------------- | ------------ | -------------------------------------------------------------------------- |
+| `--json`            | `false`      | Print JSON; with `--watch`, emit one event per line.                       |
+| `--timeout <ms>`    | `10000`      | Gateway connection timeout for each evaluation.                            |
+| `--watch`           | `false`      | Emit the initial result and then semantic readiness changes.               |
+| `--wait [duration]` | unset        | Wait for readiness, using `60s` when no duration is supplied.              |
+| `--interval <ms>`   | mode default | Delay between evaluations (minimum `250`); requires `--watch` or `--wait`. |
 
 ```bash
 openclaw ready
 openclaw ready --json
 openclaw ready --watch
 openclaw ready --watch --json --interval 500
+openclaw ready --wait 60s
+openclaw ready --wait --json
 openclaw ready --timeout 2500
 openclaw ready criteria list
 openclaw ready criteria inspect openclaw.workspace-writable --json
@@ -69,6 +72,20 @@ When the Gateway cannot be reached or does not expose the readiness contract, `-
 
 In watch mode, not-ready and unavailable states are observations rather than
 process exits; the command remains active to report recovery.
+
+## Wait mode
+
+`openclaw ready --wait [duration]` polls sequentially until the canonical
+result is ready or the total duration expires. The default duration is `60s`
+and the default polling interval is `500ms`. Each Gateway call retains its own
+`--timeout` bound, capped by the remaining total duration.
+
+Wait mode emits only the final observation. Successful JSON output remains the
+canonical readiness result, so the same command can gate Docker, Kubernetes,
+systemd, OCC, or another host after it starts OpenClaw. On timeout, the command
+exits `1` and emits the last canonical result when one was observed; if the
+Gateway was never reachable, it emits a structured `GatewayReadinessTimeout`
+error. Wait mode and watch mode are mutually exclusive.
 
 ## Criterion catalog
 

@@ -230,6 +230,7 @@ describe("registerStatusHealthSessionsCommands", () => {
       json: true,
       timeoutMs: 2500,
       watch: false,
+      waitMs: undefined,
       intervalMs: undefined,
     });
   });
@@ -240,13 +241,44 @@ describe("registerStatusHealthSessionsCommands", () => {
       json: true,
       timeoutMs: 10000,
       watch: true,
+      waitMs: undefined,
       intervalMs: 250,
     });
   });
 
+  it.each([
+    { args: ["--wait"], waitMs: 60_000 },
+    { args: ["--wait", "2m", "--interval", "250"], waitMs: 120_000 },
+  ])("runs ready wait with $args", async ({ args, waitMs }) => {
+    await runCli(["ready", ...args]);
+    expectCommandOptions(readyCommand, {
+      json: false,
+      timeoutMs: 10000,
+      watch: false,
+      waitMs,
+      intervalMs: args.includes("--interval") ? 250 : undefined,
+    });
+  });
+
+  it("rejects watch and wait together", async () => {
+    await runCli(["ready", "--watch", "--wait"]);
+    expect(runtime.error).toHaveBeenCalledWith("--watch and --wait cannot be used together");
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(readyCommand).not.toHaveBeenCalled();
+  });
+
+  it.each(["nope", "0"])("rejects invalid ready wait %s", async (duration) => {
+    await runCli(["ready", "--wait", duration]);
+    expect(runtime.error).toHaveBeenCalledWith(
+      "--wait must be a positive duration within the platform timer limit, such as 30s, 2m, or 500ms",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(readyCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects a ready interval without watch", async () => {
     await runCli(["ready", "--interval", "250"]);
-    expect(runtime.error).toHaveBeenCalledWith("--interval requires --watch");
+    expect(runtime.error).toHaveBeenCalledWith("--interval requires --watch or --wait");
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(readyCommand).not.toHaveBeenCalled();
   });
