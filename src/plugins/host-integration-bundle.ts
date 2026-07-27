@@ -9,12 +9,14 @@ const NAMESPACED_ID_PATTERN =
   /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?\/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
 const TOKEN_PATTERN = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
 const CONTRACT_VERSION_PATTERN = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?\/v[1-9]\d*$/;
+const READINESS_LOCAL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 export type PluginManifestHostIntegrationContribution = Readonly<{
   owner: string;
   kind: string;
   id: string;
   contractVersion: string;
+  readinessCriterion?: string;
 }>;
 
 export type PluginManifestHostIntegrationBundle = Readonly<{
@@ -48,6 +50,7 @@ function readRequiredString(value: Record<string, unknown>, key: string): string
  */
 export function parsePluginManifestHostIntegrationBundle(
   value: unknown,
+  pluginId: string,
 ): HostIntegrationBundleParseResult {
   if (value === undefined) {
     return { ok: true, bundle: undefined };
@@ -86,17 +89,27 @@ export function parsePluginManifestHostIntegrationBundle(
   for (const [index, rawContribution] of value.contributions.entries()) {
     if (
       !isRecord(rawContribution) ||
-      !hasOnlyKeys(rawContribution, ["owner", "kind", "id", "contractVersion"])
+      !hasOnlyKeys(rawContribution, [
+        "owner",
+        "kind",
+        "id",
+        "contractVersion",
+        "readinessCriterion",
+      ])
     ) {
       return {
         ok: false,
-        error: `hostIntegrationBundle.contributions[${index}] must contain only owner, kind, id, and contractVersion`,
+        error: `hostIntegrationBundle.contributions[${index}] contains unsupported fields`,
       };
     }
     const owner = readRequiredString(rawContribution, "owner");
     const kind = readRequiredString(rawContribution, "kind");
     const contributionId = readRequiredString(rawContribution, "id");
     const contributionContractVersion = readRequiredString(rawContribution, "contractVersion");
+    const readinessCriterion =
+      rawContribution.readinessCriterion === undefined
+        ? undefined
+        : readRequiredString(rawContribution, "readinessCriterion");
     if (!owner || !TOKEN_PATTERN.test(owner)) {
       return {
         ok: false,
@@ -134,6 +147,20 @@ export function parsePluginManifestHostIntegrationBundle(
         error: `hostIntegrationBundle.contributions[${index}].contractVersion must be a versioned contract id`,
       };
     }
+    const readinessPrefix = `plugin.${pluginId}.`;
+    const readinessLocalId = readinessCriterion?.slice(readinessPrefix.length);
+    if (
+      rawContribution.readinessCriterion !== undefined &&
+      (!readinessCriterion ||
+        !readinessCriterion.startsWith(readinessPrefix) ||
+        !readinessLocalId ||
+        !READINESS_LOCAL_ID_PATTERN.test(readinessLocalId))
+    ) {
+      return {
+        ok: false,
+        error: `hostIntegrationBundle.contributions[${index}].readinessCriterion must select this plugin's canonical readiness criterion`,
+      };
+    }
     ids.add(contributionId);
     contributions.push(
       Object.freeze({
@@ -141,6 +168,7 @@ export function parsePluginManifestHostIntegrationBundle(
         kind,
         id: contributionId,
         contractVersion: contributionContractVersion,
+        ...(readinessCriterion ? { readinessCriterion } : {}),
       }),
     );
   }

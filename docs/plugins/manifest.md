@@ -635,7 +635,8 @@ Use `hostIntegrationBundle` when one host plugin needs to publish a coherent inv
         "owner": "model-provider",
         "kind": "model-provider-adapter",
         "id": "acme/inference",
-        "contractVersion": "model-provider-adapter/v1"
+        "contractVersion": "model-provider-adapter/v1",
+        "readinessCriterion": "plugin.acme-host.inference-ready"
       },
       {
         "owner": "provider-request",
@@ -659,7 +660,9 @@ The bundle object has these fields:
 
 Each contribution requires `owner`, `kind`, `id`, and `contractVersion`. The owner and kind are lowercase canonical tokens. The id is lowercase and namespaced. The contribution contract version uses a versioned id such as `credential-slot-resolver/v1`.
 
-The schema is closed: unknown bundle or contribution fields make the plugin manifest invalid. This prevents a declaration from implying unsupported activation or readiness behavior. If multiple plugins declare the same bundle id, OpenClaw records an error and rejects every conflicting bundle declaration instead of choosing a winner. Enabled, non-failed declarations retain loader-owned plugin id, source, root, and origin provenance in the current plugin registry snapshot.
+A contribution may also name `readinessCriterion`. It must be the canonical id of a criterion registered by the same plugin, such as `plugin.acme-host.inference-ready`. The manifest remains inert: this field links inventory to owner-published evidence but does not register, select, require, or evaluate the criterion. Operators and hosting profiles retain readiness selection authority.
+
+The schema is closed: unknown bundle or contribution fields make the plugin manifest invalid. This prevents a declaration from implying unsupported activation behavior or readiness policy. If multiple plugins declare the same bundle id, OpenClaw records an error and rejects every conflicting bundle declaration instead of choosing a winner. Enabled, non-failed declarations retain loader-owned plugin id, source, root, and origin provenance in the current plugin registry snapshot.
 
 ## contracts reference
 
