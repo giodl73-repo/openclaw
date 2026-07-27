@@ -161,6 +161,18 @@ function requireString(record: Record<string, unknown>, key: string, label: stri
   return value;
 }
 
+function requireNonEmptyString(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): string {
+  const value = record[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(label + "." + key + " must be a non-empty string");
+  }
+  return value;
+}
+
 function requirePositiveInteger(
   record: Record<string, unknown>,
   key: string,
@@ -344,7 +356,7 @@ function assertOperationOpen(record: Record<string, unknown>): void {
   if (!HTTP_TOKEN_PATTERN.test(method) || FETCH_FORBIDDEN_METHODS.has(method.toUpperCase())) {
     throw new Error("operation-open.request.method must be supported by Fetch");
   }
-  const url = requireString(request, "url", "operation-open.request");
+  const url = requireNonEmptyString(request, "url", "operation-open.request");
   requireHeaderRecord(request.headers, "operation-open.request.headers");
   requireString(request, "routeProfile", "operation-open.request");
   requireString(request, "auditCorrelation", "operation-open.request");
