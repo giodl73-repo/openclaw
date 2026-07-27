@@ -253,6 +253,7 @@ export function loadPluginManifest(
   };
   const hostIntegrationBundleResult = parsePluginManifestHostIntegrationBundle(
     raw.hostIntegrationBundle,
+    id,
   );
   if (!hostIntegrationBundleResult.ok) {
     return cacheResult({
