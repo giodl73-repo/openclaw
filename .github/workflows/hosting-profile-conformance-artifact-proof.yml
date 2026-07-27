@@ -1,0 +1,96 @@
+name: Hosting profile conformance artifact proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - user/giodl/hosting-profile-conformance-artifact-proof
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Verify immutable implementation parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=123bae7b876ee69fb96c35ca5fa02096f7a56a27
+          actual="$(git rev-parse HEAD^)"
+          test "$actual" = "$expected"
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Check formatting
+        shell: bash
+        run: >-
+          pnpm exec oxfmt --check
+          docs/gateway/hosting-profiles.md
+          scripts/e2e/hosting-profiles-conformance.mjs
+          test/scripts/docker-e2e-plan.test.ts
+          test/scripts/hosting-profiles-conformance.test.ts
+
+      - name: Run focused tests
+        shell: bash
+        run: >-
+          pnpm exec vitest run
+          test/scripts/docker-e2e-plan.test.ts
+          test/scripts/hosting-profiles-conformance.test.ts
+
+      - name: Run lint and syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-oxlint.mjs \
+            scripts/e2e/hosting-profiles-conformance.mjs \
+            test/scripts/docker-e2e-plan.test.ts \
+            test/scripts/hosting-profiles-conformance.test.ts
+          bash -n scripts/e2e/hosting-profiles-docker.sh
+          node --check scripts/e2e/hosting-profiles-conformance.mjs
+          git diff --check HEAD^
+
+      - name: Run package-installed profile conformance
+        env:
+          OPENCLAW_HOSTING_PROFILES_E2E_ARTIFACT_DIR: ${{ github.workspace }}/.artifacts/hosting-profile-conformance
+        shell: bash
+        run: pnpm test:docker:hosting-profiles
+
+      - name: Verify conformance artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact=.artifacts/hosting-profile-conformance/hosting-profile-conformance.json
+          jq -e '
+            .contractVersion == 1 and
+            .suite == "openclaw-standard-hosting-profiles" and
+            .profileContractVersion == 1 and
+            .package.name == "openclaw" and
+            (.package.version | type == "string" and length > 0) and
+            (.image.id | test("^sha256:[a-f0-9]{64}$")) and
+            .summary == {"total": 13, "passed": 13, "failed": 0} and
+            .passed == true and
+            (.scenarios | length) == 13
+          ' "$artifact" >/dev/null
+
+      - name: Upload conformance artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosting-profile-conformance-${{ github.sha }}
+          path: .artifacts/hosting-profile-conformance/
+          if-no-files-found: warn
