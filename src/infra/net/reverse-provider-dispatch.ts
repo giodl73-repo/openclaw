@@ -187,6 +187,7 @@ function requireNonNegativeInteger(
 
 const HTTP_TOKEN_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const HTTP_FIELD_VALUE_PATTERN = /^[\t\x20-\x7e\x80-\xff]*$/;
+const FETCH_FORBIDDEN_METHODS = new Set(["CONNECT", "TRACE", "TRACK"]);
 
 function requireHeaderRecord(value: unknown, label: string): Record<string, string> {
   const record = assertRecord(value, label);
@@ -340,8 +341,8 @@ function assertOperationOpen(record: Record<string, unknown>): void {
     "operation-open.request",
   );
   const method = requireString(request, "method", "operation-open.request");
-  if (!HTTP_TOKEN_PATTERN.test(method)) {
-    throw new Error("operation-open.request.method must be an HTTP token");
+  if (!HTTP_TOKEN_PATTERN.test(method) || FETCH_FORBIDDEN_METHODS.has(method.toUpperCase())) {
+    throw new Error("operation-open.request.method must be supported by Fetch");
   }
   const url = requireString(request, "url", "operation-open.request");
   requireHeaderRecord(request.headers, "operation-open.request.headers");
@@ -385,8 +386,8 @@ export function assertReverseProviderDispatchFrameV1(
   if (record.type === "response-open") {
     assertKeys(record, [...BASE_KEYS, "status", "statusText", "headers"], "response-open");
     const status = requirePositiveInteger(record, "status", "response-open");
-    if (status < 100 || status > 599) {
-      throw new Error("response-open.status must be an HTTP status code");
+    if (status < 200 || status > 599) {
+      throw new Error("response-open.status must be supported by Fetch");
     }
     if (
       typeof record.statusText !== "string" ||

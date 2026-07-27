@@ -188,7 +188,26 @@ describe("reverse provider dispatch v1 fixtures", () => {
           method: "POST /smuggled",
         },
       }),
-    ).toThrow("HTTP token");
+    ).toThrow("supported by Fetch");
+    expect(() =>
+      assertReverseProviderDispatchFrameV1({
+        ...operation.base,
+        ...operation.open,
+        request: {
+          ...(operation.open.request as Record<string, unknown>),
+          method: "connect",
+        },
+      }),
+    ).toThrow("supported by Fetch");
+    expect(() =>
+      assertReverseProviderDispatchFrameV1({
+        ...operation.base,
+        type: "response-open",
+        status: 199,
+        statusText: "Informational",
+        headers: {},
+      }),
+    ).toThrow("supported by Fetch");
     expect(() =>
       assertReverseProviderDispatchFrameV1({
         ...operation.base,
