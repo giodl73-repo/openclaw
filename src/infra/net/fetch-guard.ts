@@ -687,7 +687,6 @@ async function fetchWithSsrFGuardInternal(
         init,
         credentialSlotRefs: isInitialHop ? params.initialCredentialSlotRefs : undefined,
       });
-      });
       const capturedByGlobalFetchPatch =
         !shouldUseRuntimeFetch &&
         isAmbientGlobalFetch({

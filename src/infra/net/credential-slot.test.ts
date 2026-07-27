@@ -8,10 +8,6 @@ import {
   prepareCredentialSlotBindingsV1,
 } from "./credential-slot.js";
 import { fetchWithCredentialSlotsAndSsrFGuard } from "./fetch-guard.js";
-import {
-  NETWORK_GUARD_PROFILE_VERSION,
-  type NetworkGuardProfileV1,
-} from "./network-guard-profile.js";
 import { createLocalOneHopFetchDispatcher } from "./one-hop-fetch-dispatcher.js";
 
 const SLOT_ID = "example/provider-token";
@@ -48,29 +44,6 @@ function createResolver(
     allowedOrigins: [ORIGIN],
     resolve,
     ...overrides,
-  };
-}
-
-function createNetworkGuard(url = `${ORIGIN}/v1`): NetworkGuardProfileV1 {
-  const parsed = new URL(url);
-  return {
-    version: NETWORK_GUARD_PROFILE_VERSION,
-    target: {
-      protocol: "https:",
-      origin: parsed.origin,
-      hostname: parsed.hostname,
-      port: 443,
-    },
-    route: { mode: "direct", resolution: "caller", tls: "required" },
-    addressPolicy: {
-      mode: "public-only",
-      trustedHostnames: [],
-      hostnameAllowlist: [],
-      allowedPrivateCidrs: [],
-      allowRfc2544BenchmarkRange: false,
-      allowIpv6UniqueLocalRange: false,
-      dnsRebinding: { policy: "reject", enforcement: "not-enforced" },
-    },
   };
 }
 
@@ -114,7 +87,6 @@ describe("credential slot bindings", () => {
     await dispatcher.dispatch({
       url: `${ORIGIN}/v1`,
       init,
-      networkGuard: createNetworkGuard(),
       credentialSlotRefs: [SLOT_ID],
     });
 
@@ -237,7 +209,6 @@ describe("credential slot bindings", () => {
       dispatcher.dispatch({
         url,
         init: { redirect: "manual" },
-        networkGuard: createNetworkGuard(url),
         credentialSlotRefs: [SLOT_ID],
       }),
     ).rejects.toMatchObject({ code: "origin-denied", slotId: SLOT_ID });
@@ -394,7 +365,6 @@ describe("credential slot bindings", () => {
       dispatcher.dispatch({
         url: `${ORIGIN}/v1`,
         init: { redirect: "manual" },
-        networkGuard: createNetworkGuard(),
         credentialSlotRefs: [SLOT_ID],
       }),
     ).rejects.toThrow(/without a prepared resolver binding/i);

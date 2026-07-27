@@ -1,3 +1,4 @@
+import { toErrorObject } from "../errors.js";
 export const CREDENTIAL_SLOT_VERSION = "credential-slot/v1" as const;
 export const CREDENTIAL_SLOT_RESOLVER_VERSION = "credential-slot-resolver/v1" as const;
 
@@ -125,7 +126,7 @@ function normalizeDefinition(definition: CredentialSlotDefinitionV1): Credential
   if (definition.version !== CREDENTIAL_SLOT_VERSION) {
     throw new CredentialSlotError(
       "invalid-definition",
-      `Unsupported credential slot version: ${definition.version}`,
+      "Unsupported credential slot version",
       definition.slotId,
     );
   }
@@ -166,7 +167,7 @@ function normalizeResolver(resolver: CredentialSlotResolverV1): CredentialSlotRe
   if (resolver.version !== CREDENTIAL_SLOT_RESOLVER_VERSION) {
     throw new CredentialSlotError(
       "incompatible-resolver",
-      `Unsupported credential resolver version: ${resolver.version}`,
+      "Unsupported credential resolver version",
       resolver.slotId,
     );
   }
@@ -207,7 +208,12 @@ async function resolveCredentialWithAbort<T>(
   }
   return await new Promise<T>((resolveResult, reject) => {
     const onAbort = () => {
-      reject(signal.reason ?? new DOMException("Credential resolution aborted", "AbortError"));
+      reject(
+        toErrorObject(
+          signal.reason ?? new DOMException("Credential resolution aborted", "AbortError"),
+          "Credential resolution aborted",
+        ),
+      );
     };
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) {
@@ -221,7 +227,7 @@ async function resolveCredentialWithAbort<T>(
       },
       (error: unknown) => {
         signal.removeEventListener("abort", onAbort);
-        reject(error);
+        reject(toErrorObject(error, "Credential resolution failed"));
       },
     );
   });
