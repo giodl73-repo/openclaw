@@ -1798,6 +1798,7 @@ describe("doctor health contributions", () => {
     expect(contributionIds).toContain("core/doctor/legacy-plugin-dependencies");
     expect(contributionIds).toContain("core/doctor/stale-plugin-runtime-symlinks");
     expect(contributionIds).toContain("core/doctor/disk-space");
+    expect(contributionIds).toContain("core/doctor/host-integration-bindings");
     expect(contributionIds).toContain("core/doctor/whatsapp-responsiveness");
     expect(contributionIds).toContain("core/doctor/device-pairing");
     expect(contributionIds).toContain("core/doctor/channel-plugin-blockers");
