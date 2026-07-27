@@ -205,6 +205,35 @@
       }
     },
     {
+      "id": "get-request-body",
+      "requestMethod": "GET",
+      "frames": [
+        { "type": "credit", "stream": "request", "bytes": 1 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "YQ==" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 2,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "bodyless-response-chunk",
+      "frames": [
+        { "type": "dispatch-started" },
+        { "type": "response-open", "status": 204, "statusText": "No Content", "headers": {} },
+        { "type": "credit", "stream": "response", "bytes": 1 },
+        { "type": "chunk", "stream": "response", "sequence": 0, "payloadBase64": "YQ==" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 4,
+        "certainty": "response-started"
+      }
+    },
+    {
       "id": "late-terminal-frame",
       "frames": [
         { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },

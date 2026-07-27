@@ -7,6 +7,7 @@ type FixtureCase = {
   id: string;
   frames: Array<Record<string, unknown>>;
   openOverrides?: Record<string, unknown>;
+  requestMethod?: string;
   disconnected?: boolean;
   expected: Record<string, unknown>;
 };
@@ -17,10 +18,14 @@ const operation = fixtures.operation as {
 };
 
 function materializeFrames(fixture: FixtureCase): Array<Record<string, unknown>> {
-  return [
-    { ...operation.base, ...operation.open, ...fixture.openOverrides },
-    ...fixture.frames.map((frame) => ({ ...operation.base, ...frame })),
-  ];
+  const open = { ...operation.base, ...operation.open, ...fixture.openOverrides };
+  if (fixture.requestMethod) {
+    open.request = {
+      ...(open.request as Record<string, unknown>),
+      method: fixture.requestMethod,
+    };
+  }
+  return [open, ...fixture.frames.map((frame) => ({ ...operation.base, ...frame }))];
 }
 
 describe("reverse provider dispatch v1 fixtures", () => {

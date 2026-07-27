@@ -43,6 +43,7 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
   let responseSequence = 0;
   let requestClosed = false;
   let responseOpened = false;
+  let responseBodyAllowed = false;
   let responseClosed = false;
   let dispatchStarted = false;
   let cancelled = false;
@@ -149,7 +150,13 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
         return failure("protocol-violation", frameIndex, certainty, "chunk size is invalid");
       }
       if (frame.stream === "request") {
-        if (requestClosed || frame.sequence !== requestSequence || bytes > requestCredit) {
+        if (
+          requestClosed ||
+          open.request.method.toUpperCase() === "GET" ||
+          open.request.method.toUpperCase() === "HEAD" ||
+          frame.sequence !== requestSequence ||
+          bytes > requestCredit
+        ) {
           return failure(
             "protocol-violation",
             frameIndex,
@@ -171,6 +178,7 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
       } else {
         if (
           !responseOpened ||
+          !responseBodyAllowed ||
           responseClosed ||
           frame.sequence !== responseSequence ||
           bytes > responseCredit
@@ -239,6 +247,7 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
         );
       }
       responseOpened = true;
+      responseBodyAllowed = frame.status !== 204 && frame.status !== 205 && frame.status !== 304;
       certainty = "response-started";
       continue;
     }
