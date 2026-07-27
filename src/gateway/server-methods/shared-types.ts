@@ -196,6 +196,7 @@ export type GatewayRequestContext = {
   }) => Promise<GatewayModelCatalogSnapshot>;
   getHealthCache: () => HealthSummary | null;
   getReadiness?: () => Promise<CanonicalReadinessResult>;
+  getReadinessCatalog?: () => import("../../readiness/catalog.js").ReadinessCriterionCatalog;
   refreshHealthSnapshot: (opts?: {
     probe?: boolean;
     includeSensitive?: boolean;

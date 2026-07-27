@@ -1,6 +1,10 @@
 import { getTerminalTableWidth, renderTable } from "../../packages/terminal-core/src/table.js";
 import { callGateway } from "../gateway/call.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import type {
+  ReadinessCriterionCatalog,
+  ReadinessCriterionDescriptor,
+} from "../readiness/catalog.js";
 import type { CanonicalReadinessResult, ReadinessCondition } from "../readiness/conditions.js";
 import { diffReadinessResults, type ReadinessTransitionChange } from "../readiness/transitions.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
@@ -10,6 +14,12 @@ type ReadyCommandOptions = {
   timeoutMs?: number;
   watch?: boolean;
   intervalMs?: number;
+};
+
+type ReadyCriteriaCommandOptions = {
+  id?: string;
+  json?: boolean;
+  timeoutMs?: number;
 };
 
 type ReadyCommandResult = Omit<
@@ -119,6 +129,46 @@ function emitError(runtime: RuntimeEnv, json: boolean, error: ReadyCommandError)
     runtime.error(`${error.error.reason}: ${error.error.message}`);
   }
   runtime.exit(1);
+}
+
+function criterionOwner(descriptor: ReadinessCriterionDescriptor): string {
+  if (descriptor.owner.kind === "plugin") {
+    return descriptor.owner.pluginName
+      ? `${descriptor.owner.pluginName} (${descriptor.owner.pluginId})`
+      : descriptor.owner.pluginId;
+  }
+  return descriptor.owner.kind;
+}
+
+function formatCriteriaCatalog(catalog: ReadinessCriterionCatalog): string {
+  return renderTable({
+    width: getTerminalTableWidth(),
+    border: "none",
+    columns: [
+      { key: "criterion", header: "CRITERION", minWidth: 24 },
+      { key: "selection", header: "SELECTION", minWidth: 10 },
+      { key: "owner", header: "OWNER", minWidth: 12 },
+      { key: "available", header: "AVAILABLE", minWidth: 9 },
+      { key: "description", header: "DESCRIPTION", flex: true, minWidth: 20 },
+    ],
+    rows: catalog.criteria.map((criterion) => ({
+      criterion: criterion.id,
+      selection: criterion.selection,
+      owner: criterionOwner(criterion),
+      available: criterion.registered ? "yes" : "no",
+      description: criterion.description ?? "Selected but not registered.",
+    })),
+  });
+}
+
+function formatCriterion(descriptor: ReadinessCriterionDescriptor): string {
+  return [
+    `Criterion: ${descriptor.id}`,
+    `Selection: ${descriptor.selection}`,
+    `Owner: ${criterionOwner(descriptor)}`,
+    `Available: ${descriptor.registered ? "yes" : "no"}`,
+    `Description: ${descriptor.description ?? "Selected but not registered."}`,
+  ].join("\n");
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
@@ -348,5 +398,47 @@ export async function readyCommand(
   }
   if (!readiness.ready) {
     runtime.exit(1);
+  }
+}
+
+export async function readyCriteriaCommand(
+  opts: ReadyCriteriaCommandOptions,
+  runtime: RuntimeEnv,
+  dependencies: {
+    callCatalog?: (params: { timeoutMs?: number }) => Promise<ReadinessCriterionCatalog>;
+  } = {},
+): Promise<void> {
+  const callCatalog =
+    dependencies.callCatalog ??
+    (async ({ timeoutMs }) =>
+      await callGateway<ReadinessCriterionCatalog>({
+        method: "readiness.catalog",
+        params: {},
+        timeoutMs,
+      }));
+
+  let catalog: ReadinessCriterionCatalog;
+  try {
+    catalog = await callCatalog({ timeoutMs: opts.timeoutMs });
+  } catch (error) {
+    runtime.error(`Readiness catalog unavailable: ${formatErrorMessage(error)}`);
+    runtime.exit(1);
+    return;
+  }
+
+  const criterion = opts.id
+    ? catalog.criteria.find((candidate) => candidate.id === opts.id)
+    : undefined;
+  if (opts.id && !criterion) {
+    runtime.error(`Readiness criterion not found: ${opts.id}`);
+    runtime.exit(1);
+    return;
+  }
+
+  const output = criterion ?? catalog;
+  if (opts.json) {
+    writeRuntimeJson(runtime, output);
+  } else {
+    runtime.log(criterion ? formatCriterion(criterion) : formatCriteriaCatalog(catalog));
   }
 }

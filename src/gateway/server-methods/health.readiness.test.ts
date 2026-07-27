@@ -125,3 +125,47 @@ describe("healthHandlers.ready", () => {
     expect(respond).toHaveBeenCalledWith(true, { ...status, readiness }, undefined);
   });
 });
+
+describe("healthHandlers.readiness.catalog", () => {
+  const catalogHandler = healthHandlers["readiness.catalog"];
+  if (!catalogHandler) {
+    throw new Error("healthHandlers.readiness.catalog must be registered");
+  }
+
+  it("returns descriptors without invoking readiness evaluation", async () => {
+    const catalog = { catalogVersion: 1, criteria: [] };
+    const getReadiness = vi.fn();
+    const respond = vi.fn();
+
+    await catalogHandler({
+      req: {} as never,
+      params: {},
+      respond,
+      context: { getReadinessCatalog: () => catalog, getReadiness } as never,
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(true, catalog, undefined);
+    expect(getReadiness).not.toHaveBeenCalled();
+  });
+
+  it("returns unavailable before the active catalog is published", async () => {
+    const respond = vi.fn();
+
+    await catalogHandler({
+      req: {} as never,
+      params: {},
+      respond,
+      context: {} as never,
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ message: "readiness catalog unavailable" }),
+    );
+  });
+});

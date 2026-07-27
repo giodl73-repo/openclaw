@@ -142,6 +142,17 @@ function mergeCachedHealthRuntimeState(params: {
 
 /** Gateway handlers for health snapshots and status summaries. */
 export const healthHandlers: GatewayRequestHandlers = {
+  "readiness.catalog": async ({ respond, context }) => {
+    if (!context.getReadinessCatalog) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, "readiness catalog unavailable"),
+      );
+      return;
+    }
+    respond(true, context.getReadinessCatalog(), undefined);
+  },
   ready: async ({ respond, context }) => {
     if (!context.getReadiness) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "readiness unavailable"));

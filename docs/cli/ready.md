@@ -24,6 +24,8 @@ openclaw ready --json
 openclaw ready --watch
 openclaw ready --watch --json --interval 500
 openclaw ready --timeout 2500
+openclaw ready criteria list
+openclaw ready criteria inspect openclaw.workspace-writable --json
 ```
 
 Human output identifies the producer, summarizes required/advisory counts, then
@@ -67,6 +69,20 @@ When the Gateway cannot be reached or does not expose the readiness contract, `-
 
 In watch mode, not-ready and unavailable states are observations rather than
 process exits; the command remains active to report recovery.
+
+## Criterion catalog
+
+`openclaw ready criteria list` reports the selectable core and plugin criteria
+registered by the running Gateway, their owner, availability, and current
+`required`, `advisory`, or `unselected` state. Use
+`openclaw ready criteria inspect <id>` to inspect one descriptor. Both commands
+support `--json` and `--timeout`.
+
+The catalog is read-only and observationally inert: enumeration does not run
+criterion callbacks or perform a readiness evaluation. A criterion selected in
+configuration but absent from the active registry remains visible with
+`registered: false`, which makes activation and configuration drift
+diagnosable.
 
 ## Related
 
