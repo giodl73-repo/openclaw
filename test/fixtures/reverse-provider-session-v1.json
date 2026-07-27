@@ -1,0 +1,25 @@
+{
+  "version": "reverse-provider-session-fixtures/v1",
+  "authority": {
+    "bindingId": "binding.weather.primary",
+    "interfaceVersion": "provider-request-dispatcher/v1",
+    "carrierVersion": "reverse-provider-dispatch/v1",
+    "ownerGeneration": "owner-generation-7",
+    "hostBundleGeneration": "bundle-generation-12",
+    "audience": "openclaw-host-provider"
+  },
+  "declaration": {
+    "version": "reverse-provider-session/v1",
+    "bindingId": "binding.weather.primary",
+    "interfaceVersion": "provider-request-dispatcher/v1",
+    "carrierVersion": "reverse-provider-dispatch/v1",
+    "ownerGeneration": "owner-generation-7",
+    "hostBundleGeneration": "bundle-generation-12"
+  },
+  "verifiedPeer": {
+    "credentialId": "credential-42",
+    "keyFingerprint": "sha256:fixture-key-fingerprint",
+    "audience": "openclaw-host-provider",
+    "expiresAtMs": 4102444800000
+  }
+}
