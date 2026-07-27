@@ -108,7 +108,13 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
     if (frame.type === "operation-open") {
       return failure("protocol-violation", frameIndex, certainty, "operation is already open");
     }
-    if (cancelled && frame.type !== "cancel" && frame.type !== "terminal") {
+    if (
+      cancelled &&
+      frame.type !== "cancel" &&
+      frame.type !== "terminal" &&
+      frame.type !== "dispatch-started" &&
+      frame.type !== "response-open"
+    ) {
       ignoredFrames += 1;
       continue;
     }
