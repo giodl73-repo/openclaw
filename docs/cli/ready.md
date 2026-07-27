@@ -33,7 +33,10 @@ openclaw ready criteria inspect openclaw.workspace-writable --json
 
 Human output identifies the producer, summarizes required/advisory counts, then
 lists every condition with its subject, status, requirement, stable reason, and
-diagnostic message. `--json` returns the complete canonical result unchanged,
+diagnostic message. When a condition is not `True`, it also reports the existing
+lifetime ID, generation, kind, and parent reference for the affected primary
+and related subjects. This distinguishes a condition failure from replacement
+or revision without requiring JSON parsing. `--json` returns the complete canonical result unchanged,
 including `contractVersion`, `evaluatedAtMs`, the reconciled `identity.subjects` package, condition
 subject references, `failures`, and `advisories`.
 

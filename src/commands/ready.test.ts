@@ -13,8 +13,18 @@ const ready: CanonicalReadinessResult = {
         kind: "openclaw.gateway",
         id: "gateway-1",
       },
-      { ref: "openclaw/plugins/active", kind: "openclaw.plugins" },
-      { ref: "openclaw/workspace/default", kind: "openclaw.workspace" },
+      {
+        ref: "openclaw/plugins/active",
+        kind: "openclaw.plugins",
+        generation: "plugins-7",
+      },
+      {
+        ref: "openclaw/workspace/default",
+        kind: "openclaw.workspace",
+        id: "workspace-2",
+        generation: "mount-4",
+        parentRef: "openclaw/gateway/current",
+      },
     ],
   },
   ready: true,
@@ -91,7 +101,46 @@ describe("readyCommand", () => {
     });
     expect(runtime.log.mock.calls[0]?.[0]).toContain("Ready: no");
     expect(runtime.log.mock.calls[0]?.[0]).toContain("WorkspaceStorageFull");
+    expect(runtime.log.mock.calls[0]?.[0]).toContain("Affected subject lifetimes:");
+    expect(runtime.log.mock.calls[0]?.[0]).toContain(
+      "openclaw/workspace/default: kind openclaw.workspace; id workspace-2; generation mount-4; parent openclaw/gateway/current",
+    );
     expect(runtime.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("includes related subject lifetimes for degraded conditions", async () => {
+    const runtime = createRuntime();
+    await readyCommand({}, runtime, {
+      callReady: async () => ({
+        ...notReady,
+        conditions: [
+          {
+            ...notReady.conditions.at(-1)!,
+            relatedSubjectRefs: ["openclaw/plugins/active"],
+          },
+        ],
+        failures: ["WorkspaceStorageFull"],
+      }),
+    });
+
+    const output = runtime.log.mock.calls[0]?.[0] ?? "";
+    expect(output).toContain("openclaw/workspace/default");
+    expect(output).toContain(
+      "openclaw/plugins/active: kind openclaw.plugins; id not declared; generation plugins-7",
+    );
+  });
+
+  it("omits affected subject lifetimes when every condition passes", async () => {
+    const runtime = createRuntime();
+    await readyCommand({}, runtime, {
+      callReady: async () => ({
+        ...ready,
+        conditions: [ready.conditions[0]],
+        advisories: [],
+      }),
+    });
+
+    expect(runtime.log.mock.calls[0]?.[0]).not.toContain("Affected subject lifetimes:");
   });
 
   it("fails closed with JSON when the Gateway is unavailable", async () => {
