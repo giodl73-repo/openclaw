@@ -80,6 +80,40 @@ function conditionMark(condition: ReadinessCondition): string {
   return condition.requirement === "required" ? "FAIL" : "WARN";
 }
 
+function formatAffectedSubjectLifetimes(result: ReadyCommandResult): string | undefined {
+  if (!result.identity) {
+    return undefined;
+  }
+  const affectedRefs = new Set<string>();
+  for (const condition of result.conditions) {
+    if (condition.status === "True") {
+      continue;
+    }
+    if (condition.subjectRef) {
+      affectedRefs.add(condition.subjectRef);
+    }
+    for (const relatedRef of condition.relatedSubjectRefs ?? []) {
+      affectedRefs.add(relatedRef);
+    }
+  }
+  const subjects = result.identity.subjects.filter((subject) => affectedRefs.has(subject.ref));
+  if (subjects.length === 0) {
+    return undefined;
+  }
+  return [
+    "Affected subject lifetimes:",
+    ...subjects.map((subject) => {
+      const details = [
+        `kind ${subject.kind}`,
+        `id ${subject.id ?? "not declared"}`,
+        `generation ${subject.generation ?? "not declared"}`,
+        ...(subject.parentRef ? [`parent ${subject.parentRef}`] : []),
+      ];
+      return `- ${subject.ref}: ${details.join("; ")}`;
+    }),
+  ].join("\n");
+}
+
 function formatReadyResult(result: ReadyCommandResult): string {
   const required = result.conditions.filter((condition) => condition.requirement === "required");
   const requiredPassing = required.filter((condition) => condition.status === "True").length;
@@ -120,6 +154,10 @@ function formatReadyResult(result: ReadyCommandResult): string {
         })),
       }),
     );
+  }
+  const affectedSubjects = formatAffectedSubjectLifetimes(result);
+  if (affectedSubjects) {
+    lines.push("", affectedSubjects);
   }
   return lines.join("\n");
 }
