@@ -1,0 +1,65 @@
+name: Readiness startup wait proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - user/giodl/readiness-startup-wait-proof
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Verify immutable implementation parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=5201c5558cd7e328c149ceebbd38d4fe67971d39
+          actual="$(git rev-parse HEAD^)"
+          test "$actual" = "$expected"
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Check formatting
+        shell: bash
+        run: >-
+          pnpm exec oxfmt --check
+          docs/cli/ready.md
+          src/cli/program/register.status-health-sessions.ts
+          src/cli/program/register.status-health-sessions.test.ts
+          src/commands/ready.ts
+          src/commands/ready-wait.ts
+          src/commands/ready.test.ts
+
+      - name: Run focused tests
+        shell: bash
+        run: >-
+          pnpm exec vitest run
+          src/commands/ready.test.ts
+          src/cli/program/register.status-health-sessions.test.ts
+
+      - name: Run type-aware lint
+        shell: bash
+        run: >-
+          node scripts/run-oxlint.mjs --type-aware
+          src/cli/program/register.status-health-sessions.ts
+          src/cli/program/register.status-health-sessions.test.ts
+          src/commands/ready.ts
+          src/commands/ready-wait.ts
+          src/commands/ready.test.ts
