@@ -8,11 +8,13 @@ import type {
 import type { CanonicalReadinessResult, ReadinessCondition } from "../readiness/conditions.js";
 import { diffReadinessResults, type ReadinessTransitionChange } from "../readiness/transitions.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
+import { waitForReady } from "./ready-wait.js";
 
 type ReadyCommandOptions = {
   json?: boolean;
   timeoutMs?: number;
   watch?: boolean;
+  waitMs?: number;
   intervalMs?: number;
 };
 
@@ -31,7 +33,7 @@ type ReadyCommandResult = Omit<
 type ReadyCommandError = {
   ready: false;
   error: {
-    reason: "GatewayReadinessUnavailable";
+    reason: "GatewayReadinessUnavailable" | "GatewayReadinessTimeout";
     message: string;
   };
 };
@@ -64,6 +66,7 @@ type ReadyWatchEvent = {
 };
 
 const DEFAULT_READY_WATCH_INTERVAL_MS = 2_000;
+const DEFAULT_READY_WAIT_INTERVAL_MS = 500;
 const READY_WATCH_SIGNALS: readonly ReadyWatchSignal[] = ["SIGINT", "SIGTERM"];
 const READY_WATCH_SIGNAL_EXIT_CODES: Record<ReadyWatchSignal, number> = {
   SIGINT: 130,
@@ -376,6 +379,45 @@ export async function readyCommand(
       process: dependencies.process ?? process,
       delay: dependencies.delay ?? delay,
       now: dependencies.now ?? Date.now,
+    });
+    return;
+  }
+
+  if (opts.waitMs !== undefined) {
+    const outcome = await waitForReady<ReadyCommandResult>({
+      waitMs: opts.waitMs,
+      intervalMs: opts.intervalMs ?? DEFAULT_READY_WAIT_INTERVAL_MS,
+      callTimeoutMs: opts.timeoutMs,
+      callReady,
+      delay: dependencies.delay ?? delay,
+      now: dependencies.now ?? Date.now,
+    });
+    if (outcome.state === "ready") {
+      if (opts.json) {
+        writeRuntimeJson(runtime, outcome.result);
+      } else {
+        runtime.log(formatReadyResult(outcome.result));
+      }
+      return;
+    }
+
+    const timeoutMessage = `Timed out after ${opts.waitMs}ms waiting for Gateway readiness.`;
+    if (outcome.result) {
+      if (opts.json) {
+        writeRuntimeJson(runtime, outcome.result);
+      } else {
+        runtime.log(formatReadyResult(outcome.result));
+      }
+      runtime.error(timeoutMessage);
+      runtime.exit(1);
+      return;
+    }
+    emitError(runtime, Boolean(opts.json), {
+      ready: false,
+      error: {
+        reason: "GatewayReadinessTimeout",
+        message: outcome.error ? `${timeoutMessage} ${outcome.error.message}` : timeoutMessage,
+      },
     });
     return;
   }

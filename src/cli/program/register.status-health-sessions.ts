@@ -1,3 +1,4 @@
+import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 // Status, health, sessions, commitments, and task/flow command registration.
 import type { Command } from "commander";
 import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
@@ -6,9 +7,11 @@ import { setVerbose } from "../../globals.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
+import { parseDurationMs } from "../parse-duration.js";
 import { parsePositiveIntOrUndefined, parseStrictPositiveIntOrUndefined } from "./helpers.js";
 
 const MIN_READY_WATCH_INTERVAL_MS = 250;
+const DEFAULT_READY_WAIT_MS = 60_000;
 
 function resolveVerbose(opts: { verbose?: boolean; debug?: boolean }): boolean {
   return Boolean(opts.verbose || opts.debug);
@@ -93,6 +96,30 @@ function parseReadyWatchIntervalMs(interval: unknown): number | null | undefined
     return null;
   }
   return parsed;
+}
+
+function parseReadyWaitMs(wait: unknown): number | null | undefined {
+  if (wait === undefined || wait === false) {
+    return undefined;
+  }
+  if (wait === true) {
+    return DEFAULT_READY_WAIT_MS;
+  }
+  if (typeof wait === "string") {
+    try {
+      const waitMs = parseDurationMs(wait);
+      if (waitMs > 0 && waitMs <= MAX_TIMER_TIMEOUT_MS) {
+        return waitMs;
+      }
+    } catch {
+      // Emit the stable option error below.
+    }
+  }
+  defaultRuntime.error(
+    "--wait must be a positive duration within the platform timer limit, such as 30s, 2m, or 500ms",
+  );
+  defaultRuntime.exit(1);
+  return null;
 }
 
 function parseTasksAuditLimit(limit: unknown): number | null | undefined {
@@ -201,7 +228,8 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     .option("--json", "Output JSON; with --watch, emit one event per line", false)
     .option("--timeout <ms>", "Connection timeout in milliseconds", "10000")
     .option("--watch", "Keep watching and emit semantic readiness transitions", false)
-    .option("--interval <ms>", "Watch interval in milliseconds (default: 2000)")
+    .option("--wait [duration]", "Wait for readiness (default: 60s)")
+    .option("--interval <ms>", "Polling interval in milliseconds")
     .addHelpText(
       "after",
       () =>
@@ -210,6 +238,7 @@ export function registerStatusHealthSessionsCommands(program: Command) {
           ["openclaw ready --json", "Output the canonical readiness result."],
           ["openclaw ready --watch", "Show readiness changes until interrupted."],
           ["openclaw ready --watch --json", "Stream versioned JSON Lines events."],
+          ["openclaw ready --wait 60s", "Wait until the Gateway becomes ready."],
           ["openclaw ready --timeout 2500", "Tighten the Gateway connection timeout."],
         ])}`,
     )
@@ -224,14 +253,29 @@ export function registerStatusHealthSessionsCommands(program: Command) {
         if (intervalMs === null) {
           return;
         }
-        if (intervalMs !== undefined && !opts.watch) {
-          defaultRuntime.error("--interval requires --watch");
+        const waitMs = parseReadyWaitMs(opts.wait);
+        if (waitMs === null) {
+          return;
+        }
+        if (opts.watch && waitMs !== undefined) {
+          defaultRuntime.error("--watch and --wait cannot be used together");
+          defaultRuntime.exit(1);
+          return;
+        }
+        if (intervalMs !== undefined && !opts.watch && waitMs === undefined) {
+          defaultRuntime.error("--interval requires --watch or --wait");
           defaultRuntime.exit(1);
           return;
         }
         const { readyCommand } = await import("../../commands/ready.js");
         await readyCommand(
-          { json: Boolean(opts.json), timeoutMs, watch: Boolean(opts.watch), intervalMs },
+          {
+            json: Boolean(opts.json),
+            timeoutMs,
+            watch: Boolean(opts.watch),
+            waitMs,
+            intervalMs,
+          },
           defaultRuntime,
         );
       });
