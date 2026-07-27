@@ -245,6 +245,15 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
     route: { id: "models-status" },
   },
   {
+    commandPath: ["catalog"],
+    policy: {
+      bypassConfigGuard: true,
+      ensureCliPath: false,
+      loadPlugins: "never",
+      networkProxy: "bypass",
+    },
+  },
+  {
     commandPath: ["tasks", "list"],
     exact: true,
     policy: {
