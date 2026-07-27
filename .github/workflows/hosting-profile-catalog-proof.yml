@@ -1,0 +1,79 @@
+name: Hosting profile catalog proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - user/giodl/hosting-profile-catalog-proof
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Verify immutable implementation parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=99449434cb4cadf81be4a4bc8bf4c4d35f5b4e3b
+          actual="$(git rev-parse HEAD^)"
+          test "$actual" = "$expected"
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+
+      - name: Check formatting
+        shell: bash
+        run: >-
+          pnpm exec oxfmt --check
+          docs/gateway/hosting-profiles.md
+          src/hosting/profiles.ts
+          src/hosting/profiles.test.ts
+          src/commands/hosting-profiles.ts
+          src/commands/hosting-profiles.test.ts
+          src/cli/program/register.hosting.ts
+          src/cli/program/register.hosting.test.ts
+          src/cli/program/core-command-descriptors.ts
+          src/cli/program/command-registry-core.ts
+          src/cli/program/command-registry.test.ts
+
+      - name: Run focused tests
+        shell: bash
+        run: >-
+          pnpm exec vitest run
+          src/hosting/profiles.test.ts
+          src/commands/hosting-profiles.test.ts
+          src/cli/program/register.hosting.test.ts
+          src/cli/program/command-registry.test.ts
+
+      - name: Run type-aware lint
+        shell: bash
+        run: >-
+          node scripts/run-oxlint.mjs --type-aware
+          src/hosting/profiles.ts
+          src/hosting/profiles.test.ts
+          src/commands/hosting-profiles.ts
+          src/commands/hosting-profiles.test.ts
+          src/cli/program/register.hosting.ts
+          src/cli/program/register.hosting.test.ts
+          src/cli/program/core-command-descriptors.ts
+          src/cli/program/command-registry-core.ts
+          src/cli/program/command-registry.test.ts
+
+      - name: Check core types
+        shell: bash
+        run: node scripts/run-tsgo.mjs -p tsconfig.core.json
