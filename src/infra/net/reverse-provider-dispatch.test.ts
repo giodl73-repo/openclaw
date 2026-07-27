@@ -233,6 +233,19 @@ describe("reverse provider dispatch v1 fixtures", () => {
     ).toThrow("HTTP reason phrase");
   });
 
+  it("accepts request URLs longer than bounded identifiers within the negotiated frame", () => {
+    expect(() =>
+      assertReverseProviderDispatchFrameV1({
+        ...operation.base,
+        ...operation.open,
+        request: {
+          ...(operation.open.request as Record<string, unknown>),
+          url: "https://api.dispatch.test/v1?signature=" + "a".repeat(1024),
+        },
+      }),
+    ).not.toThrow();
+  });
+
   it("rejects frames beyond the fixed wire limit", () => {
     expect(() =>
       assertReverseProviderDispatchFrameV1({

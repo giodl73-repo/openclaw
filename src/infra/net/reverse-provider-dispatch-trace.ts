@@ -247,7 +247,11 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
         );
       }
       responseOpened = true;
-      responseBodyAllowed = frame.status !== 204 && frame.status !== 205 && frame.status !== 304;
+      responseBodyAllowed =
+        open.request.method.toUpperCase() !== "HEAD" &&
+        frame.status !== 204 &&
+        frame.status !== 205 &&
+        frame.status !== 304;
       certainty = "response-started";
       continue;
     }
