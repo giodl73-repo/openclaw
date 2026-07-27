@@ -160,6 +160,51 @@
       }
     },
     {
+      "id": "request-credit-exceeds-total-limit",
+      "openOverrides": { "requestByteLimit": 10, "responseByteLimit": 10, "maxChunkBytes": 10 },
+      "frames": [
+        { "type": "credit", "stream": "request", "bytes": 10 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "AQIDBAUG" },
+        { "type": "credit", "stream": "request", "bytes": 6 }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 3,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "response-credit-exceeds-total-limit",
+      "openOverrides": { "requestByteLimit": 10, "responseByteLimit": 10, "maxChunkBytes": 10 },
+      "frames": [
+        { "type": "dispatch-started" },
+        { "type": "response-open", "status": 200, "statusText": "OK", "headers": {} },
+        { "type": "credit", "stream": "response", "bytes": 10 },
+        { "type": "chunk", "stream": "response", "sequence": 0, "payloadBase64": "AQIDBAUG" },
+        { "type": "credit", "stream": "response", "bytes": 6 }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 5,
+        "certainty": "response-started"
+      }
+    },
+    {
+      "id": "duplicate-cancellation",
+      "frames": [
+        { "type": "cancel", "reason": "caller-stopped" },
+        { "type": "cancel", "reason": "caller-stopped-again" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 2,
+        "certainty": "not-started"
+      }
+    },
+    {
       "id": "late-terminal-frame",
       "frames": [
         { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },

@@ -210,6 +210,59 @@ describe("reverse provider dispatch v1 fixtures", () => {
     });
   });
 
+  it("rejects cumulative credit beyond each stream byte limit", () => {
+    for (const stream of ["request", "response"] as const) {
+      const frames: Array<Record<string, unknown>> = [
+        {
+          ...operation.base,
+          ...operation.open,
+          requestByteLimit: 10,
+          responseByteLimit: 10,
+          maxChunkBytes: 10,
+        },
+      ];
+      if (stream === "response") {
+        frames.push({ ...operation.base, type: "dispatch-started" });
+        frames.push({
+          ...operation.base,
+          type: "response-open",
+          status: 200,
+          statusText: "OK",
+          headers: {},
+        });
+      }
+      frames.push({ ...operation.base, type: "credit", stream, bytes: 10 });
+      frames.push({
+        ...operation.base,
+        type: "chunk",
+        stream,
+        sequence: 0,
+        payloadBase64: "AQIDBAUG",
+      });
+      frames.push({ ...operation.base, type: "credit", stream, bytes: 6 });
+
+      expect(evaluateReverseProviderDispatchTraceV1({ frames })).toMatchObject({
+        ok: false,
+        code: "protocol-violation",
+      });
+    }
+  });
+
+  it("rejects duplicate cancellation", () => {
+    expect(
+      evaluateReverseProviderDispatchTraceV1({
+        frames: [
+          { ...operation.base, ...operation.open },
+          { ...operation.base, type: "cancel", reason: "caller stopped" },
+          { ...operation.base, type: "cancel", reason: "caller stopped again" },
+        ],
+      }),
+    ).toMatchObject({
+      ok: false,
+      code: "protocol-violation",
+    });
+  });
+
   it("rejects operation limits whose maximum chunk cannot fit one frame", () => {
     expect(() =>
       assertReverseProviderDispatchFrameV1({

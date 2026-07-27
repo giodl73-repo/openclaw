@@ -107,14 +107,18 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
     if (frame.type === "operation-open") {
       return failure("protocol-violation", frameIndex, certainty, "operation is already open");
     }
-    if (cancelled && frame.type !== "terminal") {
+    if (cancelled && frame.type !== "cancel" && frame.type !== "terminal") {
       ignoredFrames += 1;
       continue;
     }
     if (frame.type === "credit") {
       if (frame.stream === "request") {
         requestCredit += frame.bytes;
-        if (!Number.isSafeInteger(requestCredit) || requestCredit > open.requestByteLimit) {
+        const authorizedRequestBytes = requestBytes + requestCredit;
+        if (
+          !Number.isSafeInteger(authorizedRequestBytes) ||
+          authorizedRequestBytes > open.requestByteLimit
+        ) {
           return failure(
             "protocol-violation",
             frameIndex,
@@ -124,7 +128,11 @@ export function evaluateReverseProviderDispatchTraceV1(params: {
         }
       } else {
         responseCredit += frame.bytes;
-        if (!Number.isSafeInteger(responseCredit) || responseCredit > open.responseByteLimit) {
+        const authorizedResponseBytes = responseBytes + responseCredit;
+        if (
+          !Number.isSafeInteger(authorizedResponseBytes) ||
+          authorizedResponseBytes > open.responseByteLimit
+        ) {
           return failure(
             "protocol-violation",
             frameIndex,
