@@ -185,17 +185,17 @@ function requireNonNegativeInteger(
   return value as number;
 }
 
-const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-const HTTP_HEADER_VALUE_PATTERN = /^[\t\x20-\x7e\x80-\xff]*$/;
+const HTTP_TOKEN_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const HTTP_FIELD_VALUE_PATTERN = /^[\t\x20-\x7e\x80-\xff]*$/;
 
 function requireHeaderRecord(value: unknown, label: string): Record<string, string> {
   const record = assertRecord(value, label);
   const normalizedNames = new Set<string>();
   for (const [key, entry] of Object.entries(record)) {
     if (
-      !HTTP_HEADER_NAME_PATTERN.test(key) ||
+      !HTTP_TOKEN_PATTERN.test(key) ||
       typeof entry !== "string" ||
-      !HTTP_HEADER_VALUE_PATTERN.test(entry)
+      !HTTP_FIELD_VALUE_PATTERN.test(entry)
     ) {
       throw new Error(`${label} contains an invalid HTTP header`);
     }
@@ -339,7 +339,10 @@ function assertOperationOpen(record: Record<string, unknown>): void {
     ["method", "url", "headers", "routeProfile", "networkGuard", "auditCorrelation"],
     "operation-open.request",
   );
-  requireString(request, "method", "operation-open.request");
+  const method = requireString(request, "method", "operation-open.request");
+  if (!HTTP_TOKEN_PATTERN.test(method)) {
+    throw new Error("operation-open.request.method must be an HTTP token");
+  }
   const url = requireString(request, "url", "operation-open.request");
   requireHeaderRecord(request.headers, "operation-open.request.headers");
   requireString(request, "routeProfile", "operation-open.request");
@@ -385,8 +388,12 @@ export function assertReverseProviderDispatchFrameV1(
     if (status < 100 || status > 599) {
       throw new Error("response-open.status must be an HTTP status code");
     }
-    if (typeof record.statusText !== "string" || record.statusText.length > 256) {
-      throw new Error("response-open.statusText must be a bounded string");
+    if (
+      typeof record.statusText !== "string" ||
+      record.statusText.length > 256 ||
+      !HTTP_FIELD_VALUE_PATTERN.test(record.statusText)
+    ) {
+      throw new Error("response-open.statusText must be a bounded HTTP reason phrase");
     }
     requireHeaderRecord(record.headers, "response-open.headers");
     return record as ReverseProviderDispatchFrameV1;
