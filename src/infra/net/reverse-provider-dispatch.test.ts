@@ -178,6 +178,37 @@ describe("reverse provider dispatch v1 fixtures", () => {
     ).toThrow("invalid HTTP header");
   });
 
+  it("rejects HTTP metadata that Fetch cannot materialize", () => {
+    expect(() =>
+      assertReverseProviderDispatchFrameV1({
+        ...operation.base,
+        ...operation.open,
+        request: {
+          ...(operation.open.request as Record<string, unknown>),
+          method: "POST /smuggled",
+        },
+      }),
+    ).toThrow("HTTP token");
+    expect(() =>
+      assertReverseProviderDispatchFrameV1({
+        ...operation.base,
+        type: "response-open",
+        status: 200,
+        statusText: "OK\r\nX-Injected: true",
+        headers: {},
+      }),
+    ).toThrow("HTTP reason phrase");
+    expect(() =>
+      assertReverseProviderDispatchFrameV1({
+        ...operation.base,
+        type: "response-open",
+        status: 200,
+        statusText: "snowman ☃",
+        headers: {},
+      }),
+    ).toThrow("HTTP reason phrase");
+  });
+
   it("rejects frames beyond the fixed wire limit", () => {
     expect(() =>
       assertReverseProviderDispatchFrameV1({
