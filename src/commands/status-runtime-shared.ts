@@ -236,8 +236,8 @@ export async function resolveStatusHostIntegrationSafe(params: {
   if (!params.gatewayReachable) {
     return undefined;
   }
-  const { callGateway } = await loadGatewayCallModule();
-  const inventory = await callGateway<HostIntegrationRuntimeInventoryV1>({
+  const { callGatewayCli } = await loadGatewayCallModule();
+  const inventory = await callGatewayCli<HostIntegrationRuntimeInventoryV1>({
     method: "hostIntegration.status",
     params: {},
     timeoutMs: params.timeoutMs,

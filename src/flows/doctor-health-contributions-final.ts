@@ -290,6 +290,26 @@ export function resolveFinalDoctorHealthContributions(params: {
       run: params.runGatewayHealthChecks,
     }),
     createDoctorHealthContribution({
+      id: "doctor:host-integration-bindings",
+      label: "Host integration bindings",
+      healthChecks: {
+        description:
+          "Host integration readiness failures reported by the running Gateway inventory.",
+        defaultEnabled: false,
+        async detect(ctx) {
+          if (
+            (await hasActiveGatewayExecCredential({ cfg: ctx.cfg })) &&
+            ctx.allowExecSecretRefs !== true
+          ) {
+            return [];
+          }
+          const { collectHostIntegrationHealthFindings } =
+            await import("../commands/doctor-host-integration.js");
+          return collectHostIntegrationHealthFindings({ config: ctx.cfg });
+        },
+      },
+    }),
+    createDoctorHealthContribution({
       id: "doctor:whatsapp-responsiveness",
       label: "WhatsApp responsiveness",
       healthChecks: {

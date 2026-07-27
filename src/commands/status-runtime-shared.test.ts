@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   loadProviderUsageSummary: vi.fn(),
   runSecurityAudit: vi.fn(),
   callGateway: vi.fn(),
+  callGatewayCli: vi.fn(),
   getDaemonStatusSummary: vi.fn(),
   getNodeDaemonStatusSummary: vi.fn(),
   resolveReadOnlyChannelPluginsForConfig: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock("../security/audit.runtime.js", () => ({
 
 vi.mock("../gateway/call.js", () => ({
   callGateway: mocks.callGateway,
+  callGatewayCli: mocks.callGatewayCli,
 }));
 
 vi.mock("./status.daemon.js", () => ({
@@ -84,6 +86,7 @@ describe("status-runtime-shared", () => {
     mocks.callGateway.mockImplementation(async (params: { method?: string }) =>
       params.method === "ready" ? ready : { ok: true },
     );
+    mocks.callGatewayCli.mockResolvedValue({ ok: true });
     mocks.getDaemonStatusSummary.mockResolvedValue({ label: "LaunchAgent" });
     mocks.getNodeDaemonStatusSummary.mockResolvedValue({ label: "node" });
     mocks.resolveModelAuthLabel.mockReturnValue(undefined);
@@ -383,7 +386,7 @@ describe("status-runtime-shared", () => {
   });
 
   it("reads host integration status only from a reachable Gateway", async () => {
-    mocks.callGateway.mockResolvedValueOnce({
+    mocks.callGatewayCli.mockResolvedValueOnce({
       version: "host-integration-runtime-inventory/v1",
       status: "True",
       bundles: [{ id: "example/host" }],
@@ -397,7 +400,7 @@ describe("status-runtime-shared", () => {
         callOverrides: { url: "ws://127.0.0.1:18789", token: "tok" },
       }),
     ).resolves.toMatchObject({ status: "True", bundles: [{ id: "example/host" }] });
-    expect(mocks.callGateway).toHaveBeenCalledWith({
+    expect(mocks.callGatewayCli).toHaveBeenCalledWith({
       method: "hostIntegration.status",
       params: {},
       timeoutMs: 4321,
@@ -414,9 +417,9 @@ describe("status-runtime-shared", () => {
         gatewayReachable: false,
       }),
     ).resolves.toBeUndefined();
-    expect(mocks.callGateway).not.toHaveBeenCalled();
+    expect(mocks.callGatewayCli).not.toHaveBeenCalled();
 
-    mocks.callGateway.mockResolvedValueOnce({
+    mocks.callGatewayCli.mockResolvedValueOnce({
       version: "host-integration-runtime-inventory/v1",
       status: "Unknown",
       bundles: [],
