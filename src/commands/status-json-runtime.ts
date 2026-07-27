@@ -64,18 +64,34 @@ export async function resolveStatusJsonOutput(params: {
   suppressHealthErrors?: boolean;
 }) {
   const { scan, opts } = params;
-  const { securityAudit, usage, readiness, health, lastHeartbeat, gatewayService, nodeService } =
-    await resolveStatusRuntimeSnapshot({
-      config: scan.cfg,
-      sourceConfig: scan.sourceConfig,
-      timeoutMs: opts.timeoutMs,
-      usage: opts.usage,
-      deep: opts.deep,
-      includeReadiness: true,
-      gatewayReachable: scan.gatewayReachable,
-      includeSecurityAudit: params.includeSecurityAudit,
-      suppressHealthErrors: params.suppressHealthErrors,
-    });
+  const {
+    securityAudit,
+    usage,
+    readiness,
+    health,
+    lastHeartbeat,
+    hostIntegration,
+    gatewayService,
+    nodeService,
+  } = await resolveStatusRuntimeSnapshot({
+    config: scan.cfg,
+    sourceConfig: scan.sourceConfig,
+    timeoutMs: opts.timeoutMs,
+    usage: opts.usage,
+    deep: opts.deep,
+    gatewayReachable: scan.gatewayReachable,
+    includeReadiness: true,
+    includeHostIntegration: true,
+    gatewayCallOverrides: scan.gatewayReachable
+      ? {
+          url: scan.gatewayConnection.url,
+          ...(scan.gatewayProbeAuth?.token ? { token: scan.gatewayProbeAuth.token } : {}),
+          ...(scan.gatewayProbeAuth?.password ? { password: scan.gatewayProbeAuth.password } : {}),
+        }
+      : undefined,
+    includeSecurityAudit: params.includeSecurityAudit,
+    suppressHealthErrors: params.suppressHealthErrors,
+  });
 
   return buildStatusJsonPayload({
     summary: scan.summary,
@@ -95,6 +111,7 @@ export async function resolveStatusJsonOutput(params: {
     health,
     usage,
     lastHeartbeat,
+    hostIntegration,
     pluginCompatibility: params.includePluginCompatibility ? scan.pluginCompatibility : undefined,
   });
 }

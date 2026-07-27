@@ -67,6 +67,11 @@ describe("status-json-runtime", () => {
       readiness: { ready: true, conditions: [], failures: [], advisories: [] },
       health: { ok: true },
       lastHeartbeat: { status: "ok" },
+      hostIntegration: {
+        version: "host-integration-runtime-inventory/v1",
+        status: "True",
+        bundles: [{ id: "example/host" }],
+      },
       gatewayService: { label: "LaunchAgent" },
       nodeService: { label: "node" },
     });
@@ -88,6 +93,11 @@ describe("status-json-runtime", () => {
       deep: true,
       includeReadiness: true,
       gatewayReachable: true,
+      includeHostIntegration: true,
+      gatewayCallOverrides: {
+        url: "ws://127.0.0.1:18789",
+        token: "tok",
+      },
       includeSecurityAudit: true,
       suppressHealthErrors: undefined,
     });
@@ -110,6 +120,10 @@ describe("status-json-runtime", () => {
     });
     expect(payloadInput.health).toStrictEqual({ ok: true });
     expect(payloadInput.lastHeartbeat).toStrictEqual({ status: "ok" });
+    expect(payloadInput.hostIntegration).toMatchObject({
+      status: "True",
+      bundles: [{ id: "example/host" }],
+    });
     expect(payloadInput.pluginCompatibility).toStrictEqual([
       {
         pluginId: "legacy",
@@ -149,6 +163,11 @@ describe("status-json-runtime", () => {
       deep: false,
       includeReadiness: true,
       gatewayReachable: true,
+      includeHostIntegration: true,
+      gatewayCallOverrides: {
+        url: "ws://127.0.0.1:18789",
+        token: "tok",
+      },
       includeSecurityAudit: false,
       suppressHealthErrors: undefined,
     });
@@ -191,6 +210,11 @@ describe("status-json-runtime", () => {
       deep: true,
       includeReadiness: true,
       gatewayReachable: true,
+      includeHostIntegration: true,
+      gatewayCallOverrides: {
+        url: "ws://127.0.0.1:18789",
+        token: "tok",
+      },
       includeSecurityAudit: false,
       suppressHealthErrors: true,
     });

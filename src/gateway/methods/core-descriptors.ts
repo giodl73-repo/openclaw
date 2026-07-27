@@ -474,6 +474,7 @@ const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
     controlPlaneWrite: true,
   },
   { name: "ready", scope: "operator.read", since: "2026.7" },
+  { name: "hostIntegration.status", scope: "operator.read", since: "2026.7" },
 ] as const;
 
 const CORE_GATEWAY_METHOD_SPEC_BY_NAME: ReadonlyMap<string, CoreGatewayMethodSpec> = new Map(
