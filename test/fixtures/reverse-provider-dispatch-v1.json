@@ -1,0 +1,254 @@
+{
+  "version": "reverse-provider-dispatch-fixtures/v1",
+  "operation": {
+    "base": {
+      "version": "reverse-provider-dispatch/v1",
+      "incarnationId": "incarnation-1",
+      "operationId": "operation-1",
+      "ownerGeneration": "owner-7",
+      "hostBundleGeneration": "lobster/host@1.0.0"
+    },
+    "open": {
+      "type": "operation-open",
+      "bindingId": "lobster/egress",
+      "timeoutMs": 30000,
+      "requestByteLimit": 1024,
+      "responseByteLimit": 2048,
+      "maxFrameBytes": 4096,
+      "maxChunkBytes": 256,
+      "request": {
+        "method": "POST",
+        "url": "https://api.dispatch.test/v1",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "routeProfile": "lobster/managed-egress",
+        "auditCorrelation": "audit-1"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "accepted-stream",
+      "frames": [
+        { "type": "credit", "stream": "request", "bytes": 4 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "dGVzdA==" },
+        { "type": "half-close", "stream": "request" },
+        { "type": "dispatch-started" },
+        { "type": "response-open", "status": 200, "statusText": "OK", "headers": { "content-type": "text/plain" } },
+        { "type": "credit", "stream": "response", "bytes": 2 },
+        { "type": "chunk", "stream": "response", "sequence": 0, "payloadBase64": "b2s=" },
+        { "type": "half-close", "stream": "response" },
+        { "type": "terminal", "outcome": "completed", "certainty": "completed" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "completed", "certainty": "completed" },
+        "cancelled": false
+      }
+    },
+    {
+      "id": "overload-before-dispatch",
+      "frames": [
+        { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },
+        "cancelled": false
+      }
+    },
+    {
+      "id": "advisory-cancellation-after-dispatch",
+      "frames": [
+        { "type": "dispatch-started" },
+        { "type": "cancel", "reason": "caller-aborted" },
+        { "type": "response-open", "status": 200, "statusText": "Late", "headers": {} },
+        { "type": "terminal", "outcome": "failed", "certainty": "response-started", "failureCode": "cancelled" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "response-started", "failureCode": "cancelled" },
+        "cancelled": true,
+        "ignoredFrames": 0
+      }
+    },
+    {
+      "id": "cancellation-races-with-dispatch",
+      "frames": [
+        { "type": "cancel", "reason": "caller-aborted" },
+        { "type": "dispatch-started" },
+        { "type": "terminal", "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "cancelled" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "cancelled" },
+        "cancelled": true,
+        "ignoredFrames": 0
+      }
+    },
+    {
+      "id": "disconnect-after-dispatch",
+      "frames": [
+        { "type": "dispatch-started" }
+      ],
+      "disconnected": true,
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "started-unconfirmed", "failureCode": "connection-lost" },
+        "cancelled": false
+      }
+    },
+    {
+      "id": "request-chunk-after-half-close",
+      "frames": [
+        { "type": "half-close", "stream": "request" },
+        { "type": "credit", "stream": "request", "bytes": 1 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "YQ==" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 3,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "stale-owner-generation",
+      "openOverrides": { "ownerGeneration": "owner-6" },
+      "frames": [],
+      "expected": {
+        "ok": false,
+        "code": "stale-generation",
+        "frameIndex": 0,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "stale-binding",
+      "openOverrides": { "bindingId": "other/egress" },
+      "frames": [],
+      "expected": {
+        "ok": false,
+        "code": "stale-generation",
+        "frameIndex": 0,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "response-before-dispatch",
+      "frames": [
+        { "type": "response-open", "status": 200, "statusText": "OK", "headers": {} }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 1,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "request-credit-exceeds-total-limit",
+      "openOverrides": { "requestByteLimit": 10, "responseByteLimit": 10, "maxChunkBytes": 10 },
+      "frames": [
+        { "type": "credit", "stream": "request", "bytes": 10 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "AQIDBAUG" },
+        { "type": "credit", "stream": "request", "bytes": 6 }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 3,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "response-credit-exceeds-total-limit",
+      "openOverrides": { "requestByteLimit": 10, "responseByteLimit": 10, "maxChunkBytes": 10 },
+      "frames": [
+        { "type": "dispatch-started" },
+        { "type": "response-open", "status": 200, "statusText": "OK", "headers": {} },
+        { "type": "credit", "stream": "response", "bytes": 10 },
+        { "type": "chunk", "stream": "response", "sequence": 0, "payloadBase64": "AQIDBAUG" },
+        { "type": "credit", "stream": "response", "bytes": 6 }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 5,
+        "certainty": "response-started"
+      }
+    },
+    {
+      "id": "duplicate-cancellation",
+      "frames": [
+        { "type": "cancel", "reason": "caller-stopped" },
+        { "type": "cancel", "reason": "caller-stopped-again" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 2,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "get-request-body",
+      "requestMethod": "GET",
+      "frames": [
+        { "type": "credit", "stream": "request", "bytes": 1 },
+        { "type": "chunk", "stream": "request", "sequence": 0, "payloadBase64": "YQ==" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 2,
+        "certainty": "not-started"
+      }
+    },
+    {
+      "id": "bodyless-response-chunk",
+      "frames": [
+        { "type": "dispatch-started" },
+        { "type": "response-open", "status": 204, "statusText": "No Content", "headers": {} },
+        { "type": "credit", "stream": "response", "bytes": 1 },
+        { "type": "chunk", "stream": "response", "sequence": 0, "payloadBase64": "YQ==" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 4,
+        "certainty": "response-started"
+      }
+    },
+    {
+      "id": "head-response-body",
+      "requestMethod": "HEAD",
+      "frames": [
+        { "type": "dispatch-started" },
+        { "type": "response-open", "status": 200, "statusText": "OK", "headers": {} },
+        { "type": "credit", "stream": "response", "bytes": 1 },
+        { "type": "chunk", "stream": "response", "sequence": 0, "payloadBase64": "YQ==" }
+      ],
+      "expected": {
+        "ok": false,
+        "code": "protocol-violation",
+        "frameIndex": 4,
+        "certainty": "response-started"
+      }
+    },
+    {
+      "id": "late-terminal-frame",
+      "frames": [
+        { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },
+        { "type": "terminal", "outcome": "failed", "certainty": "not-started", "failureCode": "unavailable" }
+      ],
+      "expected": {
+        "ok": true,
+        "terminal": { "outcome": "failed", "certainty": "not-started", "failureCode": "overloaded" },
+        "cancelled": false,
+        "ignoredFrames": 1
+      }
+    }
+  ]
+}
