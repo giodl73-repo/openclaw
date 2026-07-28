@@ -187,14 +187,72 @@ describe("host integration bundle manifest", () => {
       }),
     );
 
-    expect(listRegisteredHostIntegrationBundles(registry)).toEqual([
+    const registrations = listRegisteredHostIntegrationBundles(registry);
+    expect(registrations).toEqual([
       {
         pluginId: "lobster-host",
         source: "/plugins/lobster-host/index.js",
         rootDir: "/plugins/lobster-host",
         origin: "workspace",
+        generation: expect.stringMatching(/^host-bundle-generation\/v1:sha256:[a-f0-9]{64}$/u),
         bundle: hostBundle,
       },
     ]);
+    expect(Object.isFrozen(registrations)).toBe(true);
+    expect(Object.isFrozen(registrations[0])).toBe(true);
+  });
+
+  it("derives generation from semantic registration identity instead of local paths", () => {
+    const firstBundle = parsePluginManifestHostIntegrationBundle(
+      bundle("lobster/host", [contribution("lobster/z-token"), contribution("lobster/a-token")]),
+    );
+    const reorderedBundle = parsePluginManifestHostIntegrationBundle(
+      bundle("lobster/host", [contribution("lobster/a-token"), contribution("lobster/z-token")]),
+    );
+    if (!firstBundle.ok || !firstBundle.bundle || !reorderedBundle.ok || !reorderedBundle.bundle) {
+      throw new Error("expected bundles");
+    }
+
+    const generationFor = (params: {
+      source: string;
+      rootDir: string;
+      version: string;
+      hostIntegrationBundle: PluginManifestHostIntegrationBundle;
+    }) => {
+      const registry = createEmptyPluginRegistry();
+      registry.plugins.push(
+        createPluginRecord({
+          id: "lobster-host",
+          origin: "workspace",
+          enabled: true,
+          configSchema: true,
+          ...params,
+        }),
+      );
+      return listRegisteredHostIntegrationBundles(registry)[0]?.generation;
+    };
+
+    const generation = generationFor({
+      source: "/first/index.js",
+      rootDir: "/first",
+      version: "2.0.0",
+      hostIntegrationBundle: firstBundle.bundle,
+    });
+    expect(
+      generationFor({
+        source: "/another-machine/index.js",
+        rootDir: "/another-machine",
+        version: "2.0.0",
+        hostIntegrationBundle: reorderedBundle.bundle,
+      }),
+    ).toBe(generation);
+    expect(
+      generationFor({
+        source: "/first/index.js",
+        rootDir: "/first",
+        version: "2.0.1",
+        hostIntegrationBundle: firstBundle.bundle,
+      }),
+    ).not.toBe(generation);
   });
 });
