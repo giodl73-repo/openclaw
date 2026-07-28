@@ -295,7 +295,16 @@ export class ReverseProviderSessionRegistryV1 {
       };
     }
 
-    const incarnationSeed = this.#createIncarnationId();
+    let incarnationSeed: string;
+    try {
+      incarnationSeed = this.#createIncarnationId();
+    } catch {
+      return {
+        ok: false,
+        code: "malformed",
+        message: "incarnation id factory failed",
+      };
+    }
     if (
       typeof incarnationSeed !== "string" ||
       incarnationSeed.length === 0 ||
