@@ -330,6 +330,13 @@ export class ReverseProviderSessionRegistryV1 {
     return this.#byBinding.get(bindingId);
   }
 
+  isCurrent(session: Readonly<ReverseProviderSessionV1>): boolean {
+    return (
+      this.#byBinding.get(session.declaration.bindingId) === session &&
+      this.#byConnection.get(session.connectionId) === session
+    );
+  }
+
   list(): readonly Readonly<ReverseProviderSessionV1>[] {
     return Object.freeze([...this.#byBinding.values()]);
   }
