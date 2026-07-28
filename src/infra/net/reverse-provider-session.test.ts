@@ -159,6 +159,19 @@ describe("ReverseProviderSessionRegistryV1", () => {
     ).toBeUndefined();
   });
 
+  it("contains incarnation factory failures in the admission result", () => {
+    const registry = new ReverseProviderSessionRegistryV1(() => {
+      throw new Error("entropy unavailable");
+    });
+
+    expect(admit(registry)).toEqual({
+      ok: false,
+      code: "malformed",
+      message: "incarnation id factory failed",
+    });
+    expect(registry.list()).toEqual([]);
+  });
+
   it("copies and freezes admitted session evidence", () => {
     const value = candidate();
     const registry = new ReverseProviderSessionRegistryV1(() => "incarnation-1");
