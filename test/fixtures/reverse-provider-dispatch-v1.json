@@ -23,32 +23,6 @@
           "content-type": "application/json"
         },
         "routeProfile": "lobster/managed-egress",
-        "networkGuard": {
-          "version": "network-guard/v1",
-          "target": {
-            "protocol": "https:",
-            "origin": "https://api.dispatch.test",
-            "hostname": "api.dispatch.test",
-            "port": 443
-          },
-          "route": {
-            "mode": "managed-proxy",
-            "resolution": "proxy",
-            "tls": "required"
-          },
-          "addressPolicy": {
-            "mode": "public-only",
-            "trustedHostnames": [],
-            "hostnameAllowlist": ["api.dispatch.test"],
-            "allowedPrivateCidrs": [],
-            "allowRfc2544BenchmarkRange": false,
-            "allowIpv6UniqueLocalRange": false,
-            "dnsRebinding": {
-              "policy": "reject",
-              "enforcement": "connection-owner-required"
-            }
-          }
-        },
         "auditCorrelation": "audit-1"
       }
     }
