@@ -668,6 +668,8 @@ Each contribution requires `owner`, `kind`, `id`, and `contractVersion`. The own
 
 The schema is closed: unknown bundle or contribution fields make the plugin manifest invalid. This prevents a declaration from implying unsupported activation or readiness behavior. If multiple plugins declare the same bundle id, OpenClaw records an error and rejects every conflicting bundle declaration instead of choosing a winner. Enabled, non-failed declarations retain loader-owned plugin id, source, root, and origin provenance in the current plugin registry snapshot.
 
+The registry projection also assigns each effective bundle an opaque generation derived from its semantic registration identity: plugin id and version, origin, and the validated bundle inventory. Local source and root paths are excluded, and contribution ordering does not affect the value. Consumers compare the generation as an opaque equality fence; it is distinct from the bundle SemVer and does not imply activation or readiness.
+
 ## contracts reference
 
 Use `contracts` only for static capability ownership metadata that OpenClaw can read without importing the plugin runtime.
