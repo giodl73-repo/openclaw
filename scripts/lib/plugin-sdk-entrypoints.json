@@ -234,6 +234,7 @@
   "media-understanding-runtime",
   "messaging-targets",
   "request-url",
+  "reverse-provider-dispatch",
   "runtime-store",
   "json-store",
   "persistent-dedupe",
