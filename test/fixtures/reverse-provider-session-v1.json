@@ -6,7 +6,8 @@
     "carrierVersion": "reverse-provider-dispatch/v1",
     "ownerGeneration": "owner-generation-7",
     "hostBundleGeneration": "bundle-generation-12",
-    "audience": "openclaw-host-provider"
+    "audience": "openclaw-host-provider",
+    "keyFingerprint": "sha256:fixture-key-fingerprint"
   },
   "declaration": {
     "version": "reverse-provider-session/v1",

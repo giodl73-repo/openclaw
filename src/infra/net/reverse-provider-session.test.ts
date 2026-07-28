@@ -73,6 +73,16 @@ describe("ReverseProviderSessionRegistryV1", () => {
     });
   });
 
+  it("rejects a verified peer that is not authorized for the binding", () => {
+    const verifiedPeer = { ...fixtures.verifiedPeer, keyFingerprint: "sha256:other-peer" };
+    expect(
+      admit(new ReverseProviderSessionRegistryV1(), candidate({ verifiedPeer })),
+    ).toMatchObject({
+      ok: false,
+      code: "stale-authority",
+    });
+  });
+
   it("rejects an expired peer proof, including at the expiry boundary", () => {
     const verifiedPeer = { ...fixtures.verifiedPeer, expiresAtMs: NOW_MS };
     expect(
