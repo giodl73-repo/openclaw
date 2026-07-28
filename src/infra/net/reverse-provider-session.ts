@@ -28,6 +28,7 @@ export type ReverseProviderSessionAuthorityV1 = {
   ownerGeneration: string;
   hostBundleGeneration: string;
   audience: string;
+  keyFingerprint: string;
 };
 
 export type ReverseProviderSessionV1 = {
@@ -168,6 +169,7 @@ function parseAuthority(value: unknown): ReverseProviderSessionAuthorityV1 {
       "ownerGeneration",
       "hostBundleGeneration",
       "audience",
+      "keyFingerprint",
     ],
     "expectedAuthority",
   );
@@ -188,6 +190,7 @@ function parseAuthority(value: unknown): ReverseProviderSessionAuthorityV1 {
     ownerGeneration: requireBoundedString(record, "ownerGeneration", "expectedAuthority"),
     hostBundleGeneration: requireBoundedString(record, "hostBundleGeneration", "expectedAuthority"),
     audience: requireBoundedString(record, "audience", "expectedAuthority"),
+    keyFingerprint: requireBoundedString(record, "keyFingerprint", "expectedAuthority"),
   };
 }
 
@@ -212,7 +215,8 @@ function authorityMatches(
     declaration.carrierVersion === authority.carrierVersion &&
     declaration.ownerGeneration === authority.ownerGeneration &&
     declaration.hostBundleGeneration === authority.hostBundleGeneration &&
-    peer.audience === authority.audience
+    peer.audience === authority.audience &&
+    peer.keyFingerprint === authority.keyFingerprint
   );
 }
 
