@@ -88,59 +88,6 @@ describe("reverse provider dispatch v1 fixtures", () => {
         ...operation.open,
         request: {
           ...(operation.open.request as Record<string, unknown>),
-          networkGuard: {
-            ...(operation.open.request as { networkGuard: Record<string, unknown> }).networkGuard,
-            route: undefined,
-          },
-        },
-      }),
-    ).toThrow("Unsupported network guard route shape");
-    expect(() =>
-      assertReverseProviderDispatchFrameV1({
-        ...operation.base,
-        ...operation.open,
-        request: {
-          ...(operation.open.request as Record<string, unknown>),
-          networkGuard: {
-            ...(operation.open.request as { networkGuard: Record<string, unknown> }).networkGuard,
-            addressPolicy: {
-              ...(
-                operation.open.request as {
-                  networkGuard: { addressPolicy: Record<string, unknown> };
-                }
-              ).networkGuard.addressPolicy,
-              dnsRebinding: {
-                policy: "reject",
-                enforcement: "local-pinned",
-              },
-            },
-          },
-        },
-      }),
-    ).toThrow("Network guard DNS rebinding enforcement is inconsistent");
-    expect(() =>
-      assertReverseProviderDispatchFrameV1({
-        ...operation.base,
-        ...operation.open,
-        request: {
-          ...(operation.open.request as Record<string, unknown>),
-          networkGuard: {
-            ...(operation.open.request as { networkGuard: Record<string, unknown> }).networkGuard,
-            route: {
-              mode: "managed-proxy",
-              resolution: "proxy",
-              tls: "cleartext",
-            },
-          },
-        },
-      }),
-    ).toThrow("Network guard route TLS posture is inconsistent with the target");
-    expect(() =>
-      assertReverseProviderDispatchFrameV1({
-        ...operation.base,
-        ...operation.open,
-        request: {
-          ...(operation.open.request as Record<string, unknown>),
           credentialSlotRefs: ["lobster/capi-token"],
         },
       }),

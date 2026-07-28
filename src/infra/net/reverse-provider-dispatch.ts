@@ -1,8 +1,3 @@
-import {
-  assertNetworkGuardProfileTarget,
-  type NetworkGuardProfileV1,
-} from "./network-guard-profile.js";
-
 export const REVERSE_PROVIDER_DISPATCH_VERSION = "reverse-provider-dispatch/v1" as const;
 export const REVERSE_PROVIDER_DISPATCH_MAX_FRAME_BYTES_V1 = 1024 * 1024;
 
@@ -46,7 +41,6 @@ export type ReverseProviderDispatchOperationOpenV1 = FrameBase & {
     url: string;
     headers: Record<string, string>;
     routeProfile: string;
-    networkGuard: NetworkGuardProfileV1;
     auditCorrelation: string;
   };
 };
@@ -349,23 +343,20 @@ function assertOperationOpen(record: Record<string, unknown>): void {
   const request = assertRecord(record.request, "operation-open.request");
   assertKeys(
     request,
-    ["method", "url", "headers", "routeProfile", "networkGuard", "auditCorrelation"],
+    ["method", "url", "headers", "routeProfile", "auditCorrelation"],
     "operation-open.request",
   );
   const method = requireString(request, "method", "operation-open.request");
   if (!HTTP_TOKEN_PATTERN.test(method) || FETCH_FORBIDDEN_METHODS.has(method.toUpperCase())) {
     throw new Error("operation-open.request.method must be supported by Fetch");
   }
-  const url = requireNonEmptyString(request, "url", "operation-open.request");
-  const parsedUrl = new URL(url);
+  const parsedUrl = new URL(requireNonEmptyString(request, "url", "operation-open.request"));
   if (parsedUrl.username || parsedUrl.password) {
     throw new Error("operation-open.request.url must not contain credentials");
   }
   requireHeaderRecord(request.headers, "operation-open.request.headers");
   requireString(request, "routeProfile", "operation-open.request");
   requireString(request, "auditCorrelation", "operation-open.request");
-  const networkGuard = assertRecord(request.networkGuard, "operation-open.request.networkGuard");
-  assertNetworkGuardProfileTarget(networkGuard as NetworkGuardProfileV1, url);
 }
 
 export function assertReverseProviderDispatchFrameV1(
