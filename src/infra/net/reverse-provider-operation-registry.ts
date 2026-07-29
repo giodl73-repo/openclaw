@@ -1,3 +1,4 @@
+import { ReverseProviderDispatchStateMachineV1 } from "./reverse-provider-dispatch-trace.js";
 import {
   assertReverseProviderDispatchFrameV1,
   type ReverseProviderDispatchFrameV1,
@@ -38,9 +39,14 @@ export type ReverseProviderOperationFrameResultV1 =
       message: string;
     };
 
+type ActiveOperation = {
+  ownership: Readonly<ReverseProviderOperationOwnershipV1>;
+  state: ReverseProviderDispatchStateMachineV1;
+};
+
 type SessionOperations = {
   session: Readonly<ReverseProviderSessionV1>;
-  operations: Map<string, Readonly<ReverseProviderOperationOwnershipV1>>;
+  operations: Map<string, ActiveOperation>;
 };
 
 function parseFrame(
@@ -145,7 +151,10 @@ export class ReverseProviderOperationRegistryV1 {
       hostBundleGeneration: session.declaration.hostBundleGeneration,
     });
     const operations = bucket?.operations ?? new Map();
-    operations.set(frame.operationId, ownership);
+    operations.set(frame.operationId, {
+      ownership,
+      state: new ReverseProviderDispatchStateMachineV1(frame),
+    });
     if (!bucket) {
       this.#byIncarnation.set(session.incarnationId, { session, operations });
     }
@@ -181,15 +190,24 @@ export class ReverseProviderOperationRegistryV1 {
     }
 
     const bucket = this.#byIncarnation.get(session.incarnationId);
-    const ownership = bucket?.operations.get(frame.operationId);
-    if (!ownership || bucket?.session !== session) {
+    const active = bucket?.operations.get(frame.operationId);
+    const ownership = active?.ownership;
+    if (!active || !ownership || bucket?.session !== session) {
       return {
         ok: false,
         code: "inactive-operation",
         message: "operation is not active for this session",
       };
     }
-    if (frame.type === "terminal") {
+    const observed = active.state.observe(frame);
+    if (!observed.ok) {
+      return {
+        ok: false,
+        code: "malformed",
+        message: observed.message,
+      };
+    }
+    if (observed.terminal) {
       bucket.operations.delete(frame.operationId);
       this.#size -= 1;
       if (bucket.operations.size === 0) {
@@ -207,7 +225,7 @@ export class ReverseProviderOperationRegistryV1 {
     if (!bucket || bucket.session !== session) {
       return Object.freeze([]);
     }
-    return Object.freeze([...bucket.operations.values()]);
+    return Object.freeze([...bucket.operations.values()].map((active) => active.ownership));
   }
 
   drain(
@@ -219,6 +237,6 @@ export class ReverseProviderOperationRegistryV1 {
     }
     this.#byIncarnation.delete(session.incarnationId);
     this.#size -= bucket.operations.size;
-    return Object.freeze([...bucket.operations.values()]);
+    return Object.freeze([...bucket.operations.values()].map((active) => active.ownership));
   }
 }

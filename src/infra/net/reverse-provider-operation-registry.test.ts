@@ -182,12 +182,47 @@ describe("ReverseProviderOperationRegistryV1", () => {
         session,
         frame(session, "operation-1", {
           type: "terminal",
-          outcome: "completed",
-          certainty: "completed",
+          outcome: "failed",
+          certainty: "not-started",
+          failureCode: "connection-lost",
         }),
       ),
     ).toMatchObject({ ok: true, released: true });
     expect(operations.claim(session, operationOpen(session, "operation-3")).ok).toBe(true);
+  });
+
+  it("keeps ownership when a structurally valid frame violates protocol state", () => {
+    const sessions = new ReverseProviderSessionRegistryV1(() => "incarnation-1");
+    const session = admit(sessions);
+    const operations = new ReverseProviderOperationRegistryV1(sessions);
+    operations.claim(session, operationOpen(session));
+
+    expect(
+      operations.observe(
+        session,
+        frame(session, "operation-1", {
+          type: "terminal",
+          outcome: "completed",
+          certainty: "completed",
+        }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      code: "malformed",
+    });
+    expect(operations.list(session)).toHaveLength(1);
+    expect(
+      operations.observe(
+        session,
+        frame(session, "operation-1", {
+          type: "response-open",
+          status: 200,
+          statusText: "OK",
+          headers: {},
+        }),
+      ),
+    ).toMatchObject({ ok: false, code: "malformed" });
+    expect(operations.list(session)).toHaveLength(1);
   });
 
   it("keeps ownership for non-terminal frames and rejects frames after release", () => {
