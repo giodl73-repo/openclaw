@@ -15,6 +15,7 @@ import {
   unschedulePluginSessionTurnsByTag,
 } from "./host-hook-scheduled-turns.js";
 import { enqueuePluginNextTurnInjection } from "./host-hook-state.js";
+import { deriveHostIntegrationBundleGeneration } from "./host-integration-bundle-registry.js";
 import { isPluginRegistryActivated, isPluginRegistryRetired } from "./registry-lifecycle.js";
 import type { PluginRegistrars } from "./registry-registrars.js";
 import type { PluginRuntimeResolver } from "./registry-runtime.js";
@@ -166,6 +167,17 @@ export function createPluginApiFactory(
       description: record.description,
       source: record.source,
       rootDir: record.rootDir,
+      hostIntegrationBundle: record.hostIntegrationBundle
+        ? Object.freeze({
+            id: record.hostIntegrationBundle.id,
+            generation: deriveHostIntegrationBundleGeneration({
+              id: record.id,
+              version: record.version,
+              origin: record.origin,
+              hostIntegrationBundle: record.hostIntegrationBundle,
+            }),
+          })
+        : undefined,
       registrationMode,
       config: params.config,
       pluginConfig: params.pluginConfig,

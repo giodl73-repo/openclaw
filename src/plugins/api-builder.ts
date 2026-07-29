@@ -11,6 +11,7 @@ type BuildPluginApiParams = {
   description?: string;
   source: string;
   rootDir?: string;
+  hostIntegrationBundle?: OpenClawPluginApi["hostIntegrationBundle"];
   registrationMode: OpenClawPluginApi["registrationMode"];
   config: OpenClawConfig;
   pluginConfig?: Record<string, unknown>;
@@ -194,6 +195,7 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
     description: params.description,
     source: params.source,
     rootDir: params.rootDir,
+    hostIntegrationBundle: params.hostIntegrationBundle,
     registrationMode: params.registrationMode,
     config: params.config,
     pluginConfig: params.pluginConfig,

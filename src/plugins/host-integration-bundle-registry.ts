@@ -13,7 +13,7 @@ export type RegisteredHostIntegrationBundle = Readonly<{
   bundle: PluginManifestHostIntegrationBundle;
 }>;
 
-function deriveBundleGeneration(plugin: {
+export function deriveHostIntegrationBundleGeneration(plugin: {
   id: string;
   version?: string;
   origin: PluginOrigin;
@@ -57,7 +57,7 @@ export function listRegisteredHostIntegrationBundles(
         source: plugin.source,
         ...(plugin.rootDir ? { rootDir: plugin.rootDir } : {}),
         origin: plugin.origin,
-        generation: deriveBundleGeneration(plugin),
+        generation: deriveHostIntegrationBundleGeneration(plugin),
         bundle: plugin.hostIntegrationBundle,
       }),
     )

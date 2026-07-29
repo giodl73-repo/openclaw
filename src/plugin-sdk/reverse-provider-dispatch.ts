@@ -31,3 +31,9 @@ export {
   type ReverseProviderOperationFrameResultV1,
   type ReverseProviderOperationOwnershipV1,
 } from "../infra/net/reverse-provider-operation-registry.js";
+export {
+  prepareReverseProviderOwnerBindingV1,
+  REVERSE_PROVIDER_OWNER_GENERATION_VERSION,
+  type PreparedReverseProviderOwnerBindingV1,
+  type ReverseProviderOwnerPreparationInputV1,
+} from "../infra/net/reverse-provider-owner-preparation.js";

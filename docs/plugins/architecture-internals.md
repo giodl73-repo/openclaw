@@ -679,6 +679,15 @@ WebSocket connection that physically executes already-prepared provider
 requests. The subpath exports the bounded frame validator, session-admission
 registry, and session-scoped operation registry.
 
+For a plugin that declares a host integration bundle,
+`api.hostIntegrationBundle` carries the loader-owned bundle ID and the opaque
+generation of that exact effective registration. Pass its generation to
+`prepareReverseProviderOwnerBindingV1` together with the owner-selected
+effective-config generation, traffic-policy identity, audience, and peer-key
+fingerprint. The returned `ownerGeneration` identifies the complete prepared
+binding. Do not substitute bundle SemVer, a restart counter, a reconnect ID, or
+a hand-authored label for either generation.
+
 Register the socket with `api.registerHttpRoute({ auth: "plugin",
 handleUpgrade })`. Your plugin must authenticate the remote peer before it
 constructs `ReverseProviderVerifiedPeerV1` evidence and calls the admission

@@ -168,6 +168,11 @@ export type OpenClawPluginApi = {
   description?: string;
   source: string;
   rootDir?: string;
+  /** Loader-owned identity for this plugin's effective host bundle registration. */
+  hostIntegrationBundle?: Readonly<{
+    id: string;
+    generation: string;
+  }>;
   registrationMode: PluginRegistrationMode;
   config: OpenClawConfig;
   pluginConfig?: Record<string, unknown>;
