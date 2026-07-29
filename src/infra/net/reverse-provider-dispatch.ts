@@ -351,6 +351,9 @@ function assertOperationOpen(record: Record<string, unknown>): void {
     throw new Error("operation-open.request.method must be supported by Fetch");
   }
   const parsedUrl = new URL(requireNonEmptyString(request, "url", "operation-open.request"));
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new Error("operation-open.request.url must use http or https");
+  }
   if (parsedUrl.username || parsedUrl.password) {
     throw new Error("operation-open.request.url must not contain credentials");
   }

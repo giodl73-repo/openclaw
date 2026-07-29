@@ -161,6 +161,18 @@ describe("reverse provider dispatch v1 fixtures", () => {
         },
       }),
     ).toThrow("must not contain credentials");
+    for (const url of ["file:///tmp/provider-response", "ftp://api.dispatch.test/v1"]) {
+      expect(() =>
+        assertReverseProviderDispatchFrameV1({
+          ...operation.base,
+          ...operation.open,
+          request: {
+            ...(operation.open.request as Record<string, unknown>),
+            url,
+          },
+        }),
+      ).toThrow("must use http or https");
+    }
     expect(() =>
       assertReverseProviderDispatchFrameV1({
         ...operation.base,
