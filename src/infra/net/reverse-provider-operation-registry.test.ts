@@ -129,6 +129,26 @@ describe("ReverseProviderOperationRegistryV1", () => {
     });
   });
 
+  it("rejects new and existing operations when the admitted peer proof expires", () => {
+    let nowMs = sessionFixtures.verifiedPeer.expiresAtMs - 1;
+    const sessions = new ReverseProviderSessionRegistryV1(
+      () => "incarnation-1",
+      () => nowMs,
+    );
+    const session = admit(sessions);
+    const operations = new ReverseProviderOperationRegistryV1(sessions);
+    expect(operations.claim(session, operationOpen(session, "operation-1")).ok).toBe(true);
+
+    nowMs = sessionFixtures.verifiedPeer.expiresAtMs;
+    expect(operations.claim(session, operationOpen(session, "operation-2"))).toMatchObject({
+      ok: false,
+      code: "stale-session",
+    });
+    expect(
+      operations.observe(session, frame(session, "operation-1", { type: "dispatch-started" })),
+    ).toMatchObject({ ok: false, code: "stale-session" });
+  });
+
   it("scopes duplicate operation IDs to one session incarnation", () => {
     let sequence = 0;
     const sessions = new ReverseProviderSessionRegistryV1(() => `incarnation-${++sequence}`);

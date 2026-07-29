@@ -240,10 +240,12 @@ export class ReverseProviderSessionRegistryV1 {
   readonly #byBinding = new Map<string, Readonly<ReverseProviderSessionV1>>();
   readonly #byConnection = new Map<string, Readonly<ReverseProviderSessionV1>>();
   readonly #createIncarnationId: () => string;
+  readonly #nowMs: () => number;
   #incarnationSequence = 0n;
 
-  constructor(createIncarnationId: () => string = randomUUID) {
+  constructor(createIncarnationId: () => string = randomUUID, nowMs: () => number = Date.now) {
     this.#createIncarnationId = createIncarnationId;
+    this.#nowMs = nowMs;
   }
 
   /**
@@ -331,7 +333,14 @@ export class ReverseProviderSessionRegistryV1 {
   }
 
   isCurrent(session: Readonly<ReverseProviderSessionV1>): boolean {
+    let nowMs: number;
+    try {
+      nowMs = requireNow(this.#nowMs());
+    } catch {
+      return false;
+    }
     return (
+      session.verifiedPeer.expiresAtMs > nowMs &&
       this.#byBinding.get(session.declaration.bindingId) === session &&
       this.#byConnection.get(session.connectionId) === session
     );
@@ -354,7 +363,7 @@ export class ReverseProviderSessionRegistryV1 {
     return session;
   }
 
-  expire(nowValue: unknown = Date.now()): readonly Readonly<ReverseProviderSessionV1>[] {
+  expire(nowValue: unknown = this.#nowMs()): readonly Readonly<ReverseProviderSessionV1>[] {
     const nowMs = requireNow(nowValue);
     const expired: Readonly<ReverseProviderSessionV1>[] = [];
     for (const session of this.#byBinding.values()) {
