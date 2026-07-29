@@ -26,6 +26,17 @@ function admit(
 }
 
 describe("ReverseProviderSessionRegistryV1", () => {
+  it("uses the injected registry clock when admission omits an explicit time", () => {
+    const registry = new ReverseProviderSessionRegistryV1(
+      () => "incarnation-1",
+      () => NOW_MS,
+    );
+
+    const result = registry.admit(candidate(), fixtures.authority);
+
+    expect(result.ok && result.session.admittedAtMs).toBe(NOW_MS);
+  });
+
   it("admits an exact current declaration with caller-verified peer proof", () => {
     const registry = new ReverseProviderSessionRegistryV1(() => "incarnation-1");
 

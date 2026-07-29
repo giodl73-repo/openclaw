@@ -255,7 +255,7 @@ export class ReverseProviderSessionRegistryV1 {
   admit(
     candidateValue: unknown,
     expectedAuthorityValue: unknown,
-    nowValue: unknown = Date.now(),
+    nowValue: unknown = this.#nowMs(),
   ): ReverseProviderSessionAdmissionResultV1 {
     let candidate: ReverseProviderSessionCandidateV1;
     let authority: ReverseProviderSessionAuthorityV1;
