@@ -1125,6 +1125,10 @@
     "./plugin-sdk/request-url": {
       "default": "./dist/plugin-sdk/request-url.js"
     },
+    "./plugin-sdk/reverse-provider-dispatch": {
+      "types": "./dist/plugin-sdk/reverse-provider-dispatch.d.ts",
+      "default": "./dist/plugin-sdk/reverse-provider-dispatch.js"
+    },
     "./plugin-sdk/runtime-store": {
       "types": "./dist/plugin-sdk/runtime-store.d.ts",
       "default": "./dist/plugin-sdk/runtime-store.js"

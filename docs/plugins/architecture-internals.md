@@ -672,6 +672,33 @@ Notes:
 - Practical rule: do not assume a gateway-auth plugin route is an implicit admin surface. If your route needs admin-only behavior, opt into `trusted-operator` scope surface, require an identity-bearing auth mode, and document the explicit `x-openclaw-scopes` header contract.
 - After route matching and authentication, ordinary handlers participate in Gateway root-work admission. A prepared or restarting Gateway returns `503` before invoking the handler. The narrow exception is a manifest-entitled `auth: "gateway"` route that also opts into the route-specific `trusted-operator` surface; it remains reachable so suspension control dispatch cannot be stranded, while ordinary sibling routes from the same plugin remain behind the admission boundary. WebSocket `handleUpgrade` ownership uses the same atomic admission boundary; once the handler accepts a socket, the socket's later lifetime is plugin-owned and is not tracked by this boundary.
 
+### Own a reverse provider-dispatch connection
+
+Use `openclaw/plugin-sdk/reverse-provider-dispatch` when your plugin owns a
+WebSocket connection that physically executes already-prepared provider
+requests. The subpath exports the bounded frame validator, session-admission
+registry, and session-scoped operation registry.
+
+For a plugin that declares a host integration bundle,
+`api.hostIntegrationBundle` carries the loader-owned bundle ID and the opaque
+generation of that exact effective registration. Pass its generation to
+`prepareReverseProviderOwnerBindingV1` together with the owner-selected
+effective-config generation, traffic-policy identity, audience, and peer-key
+fingerprint. The returned `ownerGeneration` identifies the complete prepared
+binding. Do not substitute bundle SemVer, a restart counter, a reconnect ID, or
+a hand-authored label for either generation.
+
+Register the socket with `api.registerHttpRoute({ auth: "plugin",
+handleUpgrade })`. Your plugin must authenticate the remote peer before it
+constructs `ReverseProviderVerifiedPeerV1` evidence and calls the admission
+registry. Gateway bearer or password authentication is not proof of the peer
+key, audience, credential ID, or expiry required by this contract.
+
+The accepted socket, send scheduling, proof-of-possession credential, and
+disconnect cleanup remain plugin-owned. Detach and drain the exact admitted
+session when the socket closes. A reconnect creates a new incarnation; do not
+resume or replay operations from the old connection.
+
 ## Plugin SDK import paths
 
 Use narrow SDK subpaths instead of the monolithic `openclaw/plugin-sdk` root
