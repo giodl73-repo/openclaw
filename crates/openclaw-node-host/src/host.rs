@@ -361,27 +361,87 @@ fn host_connection_factory(
         let display_name = display_name.clone();
         let instance_id = instance_id.clone();
         Box::pin(async move {
-            let selected_auth = issued_device_token
+            let adopted_device_token = issued_device_token
                 .lock()
                 .map_err(|_| {
                     ClientError::ConnectParams("issued device-token state is unavailable".into())
                 })?
-                .as_ref()
-                .map_or(auth, |token| ConnectAuth::device_token(token.clone()));
-            let mut options = NodeConnectOptions::new(env!("CARGO_PKG_VERSION"), env::consts::OS)
-                .display_name(display_name)
-                .identity(identity)
-                .auth(selected_auth);
-            if let Some(instance_id) = instance_id {
-                options = options.instance_id(instance_id);
+                .clone();
+            if let Some(device_token) = adopted_device_token {
+                let result = connect_host_attempt(
+                    gateway_url.clone(),
+                    display_name.clone(),
+                    instance_id.clone(),
+                    identity.clone(),
+                    ConnectAuth::device_token(device_token.clone()),
+                    runtime.clone(),
+                )
+                .await;
+                match result {
+                    Ok(session) => return Ok(session),
+                    Err(error) if invalidates_adopted_device_token(&error) => {
+                        let mut current = issued_device_token.lock().map_err(|_| {
+                            ClientError::ConnectParams(
+                                "issued device-token state is unavailable".into(),
+                            )
+                        })?;
+                        if current.as_deref() == Some(device_token.as_str()) {
+                            *current = None;
+                        }
+                        emit(
+                            "warn",
+                            "gateway.device_token_rejected",
+                            json!({"action": "retry-configured-auth"}),
+                        );
+                    }
+                    Err(error) => return Err(error),
+                }
             }
-            NodeClient::connect(
-                NodeClientConfig::new(gateway_url),
-                move |_nonce| async move { Ok::<_, Infallible>(runtime.activate(options)) },
+            connect_host_attempt(
+                gateway_url,
+                display_name,
+                instance_id,
+                identity,
+                auth,
+                runtime,
             )
             .await
         })
     }
+}
+
+async fn connect_host_attempt(
+    gateway_url: String,
+    display_name: String,
+    instance_id: Option<String>,
+    identity: NodeIdentity,
+    auth: ConnectAuth,
+    runtime: CommandRuntime,
+) -> Result<NodeSession, ClientError> {
+    let mut options = NodeConnectOptions::new(env!("CARGO_PKG_VERSION"), env::consts::OS)
+        .display_name(display_name)
+        .identity(identity)
+        .auth(auth);
+    if let Some(instance_id) = instance_id {
+        options = options.instance_id(instance_id);
+    }
+    NodeClient::connect(
+        NodeClientConfig::new(gateway_url),
+        move |_nonce| async move { Ok::<_, Infallible>(runtime.activate(options)) },
+    )
+    .await
+}
+
+fn invalidates_adopted_device_token(error: &ClientError) -> bool {
+    let ClientError::Gateway {
+        method, details, ..
+    } = error
+    else {
+        return false;
+    };
+    method == "connect"
+        && openclaw_gateway_client::ConnectErrorDetails::from_value(details.as_ref())
+            .invalidates_device_token()
 }
 
 fn host_event_handler(
@@ -728,6 +788,8 @@ const fn default_max_timeout_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{accept_async, tungstenite::Message};
 
     fn config_json(extra: &str) -> String {
         format!(r#"{{"gatewayUrl":"ws://127.0.0.1:18789"{extra}}}"#)
@@ -797,5 +859,95 @@ mod tests {
         drop(stalled);
         server.abort();
         let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn rejected_adopted_device_token_retries_configured_auth_once() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for attempt in 1..=2 {
+                let (tcp, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(tcp).await.unwrap();
+                send_test_json(
+                    &mut socket,
+                    json!({
+                        "type":"event", "event":"connect.challenge",
+                        "payload":{"nonce":format!("nonce-{attempt}")}
+                    }),
+                )
+                .await;
+                let connect = receive_test_json(&mut socket).await;
+                if attempt == 1 {
+                    assert_eq!(
+                        connect["params"]["auth"]["deviceToken"],
+                        "adopted-device-token"
+                    );
+                    send_test_json(
+                        &mut socket,
+                        json!({
+                            "type":"res", "id":connect["id"], "ok":false,
+                            "error":{
+                                "code":"UNAUTHORIZED",
+                                "message":"device token rejected",
+                                "details":{"code":"AUTH_DEVICE_TOKEN_MISMATCH"}
+                            }
+                        }),
+                    )
+                    .await;
+                } else {
+                    assert_eq!(connect["params"]["auth"]["token"], "configured-token");
+                    send_test_json(
+                        &mut socket,
+                        json!({
+                            "type":"res", "id":connect["id"], "ok":true,
+                            "payload":{"type":"hello-ok","protocol":4}
+                        }),
+                    )
+                    .await;
+                }
+            }
+        });
+
+        let config: HostConfig =
+            serde_json::from_str(&format!(r#"{{"gatewayUrl":"ws://{address}"}}"#)).unwrap();
+        let credentials = HostCredentials::new(
+            NodeIdentity::from_secret_bytes([7; 32]),
+            ConnectAuth::token("configured-token"),
+        );
+        let issued_device_token = Arc::new(Mutex::new(Some("adopted-device-token".into())));
+        let mut connect = host_connection_factory(
+            &config,
+            credentials,
+            CommandRuntime::builder().build().unwrap(),
+            Arc::clone(&issued_device_token),
+        );
+
+        let session = connect().await.unwrap();
+        assert_eq!(session.hello()["protocol"], 4);
+        assert!(issued_device_token.lock().unwrap().is_none());
+        drop(session);
+        server.await.unwrap();
+    }
+
+    async fn send_test_json<S>(socket: &mut tokio_tungstenite::WebSocketStream<S>, value: Value)
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        socket
+            .send(Message::Text(value.to_string().into()))
+            .await
+            .unwrap();
+    }
+
+    async fn receive_test_json<S>(socket: &mut tokio_tungstenite::WebSocketStream<S>) -> Value
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let message = socket.next().await.unwrap().unwrap();
+        let Message::Text(text) = message else {
+            panic!("expected text frame");
+        };
+        serde_json::from_str(text.as_str()).unwrap()
     }
 }
