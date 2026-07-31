@@ -15,7 +15,7 @@ describe("collectPluginSettingsConstraints", () => {
               build: ({ config, cwd }) => ({
                 settings: {
                   "agents.*.sandbox.mode": {
-                    state: "locked",
+                    state: "readOnly",
                     policyPath: cwd ? `${cwd}/policy.jsonc` : "policy.jsonc",
                     allowedValues: [config.agents?.defaults?.sandbox?.mode ?? "workspace"],
                   },
@@ -32,7 +32,7 @@ describe("collectPluginSettingsConstraints", () => {
               build: () => ({
                 settings: {
                   "gateway.controlUi.enabled": {
-                    state: "fixed",
+                    state: "disabled",
                     source: "host-policy",
                     allowedValues: [true],
                   },
@@ -47,15 +47,17 @@ describe("collectPluginSettingsConstraints", () => {
     });
 
     expect(constraints).toEqual({
+      version: 1,
+      mode: "active-policy-constraints",
       settings: {
         "agents.*.sandbox.mode": {
-          state: "locked",
+          state: "readOnly",
           source: "policy",
           policyPath: "C:/workspace/policy.jsonc",
           allowedValues: ["read-only"],
         },
         "gateway.controlUi.enabled": {
-          state: "fixed",
+          state: "disabled",
           source: "host-policy",
           allowedValues: [true],
         },

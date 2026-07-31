@@ -20,7 +20,7 @@ describe("plugin registry Control UI descriptors", () => {
           build: ({ config: runtimeConfig }) => ({
             settings: {
               "agents.*.sandbox.mode": {
-                state: "locked",
+                state: "readOnly",
                 source: "policy",
                 policyPath: "policy.jsonc",
                 allowedValues: [runtimeConfig.agents?.defaults?.sandbox?.mode ?? "workspace"],
@@ -39,7 +39,7 @@ describe("plugin registry Control UI descriptors", () => {
     ).resolves.toEqual({
       settings: {
         "agents.*.sandbox.mode": {
-          state: "locked",
+          state: "readOnly",
           source: "policy",
           policyPath: "policy.jsonc",
           allowedValues: ["read-only"],

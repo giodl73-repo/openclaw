@@ -32,5 +32,5 @@ export async function collectPluginSettingsConstraints(params: {
   if (Object.keys(settings).length === 0) {
     return undefined;
   }
-  return { settings };
+  return { version: 1, mode: "active-policy-constraints", settings };
 }
