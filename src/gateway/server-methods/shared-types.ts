@@ -25,6 +25,7 @@ import type { WizardSession } from "../../wizard/session.js";
 import type { AgentRuntimeIdentity } from "../agent-runtime-identity-token.js";
 import type { ChatAbortControllerEntry } from "../chat-abort.js";
 import type { GatewayHotReloadStatus } from "../config-reload-status.types.js";
+import type { ControlUiPolicySettingsConstraints } from "../control-ui-contract.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
 import type { HealthSummary } from "../health/types.js";
 import type { GatewayMethodRegistryView } from "../methods/descriptor.js";
@@ -161,6 +162,12 @@ export type GatewayRequestContext = {
   cron: GatewayCronServiceContract;
   cronStorePath: string;
   getRuntimeConfig: () => OpenClawConfig;
+  /** Optional host/policy guard for generic config write admission. */
+  getPolicySettingsConstraints?: () =>
+    | ControlUiPolicySettingsConstraints
+    | null
+    | undefined
+    | Promise<ControlUiPolicySettingsConstraints | null | undefined>;
   controlUiSessionPullRequests?: ReturnType<
     typeof import("../control-ui-session-pr-subscriptions.js").createControlUiSessionPullRequestSubscriptions
   >;

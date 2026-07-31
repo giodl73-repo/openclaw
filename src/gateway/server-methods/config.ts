@@ -63,6 +63,7 @@ import {
   summarizeChangedPaths,
 } from "../control-plane-audit.js";
 import { resolveBaseHashParam } from "./base-hash.js";
+import { rejectPolicySettingsConstraintViolations } from "./config-policy-constraints.js";
 import {
   commitGatewayConfigWrite,
   didActiveSharedGatewayAuthChange,
@@ -907,6 +908,16 @@ export const configHandlers: GatewayRequestHandlers = {
     ) {
       return;
     }
+    if (
+      await rejectPolicySettingsConstraintViolations({
+        context,
+        nextConfig: parsed.config,
+        changedPaths: diffConfigPaths(snapshot.config, parsed.config),
+        respond,
+      })
+    ) {
+      return;
+    }
     const preparedSecretsSnapshot = await ensureResolvableSecretRefsOrRespond({
       config: parsed.config,
       respond,
@@ -1116,6 +1127,16 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const changedPaths = diffConfigPaths(snapshot.config, validated.config);
+    if (
+      await rejectPolicySettingsConstraintViolations({
+        context,
+        nextConfig: validated.config,
+        changedPaths,
+        respond,
+      })
+    ) {
+      return;
+    }
 
     // No-op: if the validated config is identical to the current config,
     // skip the file write and SIGUSR1 restart entirely. This avoids a full
@@ -1195,6 +1216,16 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const changedPaths = diffConfigPaths(snapshot.config, parsed.config);
+    if (
+      await rejectPolicySettingsConstraintViolations({
+        context,
+        nextConfig: parsed.config,
+        changedPaths,
+        respond,
+      })
+    ) {
+      return;
+    }
     const actor = resolveControlPlaneActor(client);
     context?.logGateway?.info(
       `config.apply write ${formatControlPlaneActor(actor)} changedPaths=${summarizeChangedPaths(changedPaths)} restartReason=config.apply`,

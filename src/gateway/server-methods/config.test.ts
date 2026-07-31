@@ -16,6 +16,7 @@ import {
   loadConfigSchemaResponseForTests,
 } from "./config.js";
 import { createConfigHandlerHarness, createConfigWriteSnapshot } from "./config.test-helpers.js";
+import type { GatewayRequestHandlerOptions } from "./types.js";
 
 const configWriteMocks = vi.hoisted(() => ({
   commitGatewayConfigWrite: vi.fn(),
@@ -87,6 +88,7 @@ async function invokeConfigPatch(args: {
   raw: unknown;
   baseHash?: string;
   replacePaths?: string[];
+  contextOverrides?: Partial<GatewayRequestHandlerOptions["context"]>;
 }) {
   const harness = createConfigHandlerHarness({
     method: "config.patch",
@@ -95,12 +97,41 @@ async function invokeConfigPatch(args: {
       ...(args.baseHash ? { baseHash: args.baseHash } : {}),
       ...(args.replacePaths ? { replacePaths: args.replacePaths } : {}),
     },
+    contextOverrides: args.contextOverrides,
   });
   await expectDefined(
     configHandlers["config.patch"],
     'configHandlers["config.patch"] test invariant',
   )(harness.options);
   return harness;
+}
+
+function policySettingsConstraints() {
+  return {
+    version: 1 as const,
+    mode: "active-policy-constraints" as const,
+    settings: {
+      "gateway.bind": {
+        path: "gateway.bind",
+        policyPath: "gateway.exposure.allowNonLoopbackBind",
+        state: "readOnly" as const,
+        reason: "The active policy does not allow gateway binds outside the local host.",
+        source: "oc://policy.jsonc/gateway/exposure/allowNonLoopbackBind",
+        checkId: "policy/gateway-non-loopback-bind",
+        allowedValues: ["loopback"],
+      },
+      "tools.exec.host": {
+        path: "tools.exec.host",
+        policyPath: "tools.exec.allowHosts",
+        state: "enabled" as const,
+        reason: "The active policy only allows approved exec hosts.",
+        source: "oc://policy.jsonc/tools/exec/allowHosts",
+        checkId: "policy/tools-exec-host-unapproved",
+        allowedValues: ["sandbox", "gateway"],
+        deniedValues: ["node"],
+      },
+    },
+  };
 }
 
 beforeEach(() => {
@@ -431,6 +462,92 @@ describe("config.patch hash-free ui.prefs LWW", () => {
       }),
     );
     expect(storedConfig.ui?.prefs).toEqual({ locale: "de" });
+  });
+});
+
+describe("config write policy settings constraints", () => {
+  it("rejects config.patch writes that violate active policy settings constraints", async () => {
+    storedConfig = { gateway: { bind: "loopback" } };
+
+    const { respond } = await invokeConfigPatch({
+      raw: { gateway: { bind: "0.0.0.0" } },
+      baseHash: "base-hash",
+      contextOverrides: {
+        getPolicySettingsConstraints: () => policySettingsConstraints(),
+      },
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        message: expect.stringContaining("config write rejected by active policy"),
+        details: {
+          policySettingsConstraint: expect.objectContaining({
+            path: "gateway.bind",
+            checkId: "policy/gateway-non-loopback-bind",
+          }),
+        },
+      }),
+    );
+    expect(configWriteMocks.commitGatewayConfigWrite).not.toHaveBeenCalled();
+  });
+
+  it("rejects config.set writes that violate active policy settings constraints", async () => {
+    storedConfig = { tools: { exec: { host: "sandbox" } } };
+    const nextConfig = { tools: { exec: { host: "node" } } };
+    const harness = createConfigHandlerHarness({
+      method: "config.set",
+      params: {
+        raw: JSON.stringify(nextConfig),
+        baseHash: "base-hash",
+      },
+      contextOverrides: {
+        getPolicySettingsConstraints: () => policySettingsConstraints(),
+      },
+    });
+
+    await expectDefined(
+      configHandlers["config.set"],
+      'configHandlers["config.set"] test invariant',
+    )(harness.options);
+
+    expect(harness.respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        message: expect.stringContaining("The active policy only allows approved exec hosts."),
+        details: {
+          policySettingsConstraint: expect.objectContaining({
+            path: "tools.exec.host",
+            policyPath: "tools.exec.allowHosts",
+          }),
+        },
+      }),
+    );
+    expect(configWriteMocks.commitGatewayConfigWrite).not.toHaveBeenCalled();
+  });
+
+  it("allows unconstrained config.patch writes while policy settings constraints are active", async () => {
+    storedConfig = { gateway: { bind: "loopback", port: 19000 } };
+
+    const { respond } = await invokeConfigPatch({
+      raw: { gateway: { port: 19001 } },
+      baseHash: "base-hash",
+      contextOverrides: {
+        getPolicySettingsConstraints: () => policySettingsConstraints(),
+      },
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        ok: true,
+        config: expect.objectContaining({ gateway: { bind: "loopback", port: 19001 } }),
+      }),
+      undefined,
+    );
+    expect(configWriteMocks.commitGatewayConfigWrite).toHaveBeenCalledOnce();
   });
 });
 
