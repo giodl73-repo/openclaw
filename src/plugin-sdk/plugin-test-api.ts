@@ -72,6 +72,7 @@ export function createTestPluginApi(api: TestPluginApiInput = {}): OpenClawPlugi
     registerTrustedToolPolicy() {},
     registerToolMetadata() {},
     registerControlUiDescriptor() {},
+    registerSettingsConstraintsProvider() {},
     registerRuntimeLifecycle() {},
     registerAgentEventSubscription() {},
     emitAgentEvent: () => ({ emitted: false as const, reason: "test api" }),

@@ -95,6 +95,7 @@ export function createPluginApiFactory(
     registerTrustedToolPolicy,
     registerToolMetadata,
     registerControlUiDescriptor,
+    registerSettingsConstraintsProvider,
     registerRuntimeLifecycle,
     registerAgentEventSubscription,
     registerSessionSchedulerJob,
@@ -264,6 +265,8 @@ export function createPluginApiFactory(
               registerToolMetadata: (metadata) => registerToolMetadata(record, metadata),
               registerControlUiDescriptor: (descriptor) =>
                 registerControlUiDescriptor(record, descriptor),
+              registerSettingsConstraintsProvider: (provider) =>
+                registerSettingsConstraintsProvider(record, provider),
               registerRuntimeLifecycle: (lifecycle) => registerRuntimeLifecycle(record, lifecycle),
               registerAgentEventSubscription: (subscription) =>
                 registerAgentEventSubscription(record, subscription),

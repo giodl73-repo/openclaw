@@ -3,8 +3,10 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { POLICY_CLI_DESCRIPTOR } from "./src/cli-output-mode.js";
 import { registerPolicyCli } from "./src/cli.js";
 import { registerPolicyDoctorChecks } from "./src/doctor/register.js";
+import { buildActivePolicySettingsConstraints } from "./src/settings-constraints-runtime.js";
 
 export {
+  buildActivePolicySettingsConstraints,
   buildPolicySettingsConstraints,
   type PolicySettingsConstraint,
   type PolicySettingsConstraintsReport,
@@ -24,5 +26,15 @@ export default definePluginEntry({
       },
     );
     registerPolicyDoctorChecks();
+    api.registerSettingsConstraintsProvider({
+      id: "policy",
+      description: "Expose active Policy constraints for settings UI and config writes.",
+      build: ({ config, cwd, configPath }) =>
+        buildActivePolicySettingsConstraints({
+          cfg: config,
+          ...(cwd !== undefined ? { cwd } : {}),
+          ...(configPath !== undefined ? { configPath } : {}),
+        }),
+    });
   },
 });

@@ -91,6 +91,8 @@ export type PluginToolMetadataRegistration = {
   tags?: string[];
 };
 
+export type { PluginSettingsConstraintsProvider } from "./settings-constraints.js";
+
 type PluginControlUiTabGroup = "control" | "agent";
 
 export type PluginControlUiDescriptor = {

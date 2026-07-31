@@ -7,6 +7,70 @@ import { describe, expect, it } from "vitest";
 import { createPluginRecord } from "./status.test-fixtures.js";
 
 describe("plugin registry Control UI descriptors", () => {
+  it("registers settings constraints providers", async () => {
+    const { config, registry } = createPluginRegistryFixture();
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({ id: "policy-fixture", name: "Policy Fixture" }),
+      register(api) {
+        api.registerSettingsConstraintsProvider({
+          id: "policy",
+          description: "Policy settings constraints",
+          build: ({ config: runtimeConfig }) => ({
+            settings: {
+              "agents.*.sandbox.mode": {
+                state: "locked",
+                source: "policy",
+                policyPath: "policy.jsonc",
+                allowedValues: [runtimeConfig.agents?.defaults?.sandbox?.mode ?? "workspace"],
+              },
+            },
+          }),
+        });
+      },
+    });
+
+    expect(registry.registry.settingsConstraintsProviders).toHaveLength(1);
+    await expect(
+      registry.registry.settingsConstraintsProviders[0]?.provider.build({
+        config: { agents: { defaults: { sandbox: { mode: "read-only" } } } },
+      }),
+    ).resolves.toEqual({
+      settings: {
+        "agents.*.sandbox.mode": {
+          state: "locked",
+          source: "policy",
+          policyPath: "policy.jsonc",
+          allowedValues: ["read-only"],
+        },
+      },
+    });
+  });
+
+  it("rejects duplicate settings constraints providers from the same plugin", () => {
+    const { config, registry } = createPluginRegistryFixture();
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({ id: "policy-fixture", name: "Policy Fixture" }),
+      register(api) {
+        const provider = { id: "policy", build: () => ({ settings: {} }) };
+        api.registerSettingsConstraintsProvider(provider);
+        api.registerSettingsConstraintsProvider(provider);
+      },
+    });
+
+    expect(registry.registry.settingsConstraintsProviders).toHaveLength(1);
+    expect(registry.registry.diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        pluginId: "policy-fixture",
+        message: "settings constraints provider already registered: policy",
+      }),
+    );
+  });
+
   it("keeps legacy flat descriptors loadable for shipped JavaScript plugins", () => {
     const { config, registry } = createPluginRegistryFixture();
     registerTestPlugin({

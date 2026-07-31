@@ -48,6 +48,7 @@ import {
   normalizePluginNodeCapabilityScopedUrl,
   type PluginNodeCapabilitySurface,
 } from "./plugin-node-capability.js";
+import type { GatewayRequestContext } from "./server-methods/types.js";
 import type { HooksRequestHandler } from "./server/hooks-request-handler.js";
 import {
   runWithGatewayHttpWorkAdmission,
@@ -524,6 +525,7 @@ export function createGatewayHttpServer(opts: {
   rateLimiter?: AuthRateLimiter;
   getReadiness?: ReadinessChecker;
   getRuntimeConfig?: () => OpenClawConfig;
+  getPolicySettingsConstraints?: GatewayRequestContext["getPolicySettingsConstraints"];
   isTerminalEnabled?: () => boolean;
   tlsOptions?: TlsOptions;
 }): HttpServer {
@@ -619,8 +621,10 @@ export function createGatewayHttpServer(opts: {
       const pluginPathContext = resolvePluginRoutePathContext(scopedRequestPath);
       const nodeCapability = resolvePluginNodeCapabilityRoute?.(pluginPathContext);
       const resolvedAuthValue = getResolvedAuth();
-      const handleControlUiRequest = async () =>
-        (await getControlUiModule()).handleControlUiHttpRequest(req, res, {
+      const handleControlUiRequest = async () => {
+        const policySettingsConstraints =
+          (await opts.getPolicySettingsConstraints?.()) ?? undefined;
+        return (await getControlUiModule()).handleControlUiHttpRequest(req, res, {
           basePath: controlUiBasePath,
           config: configSnapshot,
           terminalEnabled: opts.isTerminalEnabled?.() ?? isTerminalConfigEnabled(configSnapshot),
@@ -630,7 +634,9 @@ export function createGatewayHttpServer(opts: {
           trustedProxies,
           allowRealIpFallback,
           rateLimiter,
+          ...(policySettingsConstraints !== undefined ? { policySettingsConstraints } : {}),
         });
+      };
       const requestStages: GatewayHttpRequestStage[] = [
         {
           name: "gateway-probes",
@@ -866,8 +872,10 @@ export function createGatewayHttpServer(opts: {
         // operator can disable it. Other explicit plugin routes retain precedence.
         requestStages.push({
           name: "control-ui-plugin-manager",
-          run: async () =>
-            (await getControlUiModule()).handleControlUiHttpRequest(req, res, {
+          run: async () => {
+            const policySettingsConstraints =
+              (await opts.getPolicySettingsConstraints?.()) ?? undefined;
+            return (await getControlUiModule()).handleControlUiHttpRequest(req, res, {
               basePath: controlUiBasePath,
               config: configSnapshot,
               terminalEnabled:
@@ -878,7 +886,9 @@ export function createGatewayHttpServer(opts: {
               trustedProxies,
               allowRealIpFallback,
               rateLimiter,
-            }),
+              ...(policySettingsConstraints !== undefined ? { policySettingsConstraints } : {}),
+            });
+          },
         });
       }
       if (configSnapshot.mcp?.apps?.enabled === true && isMcpAppStandalonePath(scopedRequestPath)) {

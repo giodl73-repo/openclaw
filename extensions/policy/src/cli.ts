@@ -20,6 +20,7 @@ import {
   type PolicyConformanceReport,
 } from "./policy-conformance.js";
 import { createPolicyAttestation } from "./policy-state.js";
+import { policyCommandConfig } from "./settings-constraints-runtime.js";
 import {
   buildPolicySettingsConstraints,
   type PolicySettingsConstraintsReport,
@@ -251,29 +252,6 @@ async function buildPolicyCheckReport(
     findings: jsonFindings,
     expectedAttestationHash: evaluation.expectedAttestationHash,
     exitCode: exitCodeFromFindings(evaluation.findings, severityMin),
-  };
-}
-
-function policyCommandConfig(cfg: HealthCheckContext["cfg"]): HealthCheckContext["cfg"] {
-  return {
-    ...cfg,
-    plugins: {
-      ...cfg.plugins,
-      entries: {
-        ...cfg.plugins?.entries,
-        policy: {
-          ...cfg.plugins?.entries?.["policy"],
-          enabled: true,
-          config: {
-            enabled: true,
-            ...(typeof cfg.plugins?.entries?.["policy"]?.config === "object" &&
-            cfg.plugins.entries["policy"].config !== null
-              ? cfg.plugins.entries["policy"].config
-              : {}),
-          },
-        },
-      },
-    },
   };
 }
 

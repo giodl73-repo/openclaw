@@ -41,6 +41,7 @@ import type { MemoryEmbeddingProviderAdapter } from "./memory-embedding-provider
 import type { PluginKind } from "./plugin-kind.types.js";
 import type { PluginRuntime } from "./runtime/types.js";
 import type { SessionCatalogProvider } from "./session-catalog.js";
+import type { PluginSettingsConstraintsProviderRegistration } from "./settings-constraints.js";
 import type { PluginDependencyStatus } from "./status-dependencies-core.js";
 import type {
   OpenClawPluginHttpRouteAuth,
@@ -536,6 +537,7 @@ export type PluginRegistry = {
   trustedToolPolicies: PluginTrustedToolPolicyRegistryRegistration[];
   toolMetadata: PluginToolMetadataRegistryRegistration[];
   controlUiDescriptors: PluginControlUiDescriptorRegistryRegistration[];
+  settingsConstraintsProviders: PluginSettingsConstraintsProviderRegistration[];
   runtimeLifecycles: PluginRuntimeLifecycleRegistryRegistration[];
   agentEventSubscriptions: PluginAgentEventSubscriptionRegistryRegistration[];
   sessionSchedulerJobs: PluginSessionSchedulerJobRegistryRegistration[];
