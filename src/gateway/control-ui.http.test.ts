@@ -1347,6 +1347,49 @@ describe("handleControlUiHttpRequest", () => {
     });
   });
 
+  it("serves policy settings constraints in bootstrap config JSON", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const { res, end } = makeMockHttpResponse();
+        const handled = await handleControlUiHttpRequest(
+          { url: CONTROL_UI_BOOTSTRAP_CONFIG_PATH, method: "GET" } as IncomingMessage,
+          res,
+          {
+            root: { kind: "resolved", path: tmp },
+            config: {},
+            policySettingsConstraints: {
+              version: 1,
+              mode: "active-policy-constraints",
+              settings: {
+                "tools.exec.host": {
+                  path: "tools.exec.host",
+                  policyPath: "tools.exec.allowHosts",
+                  state: "enabled",
+                  reason: "Policy only allows sandboxed hosts.",
+                  source: "oc://policy.jsonc/tools/exec/allowHosts",
+                  checkId: "policy/tools-exec-host-unapproved",
+                  allowedValues: ["sandbox", "gateway"],
+                  deniedValues: ["node"],
+                },
+              },
+            },
+          },
+        );
+        expect(handled).toBe(true);
+        expect(parseBootstrapPayload(end).policySettingsConstraints).toMatchObject({
+          version: 1,
+          mode: "active-policy-constraints",
+          settings: {
+            "tools.exec.host": {
+              allowedValues: ["sandbox", "gateway"],
+              deniedValues: ["node"],
+            },
+          },
+        });
+      },
+    });
+  });
+
   it("omits the assistant agent id without a config snapshot", async () => {
     await withControlUiRoot({
       fn: async (tmp) => {

@@ -4,6 +4,7 @@ import {
   CONTROL_UI_TERMINAL_ENABLED_ATTRIBUTE,
   type ControlUiBootstrapConfig,
   type ControlUiEmbedSandboxMode,
+  type ControlUiPolicySettingsConstraints,
   type ControlUiPluginFrameGrantAck,
 } from "../../../src/gateway/control-ui-contract.js";
 import { normalizeAssistantIdentity } from "../lib/assistant-identity.ts";
@@ -44,6 +45,7 @@ type ApplicationConfig = {
   allowExternalEmbedUrls: boolean;
   terminalEnabled: boolean;
   pluginFrameGrants: ControlUiPluginFrameGrantAck[];
+  policySettingsConstraints: ControlUiPolicySettingsConstraints | null;
 };
 
 export type ApplicationConfigCapability = {
@@ -80,6 +82,7 @@ const DEFAULT_APPLICATION_CONFIG: ApplicationConfig = {
   allowExternalEmbedUrls: false,
   terminalEnabled: readDocumentTerminalEnabled() ?? false,
   pluginFrameGrants: [],
+  policySettingsConstraints: null,
 };
 
 function normalizeSeamColor(value: unknown): string | null {
@@ -163,7 +166,79 @@ function normalizeApplicationConfig(parsed: ControlUiBootstrapConfig): Applicati
             (grant.match === "exact" || grant.match === "prefix"),
         )
       : [],
+    policySettingsConstraints: normalizePolicySettingsConstraints(parsed.policySettingsConstraints),
   };
+}
+
+function normalizePolicySettingsConstraints(
+  value: unknown,
+): ControlUiPolicySettingsConstraints | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("version" in value) ||
+    value.version !== 1 ||
+    !("mode" in value) ||
+    value.mode !== "active-policy-constraints" ||
+    !("settings" in value) ||
+    typeof value.settings !== "object" ||
+    value.settings === null ||
+    Array.isArray(value.settings)
+  ) {
+    return null;
+  }
+  const settings: ControlUiPolicySettingsConstraints["settings"] = {};
+  for (const [path, constraint] of Object.entries(value.settings)) {
+    if (
+      typeof constraint !== "object" ||
+      constraint === null ||
+      !("path" in constraint) ||
+      constraint.path !== path ||
+      !("state" in constraint) ||
+      (constraint.state !== "enabled" &&
+        constraint.state !== "readOnly" &&
+        constraint.state !== "disabled") ||
+      !("reason" in constraint) ||
+      typeof constraint.reason !== "string"
+    ) {
+      continue;
+    }
+    const source = typeof constraint.source === "string" ? constraint.source : undefined;
+    const broker = typeof constraint.broker === "string" ? constraint.broker : undefined;
+    const policyPath =
+      typeof constraint.policyPath === "string" ? constraint.policyPath : undefined;
+    const checkId = typeof constraint.checkId === "string" ? constraint.checkId : undefined;
+    const allowedValues = normalizeConstraintValues(constraint.allowedValues);
+    const deniedValues = normalizeConstraintValues(constraint.deniedValues);
+    settings[path] = {
+      path,
+      state: constraint.state,
+      reason: constraint.reason,
+      ...(source === undefined ? {} : { source }),
+      ...(broker === undefined ? {} : { broker }),
+      ...(policyPath === undefined ? {} : { policyPath }),
+      ...(checkId === undefined ? {} : { checkId }),
+      ...(allowedValues === undefined ? {} : { allowedValues }),
+      ...(deniedValues === undefined ? {} : { deniedValues }),
+    };
+  }
+  return {
+    version: 1,
+    mode: "active-policy-constraints",
+    settings,
+  };
+}
+
+function normalizeConstraintValues(
+  value: unknown,
+): ControlUiPolicySettingsConstraints["settings"][string]["allowedValues"] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return value.filter(
+    (entry): entry is string | number | boolean | null =>
+      entry === null || ["string", "number", "boolean"].includes(typeof entry),
+  );
 }
 
 async function loadApplicationConfig(params: {
