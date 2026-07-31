@@ -15,6 +15,15 @@ type SettingsStatusKind = "ok" | "warn" | "danger" | "accent" | "muted";
 
 type SettingsRowControl = TemplateResult | typeof nothing;
 
+export type SettingsConstraintValue = string | number | boolean | null;
+
+export type SettingsConstraint = {
+  readonly state?: "enabled" | "readOnly" | "disabled";
+  readonly reason?: string;
+  readonly allowedValues?: readonly SettingsConstraintValue[];
+  readonly deniedValues?: readonly SettingsConstraintValue[];
+};
+
 type SettingsRowProps = {
   title: unknown;
   description?: unknown;
@@ -135,17 +144,24 @@ export function renderSettingsToggle(props: {
   checked: boolean;
   onChange: (checked: boolean) => boolean | void;
   disabled?: boolean;
+  constraint?: SettingsConstraint;
   ariaLabel: string;
 }): TemplateResult {
+  const blocked = settingsConstraintBlocksValue(props.constraint, !props.checked);
+  const title = settingsConstraintTitle(props.constraint);
   return html`
     <wa-switch
       class="settings-toggle"
       size="s"
       .checked=${live(props.checked)}
-      ?disabled=${props.disabled ?? false}
+      ?disabled=${(props.disabled ?? false) || blocked}
+      title=${title ?? nothing}
       @change=${(event: Event) => {
         const target = event.currentTarget as HTMLElement & { checked: boolean };
-        if (props.onChange(target.checked) === false) {
+        if (
+          settingsConstraintBlocksValue(props.constraint, target.checked) ||
+          props.onChange(target.checked) === false
+        ) {
           target.checked = props.checked;
         }
       }}
@@ -166,7 +182,11 @@ export function renderSettingsToggleRow(props: {
   /** Runs synchronously during direct activation for effects gated on user activation. */
   onAct?: (checked: boolean) => void;
   disabled?: boolean;
+  constraint?: SettingsConstraint;
 }): TemplateResult {
+  const blocked = settingsConstraintBlocksValue(props.constraint, !props.checked);
+  const disabled = (props.disabled ?? false) || blocked;
+  const title = settingsConstraintTitle(props.constraint);
   const notifySwitchActivation = (event: MouseEvent | KeyboardEvent) => {
     const fromInput = event.composedPath().some((node) => node instanceof HTMLInputElement);
     if (
@@ -177,15 +197,19 @@ export function renderSettingsToggleRow(props: {
     }
     const checked = (event.currentTarget as HTMLElement & { checked: boolean }).checked;
     if (checked !== props.checked) {
+      if (settingsConstraintBlocksValue(props.constraint, checked)) {
+        return;
+      }
       props.onAct?.(checked);
     }
   };
   return html`
     <div
       class="settings-row settings-row--toggle"
+      title=${title ?? nothing}
       @click=${(event: MouseEvent) => {
         const target = event.target;
-        if (props.disabled || (target instanceof Element && target.closest("wa-switch") !== null)) {
+        if (disabled || (target instanceof Element && target.closest("wa-switch") !== null)) {
           return;
         }
         const checked = !props.checked;
@@ -204,12 +228,16 @@ export function renderSettingsToggleRow(props: {
           class="settings-toggle"
           size="s"
           .checked=${live(props.checked)}
-          ?disabled=${props.disabled ?? false}
+          ?disabled=${disabled}
+          title=${title ?? nothing}
           @click=${notifySwitchActivation}
           @keydown=${notifySwitchActivation}
           @change=${(event: Event) => {
             const target = event.currentTarget as HTMLElement & { checked: boolean };
-            if (props.onChange(target.checked) === false) {
+            if (
+              settingsConstraintBlocksValue(props.constraint, target.checked) ||
+              props.onChange(target.checked) === false
+            ) {
               target.checked = props.checked;
             }
           }}
@@ -227,9 +255,11 @@ export function renderSettingsSegmented<T extends string>(props: {
   /** The selected radio is passed so callers can anchor visual transitions. */
   onChange: (value: T, element: HTMLElement) => void;
   disabled?: boolean;
+  constraint?: SettingsConstraint;
   ariaLabel?: string;
   className?: string;
 }): TemplateResult {
+  const title = settingsConstraintTitle(props.constraint);
   return html`
     <wa-radio-group
       class="settings-segmented ${props.className ?? ""}"
@@ -237,9 +267,14 @@ export function renderSettingsSegmented<T extends string>(props: {
       orientation="horizontal"
       .value=${props.value}
       ?disabled=${props.disabled ?? false}
+      title=${title ?? nothing}
       @change=${(event: Event) => {
         const value = (event.currentTarget as HTMLElement & { value?: string }).value;
         if (value !== undefined) {
+          if (settingsConstraintBlocksValue(props.constraint, value)) {
+            (event.currentTarget as HTMLElement & { value?: string }).value = props.value;
+            return;
+          }
           const group = event.currentTarget as HTMLElement;
           const selected = [...group.querySelectorAll<HTMLElement>("wa-radio")].find(
             (radio) => radio.getAttribute("value") === value,
@@ -260,6 +295,7 @@ export function renderSettingsSegmented<T extends string>(props: {
             appearance="button"
             value=${option.value}
             .checked=${option.value === props.value}
+            ?disabled=${settingsConstraintBlocksValue(props.constraint, option.value)}
             title=${option.title ?? nothing}
             data-test-id=${option.testId ?? nothing}
           >
@@ -295,6 +331,48 @@ export function renderSettingsValue(value: unknown, options: { mono?: boolean } 
 
 export function renderSettingsEmpty(message: unknown): TemplateResult {
   return html`<div class="settings-empty">${message}</div>`;
+}
+
+export function settingsConstraintBlocksValue(
+  constraint: SettingsConstraint | undefined,
+  value: SettingsConstraintValue,
+): boolean {
+  if (constraint === undefined) {
+    return false;
+  }
+  if (constraint.state === "disabled") {
+    return true;
+  }
+  if (
+    constraint.state === "readOnly" &&
+    constraint.allowedValues === undefined &&
+    constraint.deniedValues === undefined
+  ) {
+    return true;
+  }
+  if (
+    constraint.allowedValues !== undefined &&
+    !constraint.allowedValues.some((allowed) => settingsConstraintValueEquals(allowed, value))
+  ) {
+    return true;
+  }
+  return (
+    constraint.deniedValues?.some((denied) => settingsConstraintValueEquals(denied, value)) ?? false
+  );
+}
+
+export function settingsConstraintTitle(
+  constraint: SettingsConstraint | undefined,
+): string | undefined {
+  const reason = constraint?.reason?.trim();
+  return reason === "" ? undefined : reason;
+}
+
+function settingsConstraintValueEquals(
+  left: SettingsConstraintValue,
+  right: SettingsConstraintValue,
+): boolean {
+  return left === right;
 }
 
 /** Secret text input with an inset reveal toggle — one field, no trailing
