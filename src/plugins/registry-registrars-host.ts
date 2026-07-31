@@ -12,6 +12,7 @@ import {
   type PluginSessionActionRegistration,
   type PluginSessionSchedulerJobRegistration,
   type PluginSessionExtensionRegistration,
+  type PluginSettingsConstraintsProvider,
   type PluginToolMetadataRegistration,
   type PluginTrustedToolPolicyRegistration,
 } from "./host-hooks.js";
@@ -500,6 +501,55 @@ export function createHostRegistrars(state: PluginRegistryState) {
     });
   };
 
+  const registerSettingsConstraintsProvider = (
+    record: PluginRecord,
+    provider: PluginSettingsConstraintsProvider,
+  ) => {
+    if (record.origin !== "bundled") {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: "settings constraints providers are limited to bundled plugins",
+      });
+      return;
+    }
+    const id = normalizePluginHostHookId(provider.id);
+    const description = normalizeOptionalHostHookString(provider.description);
+    if (!id || typeof provider.build !== "function" || description === "") {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: "settings constraints provider registration requires id and build",
+      });
+      return;
+    }
+    const existing = registry.settingsConstraintsProviders.find(
+      (entry) => entry.pluginId === record.id && entry.provider.id === id,
+    );
+    if (existing) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `settings constraints provider already registered: ${id}`,
+      });
+      return;
+    }
+    registry.settingsConstraintsProviders.push({
+      pluginId: record.id,
+      pluginName: record.name,
+      provider: {
+        ...provider,
+        id,
+        ...(description !== undefined ? { description } : {}),
+      },
+      source: record.source,
+      rootDir: record.rootDir,
+    });
+  };
+
   const registerAgentEventSubscription = (
     record: PluginRecord,
     subscription: PluginAgentEventSubscriptionRegistration,
@@ -704,6 +754,7 @@ export function createHostRegistrars(state: PluginRegistryState) {
     registerTrustedToolPolicy,
     registerToolMetadata,
     registerControlUiDescriptor,
+    registerSettingsConstraintsProvider,
     registerRuntimeLifecycle,
     registerAgentEventSubscription,
     registerSessionSchedulerJob,

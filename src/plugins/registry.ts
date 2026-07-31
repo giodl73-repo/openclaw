@@ -107,6 +107,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     registerTrustedToolPolicy: registrars.registerTrustedToolPolicy,
     registerToolMetadata: registrars.registerToolMetadata,
     registerControlUiDescriptor: registrars.registerControlUiDescriptor,
+    registerSettingsConstraintsProvider: registrars.registerSettingsConstraintsProvider,
     registerRuntimeLifecycle: registrars.registerRuntimeLifecycle,
     registerAgentEventSubscription: registrars.registerAgentEventSubscription,
     registerSessionSchedulerJob: registrars.registerSessionSchedulerJob,

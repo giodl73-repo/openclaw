@@ -46,6 +46,7 @@ import type {
   PluginSessionSchedulerJobHandle,
   PluginSessionSchedulerJobRegistration,
   PluginSessionExtensionRegistration,
+  PluginSettingsConstraintsProvider,
   PluginSessionTurnScheduleParams,
   PluginSessionTurnUnscheduleByTagParams,
   PluginSessionTurnUnscheduleByTagResult,
@@ -346,6 +347,11 @@ export type OpenClawPluginApi = {
    * @deprecated Use `api.session.controls.registerControlUiDescriptor(...)`.
    */
   registerControlUiDescriptor: (descriptor: PluginControlUiDescriptor) => void;
+  /**
+   * Register plugin-owned settings constraints for UI presentation and config writes.
+   * Bundled plugins only; installed/workspace plugins are rejected at registration.
+   */
+  registerSettingsConstraintsProvider: (provider: PluginSettingsConstraintsProvider) => void;
   /**
    * Register cleanup hooks for plugin-owned host state and background work.
    * @deprecated Use `api.lifecycle.registerRuntimeLifecycle(...)`.

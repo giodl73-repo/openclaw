@@ -4,9 +4,97 @@ import {
   registerTestPlugin,
 } from "openclaw/plugin-sdk/plugin-test-contracts";
 import { describe, expect, it } from "vitest";
-import { createPluginRecord } from "./status.test-fixtures.js";
+import { createBundledPluginRecord, createPluginRecord } from "./status.test-fixtures.js";
 
 describe("plugin registry Control UI descriptors", () => {
+  it("registers settings constraints providers", async () => {
+    const { config, registry } = createPluginRegistryFixture();
+    registerTestPlugin({
+      registry,
+      config,
+      record: createBundledPluginRecord("policy-fixture"),
+      register(api) {
+        api.registerSettingsConstraintsProvider({
+          id: "policy",
+          description: "Policy settings constraints",
+          build: ({ config: runtimeConfig }) => ({
+            settings: {
+              "agents.*.sandbox.mode": {
+                state: "readOnly",
+                source: "policy",
+                policyPath: "policy.jsonc",
+                allowedValues: [runtimeConfig.agents?.defaults?.sandbox?.mode ?? "workspace"],
+              },
+            },
+          }),
+        });
+      },
+    });
+
+    expect(registry.registry.settingsConstraintsProviders).toHaveLength(1);
+    await expect(
+      registry.registry.settingsConstraintsProviders[0]?.provider.build({
+        config: { agents: { defaults: { sandbox: { mode: "read-only" } } } },
+      }),
+    ).resolves.toEqual({
+      settings: {
+        "agents.*.sandbox.mode": {
+          state: "readOnly",
+          source: "policy",
+          policyPath: "policy.jsonc",
+          allowedValues: ["read-only"],
+        },
+      },
+    });
+  });
+
+  it("rejects duplicate settings constraints providers from the same plugin", () => {
+    const { config, registry } = createPluginRegistryFixture();
+    registerTestPlugin({
+      registry,
+      config,
+      record: createBundledPluginRecord("policy-fixture"),
+      register(api) {
+        const provider = { id: "policy", build: () => ({ settings: {} }) };
+        api.registerSettingsConstraintsProvider(provider);
+        api.registerSettingsConstraintsProvider(provider);
+      },
+    });
+
+    expect(registry.registry.settingsConstraintsProviders).toHaveLength(1);
+    expect(registry.registry.diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        pluginId: "policy-fixture",
+        message: "settings constraints provider already registered: policy",
+      }),
+    );
+  });
+
+  it("rejects settings constraints providers from non-bundled plugins", () => {
+    const { config, registry } = createPluginRegistryFixture();
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({ id: "workspace-policy", name: "Workspace Policy" }),
+      register(api) {
+        api.registerSettingsConstraintsProvider({
+          id: "workspace-policy",
+          build: () => ({ settings: {} }),
+        });
+      },
+    });
+
+    expect(registry.registry.settingsConstraintsProviders).toHaveLength(0);
+    expect(registry.registry.diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        pluginId: "workspace-policy",
+        message: "settings constraints providers are limited to bundled plugins",
+      }),
+    );
+  });
+
   it("keeps legacy flat descriptors loadable for shipped JavaScript plugins", () => {
     const { config, registry } = createPluginRegistryFixture();
     registerTestPlugin({

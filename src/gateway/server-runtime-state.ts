@@ -117,6 +117,7 @@ export async function createGatewayRuntimeState(params: {
   pluginRegistry: PluginRegistry;
   getPluginRouteRegistry?: () => PluginRegistry;
   getGatewayRequestContext?: () => GatewayRequestContext | undefined;
+  getPolicySettingsConstraints?: GatewayRequestContext["getPolicySettingsConstraints"];
   pinChannelRegistry?: boolean;
   deps: CliDeps;
   log: { info: (msg: string) => void; warn: (msg: string) => void };
@@ -327,6 +328,7 @@ export async function createGatewayRuntimeState(params: {
         rateLimiter: params.rateLimiter,
         getReadiness: params.getReadiness,
         getRuntimeConfig: loadRuntimeConfig,
+        getPolicySettingsConstraints: params.getPolicySettingsConstraints,
         isTerminalEnabled: params.isTerminalEnabled,
         tlsOptions: params.gatewayTls?.enabled ? params.gatewayTls.tlsOptions : undefined,
       });

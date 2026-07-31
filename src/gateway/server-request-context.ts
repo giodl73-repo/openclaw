@@ -27,6 +27,7 @@ type GatewayRequestContextParams = {
     "cronState" | "configReloader" | "controlUiSessionPullRequests" | "sessionViewerPresence"
   >;
   getRuntimeConfig: GatewayRequestContext["getRuntimeConfig"];
+  getPolicySettingsConstraints?: GatewayRequestContext["getPolicySettingsConstraints"];
   sessionCompanion: SessionCompanionService;
   sessionObserver: SessionObserverService;
   getMcpAppSandboxPort?: GatewayRequestContext["getMcpAppSandboxPort"];
@@ -163,6 +164,7 @@ export function createGatewayRequestContext(
       return params.runtimeState.cronState.storePath;
     },
     getRuntimeConfig: params.getRuntimeConfig,
+    getPolicySettingsConstraints: params.getPolicySettingsConstraints,
     controlUiSessionPullRequests: params.runtimeState.controlUiSessionPullRequests,
     sessionViewerPresence: params.runtimeState.sessionViewerPresence,
     sessionCompanion: params.sessionCompanion,

@@ -26,6 +26,7 @@ import {
   getHealthVersion,
   incrementPresenceVersion,
 } from "./server/health-state.js";
+import { collectPluginSettingsConstraints } from "./settings-constraints-providers.js";
 
 type GatewayCoreRuntime = Awaited<ReturnType<typeof startGatewayCoreRuntime>>;
 type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
@@ -200,6 +201,13 @@ export async function finishGatewayStartup(params: {
       runtimeState,
       sessionCompanion,
       getRuntimeConfig,
+      getPolicySettingsConstraints: () =>
+        collectPluginSettingsConstraints({
+          registry: pluginRuntime.registry,
+          config: getRuntimeConfig(),
+          cwd: defaultWorkspaceDir,
+          ...(configSnapshot.path !== undefined ? { configPath: configSnapshot.path } : {}),
+        }),
       sessionObserver,
       getMcpAppSandboxPort,
       ensureSandboxHostPort,

@@ -29,6 +29,7 @@ import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
 import { createReadinessChecker } from "./server/readiness.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
+import { collectPluginSettingsConstraints } from "./settings-constraints-providers.js";
 
 type GatewayBootstrap = Awaited<ReturnType<typeof prepareGatewayServerBootstrap>>;
 type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
@@ -396,6 +397,11 @@ export async function prepareGatewayRuntimeState(params: {
       pluginRegistry: pluginRuntime.registry,
       getPluginRouteRegistry: () => pluginRuntime.registry,
       getGatewayRequestContext: () => pluginGatewayContext.current,
+      getPolicySettingsConstraints: () =>
+        collectPluginSettingsConstraints({
+          registry: pluginRuntime.registry,
+          config: getRuntimeConfig(),
+        }),
       pinChannelRegistry: !minimalTestGateway,
       deps,
       log,
