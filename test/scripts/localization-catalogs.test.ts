@@ -30,6 +30,7 @@ async function writeFixture() {
     areas: [
       {
         id: "wizard-core",
+        owner: "wizard",
         namespace: "wizard",
         source: SOURCE_PATH,
         targets: [{ locale: "zh-CN", path: TARGET_PATH }],
@@ -251,6 +252,7 @@ describe("localization catalog authoring", () => {
       areas: [
         {
           id: "wizard-core",
+          owner: "wizard",
           namespace: "wizard",
           source: "../outside.json",
           targets: [{ locale: "zh-CN", path: TARGET_PATH }],
@@ -270,6 +272,7 @@ describe("localization catalog authoring", () => {
       areas: [
         {
           id: "wizard-core",
+          owner: "wizard",
           namespace: "wizard",
           source: "C:/outside/i18n/catalogs/en.json",
           targets: [{ locale: "zh-CN", path: TARGET_PATH }],
