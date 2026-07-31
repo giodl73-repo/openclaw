@@ -505,6 +505,15 @@ export function createHostRegistrars(state: PluginRegistryState) {
     record: PluginRecord,
     provider: PluginSettingsConstraintsProvider,
   ) => {
+    if (record.origin !== "bundled") {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: "settings constraints providers are limited to bundled plugins",
+      });
+      return;
+    }
     const id = normalizePluginHostHookId(provider.id);
     const description = normalizeOptionalHostHookString(provider.description);
     if (!id || typeof provider.build !== "function" || description === "") {

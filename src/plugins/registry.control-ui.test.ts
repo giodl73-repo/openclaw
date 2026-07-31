@@ -4,7 +4,7 @@ import {
   registerTestPlugin,
 } from "openclaw/plugin-sdk/plugin-test-contracts";
 import { describe, expect, it } from "vitest";
-import { createPluginRecord } from "./status.test-fixtures.js";
+import { createBundledPluginRecord, createPluginRecord } from "./status.test-fixtures.js";
 
 describe("plugin registry Control UI descriptors", () => {
   it("registers settings constraints providers", async () => {
@@ -12,7 +12,7 @@ describe("plugin registry Control UI descriptors", () => {
     registerTestPlugin({
       registry,
       config,
-      record: createPluginRecord({ id: "policy-fixture", name: "Policy Fixture" }),
+      record: createBundledPluginRecord("policy-fixture"),
       register(api) {
         api.registerSettingsConstraintsProvider({
           id: "policy",
@@ -53,7 +53,7 @@ describe("plugin registry Control UI descriptors", () => {
     registerTestPlugin({
       registry,
       config,
-      record: createPluginRecord({ id: "policy-fixture", name: "Policy Fixture" }),
+      record: createBundledPluginRecord("policy-fixture"),
       register(api) {
         const provider = { id: "policy", build: () => ({ settings: {} }) };
         api.registerSettingsConstraintsProvider(provider);
@@ -67,6 +67,30 @@ describe("plugin registry Control UI descriptors", () => {
         level: "error",
         pluginId: "policy-fixture",
         message: "settings constraints provider already registered: policy",
+      }),
+    );
+  });
+
+  it("rejects settings constraints providers from non-bundled plugins", () => {
+    const { config, registry } = createPluginRegistryFixture();
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({ id: "workspace-policy", name: "Workspace Policy" }),
+      register(api) {
+        api.registerSettingsConstraintsProvider({
+          id: "workspace-policy",
+          build: () => ({ settings: {} }),
+        });
+      },
+    });
+
+    expect(registry.registry.settingsConstraintsProviders).toHaveLength(0);
+    expect(registry.registry.diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        pluginId: "workspace-policy",
+        message: "settings constraints providers are limited to bundled plugins",
       }),
     );
   });
