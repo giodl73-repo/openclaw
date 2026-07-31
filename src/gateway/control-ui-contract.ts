@@ -55,6 +55,26 @@ export type ControlUiPluginFrameGrantAck = {
   match: "exact" | "prefix";
 };
 
+export type ControlUiPolicySettingsConstraintValue = string | number | boolean | null;
+
+export type ControlUiPolicySettingsConstraint = {
+  path: string;
+  state: "enabled" | "readOnly" | "disabled";
+  reason: string;
+  source?: string;
+  broker?: string;
+  policyPath?: string;
+  checkId?: string;
+  allowedValues?: ControlUiPolicySettingsConstraintValue[];
+  deniedValues?: ControlUiPolicySettingsConstraintValue[];
+};
+
+export type ControlUiPolicySettingsConstraints = {
+  version: 1;
+  mode: "active-policy-constraints";
+  settings: Record<string, ControlUiPolicySettingsConstraint>;
+};
+
 /** Public GitHub metadata rendered by Control UI link hover cards. */
 export type ControlUiGitHubPreview = {
   additions?: number;
@@ -173,4 +193,5 @@ export type ControlUiBootstrapConfig = {
    */
   terminalEnabled?: boolean;
   pluginFrameGrants?: ControlUiPluginFrameGrantAck[];
+  policySettingsConstraints?: ControlUiPolicySettingsConstraints;
 };

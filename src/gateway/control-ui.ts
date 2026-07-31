@@ -55,6 +55,7 @@ import {
   CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
   CONTROL_UI_TERMINAL_ENABLED_ATTRIBUTE,
   type ControlUiBootstrapConfig,
+  type ControlUiPolicySettingsConstraints,
   type ControlUiPluginFrameGrantAck,
 } from "./control-ui-contract.js";
 import { buildControlUiCspHeader, computeInlineScriptHashes } from "./control-ui-csp.js";
@@ -114,6 +115,7 @@ type ControlUiRequestOptions = {
   trustedProxies?: string[];
   allowRealIpFallback?: boolean;
   rateLimiter?: AuthRateLimiter;
+  policySettingsConstraints?: ControlUiPolicySettingsConstraints;
 };
 
 export type ControlUiRootState =
@@ -1104,6 +1106,9 @@ export async function handleControlUiHttpRequest(
       allowExternalEmbedUrls: config?.gateway?.controlUi?.allowExternalEmbedUrls === true,
       seamColor: config?.ui?.seamColor,
       terminalEnabled,
+      ...(opts?.policySettingsConstraints === undefined
+        ? {}
+        : { policySettingsConstraints: opts.policySettingsConstraints }),
       pluginFrameGrants: pluginFrameGrants.map(({ pluginId, path: grantPath, match }) => ({
         pluginId,
         path: grantPath,
