@@ -1,0 +1,33 @@
+{
+  // Example host policy for a managed OpenClaw runtime. It keeps the gateway
+  // local, requires authenticated Control UI access, narrows model/provider
+  // choices, and prevents users from enabling broad shell/elevated execution.
+  gateway: {
+    exposure: { allowNonLoopbackBind: false },
+    auth: { requireAuth: true },
+    controlUi: { allowInsecure: false },
+    remote: { allow: false },
+    http: { denyEndpoints: ["responses"] },
+  },
+  models: {
+    providers: { allow: ["openai"], deny: ["local"] },
+  },
+  sandbox: {
+    requireMode: ["all"],
+    allowBackends: ["podman"],
+  },
+  tools: {
+    exec: {
+      allowHosts: ["sandbox"],
+      allowSecurity: ["deny", "allowlist"],
+      requireAsk: ["always"],
+    },
+    elevated: { allow: false },
+  },
+  ingress: {
+    channels: {
+      denyOpenGroups: true,
+      requireMentionInGroups: true,
+    },
+  },
+}
