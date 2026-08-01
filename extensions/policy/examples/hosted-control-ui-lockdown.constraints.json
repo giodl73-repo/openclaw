@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "mode": "active-policy-constraints",
+  "settings": {
+    "agents.*.sandbox.mode": {
+      "path": "agents.*.sandbox.mode",
+      "policyPath": "sandbox.requireMode",
+      "state": "enabled",
+      "reason": "The active policy only allows approved values for agents.*.sandbox.mode.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/sandbox/requireMode",
+      "checkId": "policy/sandbox-mode-unapproved",
+      "allowedValues": ["all"]
+    },
+    "agents.*.sandbox.backend": {
+      "path": "agents.*.sandbox.backend",
+      "policyPath": "sandbox.allowBackends",
+      "state": "enabled",
+      "reason": "The active policy only allows approved values for agents.*.sandbox.backend.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/sandbox/allowBackends",
+      "checkId": "policy/sandbox-backend-unapproved",
+      "allowedValues": ["podman"]
+    },
+    "tools.exec.security": {
+      "path": "tools.exec.security",
+      "policyPath": "tools.exec.allowSecurity",
+      "state": "enabled",
+      "reason": "The active policy only allows approved values for tools.exec.security.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/tools/exec/allowSecurity",
+      "checkId": "policy/tools-exec-security-unapproved",
+      "allowedValues": ["deny", "allowlist"]
+    },
+    "tools.exec.ask": {
+      "path": "tools.exec.ask",
+      "policyPath": "tools.exec.requireAsk",
+      "state": "enabled",
+      "reason": "The active policy only allows approved values for tools.exec.ask.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/tools/exec/requireAsk",
+      "checkId": "policy/tools-exec-ask-unapproved",
+      "allowedValues": ["always"]
+    },
+    "tools.exec.host": {
+      "path": "tools.exec.host",
+      "policyPath": "tools.exec.allowHosts",
+      "state": "enabled",
+      "reason": "The active policy only allows approved values for tools.exec.host.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/tools/exec/allowHosts",
+      "checkId": "policy/tools-exec-host-unapproved",
+      "allowedValues": ["sandbox"]
+    },
+    "tools.elevated.enabled": {
+      "path": "tools.elevated.enabled",
+      "policyPath": "tools.elevated.allow",
+      "state": "readOnly",
+      "reason": "The active policy requires tools.elevated.enabled to stay disabled.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/tools/elevated/allow",
+      "checkId": "policy/tools-elevated-enabled",
+      "allowedValues": [false],
+      "deniedValues": [true]
+    },
+    "channels.*.groupPolicy": {
+      "path": "channels.*.groupPolicy",
+      "policyPath": "ingress.channels.denyOpenGroups",
+      "state": "enabled",
+      "reason": "The active policy only allows closed group ingress modes.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/ingress/channels/denyOpenGroups",
+      "checkId": "policy/ingress-open-groups-denied",
+      "allowedValues": ["allowlist", "disabled"],
+      "deniedValues": ["open"]
+    },
+    "channels.*.requireMention": {
+      "path": "channels.*.requireMention",
+      "policyPath": "ingress.channels.requireMentionInGroups",
+      "state": "readOnly",
+      "reason": "The active policy requires channels.*.requireMention to stay enabled.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/ingress/channels/requireMentionInGroups",
+      "checkId": "policy/ingress-group-mention-required",
+      "allowedValues": [true],
+      "deniedValues": [false]
+    },
+    "models.*.provider": {
+      "path": "models.*.provider",
+      "policyPath": "models.providers.allow",
+      "state": "enabled",
+      "reason": "The active policy only allows approved values for models.*.provider.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/models/providers/allow",
+      "checkId": "policy/models-unapproved-provider",
+      "allowedValues": ["openai"],
+      "deniedValues": ["local"]
+    },
+    "gateway.http.endpoints.*.enabled": {
+      "path": "gateway.http.endpoints.*.enabled",
+      "policyPath": "gateway.http.denyEndpoints",
+      "state": "enabled",
+      "reason": "The active policy denies these values for gateway.http.endpoints.*.enabled.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/http/denyEndpoints",
+      "checkId": "policy/gateway-http-endpoint-enabled",
+      "deniedValues": ["responses"]
+    },
+    "gateway.mode": {
+      "path": "gateway.mode",
+      "policyPath": "gateway.remote.allow",
+      "state": "enabled",
+      "reason": "The active policy does not allow remote gateway mode.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/remote/allow",
+      "checkId": "policy/gateway-remote-enabled",
+      "allowedValues": [false],
+      "deniedValues": ["remote"]
+    },
+    "gateway.bind": {
+      "path": "gateway.bind",
+      "policyPath": "gateway.exposure.allowNonLoopbackBind",
+      "state": "readOnly",
+      "reason": "The active policy does not allow gateway binds outside the local host.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/exposure/allowNonLoopbackBind",
+      "checkId": "policy/gateway-non-loopback-bind",
+      "allowedValues": ["loopback"]
+    },
+    "gateway.auth.mode": {
+      "path": "gateway.auth.mode",
+      "policyPath": "gateway.auth.requireAuth",
+      "state": "enabled",
+      "reason": "The active policy requires authenticated gateway access.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/auth/requireAuth",
+      "checkId": "policy/gateway-auth-required",
+      "allowedValues": ["token", "password", "trusted-proxy"],
+      "deniedValues": ["none"]
+    },
+    "gateway.controlUi.allowInsecure": {
+      "path": "gateway.controlUi.allowInsecure",
+      "policyPath": "gateway.controlUi.allowInsecure",
+      "state": "readOnly",
+      "reason": "The active policy requires gateway.controlUi.allowInsecure to stay disabled.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/controlUi/allowInsecure",
+      "checkId": "policy/gateway-control-ui-insecure",
+      "allowedValues": [false],
+      "deniedValues": [true]
+    },
+    "gateway.controlUi.insecureAuth": {
+      "path": "gateway.controlUi.insecureAuth",
+      "policyPath": "gateway.controlUi.allowInsecure",
+      "state": "readOnly",
+      "reason": "The active policy does not allow insecure Control UI authentication.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/controlUi/allowInsecure",
+      "checkId": "policy/gateway-control-ui-insecure-auth",
+      "allowedValues": [false],
+      "deniedValues": [true]
+    },
+    "gateway.controlUi.deviceAuthDisabled": {
+      "path": "gateway.controlUi.deviceAuthDisabled",
+      "policyPath": "gateway.controlUi.allowInsecure",
+      "state": "readOnly",
+      "reason": "The active policy requires device authorization for Control UI access.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/controlUi/allowInsecure",
+      "checkId": "policy/gateway-control-ui-device-auth-disabled",
+      "allowedValues": [false],
+      "deniedValues": [true]
+    },
+    "gateway.controlUi.hostOriginFallback": {
+      "path": "gateway.controlUi.hostOriginFallback",
+      "policyPath": "gateway.controlUi.allowInsecure",
+      "state": "readOnly",
+      "reason": "The active policy does not allow Control UI host origin fallback.",
+      "source": "oc://hosted-control-ui-lockdown.policy.jsonc/gateway/controlUi/allowInsecure",
+      "checkId": "policy/gateway-control-ui-host-origin-fallback",
+      "allowedValues": [false],
+      "deniedValues": [true]
+    }
+  }
+}

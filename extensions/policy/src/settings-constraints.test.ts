@@ -1,5 +1,11 @@
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import JSON5 from "json5";
 import { describe, expect, it } from "vitest";
 import { buildPolicySettingsConstraints } from "./settings-constraints.js";
+
+const EXAMPLES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "examples");
 
 describe("policy settings constraints", () => {
   it("returns an empty active-policy constraints report when policy has no setting restrictions", () => {
@@ -161,5 +167,23 @@ describe("policy settings constraints", () => {
     });
 
     expect(constraints.settings).toEqual({});
+  });
+
+  it("keeps the hosted Control UI lockdown example aligned with the emitted contract", async () => {
+    const policyText = await readFile(
+      join(EXAMPLES_DIR, "hosted-control-ui-lockdown.policy.jsonc"),
+      "utf-8",
+    );
+    const expectedText = await readFile(
+      join(EXAMPLES_DIR, "hosted-control-ui-lockdown.constraints.json"),
+      "utf-8",
+    );
+
+    expect(
+      buildPolicySettingsConstraints(
+        JSON5.parse(policyText),
+        "hosted-control-ui-lockdown.policy.jsonc",
+      ),
+    ).toEqual(JSON.parse(expectedText));
   });
 });
