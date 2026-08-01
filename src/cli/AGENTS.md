@@ -19,6 +19,14 @@ machine-readable output and operational values exactly.
 - Structured capability output is locale-invariant; localization applies only
   to the final human error boundary.
 
+## Agent command guidance
+
+- Resolve one CLI localization context before message-file parsing and reuse it
+  through pre-dispatch validation. Keep agent/session IDs, paths, URLs, command
+  tokens, model/provider output, and Gateway diagnostics literal.
+- Do not translate transport errors or infer a retry policy from localized
+  prose. Structured Gateway outcomes and JSON remain locale-invariant.
+
 ## Updater dry-run ownership
 
 - Author reviewed English in `i18n/locales/en.ts` and keep the hand-owned

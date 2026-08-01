@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCliLocalization } from "../cli/i18n/runtime.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { loggingState } from "../logging/state.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -297,6 +298,19 @@ describe("agentCliCommand", () => {
     });
   });
 
+  it("localizes timeout validation while preserving flags, units, and examples", async () => {
+    await withTempStore(async () => {
+      await expect(
+        agentCliCommand({ message: "hi", to: "+1555", timeout: "10s" }, runtime, {
+          localization: createCliLocalization({ locale: "zh-CN" }),
+        }),
+      ).rejects.toThrow(
+        "无效的 --timeout。请使用非负整数秒数，例如 --timeout 600。使用 --timeout 0 可禁用超时。",
+      );
+      expect(callGateway).not.toHaveBeenCalled();
+    });
+  });
+
   it("uses owner authority with the configured local gateway by default", async () => {
     await withTempStore(async () => {
       mockGatewaySuccessReply();
@@ -402,6 +416,19 @@ describe("agentCliCommand", () => {
       await expect(
         agentCliCommand({ messageFile, sessionKey: "agent:main:incident-42" }, runtime),
       ).rejects.toThrow("Message file not found");
+      expect(callGateway).not.toHaveBeenCalled();
+    });
+  });
+
+  it("localizes missing message-file errors without changing the path", async () => {
+    await withTempStore(async ({ dir }) => {
+      const messageFile = path.join(dir, "missing.md");
+
+      await expect(
+        agentCliCommand({ messageFile, sessionKey: "agent:main:incident-42" }, runtime, {
+          localization: createCliLocalization({ locale: "zh-CN" }),
+        }),
+      ).rejects.toThrow(`找不到消息文件：${messageFile}`);
       expect(callGateway).not.toHaveBeenCalled();
     });
   });
@@ -1977,6 +2004,21 @@ describe("agentCliCommand", () => {
     });
   });
 
+  it("localizes malformed session-key guidance without changing the key grammar", async () => {
+    await withTempStore(async () => {
+      await expect(
+        agentCliCommand({ message: "hi", sessionKey: "agent:main" }, runtime, {
+          localization: createCliLocalization({ locale: "zh-CN" }),
+        }),
+      ).rejects.toThrow(
+        '无效的 --session-key "agent:main"。以 agent: 开头的会话键必须使用 agent:<agent-id>:<session-key>。',
+      );
+
+      expect(callGateway).not.toHaveBeenCalled();
+      expect(agentCommand).not.toHaveBeenCalled();
+    });
+  });
+
   it("rejects explicit session keys whose agent does not match --agent", async () => {
     await withTempStore(async () => {
       await expect(
@@ -2018,6 +2060,20 @@ describe("agentCliCommand", () => {
       expect(errorMessages.some((m) => m.includes("openclaw sessions compact"))).toBe(true);
     });
   }
+
+  it("localizes compact guidance while preserving the active-profile command", async () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "ops");
+
+    await agentCliCommand({ message: "/compact", sessionId: "locked-session" }, runtime, {
+      localization: createCliLocalization({ locale: "zh-CN" }),
+    });
+
+    expect(runtime.error).toHaveBeenCalledWith(
+      "无法通过 CLI 的 --message 执行斜杠命令。请使用：openclaw --profile ops sessions compact <key>",
+    );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(callGateway).not.toHaveBeenCalled();
+  });
 
   it("rejects /compact from --message-file before any gateway or embedded turn", async () => {
     await withTempStore(async ({ dir }) => {

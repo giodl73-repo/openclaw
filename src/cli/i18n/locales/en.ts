@@ -1,6 +1,26 @@
 import type { LocalizationCatalog } from "@openclaw/localization-core";
 
 export const CLI_ENGLISH_CATALOG = {
+  "cli.agent.message.missing": "Missing message. Use {inlineCommand} or {fileCommand}.",
+  "cli.agent.messageFile.notFound": "Message file not found: {path}",
+  "cli.agent.messageFile.isDirectory": "Message file is a directory: {path}",
+  "cli.agent.messageFile.readFailure": "Unable to read message file {path}: {error}",
+  "cli.agent.messageFile.invalidUtf8": "Message file must be valid UTF-8: {path}",
+  "cli.agent.messageFile.conflict": "Use either --message or --message-file, not both.",
+  "cli.agent.messageFile.emptyOption": "--message-file must not be empty.",
+  "cli.agent.messageFile.empty": "Message file is empty: {path}",
+  "cli.agent.timeout.invalid":
+    "Invalid --timeout. Use seconds as a non-negative integer, for example --timeout 600. Use --timeout 0 to disable the timeout.",
+  "cli.agent.sessionKey.invalid":
+    'Invalid --session-key "{sessionKey}". Agent-prefixed session keys must use agent:<agent-id>:<session-key>.',
+  "cli.agent.sessionKey.agentMismatch":
+    'Agent id "{agentId}" does not match session key agent "{sessionAgentId}".',
+  "cli.agent.target.missing":
+    "No target session selected. Use --agent <id>, --session-key <key>, --session-id <id>, or --to <E.164>. Run {agentsListCommand} to see agents.",
+  "cli.agent.agentId.unknown":
+    'Unknown agent id "{agentId}". Use "{agentsListCommand}" to see configured agents.',
+  "cli.agent.compact.unsupported":
+    "Slash commands cannot be executed via --message from the CLI. Use: {compactCommand}",
   "cli.acp.provenance.invalid": 'Invalid --provenance. Use "off", "meta", or "meta+receipt".',
   "cli.acp.bridge.failed": "ACP bridge failed: {error}",
   "cli.capability.unknown": "Unknown capability: {capabilityId}",

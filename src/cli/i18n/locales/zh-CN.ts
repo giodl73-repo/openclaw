@@ -1,6 +1,26 @@
 import type { LocalizationCatalog } from "@openclaw/localization-core";
 
 export const CLI_ZH_CN_CATALOG = {
+  "cli.agent.message.missing": "缺少消息。请使用 {inlineCommand} 或 {fileCommand}。",
+  "cli.agent.messageFile.notFound": "找不到消息文件：{path}",
+  "cli.agent.messageFile.isDirectory": "消息文件是目录：{path}",
+  "cli.agent.messageFile.readFailure": "无法读取消息文件 {path}：{error}",
+  "cli.agent.messageFile.invalidUtf8": "消息文件必须是有效的 UTF-8：{path}",
+  "cli.agent.messageFile.conflict": "--message 和 --message-file 只能使用其中一个。",
+  "cli.agent.messageFile.emptyOption": "--message-file 不能为空。",
+  "cli.agent.messageFile.empty": "消息文件为空：{path}",
+  "cli.agent.timeout.invalid":
+    "无效的 --timeout。请使用非负整数秒数，例如 --timeout 600。使用 --timeout 0 可禁用超时。",
+  "cli.agent.sessionKey.invalid":
+    '无效的 --session-key "{sessionKey}"。以 agent: 开头的会话键必须使用 agent:<agent-id>:<session-key>。',
+  "cli.agent.sessionKey.agentMismatch":
+    '代理 ID "{agentId}" 与会话键中的代理 "{sessionAgentId}" 不匹配。',
+  "cli.agent.target.missing":
+    "未选择目标会话。请使用 --agent <id>、--session-key <key>、--session-id <id> 或 --to <E.164>。运行 {agentsListCommand} 查看代理。",
+  "cli.agent.agentId.unknown":
+    '未知的代理 ID "{agentId}"。请使用 "{agentsListCommand}" 查看已配置的代理。',
+  "cli.agent.compact.unsupported":
+    "无法通过 CLI 的 --message 执行斜杠命令。请使用：{compactCommand}",
   "cli.acp.provenance.invalid": '无效的 --provenance。请使用 "off"、"meta" 或 "meta+receipt"。',
   "cli.acp.bridge.failed": "ACP 桥接失败：{error}",
   "cli.capability.unknown": "未知的能力 ID：{capabilityId}",
