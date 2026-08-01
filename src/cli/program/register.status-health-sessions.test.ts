@@ -1,6 +1,6 @@
 // Register status/health/session tests cover status-related command registration.
 import { Command } from "commander";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerStatusHealthSessionsCommands } from "./register.status-health-sessions.js";
 
 const mocks = vi.hoisted(() => ({
@@ -134,6 +134,10 @@ vi.mock("../../runtime.js", () => ({
 }));
 
 describe("registerStatusHealthSessionsCommands", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   async function runCli(args: string[]) {
     const program = new Command();
     registerStatusHealthSessionsCommands(program);
@@ -141,6 +145,7 @@ describe("registerStatusHealthSessionsCommands", () => {
   }
 
   beforeEach(() => {
+    vi.stubEnv("OPENCLAW_LOCALE", "en");
     vi.clearAllMocks();
     runtime.exit.mockImplementation(() => {});
     statusCommand.mockResolvedValue(undefined);
@@ -213,6 +218,16 @@ describe("registerStatusHealthSessionsCommands", () => {
     expect(runtime.error).toHaveBeenCalledWith(
       "--timeout must be a positive integer (milliseconds)",
     );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(healthCommand).not.toHaveBeenCalled();
+  });
+
+  it("localizes shared timeout validation without changing the flag or unit", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+
+    await runCli(["health", "--timeout", "0"]);
+
+    expect(runtime.error).toHaveBeenCalledWith("--timeout 必须是正整数（毫秒）。");
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(healthCommand).not.toHaveBeenCalled();
   });
@@ -564,6 +579,16 @@ describe("registerStatusHealthSessionsCommands", () => {
     expect(runtime.error).toHaveBeenCalledWith(
       "--limit must be a positive integer, for example --limit 25.",
     );
+    expect(runtime.exit).toHaveBeenCalledWith(1);
+    expect(tasksAuditCommand).not.toHaveBeenCalled();
+  });
+
+  it("localizes tasks audit limit validation without changing the example", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+
+    await runCli(["tasks", "--json", "audit", "--limit", "5abc"]);
+
+    expect(runtime.error).toHaveBeenCalledWith("--limit 必须是正整数，例如 --limit 25。");
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(tasksAuditCommand).not.toHaveBeenCalled();
   });

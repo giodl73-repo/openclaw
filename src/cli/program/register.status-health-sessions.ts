@@ -6,6 +6,7 @@ import { setVerbose } from "../../globals.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
+import { createCliLocalization, type CliLocalization } from "../i18n/runtime.js";
 import { parsePositiveIntOrUndefined, parseStrictPositiveIntOrUndefined } from "./helpers.js";
 
 function resolveVerbose(opts: { verbose?: boolean; debug?: boolean }): boolean {
@@ -106,20 +107,26 @@ async function runSessionsListCli(opts: SessionsListCliOptions): Promise<void> {
   );
 }
 
-function parseTimeoutMs(timeout: unknown): number | null | undefined {
+function parseTimeoutMs(
+  timeout: unknown,
+  localization: CliLocalization,
+): number | null | undefined {
   const parsed = parsePositiveIntOrUndefined(timeout);
   if (timeout !== undefined && parsed === undefined) {
-    defaultRuntime.error("--timeout must be a positive integer (milliseconds)");
+    defaultRuntime.error(localization.t("cli.validation.timeout.positiveMilliseconds"));
     defaultRuntime.exit(1);
     return null;
   }
   return parsed;
 }
 
-function parseTasksAuditLimit(limit: unknown): number | null | undefined {
+function parseTasksAuditLimit(
+  limit: unknown,
+  localization: CliLocalization,
+): number | null | undefined {
   const parsed = parseStrictPositiveIntOrUndefined(limit);
   if (limit !== undefined && parsed === undefined) {
-    defaultRuntime.error("--limit must be a positive integer, for example --limit 25.");
+    defaultRuntime.error(localization.t("cli.validation.tasksAuditLimit.positiveInteger"));
     defaultRuntime.exit(1);
     return null;
   }
@@ -130,9 +137,10 @@ async function runWithVerboseAndTimeout(
   opts: { verbose?: boolean; debug?: boolean; timeout?: unknown },
   action: (params: { verbose: boolean; timeoutMs: number | undefined }) => Promise<void>,
 ): Promise<void> {
+  const localization = createCliLocalization();
   const verbose = resolveVerbose(opts);
   setVerbose(verbose);
-  const timeoutMs = parseTimeoutMs(opts.timeout);
+  const timeoutMs = parseTimeoutMs(opts.timeout, localization);
   if (timeoutMs === null) {
     return;
   }
@@ -629,8 +637,9 @@ export function registerStatusHealthSessionsCommands(program: Command) {
     )
     .option("--limit <n>", "Limit displayed findings")
     .action(async (opts, command) => {
+      const localization = createCliLocalization();
       const parentOpts = command.parent?.opts() as { json?: boolean } | undefined;
-      const limit = parseTasksAuditLimit(opts.limit);
+      const limit = parseTasksAuditLimit(opts.limit, localization);
       if (limit === null) {
         return;
       }

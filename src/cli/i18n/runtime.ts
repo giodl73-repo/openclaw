@@ -24,7 +24,7 @@ if (validationIssues.length > 0) {
 
 const cliCatalogSnapshotResult = createCatalogSnapshot({
   namespace: "cli",
-  catalogRevision: "cli-runtime:1",
+  catalogRevision: "cli-runtime:2",
   catalogs: {
     en: CLI_ENGLISH_CATALOG,
     "zh-CN": CLI_ZH_CN_CATALOG,

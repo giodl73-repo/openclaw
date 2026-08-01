@@ -1,6 +1,8 @@
 import type { LocalizationCatalog } from "@openclaw/localization-core";
 
 export const CLI_ZH_CN_CATALOG = {
+  "cli.validation.timeout.positiveMilliseconds": "--timeout 必须是正整数（毫秒）。",
+  "cli.validation.tasksAuditLimit.positiveInteger": "--limit 必须是正整数，例如 --limit 25。",
   "cli.update.dryRun.heading": "更新试运行",
   "cli.update.dryRun.noChanges": "未应用任何更改。",
   "cli.update.dryRun.root": "根目录",

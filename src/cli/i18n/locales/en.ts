@@ -1,6 +1,10 @@
 import type { LocalizationCatalog } from "@openclaw/localization-core";
 
 export const CLI_ENGLISH_CATALOG = {
+  "cli.validation.timeout.positiveMilliseconds":
+    "--timeout must be a positive integer (milliseconds)",
+  "cli.validation.tasksAuditLimit.positiveInteger":
+    "--limit must be a positive integer, for example --limit 25.",
   "cli.update.dryRun.heading": "Update dry-run",
   "cli.update.dryRun.noChanges": "No changes were applied.",
   "cli.update.dryRun.root": "Root",
