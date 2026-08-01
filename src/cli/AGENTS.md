@@ -12,6 +12,13 @@ machine-readable output and operational values exactly.
   and pass it to shared validation/rendering helpers. Do not read the process
   locale inside individual message helpers.
 
+## ACP and capability guidance
+
+- Localize only OpenClaw-owned validation and wrapper text. Keep provenance
+  values, capability IDs, commands, flags, and upstream error details literal.
+- Structured capability output is locale-invariant; localization applies only
+  to the final human error boundary.
+
 ## Updater dry-run ownership
 
 - Author reviewed English in `i18n/locales/en.ts` and keep the hand-owned

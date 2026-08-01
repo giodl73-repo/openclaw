@@ -1,6 +1,9 @@
 import type { LocalizationCatalog } from "@openclaw/localization-core";
 
 export const CLI_ENGLISH_CATALOG = {
+  "cli.acp.provenance.invalid": 'Invalid --provenance. Use "off", "meta", or "meta+receipt".',
+  "cli.acp.bridge.failed": "ACP bridge failed: {error}",
+  "cli.capability.unknown": "Unknown capability: {capabilityId}",
   "cli.validation.timeout.positiveMilliseconds":
     "--timeout must be a positive integer (milliseconds)",
   "cli.validation.tasksAuditLimit.positiveInteger":

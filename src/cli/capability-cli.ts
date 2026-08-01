@@ -13,6 +13,7 @@ import { registerTtsCapabilityCommands } from "./capability-cli/tts.js";
 import { registerVideoCapabilityCommands } from "./capability-cli/video.js";
 import { registerWebCapabilityCommands } from "./capability-cli/web.js";
 import { runCommandWithRuntime } from "./cli-utils.js";
+import { createCliLocalization } from "./i18n/runtime.js";
 import { removeCommandByName } from "./program/command-tree.js";
 
 export { CAPABILITY_METADATA } from "./capability-cli/metadata.js";
@@ -40,9 +41,14 @@ function registerCapabilityListAndInspect(capability: Command): void {
     .option("--json", "Output JSON", false)
     .action(async (opts) => {
       await runCommandWithRuntime(defaultRuntime, async () => {
+        const localization = createCliLocalization();
         const entry = findCapabilityMetadata(String(opts.name));
         if (!entry) {
-          throw new Error(`Unknown capability: ${String(opts.name)}`);
+          throw new Error(
+            localization.t("cli.capability.unknown", {
+              capabilityId: String(opts.name),
+            }),
+          );
         }
         emitJsonOrText(defaultRuntime, Boolean(opts.json), entry, (value) =>
           JSON.stringify(value, null, 2),

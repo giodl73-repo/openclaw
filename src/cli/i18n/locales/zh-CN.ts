@@ -1,6 +1,9 @@
 import type { LocalizationCatalog } from "@openclaw/localization-core";
 
 export const CLI_ZH_CN_CATALOG = {
+  "cli.acp.provenance.invalid": '无效的 --provenance。请使用 "off"、"meta" 或 "meta+receipt"。',
+  "cli.acp.bridge.failed": "ACP 桥接失败：{error}",
+  "cli.capability.unknown": "未知的能力 ID：{capabilityId}",
   "cli.validation.timeout.positiveMilliseconds": "--timeout 必须是正整数（毫秒）。",
   "cli.validation.tasksAuditLimit.positiveInteger": "--limit 必须是正整数，例如 --limit 25。",
   "cli.update.dryRun.heading": "更新试运行",
