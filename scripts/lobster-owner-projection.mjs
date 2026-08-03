@@ -6,7 +6,7 @@ const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const REQUIRED_OWNERS = ["configuration", "readiness", "release"];
 
 function clone(value) {
-  return JSON.parse(JSON.stringify(value));
+  return structuredClone(value);
 }
 
 export function projectOwnerFacts(input) {
@@ -75,8 +75,8 @@ export function runFixture(path = resolve(ROOT, ".lobster/owner-projection-fixtu
   const fixture = JSON.parse(readFileSync(path, "utf8"));
   const cases = fixture.cases.map((entry) => {
     const result = projectOwnerFacts(entry.input);
-    const failureCodes = result.failures.map((failure) => failure.code).sort();
-    const expectedCodes = [...(entry.expected.failureCodes ?? [])].sort();
+    const failureCodes = result.failures.map((failure) => failure.code).toSorted();
+    const expectedCodes = (entry.expected.failureCodes ?? []).toSorted();
     if (
       result.status !== entry.expected.status ||
       JSON.stringify(failureCodes) !== JSON.stringify(expectedCodes)

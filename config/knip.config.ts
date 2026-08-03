@@ -369,6 +369,12 @@ const config = {
     "src/gateway/board-view-ticket.ts": ["exports"],
     // Focused startup tests consume this explicit seam; production imports only the bootstrap.
     "src/gateway/server-startup-bootstrap.ts": ["exports"],
+    // Readiness unit tests exercise criterion identifiers, evidence shapes, and
+    // injected builders directly; production consumes the composed resolvers.
+    "src/readiness/activation.ts": ["exports"],
+    "src/readiness/execution-capabilities.ts": ["exports"],
+    "src/readiness/session-storage.ts": ["exports"],
+    "src/readiness/state-services.ts": ["exports"],
     // Registry facades retain direct registration/reset compatibility seams used by focused
     // tests; the full-tree scan still audits every named export against those consumers.
     "src/agents/harness/registry.ts": ["exports"],

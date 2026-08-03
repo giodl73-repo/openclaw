@@ -1,5 +1,5 @@
-import { isNixMode, resolveConfigPath } from "../config/paths.js";
 import { blockConfigWritesForRuntime } from "../config/nix-mode-write-guard.js";
+import { isNixMode, resolveConfigPath } from "../config/paths.js";
 import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";

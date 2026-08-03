@@ -29,7 +29,7 @@ async function readJson<T>(relativePath: string): Promise<T> {
 }
 
 describe("Lobster source ledger", () => {
-  it("captures exactly one quarantined generation for each owned upstream PR", async () => {
+  it("captures exactly one generation for each owned upstream PR", async () => {
     const ledger = await readJson<SourceLedger>(".lobster/sources.json");
 
     expect(ledger).toMatchObject({
@@ -42,12 +42,15 @@ describe("Lobster source ledger", () => {
 
     const prs = new Set<number>();
     const headShas = new Set<string>();
+    const admittedPrs = new Set([104018, 107026, 113421]);
     for (const source of ledger.entries) {
       expect(source.pr).toBeGreaterThan(0);
       expect(source.phase).toMatch(/^C(?:[0245]|[13][abc])$/);
       expect(source.headSha).toMatch(/^[0-9a-f]{40}$/);
       expect(source.branch).not.toHaveLength(0);
-      expect(source.disposition).toBe("source-only/quarantined");
+      expect(source.disposition).toBe(
+        admittedPrs.has(source.pr) ? "evidence-only/admitted" : "source-only/quarantined",
+      );
       expect(source.authority).toBe("none");
       expect(prs.has(source.pr)).toBe(false);
       expect(headShas.has(source.headSha)).toBe(false);
@@ -56,27 +59,30 @@ describe("Lobster source ledger", () => {
     }
   });
 
-  it("does not admit source inventory through the reconstruction queue", async () => {
+  it("admits only the exact EVID-001 source generations through the queue", async () => {
     const ledger = await readJson<SourceLedger>(".lobster/sources.json");
     const queue = await readJson<{
       base: { commit: string };
       sourceInventory: string;
-      entries: Array<{ sourcePr?: number; sourceSha?: string }>;
+      entries: Array<{ id: string; sourceSha: string }>;
     }>(".lobster/queue.json");
-    const sourcesByPr = new Map(ledger.entries.map((source) => [source.pr, source]));
+    const sourcesBySha = new Map(ledger.entries.map((source) => [source.headSha, source]));
 
     expect(queue.sourceInventory).toBe("sources.json");
     expect(queue.base.commit).toBe(ledger.baseCommit);
 
     for (const entry of queue.entries) {
-      if (entry.sourcePr === undefined) {
-        continue;
-      }
-      const source = sourcesByPr.get(entry.sourcePr);
+      const source = sourcesBySha.get(entry.sourceSha);
       expect(source).toBeDefined();
-      expect(entry.sourceSha).toBe(source?.headSha);
+      expect(source?.disposition).toBe("evidence-only/admitted");
+      expect(source?.authority).toBe("none");
     }
 
-    expect(queue.entries).toHaveLength(0);
+    expect(queue.entries).toHaveLength(3);
+    expect(queue.entries.map((entry) => entry.id)).toEqual([
+      "EVID-001-107026",
+      "EVID-001-104018",
+      "EVID-001-113421",
+    ]);
   });
 });

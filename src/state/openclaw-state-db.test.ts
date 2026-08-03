@@ -19,11 +19,11 @@ import { readSqliteNumberPragma } from "../infra/sqlite-pragma.test-support.js";
 import { loadTaskRegistryStateFromSqlite } from "../tasks/task-registry.store.sqlite.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { VERSION } from "../version.js";
+import { getOpenClawStateDatabaseReadiness } from "./openclaw-state-db-readiness.js";
 import {
   findOpenClawStateDatabaseSchemaMigrationRequiredError,
   OpenClawStateDatabaseSchemaMigrationRequiredError,
 } from "./openclaw-state-db-schema-migration-required.js";
-import { getOpenClawStateDatabaseReadiness } from "./openclaw-state-db-readiness.js";
 import type { DB as OpenClawStateKyselyDatabase } from "./openclaw-state-db.generated.js";
 import {
   assertOpenClawStateDatabaseForMaintenance,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const getStatusSummaryMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../commands/status.js", () => ({
+vi.mock("../../status/summary.js", () => ({
   getStatusSummary: getStatusSummaryMock,
 }));
 

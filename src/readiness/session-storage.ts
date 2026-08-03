@@ -14,7 +14,7 @@ export function listSessionStorageReadinessSubjects(): ReadinessSubject[] {
   return [{ ref: CORE_READINESS_SUBJECT_REFS.sessionStorage, kind: "openclaw.session-storage" }];
 }
 
-export type SessionStorageReadinessEvidence = {
+type SessionStorageReadinessEvidence = {
   writable: boolean | null;
   reason: string;
   message: string;

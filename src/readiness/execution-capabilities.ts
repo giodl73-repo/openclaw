@@ -20,7 +20,7 @@ export const MCP_RUNTIME_READY_CRITERION_ID = "openclaw.mcp-runtime-ready";
 export const SANDBOX_READY_CRITERION_ID = "openclaw.sandbox-ready";
 export const HARNESS_READY_CRITERION_ID = "openclaw.harness-ready";
 
-export type ExecutionCapabilityReadinessCriterionId =
+type ExecutionCapabilityReadinessCriterionId =
   | typeof CONTEXT_ENGINE_READY_CRITERION_ID
   | typeof TOOL_CATALOG_READY_CRITERION_ID
   | typeof MCP_RUNTIME_READY_CRITERION_ID
@@ -44,7 +44,7 @@ export type ExecutionCapabilityReadinessSnapshot = {
     | { status: "unavailable" };
 };
 
-export type ExecutionCapabilitySnapshotDeps = {
+type ExecutionCapabilitySnapshotDeps = {
   agentIds(config: OpenClawConfig): string[];
   workspaceDir(config: OpenClawConfig, agentId: string): string;
   mcpConfig(

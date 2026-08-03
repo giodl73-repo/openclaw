@@ -29,7 +29,7 @@ export const CONFIG_CURRENT_CRITERION_ID = "openclaw.config-current";
 export const MODEL_ROUTE_READY_CRITERION_ID = "openclaw.model-route-ready";
 export const SECRETS_READY_CRITERION_ID = "openclaw.secrets-ready";
 
-export type ActivationReadinessCriterionId =
+type ActivationReadinessCriterionId =
   | typeof CONFIG_CURRENT_CRITERION_ID
   | typeof MODEL_ROUTE_READY_CRITERION_ID
   | typeof SECRETS_READY_CRITERION_ID;

@@ -327,7 +327,7 @@ describe("createLazyGatewayCronState", () => {
     const cron = createCronService();
     cron.start = vi.fn(async () => await finishStart.promise);
     hoisted.setState(createCronState(cron));
-    const lazy = createLazyGatewayCronState(createParams());
+    const lazy = createLazyGatewayCronState({ ...createParams(), env: {} });
 
     expect(lazy.cron.getReadinessSnapshot()).toEqual({
       enabled: true,
