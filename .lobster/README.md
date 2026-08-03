@@ -24,3 +24,9 @@ corepack pnpm lobster:contracts
 
 Only entries with an admitted state are applied. Source-only and rejected
 entries remain inventory and never alter the reconstructed tree.
+
+Admitted source may use either one exact commit (`cherry-pick`) or one exact
+linear source generation (`cherry-pick-range`). Range entries pin the source
+base, head, commit count, and aggregate stable patch ID. Reconstruction rejects
+missing ancestry, merge commits, count or patch mismatches, and application
+conflicts rather than silently rebasing the source.

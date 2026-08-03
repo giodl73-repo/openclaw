@@ -27,6 +27,7 @@ function git(cwd, args, options = {}) {
     encoding: "utf8",
     env: options.env,
     input: options.input,
+    maxBuffer: options.maxBuffer ?? 64 * 1024 * 1024,
     stdio: options.capture === false ? "inherit" : ["pipe", "pipe", "pipe"],
   });
   return typeof output === "string" ? output.trim() : "";
@@ -115,21 +116,26 @@ export function validateManifest(manifest) {
     if (entry.kind === "noop") {
       continue;
     }
-    if (entry.kind !== "cherry-pick") {
-      fail(`${label}.kind must be cherry-pick or noop when admitted`);
+    if (entry.kind !== "cherry-pick" && entry.kind !== "cherry-pick-range") {
+      fail(`${label}.kind must be cherry-pick, cherry-pick-range, or noop when admitted`);
     }
     requireSha(entry.sourceSha, `${label}.sourceSha`);
     if (!PATCH_ID_PATTERN.test(entry.patchId ?? "")) {
       fail(`${label}.patchId must be a stable patch ID`);
     }
+    if (entry.kind === "cherry-pick-range") {
+      requireSha(entry.sourceBaseSha, `${label}.sourceBaseSha`);
+      if (!Number.isInteger(entry.sourceCommitCount) || entry.sourceCommitCount < 1) {
+        fail(`${label}.sourceCommitCount must be a positive integer`);
+      }
+    }
   }
   return manifest;
 }
 
-export function patchIdForCommit(repository, sourceSha) {
-  const patch = git(repository, ["show", "--pretty=format:", "--binary", sourceSha]);
+function patchIdForPatch(repository, patch, label) {
   if (!patch) {
-    fail(`Source ${sourceSha} has no patch content`);
+    fail(`${label} has no patch content`);
   }
   const result = spawnSync("git", ["patch-id", "--stable"], {
     cwd: repository,
@@ -137,9 +143,53 @@ export function patchIdForCommit(repository, sourceSha) {
     input: patch,
   });
   if (result.status !== 0) {
-    fail(result.stderr.trim() || `Could not compute patch ID for ${sourceSha}`);
+    fail(result.stderr.trim() || `Could not compute patch ID for ${label}`);
   }
   return result.stdout.trim().split(/\s+/u)[0];
+}
+
+export function patchIdForCommit(repository, sourceSha) {
+  return patchIdForPatch(
+    repository,
+    git(repository, ["show", "--pretty=format:", "--binary", sourceSha]),
+    `Source ${sourceSha}`,
+  );
+}
+
+export function commitsForRange(repository, sourceBaseSha, sourceSha) {
+  git(repository, ["rev-parse", "--verify", `${sourceBaseSha}^{commit}`]);
+  git(repository, ["rev-parse", "--verify", `${sourceSha}^{commit}`]);
+  const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", sourceBaseSha, sourceSha], {
+    cwd: repository,
+    encoding: "utf8",
+  });
+  if (ancestry.status !== 0) {
+    fail(`Source base ${sourceBaseSha} is not an ancestor of ${sourceSha}`);
+  }
+  const mergeCommits = git(repository, ["rev-list", "--merges", `${sourceBaseSha}..${sourceSha}`]);
+  if (mergeCommits) {
+    fail(`Source range ${sourceBaseSha}..${sourceSha} contains merge commits`);
+  }
+  const commits = git(repository, [
+    "rev-list",
+    "--reverse",
+    "--topo-order",
+    `${sourceBaseSha}..${sourceSha}`,
+  ])
+    .split("\n")
+    .filter(Boolean);
+  if (commits.length === 0) {
+    fail(`Source range ${sourceBaseSha}..${sourceSha} is empty`);
+  }
+  return commits;
+}
+
+export function patchIdForRange(repository, sourceBaseSha, sourceSha) {
+  return patchIdForPatch(
+    repository,
+    git(repository, ["diff", "--binary", sourceBaseSha, sourceSha]),
+    `Source range ${sourceBaseSha}..${sourceSha}`,
+  );
 }
 
 function committerEnvironmentForCommit(repository, sourceSha) {
@@ -193,22 +243,46 @@ export function reconstruct({ repository = ROOT, manifest, target, resultPath = 
         });
         continue;
       }
-      const actualPatchId = patchIdForCommit(repository, entry.sourceSha);
+      const sourceCommits =
+        entry.kind === "cherry-pick-range"
+          ? commitsForRange(repository, entry.sourceBaseSha, entry.sourceSha)
+          : [entry.sourceSha];
+      if (entry.kind === "cherry-pick-range" && sourceCommits.length !== entry.sourceCommitCount) {
+        fail(
+          `Source commit count mismatch for ${entry.id}: expected ${entry.sourceCommitCount}, received ${sourceCommits.length}`,
+        );
+      }
+      const actualPatchId =
+        entry.kind === "cherry-pick-range"
+          ? patchIdForRange(repository, entry.sourceBaseSha, entry.sourceSha)
+          : patchIdForCommit(repository, entry.sourceSha);
       if (actualPatchId !== entry.patchId) {
         fail(
           `Patch ID mismatch for ${entry.id}: expected ${entry.patchId}, received ${actualPatchId}`,
         );
       }
-      git(target, ["cherry-pick", "-x", entry.sourceSha], {
-        env: committerEnvironmentForCommit(repository, entry.sourceSha),
-      });
+      const commits = [];
+      for (const sourceSha of sourceCommits) {
+        const commitPatchId = patchIdForCommit(repository, sourceSha);
+        git(target, ["cherry-pick", "-x", sourceSha], {
+          env: committerEnvironmentForCommit(repository, sourceSha),
+        });
+        commits.push({
+          sourceSha,
+          patchId: commitPatchId,
+          appliedSha: git(target, ["rev-parse", "HEAD"]),
+          tree: git(target, ["rev-parse", "HEAD^{tree}"]),
+        });
+      }
       applied.push({
         id: entry.id,
         kind: entry.kind,
+        sourceBaseSha: entry.sourceBaseSha ?? null,
         sourceSha: entry.sourceSha,
         patchId: actualPatchId,
         appliedSha: git(target, ["rev-parse", "HEAD"]),
         tree: git(target, ["rev-parse", "HEAD^{tree}"]),
+        commits,
       });
     }
     const result = {
