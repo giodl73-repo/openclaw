@@ -151,6 +151,45 @@ describe("lobster reconstruction", () => {
     git(repository, ["worktree", "remove", "--force", target]);
   });
 
+  it("reconstructs admitted commits deterministically across local identities", () => {
+    const { repository, baseCommit, baseTree, sourceSha, patchId } = createRepository();
+    const entry = {
+      id: "deterministic",
+      state: "evidence-only",
+      dependsOn: [],
+      sourceSha,
+      patchId,
+      kind: "cherry-pick",
+    };
+    const firstTarget = join(tempDirs.make("lobster-deterministic-first-parent-"), "worktree");
+    git(repository, ["config", "user.name", "First Reconstructor"]);
+    git(repository, ["config", "user.email", "first@example.test"]);
+    const first = runReconstruct({
+      repository,
+      manifestValue: manifest(baseCommit, baseTree, [entry]),
+      target: firstTarget,
+    });
+    git(repository, ["worktree", "remove", "--force", firstTarget]);
+
+    const secondTarget = join(tempDirs.make("lobster-deterministic-second-parent-"), "worktree");
+    git(repository, ["config", "user.name", "Second Reconstructor"]);
+    git(repository, ["config", "user.email", "second@example.test"]);
+    const second = runReconstruct({
+      repository,
+      manifestValue: manifest(baseCommit, baseTree, [entry]),
+      target: secondTarget,
+    });
+
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    const firstResult = JSON.parse(first.stdout);
+    const secondResult = JSON.parse(second.stdout);
+    expect(secondResult.applied[0].appliedSha).toBe(firstResult.applied[0].appliedSha);
+    expect(secondResult.resultCommit).toBe(firstResult.resultCommit);
+    expect(secondResult.resultDigest).toBe(firstResult.resultDigest);
+    git(repository, ["worktree", "remove", "--force", secondTarget]);
+  });
+
   it("rejects dependency order and patch identity mismatches", () => {
     const { repository, baseCommit, baseTree, sourceSha } = createRepository();
     const dependencyTarget = join(tempDirs.make("lobster-dependency-parent-"), "worktree");

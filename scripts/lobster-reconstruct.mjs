@@ -25,6 +25,7 @@ function git(cwd, args, options = {}) {
   const output = execFileSync("git", args, {
     cwd,
     encoding: "utf8",
+    env: options.env,
     input: options.input,
     stdio: options.capture === false ? "inherit" : ["pipe", "pipe", "pipe"],
   });
@@ -141,6 +142,25 @@ export function patchIdForCommit(repository, sourceSha) {
   return result.stdout.trim().split(/\s+/u)[0];
 }
 
+function committerEnvironmentForCommit(repository, sourceSha) {
+  const metadata = git(repository, [
+    "show",
+    "--no-patch",
+    "--format=%cn%x00%ce%x00%cI",
+    sourceSha,
+  ]).split("\0");
+  const [name, email, date] = metadata;
+  if (!name || !email || !date || metadata.length !== 3) {
+    fail(`Could not read committer metadata for ${sourceSha}`);
+  }
+  return {
+    ...process.env,
+    GIT_COMMITTER_NAME: name,
+    GIT_COMMITTER_EMAIL: email,
+    GIT_COMMITTER_DATE: date,
+  };
+}
+
 export function reconstruct({ repository = ROOT, manifest, target, resultPath = "" }) {
   validateManifest(manifest);
   if (existsSync(target)) {
@@ -179,7 +199,9 @@ export function reconstruct({ repository = ROOT, manifest, target, resultPath = 
           `Patch ID mismatch for ${entry.id}: expected ${entry.patchId}, received ${actualPatchId}`,
         );
       }
-      git(target, ["cherry-pick", "-x", entry.sourceSha]);
+      git(target, ["cherry-pick", "-x", entry.sourceSha], {
+        env: committerEnvironmentForCommit(repository, entry.sourceSha),
+      });
       applied.push({
         id: entry.id,
         kind: entry.kind,
