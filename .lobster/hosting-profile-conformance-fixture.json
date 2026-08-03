@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.exa.hosting-profile-conformance.v1",
+  "cases": [
+    {
+      "id": "node-mode-ready",
+      "input": {
+        "expected": {
+          "profile": "node-mode",
+          "profileContractVersion": 1
+        },
+        "catalog": {
+          "contractVersion": 1,
+          "profiles": [
+            { "id": "local" },
+            { "id": "container" },
+            { "id": "reverse-proxy" },
+            { "id": "node-mode" }
+          ]
+        },
+        "live": {
+          "contractVersion": 1,
+          "profileContractVersion": 1,
+          "activeProfile": "node-mode",
+          "conformant": true,
+          "ready": true,
+          "conditions": [
+            { "type": "ProfileSelected", "requirement": "required", "status": "True" },
+            { "type": "NodePairingReady", "requirement": "required", "status": "True" },
+            { "type": "ControlledTargetsReady", "requirement": "required", "status": "True" },
+            { "type": "CommandApprovalReady", "requirement": "required", "status": "True" },
+            { "type": "ControlChannelReady", "requirement": "required", "status": "True" }
+          ]
+        },
+        "artifact": {
+          "contractVersion": 1,
+          "suite": "openclaw-standard-hosting-profiles",
+          "profileContractVersion": 1,
+          "package": { "name": "openclaw", "version": "2026.6.33" },
+          "image": {
+            "id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "scenarios": [
+            { "id": "unprofiled", "passed": true },
+            { "id": "local", "passed": true },
+            { "id": "local-restarted", "passed": true },
+            { "id": "container-ready", "passed": true },
+            { "id": "container-loopback", "passed": true },
+            { "id": "reverse-proxy-ready", "passed": true },
+            { "id": "reverse-proxy-auth-missing", "passed": true },
+            { "id": "node-not-ready", "passed": true },
+            { "id": "node-unapproved", "passed": true },
+            { "id": "node-ready", "passed": true },
+            { "id": "workspace-ready", "passed": true },
+            { "id": "workspace-full", "passed": true },
+            { "id": "workspace-recovered", "passed": true }
+          ],
+          "summary": { "total": 13, "passed": 13, "failed": 0 },
+          "passed": true
+        }
+      },
+      "expected": {
+        "status": "accepted",
+        "conformant": true,
+        "ready": true,
+        "failureCodes": []
+      }
+    },
+    {
+      "id": "container-conformant-not-ready",
+      "input": {
+        "expected": {
+          "profile": "container",
+          "profileContractVersion": 1
+        },
+        "catalog": {
+          "contractVersion": 1,
+          "profiles": [
+            { "id": "local" },
+            { "id": "container" },
+            { "id": "reverse-proxy" },
+            { "id": "node-mode" }
+          ]
+        },
+        "live": {
+          "contractVersion": 1,
+          "profileContractVersion": 1,
+          "activeProfile": "container",
+          "conformant": true,
+          "ready": false,
+          "conditions": [
+            { "type": "ProfileSelected", "requirement": "required", "status": "True" },
+            { "type": "ContainerStateReady", "requirement": "required", "status": "False" }
+          ]
+        },
+        "artifact": {
+          "contractVersion": 1,
+          "suite": "openclaw-standard-hosting-profiles",
+          "profileContractVersion": 1,
+          "package": { "name": "openclaw", "version": "2026.6.33" },
+          "image": {
+            "id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "scenarios": [
+            { "id": "unprofiled", "passed": true },
+            { "id": "local", "passed": true },
+            { "id": "local-restarted", "passed": true },
+            { "id": "container-ready", "passed": true },
+            { "id": "container-loopback", "passed": true },
+            { "id": "reverse-proxy-ready", "passed": true },
+            { "id": "reverse-proxy-auth-missing", "passed": true },
+            { "id": "node-not-ready", "passed": true },
+            { "id": "node-unapproved", "passed": true },
+            { "id": "node-ready", "passed": true },
+            { "id": "workspace-ready", "passed": true },
+            { "id": "workspace-full", "passed": true },
+            { "id": "workspace-recovered", "passed": true }
+          ],
+          "summary": { "total": 13, "passed": 13, "failed": 0 },
+          "passed": true
+        }
+      },
+      "expected": {
+        "status": "accepted",
+        "conformant": true,
+        "ready": false,
+        "failureCodes": []
+      }
+    },
+    {
+      "id": "mismatched-and-incomplete",
+      "input": {
+        "expected": {
+          "profile": "container",
+          "profileContractVersion": 1
+        },
+        "catalog": {
+          "contractVersion": 1,
+          "profiles": [
+            { "id": "local" },
+            { "id": "container" },
+            { "id": "reverse-proxy" }
+          ]
+        },
+        "live": {
+          "contractVersion": 1,
+          "profileContractVersion": 2,
+          "activeProfile": "local",
+          "conformant": false,
+          "ready": false,
+          "conditions": [
+            { "type": "ProfileSelected", "requirement": "advisory", "status": "True" }
+          ]
+        },
+        "artifact": {
+          "contractVersion": 1,
+          "suite": "openclaw-standard-hosting-profiles",
+          "profileContractVersion": 1,
+          "package": { "name": "openclaw", "version": "2026.6.33" },
+          "image": { "id": "mutable-image" },
+          "scenarios": [{ "id": "local", "passed": false }],
+          "summary": { "total": 1, "passed": 0, "failed": 1 },
+          "passed": false
+        }
+      },
+      "expected": {
+        "status": "rejected",
+        "conformant": false,
+        "ready": false,
+        "failureCodes": [
+          "CatalogProfilesMismatch",
+          "ProfileContractMismatch",
+          "ActiveProfileMismatch",
+          "ProfileConditionMissing",
+          "ProfileConditionNotRequired",
+          "ArtifactProvenanceInvalid",
+          "ArtifactScenarioSetMismatch",
+          "ArtifactFailed"
+        ]
+      }
+    }
+  ]
+}

@@ -42,7 +42,7 @@ describe("Lobster source ledger", () => {
 
     const prs = new Set<number>();
     const headShas = new Set<string>();
-    const admittedPrs = new Set([104018, 107026, 113421]);
+    const admittedPrs = new Set([104018, 107026, 113421, 113422, 114636]);
     for (const source of ledger.entries) {
       expect(source.pr).toBeGreaterThan(0);
       expect(source.phase).toMatch(/^C(?:[0245]|[13][abc])$/);
@@ -59,7 +59,7 @@ describe("Lobster source ledger", () => {
     }
   });
 
-  it("admits only the exact EVID-001 source generations through the queue", async () => {
+  it("admits only the exact classified evidence source generations through the queue", async () => {
     const ledger = await readJson<SourceLedger>(".lobster/sources.json");
     const queue = await readJson<{
       base: { commit: string };
@@ -78,11 +78,13 @@ describe("Lobster source ledger", () => {
       expect(source?.authority).toBe("none");
     }
 
-    expect(queue.entries).toHaveLength(3);
+    expect(queue.entries).toHaveLength(5);
     expect(queue.entries.map((entry) => entry.id)).toEqual([
       "EVID-001-107026",
       "EVID-001-104018",
       "EVID-001-113421",
+      "EVID-002-113422",
+      "EVID-002-114636",
     ]);
   });
 });

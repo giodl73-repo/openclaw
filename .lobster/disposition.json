@@ -414,6 +414,169 @@
       "zeroOldPathEvidence": "the source replaces current cron and state lifecycle safeguards instead of extending them",
       "expiry": "2026-09-03T00:00:00Z",
       "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID002-113422-01",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "1dc9e1fd0d8b5a6989fa1ca11e25a656ea80cc5c",
+      "sourceSha": "1833c554955b9fa7e77b711d913a3f0eaa64c7dc",
+      "patchId": "fe720549679c0ac511f82bead93b3966235bf2ac",
+      "dependencies": [],
+      "destination": "gateway run options and CLI documentation",
+      "fixtureIds": [
+        "lobster.exa.hosting-profile-conformance.v1"
+      ],
+      "replacement": "Compose hosting-profile selection beside current ordered configuration-layer options",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-002-113422 and EVID-002-114636, then reconstruct EVID-001",
+      "delete": [
+        "implicit-apply:fd9b01661f6ac820a618b3ea4e486ad70846cc77"
+      ],
+      "retain": [
+        "source identity",
+        "ordered config-layer CLI option"
+      ],
+      "zeroOldPathEvidence": "the source predates the current config-layer option and must preserve both independent selectors",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID002-113422-02",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "acd85f4e0c79df0159d75ec4d86fa04f0e465bc8",
+      "sourceSha": "bc5bdcc178be22b39b0aeebe26ef40d1b02e4e4b",
+      "patchId": "3c1a110e85ed72c08008f7108157024824f12539",
+      "dependencies": [],
+      "destination": "current scheduled Docker release-lane registry",
+      "fixtureIds": [
+        "lobster.exa.hosting-profile-conformance.v1"
+      ],
+      "replacement": "Register hosting-profile proof through the current scheduled lane catalog instead of the retired explicit lane assembly",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-002-113422 and EVID-002-114636, then reconstruct EVID-001",
+      "delete": [
+        "implicit-apply:dfca99616ed145cbb750cecd2d83c9f56e559527"
+      ],
+      "retain": [
+        "source identity",
+        "current scheduled lane architecture"
+      ],
+      "zeroOldPathEvidence": "the older explicit service-lane assembly is absent from the current release path",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID002-113422-03",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "87322e3cfe87cd605a914821a992c14cd4d013ef",
+      "sourceSha": "b0aa2371b2d7365111f540a8f38c03421e9e7892",
+      "patchId": "bf0aba458d9a0ee418cc48b0312c64754cb04a82",
+      "dependencies": [],
+      "destination": "current Docker test documentation",
+      "fixtureIds": [
+        "lobster.exa.hosting-profile-conformance.v1"
+      ],
+      "replacement": "Preserve current upgrade-survivor wording while adding explicit unprofiled profile proof",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-002-113422 and EVID-002-114636, then reconstruct EVID-001",
+      "delete": [
+        "implicit-apply:01d8b855281b284dcf6b25e2f9ce3c6e72a68223"
+      ],
+      "retain": [
+        "source identity",
+        "current upgrade-survivor contract"
+      ],
+      "zeroOldPathEvidence": "the source documentation describes an older workspace/session-files contract",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID002-113422-04",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "c4b12356c444499854d15d9eae42006e46d21dc1",
+      "sourceSha": "5a8dd7721cbfd6907f98673adac0fe34a598a745",
+      "patchId": "1b24ebbde069f29afed43d9e7acb5d2b25f3f831",
+      "dependencies": [],
+      "destination": "generated documentation map contract",
+      "fixtureIds": [
+        "lobster.exa.hosting-profile-conformance.v1"
+      ],
+      "replacement": "Keep the current generated-at-publish docs-map stub rather than restoring a checked-in generated heading inventory",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-002-113422 and EVID-002-114636, then reconstruct EVID-001",
+      "delete": [
+        "implicit-apply:d263011e3c53283603008992fd72c196f88efa15"
+      ],
+      "retain": [
+        "source identity",
+        "current docs-map generation ownership"
+      ],
+      "zeroOldPathEvidence": "the source generated map is intentionally no longer checked into the current tree",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID002-113422-05",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "fc3e3f166598b819768898a7cbab8428d600881a",
+      "sourceSha": "5e5dddf7544240ad70a550cd191dceb8ce4b0d04",
+      "patchId": "3d6843fa0629374c5db139cc3fd8b183a6479847",
+      "dependencies": [],
+      "destination": "gateway run option collision proof",
+      "fixtureIds": [
+        "lobster.exa.hosting-profile-conformance.v1"
+      ],
+      "replacement": "Add the hosting-profile override while preserving the current channel suppression message shape",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-002-113422 and EVID-002-114636, then reconstruct EVID-001",
+      "delete": [
+        "implicit-apply:6ef9a6bd9bb8473d49f25dc7e6b7799f43890a24"
+      ],
+      "retain": [
+        "source identity",
+        "current suppression reason and message contract"
+      ],
+      "zeroOldPathEvidence": "the source test type predates the current suppression message field",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID002-113422-06",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "93379d042ecf3edc449445b591135adcec5d78bb",
+      "sourceSha": "e6c58d9de77d34edb8ed2e11e795d78d30c3eb84",
+      "patchId": "96ba4c7ac948c292d35fd2a348d5a66630caec10",
+      "dependencies": [],
+      "destination": "current scheduled Docker lane and documentation contracts",
+      "fixtureIds": [
+        "lobster.exa.hosting-profile-conformance.v1"
+      ],
+      "replacement": "Use the source direct script command through the current named scheduled lane while preserving current upgrade-survivor wording",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-002-113422 and EVID-002-114636, then reconstruct EVID-001",
+      "delete": [
+        "implicit-apply:3af4c3ad299cd89a38b2ea54e0c5dc66da1d2d0e"
+      ],
+      "retain": [
+        "source identity",
+        "current scheduled lane registry",
+        "current upgrade contract"
+      ],
+      "zeroOldPathEvidence": "the source explicit release chunk assembly has been replaced by the current named scheduled lane registry",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
     }
   ],
   "retained": [

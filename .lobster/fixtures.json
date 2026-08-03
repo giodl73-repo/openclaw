@@ -20,6 +20,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.exa.hosting-profile-conformance.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "complete profile catalog, structurally conformant live result, and complete package evidence",
+      "structuredFailure": "profile, version, required-condition, catalog, provenance, or scenario-set mismatch",
+      "runner": "scripts/lobster-hosting-profile-conformance.mjs",
+      "evidence": ".lobster/hosting-profile-conformance-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }
