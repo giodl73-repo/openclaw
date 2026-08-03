@@ -4,6 +4,7 @@
     "classifications": ["B1", "B2", "B3"],
     "statuses": [
       "planned",
+      "build-only",
       "evidence-only",
       "release-eligible",
       "active",

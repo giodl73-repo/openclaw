@@ -777,7 +777,7 @@ function validateLedger(manifest, fixtures, disposition) {
   requireExactList(manifest.ledger.classifications, ["B1", "B2", "B3"], "ledger.classifications");
   requireExactList(
     manifest.ledger.statuses,
-    ["planned", "evidence-only", "release-eligible", "active", "expired", "deleted"],
+    ["planned", "build-only", "evidence-only", "release-eligible", "active", "expired", "deleted"],
     "ledger.statuses",
   );
   requireExactList(manifest.ledger.requiredFields, EXPECTED_LEDGER_FIELDS, "ledger.requiredFields");

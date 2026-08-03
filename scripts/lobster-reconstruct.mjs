@@ -53,6 +53,7 @@ function digest(value) {
 export function parseArgs(argv) {
   const options = {
     manifest: resolve(ROOT, ".lobster/queue.json"),
+    disposition: resolve(ROOT, ".lobster/disposition.json"),
     repository: ROOT,
     target: "",
     result: "",
@@ -61,6 +62,8 @@ export function parseArgs(argv) {
     const arg = argv[index];
     if (arg === "--manifest") {
       options.manifest = resolve(argv[++index] ?? fail("--manifest requires a path"));
+    } else if (arg === "--disposition") {
+      options.disposition = resolve(argv[++index] ?? fail("--disposition requires a path"));
     } else if (arg === "--repository") {
       options.repository = resolve(argv[++index] ?? fail("--repository requires a path"));
     } else if (arg === "--target") {
@@ -114,6 +117,9 @@ export function validateManifest(manifest) {
       continue;
     }
     if (entry.kind === "noop") {
+      if (entry.resolutions !== undefined) {
+        fail(`${label}.resolutions is only supported for cherry-pick-range entries`);
+      }
       continue;
     }
     if (entry.kind !== "cherry-pick" && entry.kind !== "cherry-pick-range") {
@@ -128,9 +134,69 @@ export function validateManifest(manifest) {
       if (!Number.isInteger(entry.sourceCommitCount) || entry.sourceCommitCount < 1) {
         fail(`${label}.sourceCommitCount must be a positive integer`);
       }
+      if (entry.resolutions !== undefined && !Array.isArray(entry.resolutions)) {
+        fail(`${label}.resolutions must be an array`);
+      }
+      const resolvedSources = new Set();
+      for (const [resolutionIndex, resolution] of (entry.resolutions ?? []).entries()) {
+        const resolutionLabel = `${label}.resolutions[${resolutionIndex}]`;
+        requireSha(resolution.sourceSha, `${resolutionLabel}.sourceSha`);
+        requireSha(resolution.carriedSha, `${resolutionLabel}.carriedSha`);
+        requireSha(resolution.prefixTree, `${resolutionLabel}.prefixTree`);
+        if (resolution.sourceSha === resolution.carriedSha) {
+          fail(`${resolutionLabel}.carriedSha must differ from sourceSha`);
+        }
+        if (!PATCH_ID_PATTERN.test(resolution.patchId ?? "")) {
+          fail(`${resolutionLabel}.patchId must be a stable patch ID`);
+        }
+        if (!resolution.dispositionId || typeof resolution.dispositionId !== "string") {
+          fail(`${resolutionLabel}.dispositionId must be non-empty`);
+        }
+        if (resolution.classification !== "B3") {
+          fail(`${resolutionLabel}.classification must be B3`);
+        }
+        if (resolvedSources.has(resolution.sourceSha)) {
+          fail(`${resolutionLabel}.sourceSha must be unique within the range`);
+        }
+        resolvedSources.add(resolution.sourceSha);
+      }
+    } else if (entry.resolutions !== undefined) {
+      fail(`${label}.resolutions is only supported for cherry-pick-range entries`);
     }
   }
   return manifest;
+}
+
+function resolutionLedgerForManifest(manifest, disposition) {
+  if (!disposition || disposition.schemaVersion !== 1 || !Array.isArray(disposition.entries)) {
+    fail("Disposition ledger must use schemaVersion 1 and expose an entries array");
+  }
+  const ledgerEntries = new Map();
+  for (const entry of disposition.entries) {
+    if (entry?.id) {
+      ledgerEntries.set(entry.id, entry);
+    }
+  }
+  const resolutions = new Map();
+  for (const queueEntry of manifest.entries) {
+    for (const resolution of queueEntry.resolutions ?? []) {
+      const ledgerEntry = ledgerEntries.get(resolution.dispositionId);
+      if (!ledgerEntry) {
+        fail(`Resolution ${resolution.dispositionId} is missing from the disposition ledger`);
+      }
+      if (
+        ledgerEntry.classification !== "B3" ||
+        ledgerEntry.status !== queueEntry.state ||
+        ledgerEntry.sourceSha !== resolution.carriedSha ||
+        ledgerEntry.patchId !== resolution.patchId
+      ) {
+        fail(`Resolution ${resolution.dispositionId} does not match its B3 disposition entry`);
+      }
+      requireSha(ledgerEntry.baseCommit, `disposition ${resolution.dispositionId}.baseCommit`);
+      resolutions.set(resolution.dispositionId, ledgerEntry);
+    }
+  }
+  return resolutions;
 }
 
 function patchIdForPatch(repository, patch, label) {
@@ -192,6 +258,14 @@ export function patchIdForRange(repository, sourceBaseSha, sourceSha) {
   );
 }
 
+function singleParentForCommit(repository, sourceSha) {
+  const parts = git(repository, ["rev-list", "--parents", "-n", "1", sourceSha]).split(/\s+/u);
+  if (parts.length !== 2) {
+    fail(`Carried resolution ${sourceSha} must have exactly one parent`);
+  }
+  return parts[1];
+}
+
 function committerEnvironmentForCommit(repository, sourceSha) {
   const metadata = git(repository, [
     "show",
@@ -211,8 +285,9 @@ function committerEnvironmentForCommit(repository, sourceSha) {
   };
 }
 
-export function reconstruct({ repository = ROOT, manifest, target, resultPath = "" }) {
+export function reconstruct({ repository = ROOT, manifest, disposition, target, resultPath = "" }) {
   validateManifest(manifest);
+  const resolutionLedger = resolutionLedgerForManifest(manifest, disposition);
   if (existsSync(target)) {
     fail(`Target already exists: ${target}`);
   }
@@ -252,6 +327,16 @@ export function reconstruct({ repository = ROOT, manifest, target, resultPath = 
           `Source commit count mismatch for ${entry.id}: expected ${entry.sourceCommitCount}, received ${sourceCommits.length}`,
         );
       }
+      const sourceCommitSet = new Set(sourceCommits);
+      const resolutions = new Map();
+      for (const resolution of entry.resolutions ?? []) {
+        if (!sourceCommitSet.has(resolution.sourceSha)) {
+          fail(
+            `Resolution ${resolution.dispositionId} targets ${resolution.sourceSha} outside ${entry.id}`,
+          );
+        }
+        resolutions.set(resolution.sourceSha, resolution);
+      }
       const actualPatchId =
         entry.kind === "cherry-pick-range"
           ? patchIdForRange(repository, entry.sourceBaseSha, entry.sourceSha)
@@ -263,13 +348,50 @@ export function reconstruct({ repository = ROOT, manifest, target, resultPath = 
       }
       const commits = [];
       for (const sourceSha of sourceCommits) {
-        const commitPatchId = patchIdForCommit(repository, sourceSha);
-        git(target, ["cherry-pick", "-x", sourceSha], {
-          env: committerEnvironmentForCommit(repository, sourceSha),
+        const sourcePatchId = patchIdForCommit(repository, sourceSha);
+        const resolution = resolutions.get(sourceSha);
+        const beforeCommitTree = git(target, ["rev-parse", "HEAD^{tree}"]);
+        let appliedSourceSha = sourceSha;
+        let appliedPatchId = sourcePatchId;
+        if (resolution) {
+          const dispositionEntry = resolutionLedger.get(resolution.dispositionId);
+          const beforeCommit = git(target, ["rev-parse", "HEAD"]);
+          if (beforeCommit !== dispositionEntry.baseCommit) {
+            fail(
+              `Resolution base mismatch for ${resolution.dispositionId}: expected ${dispositionEntry.baseCommit}, received ${beforeCommit}`,
+            );
+          }
+          if (beforeCommitTree !== resolution.prefixTree) {
+            fail(
+              `Resolution prefix mismatch for ${resolution.dispositionId}: expected ${resolution.prefixTree}, received ${beforeCommitTree}`,
+            );
+          }
+          const carriedParent = singleParentForCommit(repository, resolution.carriedSha);
+          const carriedParentTree = git(repository, ["rev-parse", `${carriedParent}^{tree}`]);
+          if (carriedParentTree !== resolution.prefixTree) {
+            fail(
+              `Resolution parent mismatch for ${resolution.dispositionId}: expected tree ${resolution.prefixTree}, received ${carriedParentTree}`,
+            );
+          }
+          appliedPatchId = patchIdForCommit(repository, resolution.carriedSha);
+          if (appliedPatchId !== resolution.patchId) {
+            fail(
+              `Resolution patch ID mismatch for ${resolution.dispositionId}: expected ${resolution.patchId}, received ${appliedPatchId}`,
+            );
+          }
+          appliedSourceSha = resolution.carriedSha;
+        }
+        git(target, ["cherry-pick", "-x", appliedSourceSha], {
+          env: committerEnvironmentForCommit(repository, appliedSourceSha),
         });
         commits.push({
           sourceSha,
-          patchId: commitPatchId,
+          patchId: sourcePatchId,
+          appliedSourceSha,
+          appliedPatchId,
+          dispositionId: resolution?.dispositionId ?? null,
+          classification: resolution?.classification ?? null,
+          prefixTree: resolution?.prefixTree ?? beforeCommitTree,
           appliedSha: git(target, ["rev-parse", "HEAD"]),
           tree: git(target, ["rev-parse", "HEAD^{tree}"]),
         });
@@ -290,6 +412,7 @@ export function reconstruct({ repository = ROOT, manifest, target, resultPath = 
       baseCommit: manifest.base.commit,
       baseTree: manifest.base.tree,
       manifestDigest: digest(manifest),
+      dispositionDigest: digest(disposition),
       applied,
       resultCommit: git(target, ["rev-parse", "HEAD"]),
       resultTree: git(target, ["rev-parse", "HEAD^{tree}"]),
@@ -317,9 +440,11 @@ export function reconstruct({ repository = ROOT, manifest, target, resultPath = 
 export function run(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   const manifest = JSON.parse(readFileSync(options.manifest, "utf8"));
+  const disposition = JSON.parse(readFileSync(options.disposition, "utf8"));
   const result = reconstruct({
     repository: options.repository,
     manifest,
+    disposition,
     target: options.target,
     resultPath: options.result,
   });

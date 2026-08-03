@@ -90,6 +90,64 @@ function createRangeRepository(): {
   };
 }
 
+function createResolutionRepository(): {
+  repository: string;
+  baseCommit: string;
+  baseTree: string;
+  sourceBaseSha: string;
+  sourceSha: string;
+  patchId: string;
+  carriedSha: string;
+  carriedPatchId: string;
+} {
+  const repository = tempDirs.make("lobster-reconstruct-resolution-");
+  git(repository, ["init"]);
+  git(repository, ["config", "user.name", "Lobster Test"]);
+  git(repository, ["config", "user.email", "lobster@example.test"]);
+  writeFileSync(join(repository, "config.txt"), "base\n");
+  git(repository, ["add", "config.txt"]);
+  git(repository, ["commit", "-m", "source base"]);
+  const sourceBaseSha = git(repository, ["rev-parse", "HEAD"]);
+
+  writeFileSync(join(repository, "config.txt"), "source behavior\n");
+  git(repository, ["add", "config.txt"]);
+  git(repository, ["commit", "-m", "source behavior"]);
+  const sourceSha = git(repository, ["rev-parse", "HEAD"]);
+  const sourcePatch = git(repository, ["diff", "--binary", sourceBaseSha, sourceSha]);
+  const patchId = git(repository, ["patch-id", "--stable"], sourcePatch).split(/\s+/u)[0];
+  if (!patchId) {
+    throw new Error("git patch-id returned no source range identity");
+  }
+
+  git(repository, ["checkout", "-b", "pinned-base", sourceBaseSha]);
+  writeFileSync(join(repository, "config.txt"), "pinned behavior\n");
+  git(repository, ["add", "config.txt"]);
+  git(repository, ["commit", "-m", "pinned base drift"]);
+  const baseCommit = git(repository, ["rev-parse", "HEAD"]);
+  const baseTree = git(repository, ["rev-parse", "HEAD^{tree}"]);
+
+  writeFileSync(join(repository, "config.txt"), "pinned behavior with source semantics\n");
+  git(repository, ["add", "config.txt"]);
+  git(repository, ["commit", "-m", "B3 source resolution"]);
+  const carriedSha = git(repository, ["rev-parse", "HEAD"]);
+  const carriedPatch = git(repository, ["show", "--pretty=format:", "--binary", carriedSha]);
+  const carriedPatchId = git(repository, ["patch-id", "--stable"], carriedPatch).split(/\s+/u)[0];
+  if (!carriedPatchId) {
+    throw new Error("git patch-id returned no carried resolution identity");
+  }
+  git(repository, ["reset", "--hard", baseCommit]);
+  return {
+    repository,
+    baseCommit,
+    baseTree,
+    sourceBaseSha,
+    sourceSha,
+    patchId,
+    carriedSha,
+    carriedPatchId,
+  };
+}
+
 function manifest(baseCommit: string, baseTree: string, entries: object[] = []) {
   return {
     schemaVersion: 1,
@@ -102,17 +160,31 @@ function manifest(baseCommit: string, baseTree: string, entries: object[] = []) 
 function runReconstruct({
   repository,
   manifestValue,
+  dispositionValue = { schemaVersion: 1, entries: [] },
   target,
   resultPath = "",
 }: {
   repository: string;
   manifestValue: object;
+  dispositionValue?: object;
   target: string;
   resultPath?: string;
 }) {
   const manifestPath = join(repository, `manifest-${Date.now()}-${Math.random()}.json`);
+  const dispositionPath = join(repository, `disposition-${Date.now()}-${Math.random()}.json`);
   writeFileSync(manifestPath, `${JSON.stringify(manifestValue, null, 2)}\n`);
-  const args = [SCRIPT, "--repository", repository, "--manifest", manifestPath, "--target", target];
+  writeFileSync(dispositionPath, `${JSON.stringify(dispositionValue, null, 2)}\n`);
+  const args = [
+    SCRIPT,
+    "--repository",
+    repository,
+    "--manifest",
+    manifestPath,
+    "--disposition",
+    dispositionPath,
+    "--target",
+    target,
+  ];
   if (resultPath) {
     args.push("--result", resultPath);
   }
@@ -195,6 +267,24 @@ describe("lobster reconstruction", () => {
       resultTree: baseTree,
     });
     git(repository, ["worktree", "remove", "--force", target]);
+
+    const invalidTarget = join(tempDirs.make("lobster-noop-invalid-parent-"), "worktree");
+    const invalid = runReconstruct({
+      repository,
+      manifestValue: manifest(baseCommit, baseTree, [
+        {
+          id: "invalid-noop",
+          state: "evidence-only",
+          dependsOn: [],
+          kind: "noop",
+          resolutions: [],
+        },
+      ]),
+      target: invalidTarget,
+    });
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain("resolutions is only supported for cherry-pick-range entries");
+    expect(existsSync(invalidTarget)).toBe(false);
   });
 
   it("applies a complete pinned source range in commit order", () => {
@@ -290,6 +380,7 @@ describe("lobster reconstruction", () => {
       sourceSha,
       sourceCommitCount: 2,
       patchId,
+      resolutions: [],
     };
     const firstTarget = join(tempDirs.make("lobster-range-first-parent-"), "worktree");
     git(repository, ["config", "user.name", "First Reconstructor"]);
@@ -376,6 +467,7 @@ describe("lobster reconstruction", () => {
           sourceSha,
           sourceCommitCount: 1,
           patchId,
+          resolutions: [],
         },
       ]),
       target: countTarget,
@@ -416,11 +508,147 @@ describe("lobster reconstruction", () => {
           sourceSha: conflictSourceSha,
           sourceCommitCount: 3,
           patchId: conflictPatchId,
+          resolutions: [],
         },
       ]),
       target: conflictTarget,
     });
     expect(conflictResult.status).toBe(1);
     expect(existsSync(conflictTarget)).toBe(false);
+  });
+
+  it("applies a B3 resolution only at its exact queue-prefix tree", () => {
+    const {
+      repository,
+      baseCommit,
+      baseTree,
+      sourceBaseSha,
+      sourceSha,
+      patchId,
+      carriedSha,
+      carriedPatchId,
+    } = createResolutionRepository();
+    const target = join(tempDirs.make("lobster-resolution-parent-"), "worktree");
+    const entry = {
+      id: "resolved-range",
+      state: "evidence-only",
+      dependsOn: [],
+      kind: "cherry-pick-range",
+      sourceBaseSha,
+      sourceSha,
+      sourceCommitCount: 1,
+      patchId,
+      resolutions: [
+        {
+          sourceSha,
+          carriedSha,
+          patchId: carriedPatchId,
+          prefixTree: baseTree,
+          dispositionId: "B3-TEST-001",
+          classification: "B3",
+        },
+      ],
+    };
+    const result = runReconstruct({
+      repository,
+      manifestValue: manifest(baseCommit, baseTree, [entry]),
+      dispositionValue: {
+        schemaVersion: 1,
+        entries: [
+          {
+            id: "B3-TEST-001",
+            classification: "B3",
+            status: "evidence-only",
+            baseCommit,
+            sourceSha: carriedSha,
+            patchId: carriedPatchId,
+          },
+        ],
+      },
+      target,
+    });
+
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.applied[0].commits[0]).toMatchObject({
+      sourceSha,
+      appliedSourceSha: carriedSha,
+      appliedPatchId: carriedPatchId,
+      dispositionId: "B3-TEST-001",
+      classification: "B3",
+      prefixTree: baseTree,
+    });
+    expect(readFileSync(join(target, "config.txt"), "utf8").replaceAll("\r\n", "\n")).toBe(
+      "pinned behavior with source semantics\n",
+    );
+    git(repository, ["worktree", "remove", "--force", target]);
+
+    const buildOnlyTarget = join(
+      tempDirs.make("lobster-resolution-build-only-parent-"),
+      "worktree",
+    );
+    const buildOnlyResult = runReconstruct({
+      repository,
+      manifestValue: manifest(baseCommit, baseTree, [{ ...entry, state: "build-only" }]),
+      dispositionValue: {
+        schemaVersion: 1,
+        entries: [
+          {
+            id: "B3-TEST-001",
+            classification: "B3",
+            status: "build-only",
+            baseCommit,
+            sourceSha: carriedSha,
+            patchId: carriedPatchId,
+          },
+        ],
+      },
+      target: buildOnlyTarget,
+    });
+    expect(buildOnlyResult.status).toBe(0);
+    git(repository, ["worktree", "remove", "--force", buildOnlyTarget]);
+
+    const mismatchTarget = join(tempDirs.make("lobster-resolution-mismatch-parent-"), "worktree");
+    const mismatchResult = runReconstruct({
+      repository,
+      manifestValue: manifest(baseCommit, baseTree, [
+        {
+          ...entry,
+          resolutions: [{ ...entry.resolutions[0], prefixTree: "a".repeat(40) }],
+        },
+      ]),
+      dispositionValue: {
+        schemaVersion: 1,
+        entries: [
+          {
+            id: "B3-TEST-001",
+            classification: "B3",
+            status: "evidence-only",
+            baseCommit,
+            sourceSha: carriedSha,
+            patchId: carriedPatchId,
+          },
+        ],
+      },
+      target: mismatchTarget,
+    });
+    expect(mismatchResult.status).toBe(1);
+    expect(mismatchResult.stderr).toContain("Resolution prefix mismatch");
+    expect(existsSync(mismatchTarget)).toBe(false);
+
+    const missingLedgerTarget = join(
+      tempDirs.make("lobster-resolution-ledger-parent-"),
+      "worktree",
+    );
+    const missingLedgerResult = runReconstruct({
+      repository,
+      manifestValue: manifest(baseCommit, baseTree, [entry]),
+      target: missingLedgerTarget,
+    });
+    expect(missingLedgerResult.status).toBe(1);
+    expect(missingLedgerResult.stderr).toContain(
+      "Resolution B3-TEST-001 is missing from the disposition ledger",
+    );
+    expect(existsSync(missingLedgerTarget)).toBe(false);
   });
 });

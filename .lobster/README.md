@@ -30,3 +30,12 @@ linear source generation (`cherry-pick-range`). Range entries pin the source
 base, head, commit count, and aggregate stable patch ID. Reconstruction rejects
 missing ancestry, merge commits, count or patch mismatches, and application
 conflicts rather than silently rebasing the source.
+
+When current-base drift prevents one source commit from applying, a range may
+name an explicit B3 resolution commit. The resolution is valid only at its
+pinned queue-prefix tree, must have a single parent with that same tree, carries
+its own stable patch ID and B3 disposition identity, and substitutes only the
+named source commit. The original range and per-commit source patch identities
+remain part of the reconstruction result. Reconstruction also requires the
+referenced disposition entry to match the B3 classification, admission state,
+exact prefix commit, carried commit, and carried patch identity.
