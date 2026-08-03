@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "retained": [
+    {
+      "path": ".lobster/",
+      "owner": "Lobster OpenClaw",
+      "reason": "Fork reconstruction and admission evidence"
+    }
+  ],
+  "deletions": [
+    {
+      "id": "BOOT-001",
+      "path": "scripts/lobster-reconstruct.mjs",
+      "trigger": "The fork carries no patches and no longer requires deterministic reconstruction",
+      "verification": "lobster/integration tree equals the pinned upstream tree without the harness"
+    }
+  ]
+}

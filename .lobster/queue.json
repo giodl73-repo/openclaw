@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "base": {
+    "repository": "openclaw/openclaw",
+    "commit": "b7f9cd0a01671f7be5fc34b4bd4bf6770603f480",
+    "tree": "5ddfc5c67814d3208f7153a260fd47ead27775e3"
+  },
+  "integration": {
+    "repository": "giodl73-repo/openclaw",
+    "branch": "lobster/integration"
+  },
+  "entries": []
+}

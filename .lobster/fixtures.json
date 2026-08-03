@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "lobster.exa.owner-projection.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "reserved",
+      "acceptedResult": "complete owner projection",
+      "structuredFailure": "stale, mixed-version, or explicitly omitted owner projection"
+    }
+  ]
+}

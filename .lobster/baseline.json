@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "b7f9cd0a01671f7be5fc34b4bd4bf6770603f480",
+  "sourceTree": "5ddfc5c67814d3208f7153a260fd47ead27775e3",
+  "node": ">=24.15.0 <25",
+  "pnpm": "11.15.1",
+  "platforms": ["ubuntu-24.04", "windows-2025"],
+  "commands": [
+    "corepack pnpm check",
+    "corepack pnpm check:test-types",
+    "corepack pnpm check:architecture",
+    "corepack pnpm build",
+    "corepack pnpm ui:build",
+    "corepack pnpm release:check"
+  ],
+  "knownFailures": [
+    {
+      "id": "native-i18n-inventory-drift",
+      "source": "vanilla",
+      "runId": "30773428781",
+      "jobId": "91564654215",
+      "command": "native-i18n",
+      "summary": "Generated native Apple inventory identifiers and sources do not match the checked-in inventory"
+    }
+  ]
+}
