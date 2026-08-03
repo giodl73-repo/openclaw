@@ -5,9 +5,11 @@
       "id": "lobster.exa.owner-projection.v1",
       "schemaVersion": 1,
       "ownerOracle": "openclaw-typescript",
-      "status": "reserved",
+      "status": "implemented",
       "acceptedResult": "complete owner projection",
       "structuredFailure": "stale, mixed-version, or explicitly omitted owner projection",
+      "runner": "scripts/lobster-owner-projection.mjs",
+      "evidence": ".lobster/owner-projection-fixture.json",
       "compatibility": {
         "current": "required",
         "legacy": "explicit",

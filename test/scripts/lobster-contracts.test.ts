@@ -57,7 +57,7 @@ describe("Lobster Wave 0 contracts", () => {
       sharedResultCount: 12,
       relationshipReferenceCount: 17,
       fixtureCount: 1,
-      ledgerEntryCount: 0,
+      ledgerEntryCount: 14,
     });
     expect(first.contractSetDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(second).toEqual(first);
@@ -123,9 +123,11 @@ describe("Lobster Wave 0 contracts", () => {
     ledger.disposition.format.requiredFields = ledger.disposition.format.requiredFields.slice(1);
     expect(() => validateContracts(ledger)).toThrow("disposition.format.requiredFields");
 
-    const implemented = inputs();
-    implemented.fixtures.fixtures[0].status = "implemented";
-    expect(() => validateContracts(implemented)).toThrow("must remain reserved");
+    const implementedWithoutRunner = inputs();
+    delete implementedWithoutRunner.fixtures.fixtures[0].runner;
+    expect(() => validateContracts(implementedWithoutRunner)).toThrow(
+      "fixture lobster.exa.owner-projection.v1.runner",
+    );
 
     const numericFixtureId = inputs();
     numericFixtureId.fixtures.fixtures[0].id = 1;

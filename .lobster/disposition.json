@@ -1,7 +1,11 @@
 {
   "schemaVersion": 1,
   "format": {
-    "classifications": ["B1", "B2", "B3"],
+    "classifications": [
+      "B1",
+      "B2",
+      "B3"
+    ],
     "statuses": [
       "planned",
       "build-only",
@@ -32,7 +36,386 @@
       "status"
     ]
   },
-  "entries": [],
+  "entries": [
+    {
+      "id": "B3-EVID001-107026-01",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "88aaa408cbb73a004836f1ad31cceb41a7fd6bc9",
+      "sourceSha": "d1ace21e85a62746e73ef78b4fa79781f62b1c67",
+      "patchId": "c4c0d201e74d2e7d5fd7476fbaa92b85c3ea6b95",
+      "dependencies": [],
+      "destination": "current split gateway configuration owners",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Port ordered configuration layers without restoring the retired gateway monolith",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-107026 and reconstruct from the pinned vanilla base",
+      "delete": [
+        "implicit-apply:4dadacafc99d45541e3cebbb2b8a30a2450dbe2e"
+      ],
+      "retain": [
+        "source identity",
+        "current gateway ownership"
+      ],
+      "zeroOldPathEvidence": "the original commit conflicts at the exact pinned prefix and only the owner-preserving carried patch reconstructs",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-107026-02",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "7c1d8c06d7d0912c8970a6623f18c41462cb000c",
+      "sourceSha": "5c2b4dfa985c389b2dd19a9bb3c071286756e5f7",
+      "patchId": "0e9677646a2b626b0a000e6b35acf502fd745158",
+      "dependencies": [],
+      "destination": "gateway server-start lifecycle owner",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Own the managed write guard in the current server-start lifecycle",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-107026 and reconstruct from the pinned vanilla base",
+      "delete": [
+        "implicit-apply:89c22d52280c567e5a1a72dff6950423bb70506d"
+      ],
+      "retain": [
+        "source identity",
+        "scoped write-guard ownership"
+      ],
+      "zeroOldPathEvidence": "the retired startup owner is absent at the exact pinned prefix",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-107026-03",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "19696a43a622bc18d72d6500d8367a10646b60c5",
+      "sourceSha": "8447c839536ba98c92267ec95c7b6110b5b072c1",
+      "patchId": "4c785a79e7424f6de668c91374db41dd2aafb09f",
+      "dependencies": [],
+      "destination": "configuration mutation guard owner",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Scope layered configuration write denial to the active runtime owner",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-107026 and reconstruct from the pinned vanilla base",
+      "delete": [
+        "implicit-apply:83cc2227c3d2c2735af507e1824f533645fd2c7f"
+      ],
+      "retain": [
+        "source identity",
+        "current config mutation semantics"
+      ],
+      "zeroOldPathEvidence": "the old process-wide guard cannot be applied without violating current owner scoping",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-107026-04",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "866b00980516e1850fa017b335185c7b4e88b290",
+      "sourceSha": "9370808844836c9bdf72c56107819c0707f066cd",
+      "patchId": "44e5fda246e81eef1de703ffff6241f6a7c472fd",
+      "dependencies": [],
+      "destination": "managed configuration integration seams",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Repair managed-layer integration against current config and startup contracts",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-107026 and reconstruct from the pinned vanilla base",
+      "delete": [
+        "implicit-apply:129822922d9cd73fec1b608c16d16eefde6622ac"
+      ],
+      "retain": [
+        "source identity",
+        "hashless patch and LWW semantics"
+      ],
+      "zeroOldPathEvidence": "the source integration assumes superseded config write and startup seams",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-107026-05",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "8c33213f9b366608953c919712366cec06b75710",
+      "sourceSha": "4c38a4db66e3b2fb4cb505b203fc4014632be522",
+      "patchId": "262155514305d3c052da5b8dc18662ef765ba497",
+      "dependencies": [],
+      "destination": "managed configuration CI and generated-doc owners",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Satisfy current managed-layer gates while preserving generated-on-demand docs",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-107026 and reconstruct from the pinned vanilla base",
+      "delete": [
+        "implicit-apply:704bfa486533a924fbb380476a08a6491dff9bd8"
+      ],
+      "retain": [
+        "source identity",
+        "current generated-doc contract"
+      ],
+      "zeroOldPathEvidence": "the source CI repair rewrites a docs map no longer owned as a checked-in monolith",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-01",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "6f8d0dc87bcc0d249b2ecb4d6ddad86190c8ab2d",
+      "sourceSha": "badb7001b238f8046587d7f9c04d1dcad99bd472",
+      "patchId": "b2a9cc7f42f97876acab11218db48376ac117dfb",
+      "dependencies": [],
+      "destination": "gateway health collector and readiness owners",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Project canonical readiness through the current refactored health collector",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:d94fb34893ac4a01bccb057cf1c488b8cba4e383"
+      ],
+      "retain": [
+        "source identity",
+        "current health collection ownership"
+      ],
+      "zeroOldPathEvidence": "the source duplicates the pre-refactor health implementation at this prefix",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-02",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "6ea1f2093af0d1c12c2f7284b1af38a12e8de972",
+      "sourceSha": "c1b60b81957a6a386e67b3b8369d8d95bc74a9bc",
+      "patchId": "4df22f91b2eb1556ebc5c178b1c2baf29f0405ad",
+      "dependencies": [],
+      "destination": "descriptor-driven gateway method registry",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Add ready through the current core descriptor and lazy health handler owners",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:273503959b3f64de075efe14b538fad4b0c1df0e"
+      ],
+      "retain": [
+        "source identity",
+        "stable advertised method ordering"
+      ],
+      "zeroOldPathEvidence": "the source restores a retired handwritten gateway handler registry",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-03",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "58713062ec9ff812edc8a9356b6aafb6101273ae",
+      "sourceSha": "b336c985019266cd8488a249a0a9549a62b9e085",
+      "patchId": "765b8a34664252bed220e298d127299a5604e8b7",
+      "dependencies": [],
+      "destination": "generated-on-demand documentation map",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Keep readiness contract fixes without restoring the obsolete monolithic docs map",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:99f7f0b4329b747c7613183f357a3c5aedf32e14"
+      ],
+      "retain": [
+        "source identity",
+        "current docs generation ownership"
+      ],
+      "zeroOldPathEvidence": "the source docs-map edit targets a generated surface not retained on the pinned base",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-04",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "06b1e0fc2cebf2a4d461899cf0589a8ff6bbbd23",
+      "sourceSha": "84f8c3650d46f22a2a1906205b1c76a50d903041",
+      "patchId": "a178639c6294fbf0652067aae92fb4d502462107",
+      "dependencies": [],
+      "destination": "Android gateway protocol enum",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Append ready without deleting current gateway protocol methods",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:2e4123e266ee0e1272b07c4f8619de09a00d8ab5"
+      ],
+      "retain": [
+        "source identity",
+        "current Android protocol additions"
+      ],
+      "zeroOldPathEvidence": "the source-side enum tail predates current Android protocol members",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-05",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "10a5c2f1616483d55195f6046215ce97370219d7",
+      "sourceSha": "5ccc08ebb0acc2a58495ee6652222a2a7b566cb7",
+      "patchId": "9b8f96eb040eae57482efc070e427dcde6d2b80c",
+      "dependencies": [],
+      "destination": "gateway startup plugin quarantine proof",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Add readiness opt-in proof while preserving the current broken-host-peer quarantine case",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:0b48a87ee8349abb7902d7bcbae9ee2860d2b6dd"
+      ],
+      "retain": [
+        "source identity",
+        "current quarantine regression proof"
+      ],
+      "zeroOldPathEvidence": "the source test name and setup predate the current host-peer quarantine contract",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-06",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "10a8433934a7102fdc0db9434dc9f1347bf7b31a",
+      "sourceSha": "a866f0693e6b05505f8977e79c9c7376e83c7794",
+      "patchId": "cf79f50dc7d690d3b06c7bf0e194ca27625c3cbe",
+      "dependencies": [],
+      "destination": "gateway protocol snapshot and plugin SDK baseline owners",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Add readiness subject identities alongside current event-loop health and SDK surfaces",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:9a9f742b1465cdbc01bd04b9f668677fed2b6251"
+      ],
+      "retain": [
+        "source identity",
+        "current protocol and SDK contracts"
+      ],
+      "zeroOldPathEvidence": "the source snapshot and baseline omit current protocol and plugin exports",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-07",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "979922cd5c2906c320af494f5fc5a1352f8b7dd6",
+      "sourceSha": "d8674fbd7b17d3361a7c328bc387a8b8b3f010da",
+      "patchId": "dc4273b7123f4b9397082ee41a0f85205a91c5bc",
+      "dependencies": [],
+      "destination": "gateway advertised-method ordering proof",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Apply the source tail-count correction relative to the current three additional methods",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:3df047ed4da790ad7418cbb0fa2dc14992d29ca9"
+      ],
+      "retain": [
+        "source identity",
+        "current method tail members"
+      ],
+      "zeroOldPathEvidence": "the source numeric correction must be translated to the longer current method tail",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-104018-08",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "bae67e38d89084f3845b1f092637ebcf3cd7d3a5",
+      "sourceSha": "b1a008cae153042c919181c0e282fc6e14fa38f8",
+      "patchId": "a64b81fc4591eea6d59e94f636b13f941e844711",
+      "dependencies": [],
+      "destination": "plugin SDK surface budget and readiness owner identities",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Increase the current SDK budget by the four readiness owner contracts",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-104018 and reconstruct from the managed-config prefix",
+      "delete": [
+        "implicit-apply:079181915a6c7bbaa712c4bc30efa10d531d2996"
+      ],
+      "retain": [
+        "source identity",
+        "current plugin SDK exports and budgets"
+      ],
+      "zeroOldPathEvidence": "the source budget is based on an older public SDK surface",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    },
+    {
+      "id": "B3-EVID001-113421-01",
+      "classification": "B3",
+      "owner": "Lobster OpenClaw source admission",
+      "baseCommit": "97072d1f33e2fe7bad1f7ecfa83eb986187f5cc2",
+      "sourceSha": "f1c577bc046ba0465e8b5183f567712248f8675b",
+      "patchId": "08e1547a9055f5befde9ed8559cc6263cc7d17c5",
+      "dependencies": [],
+      "destination": "cron and shared-state readiness owners",
+      "fixtureIds": [
+        "lobster.exa.owner-projection.v1"
+      ],
+      "replacement": "Observe scheduler and state readiness through current cron and database lifecycle contracts",
+      "minimumRelease": "2026.6.33",
+      "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
+      "rollback": "remove EVID-001-113421 and reconstruct from the readiness-foundation prefix",
+      "delete": [
+        "implicit-apply:a0e2404a090f02c1ec8f2f9920f8a1282d7de585"
+      ],
+      "retain": [
+        "source identity",
+        "current cron family and state corruption guards"
+      ],
+      "zeroOldPathEvidence": "the source replaces current cron and state lifecycle safeguards instead of extending them",
+      "expiry": "2026-09-03T00:00:00Z",
+      "status": "evidence-only"
+    }
+  ],
   "retained": [
     {
       "path": ".lobster/",

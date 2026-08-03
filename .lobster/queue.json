@@ -10,5 +10,154 @@
     "branch": "lobster/integration"
   },
   "sourceInventory": "sources.json",
-  "entries": []
+  "entries": [
+    {
+      "id": "EVID-001-107026",
+      "state": "evidence-only",
+      "dependsOn": [],
+      "kind": "cherry-pick-range",
+      "sourceBaseSha": "d8325da46df38ae2bbe96b29e0764671881e1626",
+      "sourceSha": "409fab999c4095c5b24a8d7ac23d495659738666",
+      "sourceCommitCount": 18,
+      "patchId": "5ec45158de71aadc5b72d100ca6f9e0111f8c32d",
+      "resolutions": [
+        {
+          "sourceSha": "4dadacafc99d45541e3cebbb2b8a30a2450dbe2e",
+          "carriedSha": "d1ace21e85a62746e73ef78b4fa79781f62b1c67",
+          "patchId": "c4c0d201e74d2e7d5fd7476fbaa92b85c3ea6b95",
+          "prefixTree": "a63487e4673c2221997da157b1f8924ffbdf949e",
+          "dispositionId": "B3-EVID001-107026-01",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "89c22d52280c567e5a1a72dff6950423bb70506d",
+          "carriedSha": "5c2b4dfa985c389b2dd19a9bb3c071286756e5f7",
+          "patchId": "0e9677646a2b626b0a000e6b35acf502fd745158",
+          "prefixTree": "29675584b7f0b6f1f7fdeda4ed79fbecff865b04",
+          "dispositionId": "B3-EVID001-107026-02",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "83cc2227c3d2c2735af507e1824f533645fd2c7f",
+          "carriedSha": "8447c839536ba98c92267ec95c7b6110b5b072c1",
+          "patchId": "4c785a79e7424f6de668c91374db41dd2aafb09f",
+          "prefixTree": "cbe5663b19cad718529fe6fceb6f52987b208382",
+          "dispositionId": "B3-EVID001-107026-03",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "129822922d9cd73fec1b608c16d16eefde6622ac",
+          "carriedSha": "9370808844836c9bdf72c56107819c0707f066cd",
+          "patchId": "44e5fda246e81eef1de703ffff6241f6a7c472fd",
+          "prefixTree": "747b63dc355db725558cb8ed7cb7ab278b99fa24",
+          "dispositionId": "B3-EVID001-107026-04",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "704bfa486533a924fbb380476a08a6491dff9bd8",
+          "carriedSha": "4c38a4db66e3b2fb4cb505b203fc4014632be522",
+          "patchId": "262155514305d3c052da5b8dc18662ef765ba497",
+          "prefixTree": "9633acaf36419a61cce05dc57b197ac0ab484cd3",
+          "dispositionId": "B3-EVID001-107026-05",
+          "classification": "B3"
+        }
+      ]
+    },
+    {
+      "id": "EVID-001-104018",
+      "state": "evidence-only",
+      "dependsOn": ["EVID-001-107026"],
+      "kind": "cherry-pick-range",
+      "sourceBaseSha": "1695854877ff74b66582f4af7371b1fb7da276a1",
+      "sourceSha": "2f131c6e220461f787ee7cb1a37bea096f4cbf6b",
+      "sourceCommitCount": 25,
+      "patchId": "b3548575fa7e768d38305e7390b50f5904b5e008",
+      "resolutions": [
+        {
+          "sourceSha": "d94fb34893ac4a01bccb057cf1c488b8cba4e383",
+          "carriedSha": "badb7001b238f8046587d7f9c04d1dcad99bd472",
+          "patchId": "b2a9cc7f42f97876acab11218db48376ac117dfb",
+          "prefixTree": "9a5a2aa27083d0731568ecfa19a14418d0053dd3",
+          "dispositionId": "B3-EVID001-104018-01",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "273503959b3f64de075efe14b538fad4b0c1df0e",
+          "carriedSha": "c1b60b81957a6a386e67b3b8369d8d95bc74a9bc",
+          "patchId": "4df22f91b2eb1556ebc5c178b1c2baf29f0405ad",
+          "prefixTree": "6c39c4b560b590656fa10860d9716cc031de0d6e",
+          "dispositionId": "B3-EVID001-104018-02",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "99f7f0b4329b747c7613183f357a3c5aedf32e14",
+          "carriedSha": "b336c985019266cd8488a249a0a9549a62b9e085",
+          "patchId": "765b8a34664252bed220e298d127299a5604e8b7",
+          "prefixTree": "b5690dca8fd2631ae1f11b946da3d2580c7d5908",
+          "dispositionId": "B3-EVID001-104018-03",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "2e4123e266ee0e1272b07c4f8619de09a00d8ab5",
+          "carriedSha": "84f8c3650d46f22a2a1906205b1c76a50d903041",
+          "patchId": "a178639c6294fbf0652067aae92fb4d502462107",
+          "prefixTree": "35aa830c8604e782e51332092c2c15b8dd847518",
+          "dispositionId": "B3-EVID001-104018-04",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "0b48a87ee8349abb7902d7bcbae9ee2860d2b6dd",
+          "carriedSha": "5ccc08ebb0acc2a58495ee6652222a2a7b566cb7",
+          "patchId": "9b8f96eb040eae57482efc070e427dcde6d2b80c",
+          "prefixTree": "02caada22c2d0fa56f8c34b80da6f1b358049370",
+          "dispositionId": "B3-EVID001-104018-05",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "9a9f742b1465cdbc01bd04b9f668677fed2b6251",
+          "carriedSha": "a866f0693e6b05505f8977e79c9c7376e83c7794",
+          "patchId": "cf79f50dc7d690d3b06c7bf0e194ca27625c3cbe",
+          "prefixTree": "0f704d27e9c04c4eca1cc4d3cc1fd8aa0da3e3c4",
+          "dispositionId": "B3-EVID001-104018-06",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "3df047ed4da790ad7418cbb0fa2dc14992d29ca9",
+          "carriedSha": "d8674fbd7b17d3361a7c328bc387a8b8b3f010da",
+          "patchId": "dc4273b7123f4b9397082ee41a0f85205a91c5bc",
+          "prefixTree": "988888de2ed5f956dee40d5575293c80864bc0f3",
+          "dispositionId": "B3-EVID001-104018-07",
+          "classification": "B3"
+        },
+        {
+          "sourceSha": "079181915a6c7bbaa712c4bc30efa10d531d2996",
+          "carriedSha": "b1a008cae153042c919181c0e282fc6e14fa38f8",
+          "patchId": "a64b81fc4591eea6d59e94f636b13f941e844711",
+          "prefixTree": "790b4b0d41a35e37e8e5b8d97519c890abf9cab5",
+          "dispositionId": "B3-EVID001-104018-08",
+          "classification": "B3"
+        }
+      ]
+    },
+    {
+      "id": "EVID-001-113421",
+      "state": "evidence-only",
+      "dependsOn": ["EVID-001-104018"],
+      "kind": "cherry-pick-range",
+      "sourceBaseSha": "2f131c6e220461f787ee7cb1a37bea096f4cbf6b",
+      "sourceSha": "c1d7f394f866aad86c1818ab8bc10c7fca485045",
+      "sourceCommitCount": 9,
+      "patchId": "b643f4820675c2ceafa3eaa71ec8e57feb32ac6e",
+      "resolutions": [
+        {
+          "sourceSha": "a0e2404a090f02c1ec8f2f9920f8a1282d7de585",
+          "carriedSha": "f1c577bc046ba0465e8b5183f567712248f8675b",
+          "patchId": "08e1547a9055f5befde9ed8559cc6263cc7d17c5",
+          "prefixTree": "ca6cd49a564013ff794263ec2a0563a436603183",
+          "dispositionId": "B3-EVID001-113421-01",
+          "classification": "B3"
+        }
+      ]
+    }
+  ]
 }

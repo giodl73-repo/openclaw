@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFailedTrailer } from "./lib/failed-trailer.mjs";
@@ -735,8 +735,18 @@ function validateFixtures(manifest, fixtures) {
       fail(`fixture ${fixture.id} is duplicated`);
     }
     fixtureIds.add(fixture.id);
-    if (fixture.status !== "reserved") {
-      fail(`fixture ${fixture.id} must remain reserved until an executable runner is admitted`);
+    if (fixture.status !== "reserved" && fixture.status !== "implemented") {
+      fail(`fixture ${fixture.id}.status must be reserved or implemented`);
+    }
+    if (fixture.status === "implemented") {
+      requireNonEmpty(fixture.runner, `fixture ${fixture.id}.runner`);
+      requireNonEmpty(fixture.evidence, `fixture ${fixture.id}.evidence`);
+      if (!existsSync(resolve(ROOT, fixture.runner))) {
+        fail(`fixture ${fixture.id}.runner must resolve to an executable runner`);
+      }
+      if (!existsSync(resolve(ROOT, fixture.evidence))) {
+        fail(`fixture ${fixture.id}.evidence must resolve to checked-in evidence`);
+      }
     }
     if (fixture.acceptedResult === fixture.structuredFailure) {
       fail(`fixture ${fixture.id} must distinguish accepted and failure results`);
