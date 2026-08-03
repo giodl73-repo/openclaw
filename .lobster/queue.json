@@ -9,5 +9,6 @@
     "repository": "giodl73-repo/openclaw",
     "branch": "lobster/integration"
   },
+  "sourceInventory": "sources.json",
   "entries": []
 }

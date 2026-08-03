@@ -5,6 +5,8 @@ not imported by OpenClaw production code and does not change default runtime,
 configuration, package, plugin, skill, or CLI behavior.
 
 - `queue.json` pins the upstream base and ordered carried-source admission.
+- `sources.json` captures exact upstream pull request generations as quarantined
+  inventory with no build, evidence, release, or runtime authority.
 - `baseline.json` pins cross-platform vanilla-equivalent commands.
 - `fixtures.json` reserves stable fixture identities.
 - `disposition.json` separates retained metadata from deletion obligations.
