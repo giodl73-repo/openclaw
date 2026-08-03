@@ -1,5 +1,37 @@
 {
   "schemaVersion": 1,
+  "format": {
+    "classifications": ["B1", "B2", "B3"],
+    "statuses": [
+      "planned",
+      "evidence-only",
+      "release-eligible",
+      "active",
+      "expired",
+      "deleted"
+    ],
+    "requiredFields": [
+      "id",
+      "classification",
+      "owner",
+      "baseCommit",
+      "sourceSha",
+      "patchId",
+      "dependencies",
+      "destination",
+      "fixtureIds",
+      "replacement",
+      "minimumRelease",
+      "mixedVersionWindow",
+      "rollback",
+      "delete",
+      "retain",
+      "zeroOldPathEvidence",
+      "expiry",
+      "status"
+    ]
+  },
+  "entries": [],
   "retained": [
     {
       "path": ".lobster/",

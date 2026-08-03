@@ -7,7 +7,17 @@
       "ownerOracle": "openclaw-typescript",
       "status": "reserved",
       "acceptedResult": "complete owner projection",
-      "structuredFailure": "stale, mixed-version, or explicitly omitted owner projection"
+      "structuredFailure": "stale, mixed-version, or explicitly omitted owner projection",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

@@ -7,6 +7,10 @@ configuration, package, plugin, skill, or CLI behavior.
 - `queue.json` pins the upstream base and ordered carried-source admission.
 - `sources.json` captures exact upstream pull request generations as quarantined
   inventory with no build, evidence, release, or runtime authority.
+- `contracts.json` publishes the executable XPK-001 through XPK-009 Wave 0
+  ownership, reference, evidence, mutation, profile, trust-order, fixture, and
+  ledger definition gates. They carry definition-only authority: deployment
+  profile instances still require concrete budget thresholds before admission.
 - `baseline.json` pins cross-platform vanilla-equivalent commands.
 - `fixtures.json` reserves stable fixture identities.
 - `disposition.json` separates retained metadata from deletion obligations.
@@ -15,6 +19,7 @@ Reconstruct from a clean clone:
 
 ```text
 corepack pnpm lobster:reconstruct -- --target <empty-directory-path>
+corepack pnpm lobster:contracts
 ```
 
 Only entries with an admitted state are applied. Source-only and rejected

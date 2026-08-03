@@ -1629,6 +1629,7 @@
     "lint:web-fetch-provider-boundaries": "node scripts/check-web-fetch-provider-boundaries.mjs",
     "lint:web-search-provider-boundaries": "node scripts/check-web-search-provider-boundaries.mjs",
     "lint:webhook:no-low-level-body-read": "node scripts/check-webhook-auth-body-order.mjs",
+    "lobster:contracts": "node scripts/lobster-contracts.mjs",
     "lobster:reconstruct": "node scripts/lobster-reconstruct.mjs",
     "mac:open": "open dist/OpenClaw.app",
     "mac:package": "bash scripts/package-mac-app.sh",
