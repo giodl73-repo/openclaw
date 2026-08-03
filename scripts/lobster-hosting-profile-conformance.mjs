@@ -35,7 +35,8 @@ const SCENARIO_IDS = [
 function sameMembers(actual, expected) {
   return (
     Array.isArray(actual) &&
-    JSON.stringify(actual.toSorted()) === JSON.stringify(expected.toSorted())
+    JSON.stringify(actual.toSorted((a, b) => a.localeCompare(b))) ===
+      JSON.stringify(expected.toSorted((a, b) => a.localeCompare(b)))
   );
 }
 

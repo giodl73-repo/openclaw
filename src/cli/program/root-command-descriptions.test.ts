@@ -27,6 +27,8 @@ const JSON_NOT_APPLICABLE = {
     commands: [
       "backup",
       "backup sqlite",
+      "hosting",
+      "hosting profiles",
       "message",
       "message thread",
       "message emoji",

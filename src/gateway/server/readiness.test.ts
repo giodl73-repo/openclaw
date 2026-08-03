@@ -676,7 +676,6 @@ describe("canonical configured Gateway readiness", () => {
       config: {
         gateway: { readiness: { requiredCriteria: ["openclaw.plugins-loaded"] } },
       },
-      identity: testReadinessIdentity(),
       evaluateGateway: () => readySnapshot() as ReadinessResult,
       evaluateRuntime: async () => runtime,
     });
@@ -701,7 +700,6 @@ describe("canonical configured Gateway readiness", () => {
       config: {
         gateway: { readiness: { requiredCriteria: ["openclaw.event-loop-healthy"] } },
       },
-      identity: testReadinessIdentity(),
       evaluateGateway: () => gateway,
       evaluateRuntime: async () =>
         buildRuntimeReadiness({ configLoaded: true, gateway: "responding" }),
@@ -773,7 +771,6 @@ describe("canonical configured Gateway readiness", () => {
       config: {
         gateway: { readiness: { requiredCriteria: ["openclaw.plugins-loaded"] } },
       },
-      identity: testReadinessIdentity(),
       evaluateGateway: () => readySnapshot() as ReadinessResult,
       evaluateRuntime: () => new Promise<never>(() => {}),
       timeoutMs: 5,

@@ -10,7 +10,10 @@ const SCRIPT = resolve("scripts/lobster-hosting-profile-conformance.mjs");
 
 describe("lobster.exa.hosting-profile-conformance.v1", () => {
   it("accepts complete ready and intentionally not-ready profile evidence", () => {
-    const [ready, notReady] = runFixture().cases;
+    const cases = runFixture().cases;
+    expect(cases).toHaveLength(3);
+    const ready = cases[0]!;
+    const notReady = cases[1]!;
 
     expect(ready.result).toMatchObject({
       status: "accepted",
@@ -27,7 +30,7 @@ describe("lobster.exa.hosting-profile-conformance.v1", () => {
   });
 
   it("rejects catalog, profile, condition, and package evidence mismatches", () => {
-    const rejected = runFixture().cases[2].result;
+    const rejected = runFixture().cases[2]!.result;
 
     expect(rejected.status).toBe("rejected");
     expect(rejected.failures.map((failure) => failure.code)).toEqual(

@@ -61,7 +61,7 @@ function validation(profile: string | undefined, conformant: boolean, ready: boo
         subjects: [],
       },
       ready,
-      conditions: [],
+      conditions: [] as Array<{ type: string }>,
       failures: [],
       advisories: [],
     },

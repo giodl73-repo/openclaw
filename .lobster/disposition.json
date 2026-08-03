@@ -562,7 +562,7 @@
       "fixtureIds": [
         "lobster.exa.hosting-profile-conformance.v1"
       ],
-      "replacement": "Use the source direct script command through the current named scheduled lane while preserving current upgrade-survivor wording",
+      "replacement": "Use the current package-script command through the named scheduled lane while preserving current upgrade-survivor wording",
       "minimumRelease": "2026.6.33",
       "mixedVersionWindow": "evidence-only reconstruction; no runtime mixed-version authority",
       "rollback": "remove EVID-002-113422 and EVID-002-114636, then reconstruct EVID-001",
