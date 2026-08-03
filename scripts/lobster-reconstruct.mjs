@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -175,7 +175,9 @@ export function reconstruct({ repository = ROOT, manifest, target, resultPath = 
       }
       const actualPatchId = patchIdForCommit(repository, entry.sourceSha);
       if (actualPatchId !== entry.patchId) {
-        fail(`Patch ID mismatch for ${entry.id}: expected ${entry.patchId}, received ${actualPatchId}`);
+        fail(
+          `Patch ID mismatch for ${entry.id}: expected ${entry.patchId}, received ${actualPatchId}`,
+        );
       }
       git(target, ["cherry-pick", "-x", entry.sourceSha]);
       applied.push({

@@ -37,6 +37,9 @@ function createRepository(): {
   const sourceSha = git(repository, ["rev-parse", "HEAD"]);
   const patch = git(repository, ["show", "--pretty=format:", "--binary", sourceSha]);
   const patchId = git(repository, ["patch-id", "--stable"], patch).split(/\s+/u)[0];
+  if (!patchId) {
+    throw new Error("git patch-id returned no patch identity");
+  }
   git(repository, ["reset", "--hard", baseCommit]);
   return { repository, baseCommit, baseTree, sourceSha, patchId };
 }
@@ -63,15 +66,7 @@ function runReconstruct({
 }) {
   const manifestPath = join(repository, `manifest-${Date.now()}-${Math.random()}.json`);
   writeFileSync(manifestPath, `${JSON.stringify(manifestValue, null, 2)}\n`);
-  const args = [
-    SCRIPT,
-    "--repository",
-    repository,
-    "--manifest",
-    manifestPath,
-    "--target",
-    target,
-  ];
+  const args = [SCRIPT, "--repository", repository, "--manifest", manifestPath, "--target", target];
   if (resultPath) {
     args.push("--result", resultPath);
   }
