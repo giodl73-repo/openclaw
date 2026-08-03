@@ -38,7 +38,7 @@ function stableJson(value) {
   }
   if (value && typeof value === "object") {
     return `{${Object.keys(value)
-      .sort()
+      .toSorted()
       .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
       .join(",")}}`;
   }

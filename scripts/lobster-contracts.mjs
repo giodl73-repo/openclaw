@@ -398,7 +398,7 @@ function stableJson(value) {
   }
   if (value && typeof value === "object") {
     return `{${Object.keys(value)
-      .sort()
+      .toSorted()
       .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
       .join(",")}}`;
   }
@@ -472,7 +472,7 @@ function validateExecution(manifest) {
   for (const [index, contract] of manifest.contracts.entries()) {
     const [expectedId, expectedDependencies, expectedOwnerPath] = EXPECTED_CONTRACTS[index];
     if (contract?.id !== expectedId) {
-      fail(`contracts[${index}].id must be ${expectedId}`);
+      fail(`contracts[${index}].id must be ${String(expectedId)}`);
     }
     requireExactList(contract.dependsOn, expectedDependencies, `${contract.id}.dependsOn`);
     for (const dependency of contract.dependsOn) {
@@ -483,7 +483,7 @@ function validateExecution(manifest) {
     seen.add(contract.id);
     requireNonEmpty(contract.title, `${contract.id}.title`);
     if (contract.ownerPath !== expectedOwnerPath) {
-      fail(`${contract.id}.ownerPath must be ${expectedOwnerPath}`);
+      fail(`${contract.id}.ownerPath must be ${String(expectedOwnerPath)}`);
     }
     requireNonEmpty(contract.acceptedArtifact, `${contract.id}.acceptedArtifact`);
     requireNonEmpty(contract.structuredFailure, `${contract.id}.structuredFailure`);
@@ -506,7 +506,9 @@ function validateSharedResults(manifest) {
     }
     ids.add(result.id);
     if (result.id !== expectedId || result.semanticOwner !== expectedOwner) {
-      fail(`sharedResults[${index}] must be owned as ${expectedId} by ${expectedOwner}`);
+      fail(
+        `sharedResults[${index}] must be owned as ${String(expectedId)} by ${String(expectedOwner)}`,
+      );
     }
     requireExactList(
       result.producerImplementations,
@@ -527,7 +529,7 @@ function validateReferences(manifest) {
   for (const [index, reference] of manifest.relationshipReferences.entries()) {
     const [expectedName, expectedFacets] = EXPECTED_REFERENCES[index] ?? [];
     if (reference?.name !== expectedName) {
-      fail(`relationshipReferences[${index}].name must be ${expectedName}`);
+      fail(`relationshipReferences[${index}].name must be ${String(expectedName)}`);
     }
     if (reference.payloadNeutral !== true) {
       fail(`relationshipReferences[${index}] must remain payload-neutral`);
@@ -661,7 +663,9 @@ function validateProfiles(manifest) {
     const [expectedCategory, expectedStatistics, expectedUnit] =
       EXPECTED_BUDGET_REQUIREMENTS[index];
     if (budget?.category !== expectedCategory || budget.unit !== expectedUnit) {
-      fail(`budgetRequirements[${index}] must define ${expectedCategory} in ${expectedUnit}`);
+      fail(
+        `budgetRequirements[${index}] must define ${String(expectedCategory)} in ${String(expectedUnit)}`,
+      );
     }
     requireExactList(
       budget.statistics,
@@ -925,7 +929,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
     writeFailedTrailer("lobster-contracts", process.exitCode, (message) =>
-      process.stderr.write(`${message}\n`),
+      process.stderr.write(`${String(message)}\n`),
     );
   }
 }
