@@ -43,6 +43,7 @@ import {
   getCurrentProviderAuthStates,
   isCurrentProviderAuthStateGeneration,
   publishProviderAuthWarmSnapshot,
+  serializeProviderAuthStates,
   type PreparedProviderAuthState,
   type ProviderAuthWarmSnapshot,
 } from "./model-provider-auth-state.js";
@@ -335,24 +336,6 @@ export function createProviderAuthChecker(params: {
       (await evaluateModelAuth(provider, ref)).availability === true,
     { evaluateModelAuth },
   );
-}
-
-function serializeProviderAuthStates(
-  states: ReadonlyMap<string, PreparedProviderAuthState>,
-): ProviderAuthWarmSnapshot {
-  return {
-    agents: [...states.values()].map((state) => {
-      const serialized: ProviderAuthWarmSnapshot["agents"][number] = {
-        agentId: state.agentId,
-        configFingerprint: state.configFingerprint,
-        providers: [...state.providers.entries()],
-      };
-      if (state.defaultModelRoute) {
-        serialized.defaultModelRoute = state.defaultModelRoute;
-      }
-      return serialized;
-    }),
-  };
 }
 
 function resolveProviderConfigApi(
