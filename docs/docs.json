@@ -2853,6 +2853,7 @@
                     "pages": [
                       "cli/approvals",
                       "cli/browser",
+                      "cli/commands",
                       "cli/cron",
                       "cli/connect",
                       "cli/devices",
