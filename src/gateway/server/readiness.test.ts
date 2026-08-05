@@ -743,7 +743,6 @@ describe("canonical configured Gateway readiness", () => {
     });
 
     const result = await evaluateConfiguredGatewayReadiness({
-      identity: testReadinessIdentity(),
       config: {
         gateway: { readiness: { requiredCriteria: ["openclaw.plugins-loaded"] } },
       },
@@ -768,7 +767,6 @@ describe("canonical configured Gateway readiness", () => {
     );
 
     const result = await evaluateConfiguredGatewayReadiness({
-      identity: testReadinessIdentity(),
       config: {
         gateway: { readiness: { requiredCriteria: ["openclaw.event-loop-healthy"] } },
       },
@@ -840,7 +838,6 @@ describe("canonical configured Gateway readiness", () => {
 
   it("retains selected canonical conditions when extended evaluation times out", async () => {
     const result = await evaluateConfiguredGatewayReadiness({
-      identity: testReadinessIdentity(),
       config: {
         gateway: { readiness: { requiredCriteria: ["openclaw.plugins-loaded"] } },
       },
