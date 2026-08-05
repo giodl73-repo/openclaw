@@ -15,6 +15,7 @@ import type { RuntimeProviderAuthLookup } from "./model-auth-runtime.js";
 import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import {
   clearCurrentProviderAuthWarmWorker,
+  isProviderAuthWarmSnapshot,
   setCurrentProviderAuthWarmWorker,
   type ProviderAuthWarmSnapshot,
 } from "./model-provider-auth-state.js";
@@ -65,31 +66,6 @@ export type ProviderAuthWarmWorkerRunner = (
 ) => Promise<ProviderAuthWarmSnapshot>;
 
 const PROVIDER_AUTH_WARM_CANCEL_POLL_MS = 25;
-
-function isProviderAuthWarmSnapshot(value: unknown): value is ProviderAuthWarmSnapshot {
-  if (!isRecord(value) || !Array.isArray(value.agents)) {
-    return false;
-  }
-  return value.agents.every(
-    (agent) =>
-      isRecord(agent) &&
-      typeof agent.agentId === "string" &&
-      typeof agent.configFingerprint === "string" &&
-      Array.isArray(agent.providers) &&
-      agent.providers.every(
-        (entry: unknown) =>
-          Array.isArray(entry) &&
-          entry.length === 2 &&
-          typeof entry[0] === "string" &&
-          typeof entry[1] === "boolean",
-      ) &&
-      (agent.defaultModelRoute === undefined ||
-        (isRecord(agent.defaultModelRoute) &&
-          typeof agent.defaultModelRoute.provider === "string" &&
-          typeof agent.defaultModelRoute.modelId === "string" &&
-          typeof agent.defaultModelRoute.available === "boolean")),
-  );
-}
 
 function isProviderAuthWarmWorkerResult(value: unknown): value is ProviderAuthWarmWorkerResult {
   if (!isRecord(value)) {
