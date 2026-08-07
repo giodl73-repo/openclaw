@@ -1943,7 +1943,8 @@
     "apple:i18n:check": "node --import tsx scripts/apple-app-i18n.ts check",
     "ui:install": "node scripts/ui.js install",
     "verify": "node scripts/verify.mjs",
-    "lobster:hosting-profile-conformance": "node scripts/lobster-hosting-profile-conformance.mjs"
+    "lobster:hosting-profile-conformance": "node scripts/lobster-hosting-profile-conformance.mjs",
+    "lobster:provider-attempt-usage": "node scripts/lobster-provider-attempt-usage.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

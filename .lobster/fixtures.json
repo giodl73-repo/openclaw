@@ -40,6 +40,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.mpu.provider-attempt-usage.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "explicit candidate parents link model calls and reconcile per-candidate usage to unchanged run totals",
+      "structuredFailure": "missing parent, mutable binding, fenced dispatch, call-set mismatch, or usage drift",
+      "runner": "scripts/lobster-provider-attempt-usage.mjs",
+      "evidence": ".lobster/provider-attempt-usage-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

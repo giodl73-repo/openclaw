@@ -15,6 +15,11 @@ configuration, package, plugin, skill, or CLI behavior.
 - `fixtures.json` reserves stable fixture identities.
 - `disposition.json` separates retained metadata from deletion obligations.
 
+EVID-003 adds the fork-only `lobster.mpu.provider-attempt-usage.v1` fixture. It
+proves that fallback candidate identity must parent existing model-call facts
+before dispatch, while preserving the current run usage accumulator. It adds no
+provider, billing, budget, or runtime authority.
+
 Reconstruct from a clean clone:
 
 ```text
