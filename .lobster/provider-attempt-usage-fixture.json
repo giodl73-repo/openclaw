@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.mpu.provider-attempt-usage.v1",
+  "cases": [
+    {
+      "id": "primary-failure-fallback-success",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "model.candidate_attempts",
+        "runId": "run-evid-003",
+        "result": "completed_with_fallback",
+        "attempts": [
+          {
+            "candidateAttemptId": "run-evid-003:candidate:1",
+            "runId": "run-evid-003",
+            "ordinal": 1,
+            "provider": "primary",
+            "model": "model-a",
+            "authProfileRef": "hmac-sha256:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "preparedRuntimeGeneration": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "result": "retryable_failure",
+            "modelCallIds": ["run-evid-003:model:1"],
+            "usage": { "input": 120, "output": 0, "total": 120 }
+          },
+          {
+            "candidateAttemptId": "run-evid-003:candidate:2",
+            "runId": "run-evid-003",
+            "ordinal": 2,
+            "provider": "fallback",
+            "model": "model-b",
+            "authProfileRef": "hmac-sha256:v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "preparedRuntimeGeneration": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "result": "succeeded",
+            "modelCallIds": ["run-evid-003:model:1"],
+            "usage": { "input": 140, "output": 42, "total": 182 }
+          }
+        ],
+        "modelCalls": [
+          {
+            "modelCallId": "run-evid-003:model:1",
+            "candidateAttemptId": "run-evid-003:candidate:1",
+            "candidateLink": { "source": "fallback_runner", "phase": "before_dispatch" },
+            "runId": "run-evid-003",
+            "provider": "primary",
+            "model": "model-a",
+            "result": "error",
+            "usage": { "input": 120, "output": 0, "total": 120 }
+          },
+          {
+            "modelCallId": "run-evid-003:model:1",
+            "candidateAttemptId": "run-evid-003:candidate:2",
+            "candidateLink": { "source": "fallback_runner", "phase": "before_dispatch" },
+            "runId": "run-evid-003",
+            "provider": "fallback",
+            "model": "model-b",
+            "result": "completed",
+            "usage": { "input": 140, "output": 42, "total": 182 }
+          }
+        ],
+        "runUsage": { "input": 260, "output": 42, "total": 302, "reconciles": true }
+      },
+      "expected": { "status": "accepted", "failureCodes": [] }
+    },
+    {
+      "id": "generation-fenced-before-dispatch",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "model.candidate_attempts",
+        "runId": "run-evid-003-fenced",
+        "result": "blocked",
+        "attempts": [
+          {
+            "candidateAttemptId": "run-evid-003-fenced:candidate:1",
+            "runId": "run-evid-003-fenced",
+            "ordinal": 1,
+            "provider": "primary",
+            "model": "model-a",
+            "authProfileRef": "hmac-sha256:v1:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "preparedRuntimeGeneration": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "result": "blocked",
+            "reason": "prepared_runtime_generation_changed",
+            "modelCallIds": [],
+            "usage": null
+          }
+        ],
+        "modelCalls": [],
+        "runUsage": { "input": 0, "output": 0, "total": 0, "reconciles": true }
+      },
+      "expected": { "status": "accepted", "failureCodes": [] }
+    },
+    {
+      "id": "reconstructed-and-misreported",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "model.candidate_attempts",
+        "runId": "run-evid-003-invalid",
+        "result": "completed_with_fallback",
+        "attempts": [
+          {
+            "candidateAttemptId": "run-evid-003-invalid:candidate:1",
+            "runId": "wrong-run",
+            "ordinal": 2,
+            "provider": "primary",
+            "model": "model-a",
+            "authProfileRef": "profile-secret-name",
+            "preparedRuntimeGeneration": "mutable-runtime",
+            "result": "blocked",
+            "reason": "prepared_runtime_generation_changed",
+            "modelCallIds": [],
+            "usage": { "input": 10, "total": 10 }
+          },
+          {
+            "candidateAttemptId": "run-evid-003-invalid:candidate:2",
+            "runId": "run-evid-003-invalid",
+            "ordinal": 2,
+            "provider": "primary",
+            "model": "model-a",
+            "authProfileRef": "hmac-sha256:v1:1111111111111111111111111111111111111111111111111111111111111111",
+            "preparedRuntimeGeneration": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "result": "succeeded",
+            "modelCallIds": ["missing-call"],
+            "usage": { "input": 99, "total": 99 }
+          }
+        ],
+        "modelCalls": [
+          {
+            "modelCallId": "orphan-call",
+            "candidateAttemptId": "unknown-candidate",
+            "candidateLink": { "source": "diagnostic_reconstruction", "phase": "after_completion" },
+            "runId": "run-evid-003-invalid",
+            "provider": "primary",
+            "model": "model-a",
+            "result": "completed",
+            "credential": "must-not-be-exported",
+            "usage": { "input": 20, "total": 20 }
+          }
+        ],
+        "runUsage": { "input": 20, "total": 20, "reconciles": true }
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "CandidateBindingInvalid",
+          "CandidateCallSetMismatch",
+          "CandidateLinkNotDispatchBound",
+          "CandidateUsageMismatch",
+          "CandidateOutcomeMismatch",
+          "FallbackSequenceInvalid",
+          "FencedCandidateDispatched",
+          "ModelCallParentInvalid",
+          "RunUsageMismatch",
+          "SensitivePayloadPresent"
+        ]
+      }
+    }
+  ]
+}
