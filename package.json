@@ -1945,7 +1945,8 @@
     "verify": "node scripts/verify.mjs",
     "lobster:hosting-profile-conformance": "node scripts/lobster-hosting-profile-conformance.mjs",
     "lobster:provider-attempt-usage": "node scripts/lobster-provider-attempt-usage.mjs",
-    "lobster:restart-safe-bounded-lease": "node scripts/lobster-restart-safe-bounded-lease.mjs"
+    "lobster:restart-safe-bounded-lease": "node scripts/lobster-restart-safe-bounded-lease.mjs",
+    "lobster:mixed-owner-checkpoint-copy-facts": "node scripts/lobster-mixed-owner-checkpoint-copy-facts.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

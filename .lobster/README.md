@@ -27,6 +27,14 @@ fencing, renewal or expiry, and terminal settlement. It does not replace Cron,
 worktree, child-admission, scheduling, policy, billing, or fleet owners and
 carries authority `none`.
 
+EVID-005 adds the fork-only
+`lobster.kcc.mixed-owner-checkpoint-copy-facts.v1` fixture. It proves dirty
+checkpoint refusal, compatible clean capture, and truthful per-owner copy
+settlement across complete, retained, externally controlled, and unknown
+outcomes. It adds no checkpoint implementation, copy database, retention
+policy, restore path, or cross-owner mutation authority and carries authority
+`none`.
+
 Reconstruct from a clean clone:
 
 ```text

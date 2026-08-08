@@ -80,6 +80,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.kcc.mixed-owner-checkpoint-copy-facts.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "dirty checkpoint state is refused before compatible clean capture and every known, retained, external, or unknown copy owner settles independently",
+      "structuredFailure": "dirty or incompatible admission, owner inventory mismatch, invalid retained/external/unknown settlement, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-mixed-owner-checkpoint-copy-facts.mjs",
+      "evidence": ".lobster/mixed-owner-checkpoint-copy-facts-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }
