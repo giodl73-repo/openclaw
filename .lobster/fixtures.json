@@ -120,6 +120,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.rfn.remote-node-invocation-trust.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "current pairing, connection, command policy, invocation, idempotency, ordered stream, dispatch, cancellation, and effect certainty remain correlated without treating capability as authority or local abort as remote stop",
+      "structuredFailure": "stale authority or route, invalid dispatch provenance, unordered stream, cancellation certainty overclaim, operation inventory mismatch, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-remote-node-invocation-trust.mjs",
+      "evidence": ".lobster/remote-node-invocation-trust-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

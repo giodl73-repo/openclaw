@@ -43,6 +43,15 @@ lost-acknowledgement reconciliation under one stable child operation identity.
 It adds no lifecycle coordinator, policy or legal-hold service, data owner,
 workflow database, or mutation authority and carries authority `none`.
 
+EVID-007 adds the fork-only
+`lobster.rfn.remote-node-invocation-trust.v1` fixture. It correlates current
+pairing generation, connection, command policy, invocation, idempotency,
+ordered progress, dispatch, cancellation, and owner-native effect certainty.
+It keeps capability advertisement non-authorizing and a post-dispatch local
+abort explicitly unknown at the remote effect boundary. It adds no node
+runtime, command policy, pairing owner, transport, audit service, or invocation
+authority and carries authority `none`.
+
 Reconstruct from a clean clone:
 
 ```text

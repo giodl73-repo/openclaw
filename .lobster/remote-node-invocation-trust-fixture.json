@@ -1,0 +1,389 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.remote-node-invocation-trust.v1",
+  "cases": [
+    {
+      "id": "completed-pairing-blocked-and-abort-unknown",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "node.invocation_trust",
+        "inventory": {
+          "nodeRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "command": "fixture.noop",
+          "policyRefs": [
+            "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+            "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "expectedOperationIds": [
+            "hmac-sha256:v1:4111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:6111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "operations": [
+          {
+            "operationId": "hmac-sha256:v1:4111111111111111111111111111111111111111111111111111111111111111",
+            "route": "node_transport",
+            "command": "fixture.noop",
+            "capabilityAdvertised": true,
+            "authority": {
+              "decision": "allow",
+              "policyRef": "sha256:2111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "subject": {
+              "nodeRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "pairingGeneration": "sha256:7111111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:8111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "current": {
+              "pairingGeneration": "sha256:7111111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:8111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "invokeRef": "sha256:9111111111111111111111111111111111111111111111111111111111111111",
+              "idempotencyRef": "hmac-sha256:v1:a111111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "stream": {
+              "progress": [
+                {
+                  "sequence": 0,
+                  "evidenceRef": "sha256:b111111111111111111111111111111111111111111111111111111111111111"
+                },
+                {
+                  "sequence": 1,
+                  "evidenceRef": "sha256:c111111111111111111111111111111111111111111111111111111111111111"
+                }
+              ],
+              "terminalSettled": true
+            },
+            "cancellation": {
+              "requested": false,
+              "acknowledged": false
+            },
+            "result": "completed",
+            "effect": {
+              "result": "completed",
+              "certainty": "confirmed",
+              "evidenceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "route": "node_transport",
+            "command": "fixture.noop",
+            "capabilityAdvertised": true,
+            "authority": {
+              "decision": "allow",
+              "policyRef": "sha256:2111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "subject": {
+              "nodeRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "pairingGeneration": "sha256:7111111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:8111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "current": {
+              "pairingGeneration": "sha256:e111111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:f111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "invokeRef": null,
+              "idempotencyRef": "hmac-sha256:v1:1211111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": false
+            },
+            "stream": {
+              "progress": [],
+              "terminalSettled": true
+            },
+            "cancellation": {
+              "requested": false,
+              "acknowledged": false
+            },
+            "result": "blocked",
+            "reason": "PAIRING_CHANGED",
+            "effect": {
+              "result": "not_started",
+              "certainty": "confirmed"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:6111111111111111111111111111111111111111111111111111111111111111",
+            "route": "node_transport",
+            "command": "fixture.noop",
+            "capabilityAdvertised": true,
+            "authority": {
+              "decision": "allow",
+              "policyRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "subject": {
+              "nodeRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "pairingGeneration": "sha256:e111111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:f111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "current": {
+              "pairingGeneration": "sha256:e111111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:f111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "invokeRef": "sha256:2211111111111111111111111111111111111111111111111111111111111111",
+              "idempotencyRef": "hmac-sha256:v1:3211111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "stream": {
+              "progress": [],
+              "terminalSettled": true
+            },
+            "cancellation": {
+              "requested": true,
+              "acknowledged": false
+            },
+            "result": "cancelled",
+            "reason": "ABORTED",
+            "effect": {
+              "result": "unknown",
+              "certainty": "unknown"
+            }
+          }
+        ],
+        "final": {
+          "reportedOperationIds": [
+            "hmac-sha256:v1:4111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:6111111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "counts": {
+            "completed": 1,
+            "blocked": 1,
+            "cancelled": 1,
+            "unknownEffects": 1
+          },
+          "status": "partial",
+          "assuranceComplete": false
+        }
+      },
+      "expected": {
+        "status": "accepted",
+        "failureCodes": []
+      }
+    },
+    {
+      "id": "authority-route-stream-and-cancellation-overclaim-rejected",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "node.invocation_trust",
+        "inventory": {
+          "nodeRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+          "command": "fixture.noop",
+          "policyRefs": [
+            "sha256:2311111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "expectedOperationIds": [
+            "hmac-sha256:v1:3311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:4311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:5311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:6311111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "operations": [
+          {
+            "operationId": "hmac-sha256:v1:3311111111111111111111111111111111111111111111111111111111111111",
+            "route": "node_transport",
+            "command": "fixture.noop",
+            "capabilityAdvertised": true,
+            "authority": {
+              "decision": "allow",
+              "policyRef": "sha256:7311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "subject": {
+              "nodeRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+              "pairingGeneration": "sha256:8311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:9311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "current": {
+              "pairingGeneration": "sha256:a311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:b311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "invokeRef": "sha256:c311111111111111111111111111111111111111111111111111111111111111",
+              "idempotencyRef": "hmac-sha256:v1:d311111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "stream": {
+              "progress": [
+                {
+                  "sequence": 0,
+                  "evidenceRef": "sha256:e311111111111111111111111111111111111111111111111111111111111111"
+                },
+                {
+                  "sequence": 2,
+                  "evidenceRef": "sha256:f311111111111111111111111111111111111111111111111111111111111111"
+                }
+              ],
+              "terminalSettled": true
+            },
+            "cancellation": {
+              "requested": false,
+              "acknowledged": false
+            },
+            "result": "completed",
+            "effect": {
+              "result": "completed",
+              "certainty": "confirmed",
+              "evidenceRef": "sha256:1411111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:4311111111111111111111111111111111111111111111111111111111111111",
+            "route": "node_transport",
+            "command": "fixture.noop",
+            "capabilityAdvertised": true,
+            "authority": {
+              "decision": "allow",
+              "policyRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "subject": {
+              "nodeRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+              "pairingGeneration": "sha256:8311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:9311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "current": {
+              "pairingGeneration": "sha256:a311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:b311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "invokeRef": "sha256:2411111111111111111111111111111111111111111111111111111111111111",
+              "idempotencyRef": "hmac-sha256:v1:3411111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "stream": {
+              "progress": [],
+              "terminalSettled": true
+            },
+            "cancellation": {
+              "requested": false,
+              "acknowledged": false
+            },
+            "result": "blocked",
+            "reason": "PAIRING_CHANGED",
+            "effect": {
+              "result": "not_started",
+              "certainty": "confirmed"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:5311111111111111111111111111111111111111111111111111111111111111",
+            "route": "node_transport",
+            "command": "fixture.noop",
+            "capabilityAdvertised": true,
+            "authority": {
+              "decision": "allow",
+              "policyRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "subject": {
+              "nodeRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+              "pairingGeneration": "sha256:a311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:b311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "current": {
+              "pairingGeneration": "sha256:a311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:b311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "invokeRef": "sha256:4411111111111111111111111111111111111111111111111111111111111111",
+              "idempotencyRef": "hmac-sha256:v1:5411111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "stream": {
+              "progress": [],
+              "terminalSettled": true
+            },
+            "cancellation": {
+              "requested": true,
+              "acknowledged": false
+            },
+            "result": "cancelled",
+            "reason": "ABORTED",
+            "effect": {
+              "result": "stopped",
+              "certainty": "confirmed",
+              "evidenceRef": "sha256:6411111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:7411111111111111111111111111111111111111111111111111111111111111",
+            "route": "node_transport",
+            "command": "fixture.noop",
+            "capabilityAdvertised": true,
+            "authority": {
+              "decision": "allow",
+              "policyRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "subject": {
+              "nodeRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+              "pairingGeneration": "sha256:a311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:b311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "current": {
+              "pairingGeneration": "sha256:a311111111111111111111111111111111111111111111111111111111111111",
+              "connectionRef": "sha256:b311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "invokeRef": null,
+              "idempotencyRef": "hmac-sha256:v1:8411111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": false
+            },
+            "stream": {
+              "progress": [],
+              "terminalSettled": true
+            },
+            "cancellation": {
+              "requested": false,
+              "acknowledged": false
+            },
+            "result": "blocked",
+            "reason": "POLICY_DENIED",
+            "effect": {
+              "result": "not_started",
+              "certainty": "confirmed"
+            },
+            "payload": {
+              "secret": "sensitive"
+            }
+          }
+        ],
+        "final": {
+          "reportedOperationIds": [
+            "hmac-sha256:v1:3311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:4311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:5311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:7411111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "counts": {
+            "completed": 2,
+            "blocked": 1,
+            "cancelled": 1,
+            "unknownEffects": 0
+          },
+          "status": "complete",
+          "assuranceComplete": true
+        }
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "AssuranceOverclaimed",
+          "AuthorityInvalid",
+          "CancellationCertaintyOverclaimed",
+          "DispatchProvenanceInvalid",
+          "EffectCertaintyInvalid",
+          "FinalStateMismatch",
+          "OperationInvalid",
+          "OperationInventoryMismatch",
+          "SensitivePayloadPresent",
+          "StreamInvalid",
+          "SubjectBindingMismatch"
+        ]
+      }
+    }
+  ]
+}
