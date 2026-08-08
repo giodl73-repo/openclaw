@@ -43,39 +43,39 @@ describe("release activation evidence", () => {
   it("rejects sensitive payload fields", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    attempts[0].token = "do-not-carry-secrets";
+    attempts[0]!.token = "do-not-carry-secrets";
     expect(failureCodes(fixture)).toContain("SensitivePayloadPresent");
   });
 
   it("rejects mutable or uninventoried release identity", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const release = attempts[0].release as Record<string, Record<string, unknown>>;
-    release.target.artifactDigest = "latest";
+    const release = attempts[0]!.release as Record<string, Record<string, unknown>>;
+    release.target!.artifactDigest = "latest";
     expect(failureCodes(fixture)).toContain("ReleaseIdentityInvalid");
   });
 
   it("rejects a target that aliases the prior artifact", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const release = attempts[0].release as Record<string, Record<string, unknown>>;
-    release.target.version = release.prior.version;
-    release.target.artifactDigest = release.prior.artifactDigest;
+    const release = attempts[0]!.release as Record<string, Record<string, unknown>>;
+    release.target!.version = release.prior!.version;
+    release.target!.artifactDigest = release.prior!.artifactDigest;
     expect(failureCodes(fixture)).toContain("ReleaseIdentityInvalid");
   });
 
   it("rejects ready results with incompatible state", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const compatibility = attempts[0].compatibility as Record<string, Record<string, unknown>>;
-    compatibility.state.result = "newer_than_target";
+    const compatibility = attempts[0]!.compatibility as Record<string, Record<string, unknown>>;
+    compatibility.state!.result = "newer_than_target";
     expect(failureCodes(fixture)).toContain("CompatibilityInvalid");
   });
 
   it("rejects schema refusal after package mutation", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const mutation = attempts[1].mutation as Record<string, unknown>;
+    const mutation = attempts[1]!.mutation as Record<string, unknown>;
     mutation.package = "activated";
     expect(failureCodes(fixture)).toContain("MutationBoundaryInvalid");
   });
@@ -83,7 +83,7 @@ describe("release activation evidence", () => {
   it("rejects reordered activation phases", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const phases = attempts[0].phases as unknown[];
+    const phases = attempts[0]!.phases as unknown[];
     [phases[0], phases[1]] = [phases[1], phases[0]];
     expect(failureCodes(fixture)).toContain("PhaseSequenceInvalid");
   });
@@ -91,24 +91,24 @@ describe("release activation evidence", () => {
   it("rejects reused phase evidence", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const phases = attempts[0].phases as Array<Record<string, unknown>>;
-    phases[1].evidenceRef = phases[0].evidenceRef;
+    const phases = attempts[0]!.phases as Array<Record<string, unknown>>;
+    phases[1]!.evidenceRef = phases[0]!.evidenceRef;
     expect(failureCodes(fixture)).toContain("PhaseSequenceInvalid");
   });
 
   it("rejects readiness bound to the prior artifact", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const release = attempts[0].release as Record<string, Record<string, unknown>>;
-    const active = attempts[0].active as Record<string, unknown>;
-    active.artifactDigest = release.prior.artifactDigest;
+    const release = attempts[0]!.release as Record<string, Record<string, unknown>>;
+    const active = attempts[0]!.active as Record<string, unknown>;
+    active.artifactDigest = release.prior!.artifactDigest;
     expect(failureCodes(fixture)).toContain("ActivationBindingMismatch");
   });
 
   it("rejects aggregate rollback in place of per-layer certainty", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    const recovery = attempts[1].recovery as Record<string, unknown>;
+    const recovery = attempts[1]!.recovery as Record<string, unknown>;
     delete recovery.code;
     delete recovery.state;
     recovery.result = "rolled_back";
@@ -125,7 +125,7 @@ describe("release activation evidence", () => {
   it("rejects references in the wrong inventory class", async () => {
     const fixture = await loadFixture();
     const inventory = fixture.inventory as Record<string, unknown[]>;
-    inventory.planRefs[0] =
+    inventory.planRefs![0] =
       "attempt-sha256:1111111111111111111111111111111111111111111111111111111111111111";
     expect(failureCodes(fixture)).toContain("AttemptInventoryMismatch");
   });
@@ -133,7 +133,7 @@ describe("release activation evidence", () => {
   it("rejects non-array phases without throwing", async () => {
     const fixture = await loadFixture();
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
-    attempts[0].phases = {};
+    attempts[0]!.phases = {};
     expect(() => failureCodes(fixture)).not.toThrow();
     expect(failureCodes(fixture)).toContain("PhaseSequenceInvalid");
   });
@@ -150,8 +150,8 @@ describe("release activation evidence", () => {
     const attempts = fixture.attempts as Array<Record<string, unknown>>;
     attempts.pop();
     const inventory = fixture.inventory as Record<string, unknown[]>;
-    inventory.planRefs.pop();
-    inventory.expectedAttemptIds.pop();
+    inventory.planRefs!.pop();
+    inventory.expectedAttemptIds!.pop();
     const finalState = fixture.finalState as Record<string, unknown>;
     finalState.blockedAttemptCount = 0;
     expect(failureCodes(fixture)).toContain("AssuranceOverclaimed");
