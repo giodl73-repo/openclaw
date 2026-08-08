@@ -160,6 +160,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.rla.release-activation.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "one exact compatible candidate completes ordered owner phases and reaches candidate-bound readiness while one newer-schema target is refused before package, state, or service mutation",
+      "structuredFailure": "mutable or uninventoried release identity, invalid compatibility, mutation before refusal, phase-order drift, readiness identity mismatch, aggregate recovery certainty, attempt inventory mismatch, assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-release-activation.mjs",
+      "evidence": ".lobster/release-activation-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

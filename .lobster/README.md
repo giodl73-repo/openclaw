@@ -62,6 +62,14 @@ It adds no action bus, policy or approval owner, generic retry policy, audit
 service, external-effect owner, or execution authority and carries authority
 `none`.
 
+EVID-009 adds the fork-only `lobster.rla.release-activation.v1` fixture. It
+composes existing updater-owner facts to prove one exact compatible candidate
+completes ordered package, Doctor, plugin, service, and readiness phases, while
+one newer-schema target is refused before package, state, or service mutation.
+Release proof stays referenced by immutable identity, readiness stays bound to
+the candidate service incarnation, code and state recovery certainty remain
+separate, and authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text

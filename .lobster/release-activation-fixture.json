@@ -1,0 +1,180 @@
+{
+  "contractVersion": 1,
+  "authority": "none",
+  "fixtureId": "release-activation-evid-009",
+  "inventory": {
+    "installationRef": "installation-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "planRefs": [
+      "plan-sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "plan-sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    ],
+    "releaseProofRefs": [
+      "release-proof-sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "release-proof-sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "release-proof-sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "evidenceRefs": [
+      "evidence-sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "evidence-sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "evidence-sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "evidence-sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "evidence-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "evidence-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "expectedAttemptIds": [
+      "attempt-sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "attempt-sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    ]
+  },
+  "attempts": [
+    {
+      "attemptId": "attempt-sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "subject": {
+        "owner": "openclaw-local-updater",
+        "installationRef": "installation-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "planRef": "plan-sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "release": {
+        "prior": {
+          "version": "2026.7.1",
+          "artifactDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "proofRef": "release-proof-sha256:3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        "target": {
+          "version": "2026.8.1",
+          "artifactDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "proofRef": "release-proof-sha256:4444444444444444444444444444444444444444444444444444444444444444"
+        }
+      },
+      "compatibility": {
+        "state": {
+          "currentSchema": 6,
+          "targetSupportedSchema": 7,
+          "result": "compatible"
+        },
+        "plugins": {
+          "result": "compatible",
+          "restartDebt": "none"
+        }
+      },
+      "mutation": {
+        "package": "activated",
+        "state": "migrated",
+        "service": "restarted"
+      },
+      "phases": [
+        {
+          "owner": "package",
+          "phase": "activate",
+          "result": "complete",
+          "evidenceRef": "evidence-sha256:6666666666666666666666666666666666666666666666666666666666666666"
+        },
+        {
+          "owner": "doctor",
+          "phase": "migrate",
+          "result": "complete",
+          "evidenceRef": "evidence-sha256:7777777777777777777777777777777777777777777777777777777777777777"
+        },
+        {
+          "owner": "plugins",
+          "phase": "converge",
+          "result": "complete",
+          "evidenceRef": "evidence-sha256:8888888888888888888888888888888888888888888888888888888888888888"
+        },
+        {
+          "owner": "service",
+          "phase": "restart",
+          "result": "complete",
+          "evidenceRef": "evidence-sha256:9999999999999999999999999999999999999999999999999999999999999999"
+        },
+        {
+          "owner": "readiness",
+          "phase": "prove",
+          "result": "ready",
+          "evidenceRef": "evidence-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "active": {
+        "version": "2026.8.1",
+        "artifactDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "serviceIncarnationRef": "service-incarnation-sha256:1212121212121212121212121212121212121212121212121212121212121212",
+        "readinessGenerationRef": "readiness-generation-sha256:1313131313131313131313131313131313131313131313131313131313131313"
+      },
+      "recovery": {
+        "code": "not_required",
+        "state": "not_required"
+      },
+      "result": "ready",
+      "certainty": "confirmed"
+    },
+    {
+      "attemptId": "attempt-sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "subject": {
+        "owner": "openclaw-local-updater",
+        "installationRef": "installation-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "planRef": "plan-sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "release": {
+        "prior": {
+          "version": "2026.8.1",
+          "artifactDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "proofRef": "release-proof-sha256:4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        "target": {
+          "version": "2026.7.4",
+          "artifactDigest": "sha256:1414141414141414141414141414141414141414141414141414141414141414",
+          "proofRef": "release-proof-sha256:5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      "compatibility": {
+        "state": {
+          "currentSchema": 7,
+          "targetSupportedSchema": 6,
+          "result": "newer_than_target"
+        },
+        "plugins": {
+          "result": "not_evaluated",
+          "restartDebt": "unknown"
+        }
+      },
+      "mutation": {
+        "package": "not_started",
+        "state": "not_changed",
+        "service": "not_stopped"
+      },
+      "phases": [
+        {
+          "owner": "compatibility",
+          "phase": "preflight",
+          "result": "blocked",
+          "evidenceRef": "evidence-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "active": {
+        "version": "2026.8.1",
+        "artifactDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "serviceIncarnationRef": "service-incarnation-sha256:1212121212121212121212121212121212121212121212121212121212121212",
+        "readinessGenerationRef": "readiness-generation-sha256:1313131313131313131313131313131313131313131313131313131313131313"
+      },
+      "recovery": {
+        "code": "not_required",
+        "state": "not_required"
+      },
+      "result": "blocked",
+      "reason": "STATE_SCHEMA_NEWER_THAN_TARGET",
+      "certainty": "confirmed"
+    }
+  ],
+  "finalState": {
+    "readyAttemptCount": 1,
+    "blockedAttemptCount": 1,
+    "unknownAttemptCount": 0,
+    "aggregateAssurance": "complete"
+  },
+  "contract": {
+    "name": "release-activation",
+    "version": "1.0.0",
+    "authority": "none",
+    "digest": "hmac-sha256:1515151515151515151515151515151515151515151515151515151515151515"
+  }
+}
