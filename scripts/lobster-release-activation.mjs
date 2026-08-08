@@ -7,8 +7,13 @@ const CONTRACT_NAME = "release-activation";
 const CONTRACT_SEMVER = "1.0.0";
 const AUTHORITY = "none";
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
-const REF_RE =
-  /^(?:installation|plan|release-proof|evidence|attempt|service-incarnation|readiness-generation)-sha256:[0-9a-f]{64}$/;
+const INSTALLATION_REF_RE = /^installation-sha256:[0-9a-f]{64}$/;
+const PLAN_REF_RE = /^plan-sha256:[0-9a-f]{64}$/;
+const RELEASE_PROOF_REF_RE = /^release-proof-sha256:[0-9a-f]{64}$/;
+const EVIDENCE_REF_RE = /^evidence-sha256:[0-9a-f]{64}$/;
+const ATTEMPT_REF_RE = /^attempt-sha256:[0-9a-f]{64}$/;
+const SERVICE_INCARNATION_REF_RE = /^service-incarnation-sha256:[0-9a-f]{64}$/;
+const READINESS_GENERATION_REF_RE = /^readiness-generation-sha256:[0-9a-f]{64}$/;
 const CONTRACT_DIGEST_RE = /^hmac-sha256:[0-9a-f]{64}$/;
 const VERSION_RE = /^\d{4}\.\d{1,2}\.\d{1,2}(?:-[0-9A-Za-z.-]+)?$/;
 const SENSITIVE_KEY_RE =
@@ -122,7 +127,7 @@ function validateReleaseIdentity(identity, location, proofRefs, failures) {
   const valid =
     VERSION_RE.test(identity.version ?? "") &&
     DIGEST_RE.test(identity.artifactDigest ?? "") &&
-    REF_RE.test(identity.proofRef ?? "") &&
+    RELEASE_PROOF_REF_RE.test(identity.proofRef ?? "") &&
     proofRefs.has(identity.proofRef);
   if (!valid) {
     addFailure(
@@ -141,7 +146,7 @@ function validateCommonAttemptShape(attempt, index, inventory, failures) {
   }
   let valid = true;
   if (
-    !REF_RE.test(attempt.attemptId ?? "") ||
+    !ATTEMPT_REF_RE.test(attempt.attemptId ?? "") ||
     !inventory.expectedAttemptIds.has(attempt.attemptId)
   ) {
     addFailure(
@@ -156,6 +161,7 @@ function validateCommonAttemptShape(attempt, index, inventory, failures) {
   } else if (
     attempt.subject.owner !== "openclaw-local-updater" ||
     attempt.subject.installationRef !== inventory.installationRef ||
+    !PLAN_REF_RE.test(attempt.subject.planRef ?? "") ||
     !inventory.planRefs.has(attempt.subject.planRef)
   ) {
     addFailure(
@@ -303,8 +309,8 @@ function validateReadyAttempt(attempt, index, failures) {
   if (
     attempt.active?.version !== attempt.release?.target?.version ||
     attempt.active?.artifactDigest !== attempt.release?.target?.artifactDigest ||
-    !REF_RE.test(attempt.active?.serviceIncarnationRef ?? "") ||
-    !REF_RE.test(attempt.active?.readinessGenerationRef ?? "")
+    !SERVICE_INCARNATION_REF_RE.test(attempt.active?.serviceIncarnationRef ?? "") ||
+    !READINESS_GENERATION_REF_RE.test(attempt.active?.readinessGenerationRef ?? "")
   ) {
     addFailure(
       failures,
@@ -370,8 +376,8 @@ function validateBlockedAttempt(attempt, index, failures) {
   if (
     attempt.active?.version !== attempt.release?.prior?.version ||
     attempt.active?.artifactDigest !== attempt.release?.prior?.artifactDigest ||
-    !REF_RE.test(attempt.active?.serviceIncarnationRef ?? "") ||
-    !REF_RE.test(attempt.active?.readinessGenerationRef ?? "")
+    !SERVICE_INCARNATION_REF_RE.test(attempt.active?.serviceIncarnationRef ?? "") ||
+    !READINESS_GENERATION_REF_RE.test(attempt.active?.readinessGenerationRef ?? "")
   ) {
     addFailure(
       failures,
@@ -424,11 +430,11 @@ export function validateReleaseActivationFixture(input) {
     expectedAttemptIds: new Set(input.inventory?.expectedAttemptIds ?? []),
   };
   if (
-    !REF_RE.test(inventory.installationRef ?? "") ||
-    !isUniqueStringArray(input.inventory?.planRefs, REF_RE) ||
-    !isUniqueStringArray(input.inventory?.releaseProofRefs, REF_RE) ||
-    !isUniqueStringArray(input.inventory?.evidenceRefs, REF_RE) ||
-    !isUniqueStringArray(input.inventory?.expectedAttemptIds, REF_RE)
+    !INSTALLATION_REF_RE.test(inventory.installationRef ?? "") ||
+    !isUniqueStringArray(input.inventory?.planRefs, PLAN_REF_RE) ||
+    !isUniqueStringArray(input.inventory?.releaseProofRefs, RELEASE_PROOF_REF_RE) ||
+    !isUniqueStringArray(input.inventory?.evidenceRefs, EVIDENCE_REF_RE) ||
+    !isUniqueStringArray(input.inventory?.expectedAttemptIds, ATTEMPT_REF_RE)
   ) {
     addFailure(
       failures,
@@ -461,7 +467,7 @@ export function validateReleaseActivationFixture(input) {
       );
     }
     seenPlanRefs.add(attempt?.subject?.planRef);
-    for (const phase of attempt?.phases ?? []) {
+    for (const phase of Array.isArray(attempt?.phases) ? attempt.phases : []) {
       if (seenEvidenceRefs.has(phase?.evidenceRef)) {
         addFailure(
           failures,

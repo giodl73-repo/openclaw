@@ -122,6 +122,22 @@ describe("release activation evidence", () => {
     expect(failureCodes(fixture)).toContain("AttemptInventoryMismatch");
   });
 
+  it("rejects references in the wrong inventory class", async () => {
+    const fixture = await loadFixture();
+    const inventory = fixture.inventory as Record<string, unknown[]>;
+    inventory.planRefs[0] =
+      "attempt-sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    expect(failureCodes(fixture)).toContain("AttemptInventoryMismatch");
+  });
+
+  it("rejects non-array phases without throwing", async () => {
+    const fixture = await loadFixture();
+    const attempts = fixture.attempts as Array<Record<string, unknown>>;
+    attempts[0].phases = {};
+    expect(() => failureCodes(fixture)).not.toThrow();
+    expect(failureCodes(fixture)).toContain("PhaseSequenceInvalid");
+  });
+
   it("rejects final-state count drift", async () => {
     const fixture = await loadFixture();
     const finalState = fixture.finalState as Record<string, unknown>;
