@@ -56,7 +56,7 @@ describe("Lobster Wave 0 contracts", () => {
       contractCount: 9,
       sharedResultCount: 12,
       relationshipReferenceCount: 17,
-      fixtureCount: 4,
+      fixtureCount: 5,
       ledgerEntryCount: 20,
     });
     expect(first.contractSetDigest).toMatch(/^[0-9a-f]{64}$/);

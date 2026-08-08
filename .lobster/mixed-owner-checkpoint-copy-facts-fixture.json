@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.kcc.mixed-owner-checkpoint-copy-facts.v1",
+  "cases": [
+    {
+      "id": "dirty-refused-clean-accepted-copy-facts-partial",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "knowledge.checkpoint_copy_facts",
+        "checkpointAttempts": [
+          {
+            "sequence": 1,
+            "attemptId": "checkpoint-dirty",
+            "requiredOwnerIds": [
+              "openclaw-global-state",
+              "openclaw-agent-state:main"
+            ],
+            "ownerFacts": [
+              {
+                "ownerId": "openclaw-global-state",
+                "sourceGeneration": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                "manifestRef": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+                "artifactRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111",
+                "compatibility": "compatible",
+                "consistency": "clean",
+                "outcome": "included"
+              },
+              {
+                "ownerId": "openclaw-agent-state:main",
+                "sourceGeneration": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+                "manifestRef": "sha256:5111111111111111111111111111111111111111111111111111111111111111",
+                "artifactRef": "sha256:6111111111111111111111111111111111111111111111111111111111111111",
+                "compatibility": "compatible",
+                "consistency": "dirty",
+                "outcome": "refused",
+                "reason": "dirty_state"
+              }
+            ],
+            "outcome": "refused",
+            "reason": "dirty_owner"
+          },
+          {
+            "sequence": 2,
+            "attemptId": "checkpoint-clean",
+            "requiredOwnerIds": [
+              "openclaw-global-state",
+              "openclaw-agent-state:main"
+            ],
+            "ownerFacts": [
+              {
+                "ownerId": "openclaw-global-state",
+                "sourceGeneration": "sha256:7111111111111111111111111111111111111111111111111111111111111111",
+                "manifestRef": "sha256:8111111111111111111111111111111111111111111111111111111111111111",
+                "artifactRef": "sha256:9111111111111111111111111111111111111111111111111111111111111111",
+                "compatibility": "compatible",
+                "consistency": "clean",
+                "outcome": "included"
+              },
+              {
+                "ownerId": "openclaw-agent-state:main",
+                "sourceGeneration": "sha256:a111111111111111111111111111111111111111111111111111111111111111",
+                "manifestRef": "sha256:b111111111111111111111111111111111111111111111111111111111111111",
+                "artifactRef": "sha256:c111111111111111111111111111111111111111111111111111111111111111",
+                "compatibility": "compatible",
+                "consistency": "clean",
+                "outcome": "included"
+              }
+            ],
+            "outcome": "accepted"
+          }
+        ],
+        "copyInventory": {
+          "sourceGeneration": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+          "expectedOwnerIds": [
+            "session-canonical",
+            "session-transcript-index",
+            "qmd-session-projection",
+            "workspace-session-export",
+            "session-delete-archive",
+            "backup-archive",
+            "provider-thread",
+            "delegated-backend"
+          ]
+        },
+        "copySettlements": [
+          {
+            "ownerId": "session-canonical",
+            "copyId": "hmac-sha256:v1:1111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "canonical",
+            "control": "local",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e111111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "complete"
+          },
+          {
+            "ownerId": "session-transcript-index",
+            "copyId": "hmac-sha256:v1:2111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "index",
+            "control": "local",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e211111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "complete"
+          },
+          {
+            "ownerId": "qmd-session-projection",
+            "copyId": "hmac-sha256:v1:3111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "derived",
+            "control": "local",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e311111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "complete"
+          },
+          {
+            "ownerId": "workspace-session-export",
+            "copyId": "hmac-sha256:v1:4111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "export",
+            "control": "local",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e411111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "retained",
+            "retentionRef": "sha256:f411111111111111111111111111111111111111111111111111111111111111",
+            "expiresAt": 2000
+          },
+          {
+            "ownerId": "session-delete-archive",
+            "copyId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "archive",
+            "control": "local",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e511111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "retained",
+            "retentionRef": "sha256:f511111111111111111111111111111111111111111111111111111111111111",
+            "expiresAt": 3000
+          },
+          {
+            "ownerId": "backup-archive",
+            "copyId": "hmac-sha256:v1:6111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "backup",
+            "control": "local",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e611111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "retained",
+            "retentionRef": "sha256:f611111111111111111111111111111111111111111111111111111111111111",
+            "expiresAt": 4000
+          },
+          {
+            "ownerId": "provider-thread",
+            "copyId": "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "external",
+            "control": "external",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e711111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "externally_controlled"
+          },
+          {
+            "ownerId": "delegated-backend",
+            "copyId": "hmac-sha256:v1:8111111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "delegated",
+            "control": "unknown",
+            "sourceRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:e811111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "unknown"
+          }
+        ],
+        "final": {
+          "acceptedCheckpointId": "checkpoint-clean",
+          "copyStatus": "partial",
+          "assuranceComplete": false,
+          "reportedOwnerIds": [
+            "session-canonical",
+            "session-transcript-index",
+            "qmd-session-projection",
+            "workspace-session-export",
+            "session-delete-archive",
+            "backup-archive",
+            "provider-thread",
+            "delegated-backend"
+          ],
+          "counts": {
+            "complete": 3,
+            "retained": 3,
+            "externallyControlled": 1,
+            "unknown": 1
+          },
+          "reconciles": true
+        }
+      },
+      "expected": {
+        "status": "accepted",
+        "failureCodes": []
+      }
+    },
+    {
+      "id": "dirty-incompatible-and-copy-overclaim-rejected",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "knowledge.checkpoint_copy_facts",
+        "checkpointAttempts": [
+          {
+            "sequence": 1,
+            "attemptId": "checkpoint-overclaimed",
+            "requiredOwnerIds": [
+              "openclaw-global-state",
+              "openclaw-agent-state:main",
+              "missing-owner"
+            ],
+            "ownerFacts": [
+              {
+                "ownerId": "openclaw-global-state",
+                "sourceGeneration": "sha256:1211111111111111111111111111111111111111111111111111111111111111",
+                "manifestRef": "sha256:2211111111111111111111111111111111111111111111111111111111111111",
+                "artifactRef": "sha256:3211111111111111111111111111111111111111111111111111111111111111",
+                "compatibility": "compatible",
+                "consistency": "dirty",
+                "outcome": "included"
+              },
+              {
+                "ownerId": "openclaw-agent-state:main",
+                "sourceGeneration": "sha256:4211111111111111111111111111111111111111111111111111111111111111",
+                "manifestRef": "sha256:5211111111111111111111111111111111111111111111111111111111111111",
+                "artifactRef": "sha256:6211111111111111111111111111111111111111111111111111111111111111",
+                "compatibility": "incompatible",
+                "consistency": "clean",
+                "outcome": "included"
+              }
+            ],
+            "outcome": "accepted"
+          }
+        ],
+        "copyInventory": {
+          "sourceGeneration": "sha256:7211111111111111111111111111111111111111111111111111111111111111",
+          "expectedOwnerIds": [
+            "session-delete-archive",
+            "provider-thread",
+            "delegated-backend",
+            "missing-copy-owner"
+          ]
+        },
+        "copySettlements": [
+          {
+            "ownerId": "session-delete-archive",
+            "copyId": "hmac-sha256:v1:1211111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "archive",
+            "control": "local",
+            "sourceRef": "sha256:7211111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:8211111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "retained",
+            "path": "sensitive/session.jsonl"
+          },
+          {
+            "ownerId": "provider-thread",
+            "copyId": "hmac-sha256:v1:2211111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "external",
+            "control": "external",
+            "sourceRef": "sha256:7211111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:9211111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "complete"
+          },
+          {
+            "ownerId": "delegated-backend",
+            "copyId": "hmac-sha256:v1:3211111111111111111111111111111111111111111111111111111111111111",
+            "copyClass": "delegated",
+            "control": "unknown",
+            "sourceRef": "sha256:7211111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:a211111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "complete"
+          }
+        ],
+        "final": {
+          "acceptedCheckpointId": "checkpoint-overclaimed",
+          "copyStatus": "complete",
+          "assuranceComplete": true,
+          "reportedOwnerIds": [
+            "session-delete-archive",
+            "provider-thread",
+            "delegated-backend",
+            "missing-copy-owner"
+          ],
+          "counts": {
+            "complete": 3,
+            "retained": 0,
+            "externallyControlled": 0,
+            "unknown": 0
+          },
+          "reconciles": true
+        }
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "AssuranceOverclaimed",
+          "CheckpointInventoryMismatch",
+          "CompatibleCheckpointMissing",
+          "CopyInventoryMismatch",
+          "CopyOutcomeInvalid",
+          "CopySettlementInvalid",
+          "DirtyCheckpointAdmitted",
+          "DirtyRefusalMissing",
+          "FinalStateMismatch",
+          "IncompatibleCheckpointAdmitted",
+          "SensitivePayloadPresent"
+        ]
+      }
+    }
+  ]
+}
