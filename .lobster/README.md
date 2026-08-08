@@ -20,6 +20,13 @@ proves that fallback candidate identity must parent existing model-call facts
 before dispatch, while preserving the current run usage accumulator. It adds no
 provider, billing, budget, or runtime authority.
 
+EVID-004 adds the fork-only `lobster.dgr.restart-safe-bounded-lease.v1`
+fixture. It reuses the host-owned state lease as the capacity-one oracle and
+proves exhaustion, restart recovery, lost-acknowledgement identity, stale-holder
+fencing, renewal or expiry, and terminal settlement. It does not replace Cron,
+worktree, child-admission, scheduling, policy, billing, or fleet owners and
+carries authority `none`.
+
 Reconstruct from a clean clone:
 
 ```text
