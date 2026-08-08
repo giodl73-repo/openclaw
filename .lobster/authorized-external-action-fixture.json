@@ -1,0 +1,420 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.exa.authorized-external-action.v1",
+  "cases": [
+    {
+      "id": "stale-policy-block-one-effect-and-replay",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "external_action.lifecycle",
+        "inventory": {
+          "requesterRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "sessionRef": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+          "toolName": "fixture.external_write",
+          "toolOwner": "fixture",
+          "surfaceRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111",
+          "targetClass": "test-ledger",
+          "currentPolicyRef": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+          "expectedOperationIds": [
+            "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:6111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "operations": [
+          {
+            "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "request": {
+              "admissionRef": "sha256:8111111111111111111111111111111111111111111111111111111111111111",
+              "requesterRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "sessionRef": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+              "runRef": "sha256:9111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "capability": {
+              "toolCallRef": "sha256:a111111111111111111111111111111111111111111111111111111111111111",
+              "toolName": "fixture.external_write",
+              "toolOwner": "fixture",
+              "surfaceRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "authority": {
+              "decision": "allow",
+              "approvalRef": "sha256:b111111111111111111111111111111111111111111111111111111111111111",
+              "approvalResolution": "allow_once",
+              "approvedPolicyRef": "sha256:c111111111111111111111111111111111111111111111111111111111111111",
+              "currentPolicyRef": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+              "approvedAt": "2026-08-08T00:00:00Z",
+              "expiresAt": "2026-08-08T00:10:00Z",
+              "observedAt": "2026-08-08T00:01:00Z"
+            },
+            "target": {
+              "class": "test-ledger",
+              "credentialRef": "sha256:d111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "idempotencyRef": "hmac-sha256:v1:e111111111111111111111111111111111111111111111111111111111111111",
+              "paramsRef": "sha256:f111111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": false
+            },
+            "result": "blocked",
+            "reason": "POLICY_GENERATION_CHANGED",
+            "runtime": {
+              "status": "blocked"
+            },
+            "effect": {
+              "effectRef": null,
+              "result": "not_started",
+              "duplicate": false,
+              "certainty": "confirmed"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:6111111111111111111111111111111111111111111111111111111111111111",
+            "request": {
+              "admissionRef": "sha256:1211111111111111111111111111111111111111111111111111111111111111",
+              "requesterRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "sessionRef": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+              "runRef": "sha256:2211111111111111111111111111111111111111111111111111111111111111"
+            },
+            "capability": {
+              "toolCallRef": "sha256:3211111111111111111111111111111111111111111111111111111111111111",
+              "toolName": "fixture.external_write",
+              "toolOwner": "fixture",
+              "surfaceRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "authority": {
+              "decision": "allow",
+              "approvalRef": "sha256:4211111111111111111111111111111111111111111111111111111111111111",
+              "approvalResolution": "allow_once",
+              "approvedPolicyRef": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+              "currentPolicyRef": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+              "approvedAt": "2026-08-08T00:02:00Z",
+              "expiresAt": "2026-08-08T00:12:00Z",
+              "observedAt": "2026-08-08T00:03:00Z"
+            },
+            "target": {
+              "class": "test-ledger",
+              "credentialRef": "sha256:5211111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "idempotencyRef": "hmac-sha256:v1:6211111111111111111111111111111111111111111111111111111111111111",
+              "paramsRef": "sha256:7211111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "result": "completed",
+            "runtime": {
+              "status": "succeeded"
+            },
+            "effect": {
+              "effectRef": "sha256:8211111111111111111111111111111111111111111111111111111111111111",
+              "result": "applied",
+              "duplicate": false,
+              "certainty": "confirmed",
+              "evidenceRef": "sha256:9211111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111",
+            "request": {
+              "admissionRef": "sha256:a211111111111111111111111111111111111111111111111111111111111111",
+              "requesterRef": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "sessionRef": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+              "runRef": "sha256:2211111111111111111111111111111111111111111111111111111111111111"
+            },
+            "capability": {
+              "toolCallRef": "sha256:b211111111111111111111111111111111111111111111111111111111111111",
+              "toolName": "fixture.external_write",
+              "toolOwner": "fixture",
+              "surfaceRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "authority": {
+              "decision": "allow",
+              "approvalRef": "sha256:4211111111111111111111111111111111111111111111111111111111111111",
+              "approvalResolution": "allow_once",
+              "approvedPolicyRef": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+              "currentPolicyRef": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+              "approvedAt": "2026-08-08T00:02:00Z",
+              "expiresAt": "2026-08-08T00:12:00Z",
+              "observedAt": "2026-08-08T00:04:00Z"
+            },
+            "target": {
+              "class": "test-ledger",
+              "credentialRef": "sha256:5211111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "idempotencyRef": "hmac-sha256:v1:6211111111111111111111111111111111111111111111111111111111111111",
+              "paramsRef": "sha256:7211111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "result": "replayed",
+            "runtime": {
+              "status": "succeeded"
+            },
+            "effect": {
+              "effectRef": "sha256:8211111111111111111111111111111111111111111111111111111111111111",
+              "result": "already_applied",
+              "duplicate": true,
+              "certainty": "confirmed",
+              "evidenceRef": "sha256:c211111111111111111111111111111111111111111111111111111111111111"
+            }
+          }
+        ],
+        "final": {
+          "reportedOperationIds": [
+            "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:6111111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "counts": {
+            "completed": 1,
+            "blocked": 1,
+            "replayed": 1,
+            "unknownEffects": 0,
+            "uniqueEffects": 1
+          },
+          "status": "complete",
+          "assuranceComplete": true
+        }
+      },
+      "expected": {
+        "status": "accepted",
+        "failureCodes": []
+      }
+    },
+    {
+      "id": "request-authority-replay-and-sensitive-overclaim-rejected",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "external_action.lifecycle",
+        "inventory": {
+          "requesterRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+          "sessionRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111",
+          "toolName": "fixture.external_write",
+          "toolOwner": "fixture",
+          "surfaceRef": "sha256:3311111111111111111111111111111111111111111111111111111111111111",
+          "targetClass": "test-ledger",
+          "currentPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+          "expectedOperationIds": [
+            "hmac-sha256:v1:5311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:6311111111111111111111111111111111111111111111111111111111111111"
+          ]
+        },
+        "operations": [
+          {
+            "operationId": "hmac-sha256:v1:5311111111111111111111111111111111111111111111111111111111111111",
+            "request": {
+              "admissionRef": "sha256:7311111111111111111111111111111111111111111111111111111111111111",
+              "requesterRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+              "sessionRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111",
+              "runRef": "sha256:8311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "capability": {
+              "toolCallRef": "sha256:9311111111111111111111111111111111111111111111111111111111111111",
+              "toolName": "fixture.external_write",
+              "toolOwner": "fixture",
+              "surfaceRef": "sha256:3311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "authority": {
+              "decision": "allow",
+              "approvalRef": "sha256:a311111111111111111111111111111111111111111111111111111111111111",
+              "approvalResolution": "allow_once",
+              "approvedPolicyRef": "sha256:b311111111111111111111111111111111111111111111111111111111111111",
+              "currentPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+              "approvedAt": "2026-08-08T00:00:00Z",
+              "expiresAt": "2026-08-08T00:10:00Z",
+              "observedAt": "2026-08-08T00:01:00Z"
+            },
+            "target": {
+              "class": "test-ledger",
+              "credentialRef": "sha256:c311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "idempotencyRef": "hmac-sha256:v1:d311111111111111111111111111111111111111111111111111111111111111",
+              "paramsRef": "sha256:e311111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "result": "blocked",
+            "reason": "POLICY_GENERATION_CHANGED",
+            "runtime": {
+              "status": "blocked"
+            },
+            "effect": {
+              "effectRef": null,
+              "result": "not_started",
+              "duplicate": false,
+              "certainty": "confirmed"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:6311111111111111111111111111111111111111111111111111111111111111",
+            "request": {
+              "admissionRef": "sha256:f311111111111111111111111111111111111111111111111111111111111111",
+              "requesterRef": "sha256:1411111111111111111111111111111111111111111111111111111111111111",
+              "sessionRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111",
+              "runRef": "sha256:2411111111111111111111111111111111111111111111111111111111111111"
+            },
+            "capability": {
+              "toolCallRef": "sha256:3411111111111111111111111111111111111111111111111111111111111111",
+              "toolName": "fixture.external_write",
+              "toolOwner": "fixture",
+              "surfaceRef": "sha256:4411111111111111111111111111111111111111111111111111111111111111"
+            },
+            "authority": {
+              "decision": "allow",
+              "approvalRef": "sha256:5411111111111111111111111111111111111111111111111111111111111111",
+              "approvalResolution": "allow_once",
+              "approvedPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+              "currentPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+              "approvedAt": "2026-08-08T00:02:00Z",
+              "expiresAt": "2026-08-08T00:03:00Z",
+              "observedAt": "2026-08-08T00:04:00Z"
+            },
+            "target": {
+              "class": "test-ledger",
+              "credentialRef": "sha256:6411111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "idempotencyRef": "hmac-sha256:v1:7411111111111111111111111111111111111111111111111111111111111111",
+              "paramsRef": "sha256:8411111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "result": "completed",
+            "runtime": {
+              "status": "succeeded"
+            },
+            "effect": {
+              "effectRef": null,
+              "result": "unknown",
+              "duplicate": false,
+              "certainty": "unknown"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:9311111111111111111111111111111111111111111111111111111111111111",
+            "request": {
+              "admissionRef": "sha256:a411111111111111111111111111111111111111111111111111111111111111",
+              "requesterRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+              "sessionRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111",
+              "runRef": "sha256:2411111111111111111111111111111111111111111111111111111111111111"
+            },
+            "capability": {
+              "toolCallRef": "sha256:b411111111111111111111111111111111111111111111111111111111111111",
+              "toolName": "fixture.external_write",
+              "toolOwner": "fixture",
+              "surfaceRef": "sha256:3311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "authority": {
+              "decision": "allow",
+              "approvalRef": "sha256:c411111111111111111111111111111111111111111111111111111111111111",
+              "approvalResolution": "allow_once",
+              "approvedPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+              "currentPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+              "approvedAt": "2026-08-08T00:02:00Z",
+              "expiresAt": "2026-08-08T00:12:00Z",
+              "observedAt": "2026-08-08T00:04:00Z"
+            },
+            "target": {
+              "class": "test-ledger",
+              "credentialRef": "sha256:6411111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "idempotencyRef": "hmac-sha256:v1:7411111111111111111111111111111111111111111111111111111111111111",
+              "paramsRef": "sha256:d411111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "result": "replayed",
+            "runtime": {
+              "status": "succeeded"
+            },
+            "effect": {
+              "effectRef": "sha256:e411111111111111111111111111111111111111111111111111111111111111",
+              "result": "already_applied",
+              "duplicate": true,
+              "certainty": "confirmed",
+              "evidenceRef": "sha256:f411111111111111111111111111111111111111111111111111111111111111"
+            }
+          },
+          {
+            "operationId": "hmac-sha256:v1:1511111111111111111111111111111111111111111111111111111111111111",
+            "request": {
+              "admissionRef": "sha256:2511111111111111111111111111111111111111111111111111111111111111",
+              "requesterRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+              "sessionRef": "sha256:2311111111111111111111111111111111111111111111111111111111111111",
+              "runRef": "sha256:3511111111111111111111111111111111111111111111111111111111111111"
+            },
+            "capability": {
+              "toolCallRef": "sha256:4511111111111111111111111111111111111111111111111111111111111111",
+              "toolName": "fixture.external_write",
+              "toolOwner": "fixture",
+              "surfaceRef": "sha256:3311111111111111111111111111111111111111111111111111111111111111"
+            },
+            "authority": {
+              "decision": "allow",
+              "approvalRef": "sha256:5511111111111111111111111111111111111111111111111111111111111111",
+              "approvalResolution": "allow_once",
+              "approvedPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+              "currentPolicyRef": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+              "approvedAt": "2026-08-08T00:02:00Z",
+              "expiresAt": "2026-08-08T00:12:00Z",
+              "observedAt": "2026-08-08T00:04:00Z"
+            },
+            "target": {
+              "class": "test-ledger",
+              "credentialRef": "sha256:6511111111111111111111111111111111111111111111111111111111111111"
+            },
+            "invocation": {
+              "idempotencyRef": "hmac-sha256:v1:7511111111111111111111111111111111111111111111111111111111111111",
+              "paramsRef": "sha256:8511111111111111111111111111111111111111111111111111111111111111",
+              "dispatched": true
+            },
+            "result": "completed",
+            "runtime": {
+              "status": "succeeded"
+            },
+            "effect": {
+              "effectRef": "sha256:9511111111111111111111111111111111111111111111111111111111111111",
+              "result": "applied",
+              "duplicate": false,
+              "certainty": "confirmed",
+              "evidenceRef": "sha256:a511111111111111111111111111111111111111111111111111111111111111"
+            },
+            "parameters": {
+              "secret": "sensitive"
+            }
+          }
+        ],
+        "final": {
+          "reportedOperationIds": [
+            "hmac-sha256:v1:5311111111111111111111111111111111111111111111111111111111111111",
+            "hmac-sha256:v1:6311111111111111111111111111111111111111111111111111111111111111"
+          ],
+          "counts": {
+            "completed": 2,
+            "blocked": 1,
+            "replayed": 1,
+            "unknownEffects": 0,
+            "uniqueEffects": 2
+          },
+          "status": "complete",
+          "assuranceComplete": true
+        }
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "ApprovalExpired",
+          "AssuranceOverclaimed",
+          "AuthorityInvalid",
+          "CapabilityBindingMismatch",
+          "DispatchProvenanceInvalid",
+          "EffectSettlementInvalid",
+          "FinalStateMismatch",
+          "IdempotencyConflict",
+          "OperationInvalid",
+          "OperationInventoryMismatch",
+          "RequesterBindingMismatch",
+          "SensitivePayloadPresent"
+        ]
+      }
+    }
+  ]
+}
