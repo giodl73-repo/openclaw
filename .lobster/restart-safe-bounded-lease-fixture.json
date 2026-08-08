@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.dgr.restart-safe-bounded-lease.v1",
+  "cases": [
+    {
+      "id": "one-unit-restart-fence-and-settle",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "resource.bounded_lease",
+        "resource": {
+          "resourceId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "owner": "openclaw-state-lease",
+          "capacity": 1,
+          "unit": "slot"
+        },
+        "events": [
+          {
+            "sequence": 1,
+            "type": "acquire",
+            "operationId": "operation-a",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "holderRef": "hmac-sha256:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "quantity": 1,
+            "at": 100,
+            "expiresAt": 200,
+            "outcome": "admitted"
+          },
+          {
+            "sequence": 2,
+            "type": "acquire",
+            "operationId": "operation-b",
+            "leaseId": null,
+            "generation": 1,
+            "holderRef": "hmac-sha256:v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "quantity": 1,
+            "at": 110,
+            "outcome": "exhausted",
+            "reason": "capacity_exhausted",
+            "retryAfter": 200
+          },
+          {
+            "sequence": 3,
+            "type": "restart",
+            "at": 120,
+            "runtimeGeneration": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "persistedLeaseIds": ["lease-a"]
+          },
+          {
+            "sequence": 4,
+            "type": "acquire",
+            "operationId": "operation-a",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "holderRef": "hmac-sha256:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "quantity": 1,
+            "at": 130,
+            "expiresAt": 200,
+            "outcome": "existing"
+          },
+          {
+            "sequence": 5,
+            "type": "expire",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "at": 200,
+            "outcome": "expired"
+          },
+          {
+            "sequence": 6,
+            "type": "settle",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "at": 201,
+            "outcome": "expired",
+            "quantity": 1
+          },
+          {
+            "sequence": 7,
+            "type": "acquire",
+            "operationId": "operation-b",
+            "leaseId": "lease-b",
+            "generation": 2,
+            "holderRef": "hmac-sha256:v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "quantity": 1,
+            "at": 202,
+            "expiresAt": 300,
+            "outcome": "admitted"
+          },
+          {
+            "sequence": 8,
+            "type": "assert",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "holderRef": "hmac-sha256:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "at": 203,
+            "outcome": "fenced",
+            "reason": "stale_generation",
+            "currentGeneration": 2
+          },
+          {
+            "sequence": 9,
+            "type": "renew",
+            "leaseId": "lease-b",
+            "generation": 2,
+            "holderRef": "hmac-sha256:v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "at": 250,
+            "expiresAt": 400,
+            "outcome": "renewed"
+          },
+          {
+            "sequence": 10,
+            "type": "release",
+            "leaseId": "lease-b",
+            "generation": 2,
+            "holderRef": "hmac-sha256:v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "at": 300,
+            "outcome": "released"
+          },
+          {
+            "sequence": 11,
+            "type": "settle",
+            "leaseId": "lease-b",
+            "generation": 2,
+            "at": 301,
+            "outcome": "released",
+            "quantity": 1
+          }
+        ],
+        "final": {
+          "activeLeaseIds": [],
+          "settledLeaseIds": ["lease-a", "lease-b"],
+          "capacityInUse": 0,
+          "reconciles": true
+        }
+      },
+      "expected": { "status": "accepted", "failureCodes": [] }
+    },
+    {
+      "id": "duplicate-drift-and-unsettled",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "resource.bounded_lease",
+        "resource": {
+          "resourceId": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "owner": "openclaw-state-lease",
+          "capacity": 1,
+          "unit": "slot"
+        },
+        "events": [
+          {
+            "sequence": 1,
+            "type": "acquire",
+            "operationId": "operation-a",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "holderRef": "hmac-sha256:v1:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "quantity": 1,
+            "at": 100,
+            "expiresAt": 200,
+            "outcome": "admitted",
+            "credential": "must-not-be-exported"
+          },
+          {
+            "sequence": 2,
+            "type": "acquire",
+            "operationId": "operation-b",
+            "leaseId": "lease-b",
+            "generation": 2,
+            "holderRef": "hmac-sha256:v1:1111111111111111111111111111111111111111111111111111111111111111",
+            "quantity": 1,
+            "at": 110,
+            "expiresAt": 210,
+            "outcome": "admitted"
+          },
+          {
+            "sequence": 3,
+            "type": "restart",
+            "at": 120,
+            "runtimeGeneration": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "persistedLeaseIds": []
+          },
+          {
+            "sequence": 4,
+            "type": "acquire",
+            "operationId": "operation-a",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "holderRef": "hmac-sha256:v1:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "quantity": 1,
+            "at": 130,
+            "expiresAt": 200,
+            "outcome": "existing"
+          },
+          {
+            "sequence": 5,
+            "type": "expire",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "at": 150,
+            "outcome": "expired"
+          },
+          {
+            "sequence": 6,
+            "type": "renew",
+            "leaseId": "lease-b",
+            "generation": 2,
+            "holderRef": "hmac-sha256:v1:1111111111111111111111111111111111111111111111111111111111111111",
+            "at": 160,
+            "expiresAt": 260,
+            "outcome": "renewed"
+          },
+          {
+            "sequence": 7,
+            "type": "assert",
+            "leaseId": "lease-a",
+            "generation": 1,
+            "holderRef": "hmac-sha256:v1:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "at": 170,
+            "outcome": "fenced",
+            "reason": "stale_generation",
+            "currentGeneration": 1
+          }
+        ],
+        "final": {
+          "activeLeaseIds": [],
+          "settledLeaseIds": [],
+          "capacityInUse": 0,
+          "reconciles": true
+        }
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "CapacityExceeded",
+          "FinalStateMismatch",
+          "LeaseTerminationInvalid",
+          "ProofIncomplete",
+          "RenewalInvalid",
+          "RestartStateMismatch",
+          "SensitivePayloadPresent",
+          "StaleHolderNotFenced",
+          "TerminalSettlementInvalid"
+        ]
+      }
+    }
+  ]
+}

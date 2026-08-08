@@ -60,6 +60,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.dgr.restart-safe-bounded-lease.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "one bounded capacity unit exhausts, survives restart, resolves lost acknowledgement, fences stale holders, renews or expires, and settles terminally",
+      "structuredFailure": "capacity drift, duplicate allocation, restart mismatch, stale ownership, invalid renewal or termination, missing settlement, or sensitive payload",
+      "runner": "scripts/lobster-restart-safe-bounded-lease.mjs",
+      "evidence": ".lobster/restart-safe-bounded-lease-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }
