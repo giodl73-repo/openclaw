@@ -69,7 +69,8 @@ function sameStringSet(actual, expected) {
   return (
     Array.isArray(actual) &&
     actual.every(validIdentifier) &&
-    JSON.stringify([...actual].toSorted()) === JSON.stringify([...expected].toSorted())
+    JSON.stringify([...actual].toSorted((a, b) => a.localeCompare(b))) ===
+      JSON.stringify([...expected].toSorted((a, b) => a.localeCompare(b)))
   );
 }
 
@@ -353,8 +354,12 @@ export function runFixture(
   const fixture = JSON.parse(readFileSync(path, "utf8"));
   const cases = fixture.cases.map((entry) => {
     const result = validateRestartSafeBoundedLeaseEvidence(entry.input);
-    const failureCodes = result.failures.map((failure) => failure.code).toSorted();
-    const expectedCodes = (entry.expected.failureCodes ?? []).toSorted();
+    const failureCodes = result.failures
+      .map((failure) => failure.code)
+      .toSorted((a, b) => a.localeCompare(b));
+    const expectedCodes = (entry.expected.failureCodes ?? []).toSorted((a, b) =>
+      a.localeCompare(b),
+    );
     if (
       result.status !== entry.expected.status ||
       JSON.stringify(failureCodes) !== JSON.stringify(expectedCodes)
