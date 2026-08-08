@@ -100,6 +100,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.dgr.immutable-lifecycle-obligations.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "accepted required-child membership remains immutable, final authority and hold checks fence destructive effects, and lost acknowledgement reconciles by stable child operation identity without duplicate mutation",
+      "structuredFailure": "membership drift, stale authority or generation, held mutation, changed operation identity, duplicate effect, unresolved acknowledgement, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-immutable-lifecycle-obligations.mjs",
+      "evidence": ".lobster/immutable-lifecycle-obligations-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

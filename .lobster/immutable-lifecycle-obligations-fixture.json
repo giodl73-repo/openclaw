@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.dgr.immutable-lifecycle-obligations.v1",
+  "cases": [
+    {
+      "id": "hold-fenced-lost-ack-reconciled-once",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "data.lifecycle_obligations",
+        "plan": {
+          "planId": "hmac-sha256:v1:1111111111111111111111111111111111111111111111111111111111111111",
+          "membershipGeneration": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+          "acceptedAt": 1000,
+          "authorityRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111",
+          "policyGeneration": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+          "requiredChildIds": [
+            "session-canonical",
+            "qmd-session-projection"
+          ],
+          "children": [
+            {
+              "childId": "session-canonical",
+              "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+              "ownerGeneration": "sha256:6111111111111111111111111111111111111111111111111111111111111111",
+              "mode": "archive_and_remove"
+            },
+            {
+              "childId": "qmd-session-projection",
+              "operationId": "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111",
+              "ownerGeneration": "sha256:8111111111111111111111111111111111111111111111111111111111111111",
+              "mode": "purge"
+            }
+          ]
+        },
+        "events": [
+          {
+            "sequence": 1,
+            "kind": "final_check",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "authority": "authorized",
+            "authorityRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111",
+            "policyGeneration": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+            "ownerGeneration": "sha256:6111111111111111111111111111111111111111111111111111111111111111",
+            "hold": "active",
+            "holdGeneration": "sha256:9111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "blocked",
+            "reason": "hold_active"
+          },
+          {
+            "sequence": 2,
+            "kind": "final_check",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "authority": "authorized",
+            "authorityRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111",
+            "policyGeneration": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+            "ownerGeneration": "sha256:6111111111111111111111111111111111111111111111111111111111111111",
+            "hold": "none",
+            "holdGeneration": "sha256:a111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "authorized"
+          },
+          {
+            "sequence": 3,
+            "kind": "mutation",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:b111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "applied"
+          },
+          {
+            "sequence": 4,
+            "kind": "acknowledgement",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:b111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "unknown"
+          },
+          {
+            "sequence": 5,
+            "kind": "reconciliation",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:5111111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:b111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:c111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "resolved_existing",
+            "settlement": "complete"
+          },
+          {
+            "sequence": 6,
+            "kind": "final_check",
+            "childId": "qmd-session-projection",
+            "operationId": "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111",
+            "authority": "authorized",
+            "authorityRef": "sha256:3111111111111111111111111111111111111111111111111111111111111111",
+            "policyGeneration": "sha256:4111111111111111111111111111111111111111111111111111111111111111",
+            "ownerGeneration": "sha256:8111111111111111111111111111111111111111111111111111111111111111",
+            "hold": "none",
+            "holdGeneration": "sha256:d111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "authorized"
+          },
+          {
+            "sequence": 7,
+            "kind": "mutation",
+            "childId": "qmd-session-projection",
+            "operationId": "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:e111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "applied"
+          },
+          {
+            "sequence": 8,
+            "kind": "acknowledgement",
+            "childId": "qmd-session-projection",
+            "operationId": "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:e111111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "received"
+          },
+          {
+            "sequence": 9,
+            "kind": "settlement",
+            "childId": "qmd-session-projection",
+            "operationId": "hmac-sha256:v1:7111111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:e111111111111111111111111111111111111111111111111111111111111111",
+            "evidenceRef": "sha256:f111111111111111111111111111111111111111111111111111111111111111",
+            "settlement": "complete"
+          }
+        ],
+        "final": {
+          "planId": "hmac-sha256:v1:1111111111111111111111111111111111111111111111111111111111111111",
+          "membershipGeneration": "sha256:2111111111111111111111111111111111111111111111111111111111111111",
+          "requiredChildIds": [
+            "session-canonical",
+            "qmd-session-projection"
+          ],
+          "settledChildIds": [
+            "session-canonical",
+            "qmd-session-projection"
+          ],
+          "effectCounts": [
+            {
+              "childId": "session-canonical",
+              "count": 1
+            },
+            {
+              "childId": "qmd-session-projection",
+              "count": 1
+            }
+          ],
+          "status": "complete",
+          "assuranceComplete": true
+        }
+      },
+      "expected": {
+        "status": "accepted",
+        "failureCodes": []
+      }
+    },
+    {
+      "id": "membership-fence-replay-and-assurance-overclaim-rejected",
+      "input": {
+        "schemaVersion": 1,
+        "evidenceType": "data.lifecycle_obligations",
+        "plan": {
+          "planId": "hmac-sha256:v1:1211111111111111111111111111111111111111111111111111111111111111",
+          "membershipGeneration": "sha256:2211111111111111111111111111111111111111111111111111111111111111",
+          "acceptedAt": 1000,
+          "authorityRef": "sha256:3211111111111111111111111111111111111111111111111111111111111111",
+          "policyGeneration": "sha256:4211111111111111111111111111111111111111111111111111111111111111",
+          "requiredChildIds": [
+            "session-canonical",
+            "qmd-session-projection"
+          ],
+          "children": [
+            {
+              "childId": "session-canonical",
+              "operationId": "hmac-sha256:v1:5211111111111111111111111111111111111111111111111111111111111111",
+              "ownerGeneration": "sha256:6211111111111111111111111111111111111111111111111111111111111111",
+              "mode": "archive_and_remove"
+            },
+            {
+              "childId": "qmd-session-projection",
+              "operationId": "hmac-sha256:v1:7211111111111111111111111111111111111111111111111111111111111111",
+              "ownerGeneration": "sha256:8211111111111111111111111111111111111111111111111111111111111111",
+              "mode": "purge"
+            }
+          ]
+        },
+        "events": [
+          {
+            "sequence": 1,
+            "kind": "final_check",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:5211111111111111111111111111111111111111111111111111111111111111",
+            "authority": "revoked",
+            "authorityRef": "sha256:9211111111111111111111111111111111111111111111111111111111111111",
+            "policyGeneration": "sha256:4211111111111111111111111111111111111111111111111111111111111111",
+            "ownerGeneration": "sha256:6211111111111111111111111111111111111111111111111111111111111111",
+            "hold": "none",
+            "holdGeneration": "sha256:a211111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "authorized"
+          },
+          {
+            "sequence": 2,
+            "kind": "mutation",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:5211111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:b211111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "applied",
+            "path": "sensitive/session.jsonl"
+          },
+          {
+            "sequence": 3,
+            "kind": "mutation",
+            "childId": "session-canonical",
+            "operationId": "hmac-sha256:v1:c211111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:d211111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "applied"
+          },
+          {
+            "sequence": 4,
+            "kind": "final_check",
+            "childId": "qmd-session-projection",
+            "operationId": "hmac-sha256:v1:7211111111111111111111111111111111111111111111111111111111111111",
+            "authority": "authorized",
+            "authorityRef": "sha256:3211111111111111111111111111111111111111111111111111111111111111",
+            "policyGeneration": "sha256:e211111111111111111111111111111111111111111111111111111111111111",
+            "ownerGeneration": "sha256:8211111111111111111111111111111111111111111111111111111111111111",
+            "hold": "active",
+            "holdGeneration": "sha256:f211111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "authorized"
+          },
+          {
+            "sequence": 5,
+            "kind": "mutation",
+            "childId": "qmd-session-projection",
+            "operationId": "hmac-sha256:v1:7211111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "applied"
+          },
+          {
+            "sequence": 6,
+            "kind": "acknowledgement",
+            "childId": "qmd-session-projection",
+            "operationId": "hmac-sha256:v1:7211111111111111111111111111111111111111111111111111111111111111",
+            "effectRef": "sha256:1311111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "unknown"
+          },
+          {
+            "sequence": 7,
+            "kind": "final_check",
+            "childId": "unplanned-copy",
+            "operationId": "hmac-sha256:v1:2311111111111111111111111111111111111111111111111111111111111111",
+            "authority": "authorized",
+            "authorityRef": "sha256:3211111111111111111111111111111111111111111111111111111111111111",
+            "policyGeneration": "sha256:4211111111111111111111111111111111111111111111111111111111111111",
+            "ownerGeneration": "sha256:3311111111111111111111111111111111111111111111111111111111111111",
+            "hold": "none",
+            "holdGeneration": "sha256:4311111111111111111111111111111111111111111111111111111111111111",
+            "outcome": "authorized"
+          }
+        ],
+        "final": {
+          "planId": "hmac-sha256:v1:1211111111111111111111111111111111111111111111111111111111111111",
+          "membershipGeneration": "sha256:2211111111111111111111111111111111111111111111111111111111111111",
+          "requiredChildIds": [
+            "session-canonical",
+            "qmd-session-projection",
+            "unplanned-copy"
+          ],
+          "settledChildIds": [
+            "session-canonical",
+            "qmd-session-projection",
+            "unplanned-copy"
+          ],
+          "effectCounts": [
+            {
+              "childId": "session-canonical",
+              "count": 2
+            },
+            {
+              "childId": "qmd-session-projection",
+              "count": 1
+            },
+            {
+              "childId": "unplanned-copy",
+              "count": 1
+            }
+          ],
+          "status": "complete",
+          "assuranceComplete": true
+        }
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "AggregateOverclaimed",
+          "AmbiguousAcknowledgementUnresolved",
+          "DuplicateMutation",
+          "EffectWithoutAuthorization",
+          "EventInvalid",
+          "FinalFenceInvalid",
+          "FinalStateMismatch",
+          "HeldMutationAuthorized",
+          "OperationIdentityChanged",
+          "PolicyGenerationChanged",
+          "RequiredMembershipChanged",
+          "SensitivePayloadPresent",
+          "StaleAuthorityAuthorized",
+          "UnplannedChild"
+        ]
+      }
+    }
+  ]
+}

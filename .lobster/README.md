@@ -35,6 +35,14 @@ outcomes. It adds no checkpoint implementation, copy database, retention
 policy, restore path, or cross-owner mutation authority and carries authority
 `none`.
 
+EVID-006 adds the fork-only
+`lobster.dgr.immutable-lifecycle-obligations.v1` fixture. It proves immutable
+accepted required-child membership, final authority, policy-generation,
+owner-generation, and hold fencing before destructive effects, and
+lost-acknowledgement reconciliation under one stable child operation identity.
+It adds no lifecycle coordinator, policy or legal-hold service, data owner,
+workflow database, or mutation authority and carries authority `none`.
+
 Reconstruct from a clean clone:
 
 ```text
