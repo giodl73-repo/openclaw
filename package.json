@@ -1948,7 +1948,8 @@
     "lobster:restart-safe-bounded-lease": "node scripts/lobster-restart-safe-bounded-lease.mjs",
     "lobster:mixed-owner-checkpoint-copy-facts": "node scripts/lobster-mixed-owner-checkpoint-copy-facts.mjs",
     "lobster:immutable-lifecycle-obligations": "node scripts/lobster-immutable-lifecycle-obligations.mjs",
-    "lobster:remote-node-invocation-trust": "node scripts/lobster-remote-node-invocation-trust.mjs"
+    "lobster:remote-node-invocation-trust": "node scripts/lobster-remote-node-invocation-trust.mjs",
+    "lobster:authorized-external-action": "node scripts/lobster-authorized-external-action.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

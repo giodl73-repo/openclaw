@@ -52,6 +52,16 @@ abort explicitly unknown at the remote effect boundary. It adds no node
 runtime, command policy, pairing owner, transport, audit service, or invocation
 authority and carries authority `none`.
 
+EVID-008 adds the fork-only
+`lobster.exa.authorized-external-action.v1` fixture. It correlates the admitted
+requester, run-scoped tool surface, current policy generation, approval,
+finalized parameter fingerprint, owner idempotency identity, runtime outcome,
+and owner-native effect certainty. It blocks stale policy before dispatch and
+resolves an exact replay to the original effect without counting a duplicate.
+It adds no action bus, policy or approval owner, generic retry policy, audit
+service, external-effect owner, or execution authority and carries authority
+`none`.
+
 Reconstruct from a clean clone:
 
 ```text

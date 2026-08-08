@@ -140,6 +140,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.exa.authorized-external-action.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "admitted requester, run-scoped tool surface, current policy, approval, finalized parameters, owner idempotency, runtime result, and confirmed external effect remain correlated while replay resolves the original effect without duplication",
+      "structuredFailure": "requester or surface mismatch, stale policy dispatch, expired approval, idempotency parameter conflict, changed replay effect identity, runtime/effect certainty overclaim, operation inventory mismatch, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-authorized-external-action.mjs",
+      "evidence": ".lobster/authorized-external-action-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }
