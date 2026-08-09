@@ -300,6 +300,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-side-effect-free-invocation.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "an owner-approved Rust node executes one system.which request and returns the exact correlated result through connection- and pairing-generation-fenced Gateway dispatch",
+      "structuredFailure": "an allowlisted but undeclared system.notify request is refused by the Gateway before Rust dispatch",
+      "runner": "scripts/lobster-rust-gateway-side-effect-free-invocation.mjs",
+      "evidence": ".lobster/rust-gateway-side-effect-free-invocation-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }
