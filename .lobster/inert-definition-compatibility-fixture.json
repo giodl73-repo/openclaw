@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.ext.inert-definition-compatibility.v1",
+  "cases": [
+    {
+      "id": "known-required-and-unknown-optional-remain-inert",
+      "input": {
+        "consumer": {
+          "id": "openclaw-typescript",
+          "contractVersion": 1,
+          "supportedSemantics": [
+            "claw.packages.exact-versions.v1",
+            "claw.workspace.files.v1",
+            "plugin.activation.v1",
+            "plugin.config-schema.v1",
+            "skill.invocation-policy.v1",
+            "skill.prompt-content.v1"
+          ]
+        },
+        "definitions": [
+          {
+            "family": "plugin",
+            "nativeId": "browser",
+            "revision": "semver:1.4.0",
+            "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "requiredSemantics": [
+              "plugin.config-schema.v1"
+            ],
+            "optionalSemantics": [
+              "plugin.activation.v1",
+              "vendor.example.dashboard-hint.v2"
+            ]
+          },
+          {
+            "family": "claw",
+            "nativeId": "github-triage",
+            "revision": "schema:1",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "requiredSemantics": [
+              "claw.packages.exact-versions.v1",
+              "claw.workspace.files.v1"
+            ],
+            "optionalSemantics": []
+          },
+          {
+            "family": "skill",
+            "nativeId": "issue-review",
+            "revision": "sha256:3333333333333333",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "requiredSemantics": [
+              "skill.prompt-content.v1"
+            ],
+            "optionalSemantics": [
+              "skill.invocation-policy.v1",
+              "vendor.example.catalog-label.v1"
+            ]
+          }
+        ],
+        "expectedDefinitionIds": [
+          "claw:github-triage",
+          "plugin:browser",
+          "skill:issue-review"
+        ],
+        "activationAttempted": false,
+        "mutationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "accepted",
+        "failureCodes": [],
+        "definitions": [
+          {
+            "definitionId": "claw:github-triage",
+            "family": "claw",
+            "revision": "schema:1",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "status": "compatible"
+          },
+          {
+            "definitionId": "plugin:browser",
+            "family": "plugin",
+            "revision": "semver:1.4.0",
+            "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "status": "compatible"
+          },
+          {
+            "definitionId": "skill:issue-review",
+            "family": "skill",
+            "revision": "sha256:3333333333333333",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "status": "compatible"
+          }
+        ],
+        "preservedOptionalSemantics": [
+          "vendor.example.catalog-label.v1",
+          "vendor.example.dashboard-hint.v2"
+        ]
+      }
+    },
+    {
+      "id": "unknown-required-semantics-block-before-activation",
+      "input": {
+        "consumer": {
+          "id": "openclaw-typescript",
+          "contractVersion": 1,
+          "supportedSemantics": [
+            "claw.packages.exact-versions.v1",
+            "claw.workspace.files.v1",
+            "plugin.activation.v1",
+            "plugin.config-schema.v1",
+            "skill.invocation-policy.v1",
+            "skill.prompt-content.v1"
+          ]
+        },
+        "definitions": [
+          {
+            "family": "plugin",
+            "nativeId": "browser-next",
+            "revision": "semver:2.0.0",
+            "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "requiredSemantics": [
+              "plugin.config-schema.v1",
+              "vendor.example.protected-route.v2"
+            ],
+            "optionalSemantics": [
+              "vendor.example.dashboard-hint.v2"
+            ]
+          },
+          {
+            "family": "claw",
+            "nativeId": "github-triage",
+            "revision": "schema:1",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "requiredSemantics": [
+              "claw.packages.exact-versions.v1",
+              "claw.workspace.files.v1"
+            ],
+            "optionalSemantics": []
+          },
+          {
+            "family": "skill",
+            "nativeId": "issue-review",
+            "revision": "sha256:3333333333333333",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "requiredSemantics": [
+              "skill.prompt-content.v1"
+            ],
+            "optionalSemantics": [
+              "skill.invocation-policy.v1"
+            ]
+          }
+        ],
+        "expectedDefinitionIds": [
+          "claw:github-triage",
+          "plugin:browser-next",
+          "skill:issue-review"
+        ],
+        "activationAttempted": false,
+        "mutationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "UnknownRequiredSemantic"
+        ],
+        "definitions": [
+          {
+            "definitionId": "claw:github-triage",
+            "family": "claw",
+            "revision": "schema:1",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "status": "compatible"
+          },
+          {
+            "definitionId": "plugin:browser-next",
+            "family": "plugin",
+            "revision": "semver:2.0.0",
+            "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "status": "blocked"
+          },
+          {
+            "definitionId": "skill:issue-review",
+            "family": "skill",
+            "revision": "sha256:3333333333333333",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "status": "compatible"
+          }
+        ],
+        "preservedOptionalSemantics": [
+          "vendor.example.dashboard-hint.v2"
+        ]
+      }
+    }
+  ]
+}

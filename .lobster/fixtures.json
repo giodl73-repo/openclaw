@@ -200,6 +200,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.ext.inert-definition-compatibility.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "plugin, Claw, and skill definitions retain native identity and revision while unknown optional semantics remain inert and inspectable",
+      "structuredFailure": "unknown required semantics, family or identity drift, malformed revisions, activation before compatibility, authority overclaim, or sensitive payload",
+      "runner": "scripts/lobster-inert-definition-compatibility.mjs",
+      "evidence": ".lobster/inert-definition-compatibility-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

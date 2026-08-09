@@ -1951,7 +1951,8 @@
     "lobster:remote-node-invocation-trust": "node scripts/lobster-remote-node-invocation-trust.mjs",
     "lobster:authorized-external-action": "node scripts/lobster-authorized-external-action.mjs",
     "lobster:release-activation": "node scripts/lobster-release-activation.mjs",
-    "lobster:session-copy-lifecycle": "node scripts/lobster-session-copy-lifecycle.mjs"
+    "lobster:session-copy-lifecycle": "node scripts/lobster-session-copy-lifecycle.mjs",
+    "lobster:inert-definition-compatibility": "node scripts/lobster-inert-definition-compatibility.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

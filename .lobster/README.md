@@ -79,6 +79,14 @@ one stale-generation refusal before mutation. It adds no universal session
 store, copy database, privacy service, retention owner, or deletion authority,
 and authority remains `none`.
 
+EVID-011 adds the fork-only
+`lobster.ext.inert-definition-compatibility.v1` fixture. It preserves plugin,
+Claw, and skill native identities and revisions while proving that unknown
+optional semantics stay inert and inspectable and unknown required semantics
+block before activation or mutation. It adds no shared extension manifest,
+catalog, installer, runtime loader, or compatibility authority, and authority
+remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
