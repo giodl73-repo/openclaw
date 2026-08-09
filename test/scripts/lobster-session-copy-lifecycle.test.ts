@@ -54,6 +54,14 @@ describe("session copy lifecycle evidence", () => {
     expect(codes(input)).toContain("InventoryMismatch");
   });
 
+  it("rejects malformed inventory collections without throwing", async () => {
+    const input = await fixture();
+    const inventory = input.inventory as Record<string, unknown>;
+    inventory.copyRefs = {};
+    expect(() => codes(input)).not.toThrow();
+    expect(codes(input)).toContain("InventoryMismatch");
+  });
+
   it("rejects stale export generation", async () => {
     const input = await fixture();
     const target = operations(input)[0]!.target as Record<string, unknown>;
@@ -112,6 +120,14 @@ describe("session copy lifecycle evidence", () => {
     const settlements = operations(input)[1]!.settlements as Array<Record<string, unknown>>;
     settlements.pop();
     expect(codes(input)).toContain("SettlementInvalid");
+  });
+
+  it("rejects a retained export settlement bound to a different copy", async () => {
+    const input = await fixture();
+    const settlements = operations(input)[1]!.settlements as Array<Record<string, unknown>>;
+    settlements[2]!.copyRef =
+      "copy-sha256:0707070707070707070707070707070707070707070707070707070707070707";
+    expect(codes(input)).toContain("GenerationFenceInvalid");
   });
 
   it("rejects QMD deferred cleanup hidden as immediate completion", async () => {
