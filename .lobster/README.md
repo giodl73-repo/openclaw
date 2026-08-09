@@ -97,6 +97,15 @@ not claim Rust adjacent-version conformance or a release-duration policy.
 It adds no transport, protocol dispatcher, downgrade adapter, release policy,
 or runtime authority, and authority remains `none`.
 
+EVID-013 adds the fork-only
+`lobster.kcc.mixed-owner-restore-composition.v1` fixture. It preserves
+OpenClaw's global and per-agent SQLite snapshot owners and proves one exact,
+verified, current-schema owner set is ready for independent owner-native fresh
+restore. One incompatible agent schema blocks the entire set before any
+publication attempt. The fixture does not claim a shared capture generation,
+cross-database transaction, completed restore, overwrite path, migration
+authority, or runtime authority, and authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text

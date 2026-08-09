@@ -240,6 +240,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.kcc.mixed-owner-restore-composition.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "one exact verified global and agent owner set at current owner-specific schemas is ready for independent owner-native fresh restore",
+      "structuredFailure": "owner inventory, snapshot identity, verification, schema compatibility, fresh-target, preflight mutation, authority, or sensitive payload mismatch",
+      "runner": "scripts/lobster-mixed-owner-restore-composition.mjs",
+      "evidence": ".lobster/mixed-owner-restore-composition-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }
