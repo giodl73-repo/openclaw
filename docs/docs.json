@@ -1636,6 +1636,7 @@
                     "group": "Configuration",
                     "pages": [
                       "gateway/configuration",
+                      "gateway/config-layers",
                       "gateway/configuration-reference",
                       "gateway/config-agents",
                       "gateway/config-channels",
@@ -1658,6 +1659,7 @@
                     "group": "Health and diagnostics",
                     "pages": [
                       "gateway/health",
+                      "gateway/hosting-profiles",
                       "gateway/heartbeat",
                       "gateway/doctor",
                       "gateway/audit",
@@ -1802,6 +1804,7 @@
                       "cli/logs",
                       "cli/migrate",
                       "cli/onboard",
+                      "cli/ready",
                       "cli/reset",
                       "cli/secrets",
                       "cli/security",

@@ -9,6 +9,7 @@ import {
   type SessionDeliveryRecoveryLogger,
   type SettleSessionDeliveryFn,
 } from "./session-delivery-queue.js";
+import { publishSessionDeliveryRuntimeReadiness } from "./session-delivery-runtime-readiness.js";
 
 type SessionDeliveryRuntime = {
   deliver: DeliverSessionDeliveryFn;
@@ -142,12 +143,14 @@ export function startSessionDeliveryRuntime(params: SessionDeliveryRuntime): () 
   const generation = runtimeGeneration;
   clearScheduledEntries();
   runtime = params;
+  publishSessionDeliveryRuntimeReadiness({ active: true, generation });
   return () => {
     if (runtimeGeneration !== generation) {
       return;
     }
     runtimeGeneration += 1;
     runtime = undefined;
+    publishSessionDeliveryRuntimeReadiness({ active: false, generation: runtimeGeneration });
     clearScheduledEntries();
   };
 }
@@ -201,6 +204,7 @@ const testing = {
   reset(): void {
     runtimeGeneration += 1;
     runtime = undefined;
+    publishSessionDeliveryRuntimeReadiness({ active: false, generation: runtimeGeneration });
     clearScheduledEntries();
   },
 };

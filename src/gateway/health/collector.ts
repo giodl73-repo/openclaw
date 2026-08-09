@@ -19,6 +19,10 @@ import {
   toPublicPluginVerificationDiagnostic,
 } from "../../plugins/runtime-degraded-state.js";
 import { getActivePluginRegistry } from "../../plugins/runtime.js";
+import {
+  buildRuntimeReadiness,
+  buildUnobservedGatewayConditions,
+} from "../../readiness/conditions.js";
 import { buildChannelAccountBindings, resolvePreferredAccountId } from "../../routing/bindings.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import {
@@ -402,6 +406,12 @@ export async function collectGatewayHealthSnapshot(params: {
     ok: true,
     ts: Date.now(),
     durationMs: Date.now() - start,
+    readiness: buildRuntimeReadiness({
+      configLoaded: true,
+      gateway: "responding",
+      plugins: pluginHealth,
+      coreConditions: buildUnobservedGatewayConditions(),
+    }),
     ...(params.eventLoop ? { eventLoop: params.eventLoop } : {}),
     ...(pluginHealth ? { plugins: pluginHealth } : {}),
     ...(contextEngineHealth ? { contextEngines: contextEngineHealth } : {}),

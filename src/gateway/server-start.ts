@@ -1,4 +1,5 @@
-import { isNixMode } from "../config/paths.js";
+import { blockConfigWritesForRuntime } from "../config/nix-mode-write-guard.js";
+import { isNixMode, resolveConfigPath } from "../config/paths.js";
 import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { createSubsystemLogger, runtimeForLogger } from "../logging/subsystem.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
@@ -147,6 +148,12 @@ export async function startGatewayServer(
     stopRegisteredPostReadySidecars,
     terminalSessions,
   } = lifecycleRuntime;
+  const restoreConfigWritesForServer = opts.configLayersReadOnly
+    ? blockConfigWritesForRuntime({
+        configPath: resolveConfigPath(),
+        reason: "configuration writes are unavailable while --config-layer is active",
+      })
+    : () => {};
   try {
     const coreRuntime = await startGatewayCoreRuntime({
       lifecycleRuntime,
@@ -177,6 +184,7 @@ export async function startGatewayServer(
     });
   } catch (err) {
     await closeOnStartupFailure();
+    restoreConfigWritesForServer();
     throw err;
   }
   // The public server is fully initialized now. Leave a short I/O window before
@@ -205,6 +213,7 @@ export async function startGatewayServer(
         await close(optsLocal);
       } finally {
         clearFallbackGatewayContextForServer.get()();
+        restoreConfigWritesForServer();
       }
     },
   };

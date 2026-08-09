@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "lobster.exa.owner-projection.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "complete owner projection",
+      "structuredFailure": "stale, mixed-version, or explicitly omitted owner projection",
+      "runner": "scripts/lobster-owner-projection.mjs",
+      "evidence": ".lobster/owner-projection-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.exa.hosting-profile-conformance.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "complete profile catalog, structurally conformant live result, and complete package evidence",
+      "structuredFailure": "profile, version, required-condition, catalog, provenance, or scenario-set mismatch",
+      "runner": "scripts/lobster-hosting-profile-conformance.mjs",
+      "evidence": ".lobster/hosting-profile-conformance-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.mpu.provider-attempt-usage.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "explicit candidate parents link model calls and reconcile per-candidate usage to unchanged run totals",
+      "structuredFailure": "missing parent, mutable binding, fenced dispatch, call-set mismatch, or usage drift",
+      "runner": "scripts/lobster-provider-attempt-usage.mjs",
+      "evidence": ".lobster/provider-attempt-usage-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.dgr.restart-safe-bounded-lease.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "one bounded capacity unit exhausts, survives restart, resolves lost acknowledgement, fences stale holders, renews or expires, and settles terminally",
+      "structuredFailure": "capacity drift, duplicate allocation, restart mismatch, stale ownership, invalid renewal or termination, missing settlement, or sensitive payload",
+      "runner": "scripts/lobster-restart-safe-bounded-lease.mjs",
+      "evidence": ".lobster/restart-safe-bounded-lease-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.kcc.mixed-owner-checkpoint-copy-facts.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "dirty checkpoint state is refused before compatible clean capture and every known, retained, external, or unknown copy owner settles independently",
+      "structuredFailure": "dirty or incompatible admission, owner inventory mismatch, invalid retained/external/unknown settlement, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-mixed-owner-checkpoint-copy-facts.mjs",
+      "evidence": ".lobster/mixed-owner-checkpoint-copy-facts-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.dgr.immutable-lifecycle-obligations.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "accepted required-child membership remains immutable, final authority and hold checks fence destructive effects, and lost acknowledgement reconciles by stable child operation identity without duplicate mutation",
+      "structuredFailure": "membership drift, stale authority or generation, held mutation, changed operation identity, duplicate effect, unresolved acknowledgement, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-immutable-lifecycle-obligations.mjs",
+      "evidence": ".lobster/immutable-lifecycle-obligations-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.rfn.remote-node-invocation-trust.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "current pairing, connection, command policy, invocation, idempotency, ordered stream, dispatch, cancellation, and effect certainty remain correlated without treating capability as authority or local abort as remote stop",
+      "structuredFailure": "stale authority or route, invalid dispatch provenance, unordered stream, cancellation certainty overclaim, operation inventory mismatch, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-remote-node-invocation-trust.mjs",
+      "evidence": ".lobster/remote-node-invocation-trust-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.exa.authorized-external-action.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "admitted requester, run-scoped tool surface, current policy, approval, finalized parameters, owner idempotency, runtime result, and confirmed external effect remain correlated while replay resolves the original effect without duplication",
+      "structuredFailure": "requester or surface mismatch, stale policy dispatch, expired approval, idempotency parameter conflict, changed replay effect identity, runtime/effect certainty overclaim, operation inventory mismatch, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-authorized-external-action.mjs",
+      "evidence": ".lobster/authorized-external-action-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    },
+    {
+      "id": "lobster.rla.release-activation.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "one exact compatible candidate completes ordered owner phases and reaches candidate-bound readiness while one newer-schema target is refused before package, state, or service mutation",
+      "structuredFailure": "mutable or uninventoried release identity, invalid compatibility, mutation before refusal, phase-order drift, readiness identity mismatch, aggregate recovery certainty, attempt inventory mismatch, assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-release-activation.mjs",
+      "evidence": ".lobster/release-activation-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
+    }
+  ]
+}

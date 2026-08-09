@@ -783,7 +783,10 @@ describe("scripts/test-projects changed-target routing", () => {
         ],
       ],
       ["scripts/e2e/mcp-channels-seed.ts", ["test/scripts/docker-e2e-seeds.test.ts"]],
-      ["scripts/e2e/docker-openai-seed.ts", ["test/scripts/docker-e2e-seeds.test.ts"]],
+      [
+        "scripts/e2e/docker-openai-seed.ts",
+        ["test/scripts/docker-e2e-plan.test.ts", "test/scripts/docker-e2e-seeds.test.ts"],
+      ],
       ["scripts/e2e/mcp-code-mode-gateway-seed.ts", ["test/scripts/docker-e2e-seeds.test.ts"]],
       ["scripts/e2e/mock-openai-server.mjs", ["test/scripts/e2e-mock-config-limits.test.ts"]],
       [

@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.exa.owner-projection.v1",
+  "cases": [
+    {
+      "id": "accepted-current-owner-projection",
+      "input": {
+        "expected": {
+          "artifactGeneration": "openclaw@2026.6.33",
+          "releaseVersion": "2026.6.33",
+          "generations": {
+            "configuration": "config-42",
+            "readiness": "readiness-17",
+            "release": "release-2026.6.33"
+          }
+        },
+        "facts": {
+          "configuration": {
+            "schemaVersion": 1,
+            "ownerRef": "openclaw/configuration/current",
+            "generation": "config-42",
+            "artifactGeneration": "openclaw@2026.6.33",
+            "value": {
+              "layers": ["defaults", "host-managed", "workspace"],
+              "readOnly": true
+            }
+          },
+          "readiness": {
+            "schemaVersion": 1,
+            "ownerRef": "openclaw/gateway/readiness/current",
+            "generation": "readiness-17",
+            "artifactGeneration": "openclaw@2026.6.33",
+            "value": {
+              "ready": true,
+              "requiredConditions": ["ConfigLoaded", "GatewayResponding"]
+            }
+          },
+          "release": {
+            "schemaVersion": 1,
+            "ownerRef": "openclaw/release/current",
+            "generation": "release-2026.6.33",
+            "artifactGeneration": "openclaw@2026.6.33",
+            "value": {
+              "version": "2026.6.33",
+              "channel": "extended-stable"
+            }
+          },
+          "telemetry": {
+            "schemaVersion": 1,
+            "required": false,
+            "ownerRef": "openclaw/telemetry/current",
+            "generation": "telemetry-9",
+            "artifactGeneration": "openclaw@2026.6.33",
+            "value": {
+              "sampled": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "status": "accepted",
+        "failureCodes": []
+      }
+    },
+    {
+      "id": "rejected-stale-mixed-and-omitted-projection",
+      "input": {
+        "expected": {
+          "artifactGeneration": "openclaw@2026.6.33",
+          "releaseVersion": "2026.6.33",
+          "generations": {
+            "configuration": "config-42",
+            "readiness": "readiness-17",
+            "release": "release-2026.6.33"
+          }
+        },
+        "facts": {
+          "configuration": {
+            "schemaVersion": 1,
+            "ownerRef": "openclaw/configuration/current",
+            "generation": "config-41",
+            "artifactGeneration": "openclaw@2026.6.33",
+            "value": {
+              "layers": ["defaults", "host-managed"],
+              "readOnly": true
+            }
+          },
+          "release": {
+            "schemaVersion": 1,
+            "ownerRef": "openclaw/release/current",
+            "generation": "release-2026.7.1",
+            "artifactGeneration": "openclaw@2026.7.1",
+            "value": {
+              "version": "2026.7.1",
+              "channel": "main"
+            }
+          }
+        }
+      },
+      "expected": {
+        "status": "rejected",
+        "failureCodes": [
+          "OwnerMixedVersion",
+          "OwnerOmitted",
+          "OwnerStale",
+          "OwnerStale",
+          "ReleaseVersionMismatch"
+        ]
+      }
+    }
+  ]
+}

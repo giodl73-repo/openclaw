@@ -1,0 +1,645 @@
+{
+  "schemaVersion": 1,
+  "phase": "wave-0",
+  "owner": "Lobster OpenClaw",
+  "authority": "definition-only",
+  "admissionReady": false,
+  "baseCommit": "e197147c4403a9b5aed60f43f8a28b03ed6f0fe9",
+  "validationCommand": "corepack pnpm lobster:contracts",
+  "contracts": [
+    {
+      "id": "XPK-001",
+      "title": "Shared-result ownership and dependency map",
+      "dependsOn": [],
+      "ownerPath": "#/sharedResults",
+      "acceptedArtifact": "Every shared result has one producer and named consumers",
+      "structuredFailure": "duplicate producer, missing producer, or unnamed consumer"
+    },
+    {
+      "id": "XPK-002",
+      "title": "Opaque relationship references",
+      "dependsOn": ["XPK-001"],
+      "ownerPath": "#/relationshipReferences",
+      "acceptedArtifact": "Stable payload-neutral references preserve owner-native semantics",
+      "structuredFailure": "missing reference class, duplicate reference, or payload ownership claim"
+    },
+    {
+      "id": "XPK-003",
+      "title": "Evidence integrity and disclosure",
+      "dependsOn": ["XPK-001", "XPK-002"],
+      "ownerPath": "#/evidenceIntegrity",
+      "acceptedArtifact": "Integrity, chronology, disclosure, retention, supersession, and sink failure are explicit",
+      "structuredFailure": "unverifiable evidence, ambiguous terminal class, or silent sink loss"
+    },
+    {
+      "id": "XPK-004",
+      "title": "Managed mutation request and result",
+      "dependsOn": ["XPK-001", "XPK-002", "XPK-003"],
+      "ownerPath": "#/managedMutation",
+      "acceptedArtifact": "One operation identity binds preview, authority, owner mutation, and settlement",
+      "structuredFailure": "target drift, generation conflict, replay ambiguity, or unsanitized error"
+    },
+    {
+      "id": "XPK-005",
+      "title": "Deployment and risk profiles",
+      "dependsOn": ["XPK-001", "XPK-003"],
+      "ownerPath": "#/deploymentProfiles",
+      "acceptedArtifact": "Each profile declares dependency, risk posture, degraded behavior, and measurable budgets",
+      "structuredFailure": "implicit managed dependency, permissive protected effect, or unowned budget"
+    },
+    {
+      "id": "XPK-006",
+      "title": "Implementation selection and cutover",
+      "dependsOn": ["XPK-001", "XPK-002", "XPK-005"],
+      "ownerPath": "#/implementationSelection",
+      "acceptedArtifact": "Desired placement and authoritative local selection remain distinct",
+      "structuredFailure": "multiple authorities, effectful shadow, or unknown rollback settlement"
+    },
+    {
+      "id": "XPK-007",
+      "title": "Fixture registry",
+      "dependsOn": ["XPK-001", "XPK-002", "XPK-003"],
+      "ownerPath": "#/fixtureRegistry",
+      "acceptedArtifact": "Fixtures have stable identity, owner oracle, compatibility rules, and runner expectations",
+      "structuredFailure": "unstable fixture identity, missing owner oracle, or absent structured failure"
+    },
+    {
+      "id": "XPK-008",
+      "title": "Artifact, release, and startup trust order",
+      "dependsOn": ["XPK-002", "XPK-003", "XPK-005"],
+      "ownerPath": "#/trustOrder",
+      "acceptedArtifact": "Immutable bytes verify before parse, activation, exposure, and readiness",
+      "structuredFailure": "parse-before-verify, policy-after-activation, or unpublished-byte proof"
+    },
+    {
+      "id": "XPK-009",
+      "title": "Fork, release, and deletion ledger",
+      "dependsOn": ["XPK-001", "XPK-006", "XPK-008"],
+      "ownerPath": "#/ledger",
+      "acceptedArtifact": "Every B1, B2, or B3 path names replacement, rollback, expiry, and exact deletion",
+      "structuredFailure": "unowned patch, missing replacement, indefinite carry, or unverifiable deletion"
+    }
+  ],
+  "sharedResults": [
+    {
+      "id": "configuration-activation",
+      "semanticOwner": "CFA",
+      "producerImplementations": ["CFA"],
+      "consumers": ["OAF", "EAR", "EXA", "Lobster adopters"]
+    },
+    {
+      "id": "readiness-profile",
+      "semanticOwner": "CFA",
+      "producerImplementations": ["CFA", "RFN"],
+      "consumers": ["OAF", "EAR", "EXA"]
+    },
+    {
+      "id": "unit-release-recovery",
+      "semanticOwner": "EAR",
+      "producerImplementations": ["EAR"],
+      "consumers": ["OAF", "Lobster promotion", "EXA"]
+    },
+    {
+      "id": "checkpoint-restore",
+      "semanticOwner": "KCC",
+      "producerImplementations": ["KCC"],
+      "consumers": ["OAF", "EAR", "EXA"]
+    },
+    {
+      "id": "fleet-lifecycle",
+      "semanticOwner": "OAF",
+      "producerImplementations": ["OAF"],
+      "consumers": ["EXA", "Lobster operations"]
+    },
+    {
+      "id": "run-attempt",
+      "semanticOwner": "ARO",
+      "producerImplementations": ["ARO"],
+      "consumers": ["MPU", "IAE", "EXA"]
+    },
+    {
+      "id": "provider-usage",
+      "semanticOwner": "MPU",
+      "producerImplementations": ["MPU"],
+      "consumers": ["ARO", "DGR", "EXA"]
+    },
+    {
+      "id": "authority-effect-delivery",
+      "semanticOwner": "IAE",
+      "producerImplementations": ["IAE"],
+      "consumers": ["ARO", "DGR", "EXA", "Lobster adopters"]
+    },
+    {
+      "id": "knowledge-continuity",
+      "semanticOwner": "KCC",
+      "producerImplementations": ["KCC"],
+      "consumers": ["DGR", "EXA"]
+    },
+    {
+      "id": "lifecycle-resource",
+      "semanticOwner": "DGR",
+      "producerImplementations": ["DGR"],
+      "consumers": ["OAF", "MPU", "EXA"]
+    },
+    {
+      "id": "operator-projection",
+      "semanticOwner": "EXA",
+      "producerImplementations": ["EXA"],
+      "consumers": ["Local CLI", "Control UI", "Cowork", "managed administration"]
+    },
+    {
+      "id": "artifact-release-evidence",
+      "semanticOwner": "EAR",
+      "producerImplementations": ["EAR"],
+      "consumers": ["Rust canary", "OAF release lanes", "Lobster promotion"]
+    }
+  ],
+  "relationshipReferences": [
+    {
+      "name": "ownerRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["ownerType", "ownerId"]
+    },
+    {
+      "name": "subjectRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["ownerNativeSubjectId"]
+    },
+    {
+      "name": "generationRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["immutableGenerationOrExplicitLegacyUnknown"]
+    },
+    {
+      "name": "operationRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["acceptedSemanticOperationId"]
+    },
+    {
+      "name": "decisionRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["decisionId", "generation", "expiry", "normalizedIntent"]
+    },
+    {
+      "name": "attemptRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["boundedTryId", "fixedGenerations"]
+    },
+    {
+      "name": "parentRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["relationshipType", "parentOwnerRef"]
+    },
+    {
+      "name": "childRef",
+      "payloadNeutral": true,
+      "requiredFacets": ["immutableChildId", "parentPlanOrOperation", "acceptedMembership"]
+    },
+    {
+      "name": "copyRef",
+      "payloadNeutral": true,
+      "requiredFacets": [
+        "sourceOwner",
+        "sourceGeneration",
+        "copyOwner",
+        "copyId",
+        "relationship",
+        "retentionOrHold",
+        "externalOrUnknown"
+      ]
+    },
+    {
+      "name": "leaseRef",
+      "payloadNeutral": true,
+      "requiredFacets": [
+        "resourceOwner",
+        "scope",
+        "generation",
+        "holder",
+        "capacity",
+        "expiry",
+        "fencingToken",
+        "settlement"
+      ]
+    },
+    {
+      "name": "deliveryRef",
+      "payloadNeutral": true,
+      "requiredFacets": [
+        "deliveryOperation",
+        "nativeAttempt",
+        "routeGeneration",
+        "renderGeneration",
+        "receipt",
+        "replayPolicy",
+        "certainty"
+      ]
+    },
+    {
+      "name": "artifactRef",
+      "payloadNeutral": true,
+      "requiredFacets": [
+        "sourceCoordinate",
+        "immutableDigest",
+        "provenanceAuthority",
+        "verificationResult"
+      ]
+    },
+    {
+      "name": "componentRef",
+      "payloadNeutral": true,
+      "requiredFacets": [
+        "componentOwner",
+        "artifactRef",
+        "protocolRange",
+        "schemaRange",
+        "stateRange",
+        "migrationRequirements"
+      ]
+    },
+    {
+      "name": "releaseRef",
+      "payloadNeutral": true,
+      "requiredFacets": [
+        "exactComponentTuple",
+        "candidateGeneration",
+        "activation",
+        "readiness",
+        "recovery",
+        "publicationEvidence"
+      ]
+    },
+    {
+      "name": "planRef",
+      "payloadNeutral": true,
+      "requiredFacets": [
+        "acceptedPlanId",
+        "immutableRequiredChildren",
+        "membershipGeneration",
+        "acceptanceTime"
+      ]
+    },
+    {
+      "name": "evidenceRefs",
+      "payloadNeutral": true,
+      "requiredFacets": ["integrityBearingReferencesOnly"]
+    },
+    {
+      "name": "compatibility",
+      "payloadNeutral": true,
+      "requiredFacets": ["state"]
+    }
+  ],
+  "relationshipEvidenceFields": [
+    "observedChronology",
+    "acceptedChronology",
+    "effectiveChronology",
+    "settledChronology",
+    "freshness",
+    "certainty",
+    "disclosure",
+    "omission",
+    "supersession"
+  ],
+  "relationshipInvariants": [
+    "owner-native-payload-is-not-copied",
+    "shared-reference-meanings-cannot-be-redefined",
+    "domain-specific-opaque-references-may-be-added"
+  ],
+  "evidenceIntegrity": {
+    "requiredFields": [
+      "evidenceId",
+      "producer",
+      "subjectRef",
+      "operationRef",
+      "attemptRef",
+      "chronology",
+      "authorityGeneration",
+      "policyGeneration",
+      "ownerGeneration",
+      "artifactGeneration",
+      "componentGeneration",
+      "releaseGeneration",
+      "contentDigest",
+      "integrityMechanism",
+      "classification",
+      "disclosureClass",
+      "omissions",
+      "retention",
+      "legalHold",
+      "expiry",
+      "supersessionRefs",
+      "verificationResult",
+      "verifierRef",
+      "exportRefs"
+    ],
+    "classifications": [
+      "accepted",
+      "denied",
+      "failed",
+      "partial",
+      "unknown",
+      "superseded",
+      "corrected"
+    ],
+    "failureMatrix": [
+      {
+        "class": "best-effort-diagnostics",
+        "behavior": "proceed-with-explicit-coverage-gap"
+      },
+      {
+        "class": "required-operational-receipt",
+        "behavior": "return-unknown-or-deferred-and-reconcile-by-operation"
+      },
+      {
+        "class": "protected-effect-authorization",
+        "behavior": "do-not-dispatch-until-durably-accepted"
+      },
+      {
+        "class": "post-effect-settlement",
+        "behavior": "preserve-owner-result-and-reconcile-without-replay"
+      },
+      {
+        "class": "compliance-export",
+        "behavior": "mark-incomplete-and-do-not-attest"
+      }
+    ],
+    "verificationChecks": [
+      "content-integrity",
+      "signer-or-authority",
+      "generation-binding",
+      "chronology",
+      "supersession",
+      "retention-state"
+    ],
+    "attestationRules": [
+      "export-is-not-attestation-unless-all-required-evidence-verifies",
+      "export-is-not-attestation-unless-coverage-is-complete"
+    ],
+    "projectionRules": [
+      "preserve-stable-machine-identifiers",
+      "sanitize-human-detail",
+      "do-not-copy-secrets-or-unrestricted-owner-payloads"
+    ],
+    "terminalClasses": [
+      "parse-failure",
+      "unsupported-operation",
+      "missing-authority",
+      "policy-deny",
+      "user-deny",
+      "timeout",
+      "target-mismatch",
+      "approved-handler-failure"
+    ]
+  },
+  "managedMutation": {
+    "steps": [
+      "authenticate-actor",
+      "resolve-authority-and-policy",
+      "normalize-owner-target",
+      "load-expected-generation",
+      "preview-or-validate",
+      "authorize-normalized-intent",
+      "owner-accepts-or-rejects",
+      "owner-mutates",
+      "owner-validates-and-settles",
+      "return-sanitized-result-and-evidence"
+    ],
+    "requiredFields": [
+      "actorRef",
+      "authorityGeneration",
+      "policyGeneration",
+      "ownerRef",
+      "subjectRef",
+      "normalizedTarget",
+      "expectedGeneration",
+      "operationRef",
+      "idempotency",
+      "intentDigest",
+      "preview",
+      "validation",
+      "ownerResult",
+      "conflict",
+      "retry",
+      "syncLoop",
+      "sourceGeneration",
+      "loopPreventionToken",
+      "sanitizedError"
+    ],
+    "retryIdentity": "operationRef",
+    "connectorDelivery": "at-least-once-reconcile-before-replay"
+  },
+  "deploymentProfiles": [
+    {
+      "id": "local-baseline",
+      "kind": "template",
+      "managedDependency": "none",
+      "riskPosture": "existing-local-behavior-remains-complete",
+      "legacyArtifactPolicy": "existing-local-policy-with-explicit-migration-sunset",
+      "offlineBehavior": "owner-native-local-behavior",
+      "degradedBehavior": "managed-governance-remains-removable",
+      "containment": "local-owner-actions-only",
+      "breakGlass": "not-applicable-without-protected-managed-effects",
+      "measurementOwner": "local-runtime-owner",
+      "budgetPolicy": "concrete-positive-thresholds-required-in-profile-instance-before-admission"
+    },
+    {
+      "id": "local-governed",
+      "kind": "template",
+      "managedDependency": "local-policy-and-evidence",
+      "riskPosture": "declared-protected-operations-fail-closed",
+      "legacyArtifactPolicy": "warn-quarantine-or-block-with-explicit-sunset",
+      "offlineBehavior": "cached-local-policy-only",
+      "degradedBehavior": "ordinary-owner-operations-retain-documented-local-behavior",
+      "containment": "route-isolation-credential-revocation-admission-freeze-process-stop",
+      "breakGlass": "separately-authorized-time-bounded-evidenced",
+      "measurementOwner": "local-governance-owner",
+      "budgetPolicy": "concrete-positive-thresholds-required-in-profile-instance-before-admission"
+    },
+    {
+      "id": "managed-workspace",
+      "kind": "template",
+      "managedDependency": "lobster-desired-state-and-policy",
+      "riskPosture": "fresh-signed-cache-allowed-required-decisions-fail-closed",
+      "legacyArtifactPolicy": "quarantine-or-block-with-managed-migration-sunset",
+      "offlineBehavior": "fresh-signed-cache-with-risk-class-expiry",
+      "degradedBehavior": "required-unavailable-decisions-fail-closed-by-risk-class",
+      "containment": "route-isolation-credential-revocation-admission-freeze-process-stop",
+      "breakGlass": "separately-authorized-time-bounded-evidenced",
+      "measurementOwner": "workspace-operations-owner",
+      "budgetPolicy": "concrete-positive-thresholds-required-in-profile-instance-before-admission"
+    },
+    {
+      "id": "managed-fleet",
+      "kind": "template",
+      "managedDependency": "lobster-rollout-retention-budget-and-repair",
+      "riskPosture": "per-unit-truth-authoritative-aggregate-unknown-never-success",
+      "legacyArtifactPolicy": "fleet-quarantine-with-enforced-migration-sunset",
+      "offlineBehavior": "per-unit-policy-cache-with-unknown-reachability",
+      "degradedBehavior": "aggregate-unknown-or-partial-never-becomes-success",
+      "containment": "route-isolation-credential-revocation-admission-freeze-process-stop-quarantine",
+      "breakGlass": "separately-authorized-time-bounded-evidenced",
+      "measurementOwner": "fleet-operations-owner",
+      "budgetPolicy": "concrete-positive-thresholds-required-in-profile-instance-before-admission"
+    }
+  ],
+  "budgetRequirements": [
+    {
+      "category": "latency",
+      "statistics": ["p95", "p99"],
+      "unit": "milliseconds",
+      "thresholdType": "positive-number",
+      "requiredPerProfileInstance": true
+    },
+    {
+      "category": "cold-start",
+      "statistics": ["p95", "p99"],
+      "unit": "milliseconds",
+      "thresholdType": "positive-number",
+      "requiredPerProfileInstance": true
+    },
+    {
+      "category": "memory",
+      "statistics": ["p95", "p99"],
+      "unit": "bytes",
+      "thresholdType": "positive-number",
+      "requiredPerProfileInstance": true
+    },
+    {
+      "category": "freshness",
+      "statistics": ["maximum"],
+      "unit": "seconds",
+      "thresholdType": "positive-number",
+      "requiredPerProfileInstance": true
+    },
+    {
+      "category": "reconnect",
+      "statistics": ["p95", "p99"],
+      "unit": "milliseconds",
+      "thresholdType": "positive-number",
+      "requiredPerProfileInstance": true
+    },
+    {
+      "category": "queue-backpressure",
+      "statistics": ["maximum-depth", "maximum-age"],
+      "unit": "items-and-milliseconds",
+      "thresholdType": "positive-number",
+      "requiredPerProfileInstance": true
+    },
+    {
+      "category": "recovery",
+      "statistics": ["p95", "p99"],
+      "unit": "seconds",
+      "thresholdType": "positive-number",
+      "requiredPerProfileInstance": true
+    }
+  ],
+  "requiredDegradedServices": [
+    "policy",
+    "approval",
+    "evidence",
+    "release",
+    "identity",
+    "fleet"
+  ],
+  "requiredContainmentActions": [
+    "route-isolation",
+    "credential-revocation",
+    "admission-freeze",
+    "process-stop",
+    "quarantine",
+    "unknown-reachability"
+  ],
+  "riskInvariants": [
+    "protected-effects-cannot-be-made-permissive-by-admin-override",
+    "break-glass-is-separately-authorized-time-bounded-and-evidenced",
+    "aggregate-unknown-or-partial-never-becomes-success"
+  ],
+  "implementationSelection": {
+    "invariants": [
+      "desired-placement-is-not-local-selection",
+      "one-authoritative-implementation-binds-before-admission-or-mutation",
+      "shadow-is-effect-free",
+      "rollback-settlement-is-explicit",
+      "unknown-settlement-does-not-become-success"
+    ]
+  },
+  "fixtureRegistry": {
+    "path": "fixtures.json",
+    "requiredFields": [
+      "id",
+      "schemaVersion",
+      "ownerOracle",
+      "status",
+      "acceptedResult",
+      "structuredFailure",
+      "compatibility",
+      "runners"
+    ],
+    "compatibilityStates": [
+      "current",
+      "legacy",
+      "optional-unknown",
+      "incompatible",
+      "unsupported",
+      "malformed",
+      "unknown"
+    ]
+  },
+  "trustOrder": [
+    "resolve-immutable-artifact",
+    "verify-digest-signature-authority-expiry-revocation",
+    "parse",
+    "validate-protocol-schema-state-compatibility",
+    "create-or-validate-checkpoint",
+    "stage-and-migrate-under-target-owner",
+    "load-policy-and-authority",
+    "activate-one-implementation",
+    "observe-exact-candidate-readiness",
+    "commit-or-recover",
+    "publish-actual-artifact-proof"
+  ],
+  "publishedArtifactProofRequirements": [
+    "published-bytes-in-clean-environment",
+    "compatible-component-set",
+    "partial-publication",
+    "fresh-install",
+    "upgrade",
+    "downgrade-refusal",
+    "rollback",
+    "recovery-blocked"
+  ],
+  "ledger": {
+    "path": "disposition.json",
+    "classifications": ["B1", "B2", "B3"],
+    "statuses": [
+      "planned",
+      "build-only",
+      "evidence-only",
+      "release-eligible",
+      "active",
+      "expired",
+      "deleted"
+    ],
+    "requiredFields": [
+      "id",
+      "classification",
+      "owner",
+      "baseCommit",
+      "sourceSha",
+      "patchId",
+      "dependencies",
+      "destination",
+      "fixtureIds",
+      "replacement",
+      "minimumRelease",
+      "mixedVersionWindow",
+      "rollback",
+      "delete",
+      "retain",
+      "zeroOldPathEvidence",
+      "expiry",
+      "status"
+    ]
+  }
+}

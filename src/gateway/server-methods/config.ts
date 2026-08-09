@@ -784,6 +784,17 @@ async function commitGatewayConfigWriteOrRespond(
   }
 }
 
+function rejectReadOnlyConfigWrite(
+  context: GatewayRequestContext | undefined,
+  respond: RespondFn,
+): boolean {
+  if (!context?.configReadOnlyReason) {
+    return false;
+  }
+  respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, context.configReadOnlyReason));
+  return true;
+}
+
 function isHashlessPatchLwwPath(path: string): boolean {
   return HASHLESS_PATCH_LWW_PATH_PREFIXES.some(
     (prefix) => path === prefix || path.startsWith(`${prefix}.`),
@@ -834,6 +845,7 @@ export const configHandlers: GatewayRequestHandlers = {
     respond(
       true,
       await readConfigGetResponse({
+        configSnapshot: context.configSnapshot,
         getHotReloadStatus: context.getConfigReloaderHotReloadStatus,
         loadUiHints: () => loadSchemaWithPlugins().uiHints,
       }),
@@ -881,6 +893,9 @@ export const configHandlers: GatewayRequestHandlers = {
   },
   "config.set": async ({ params, respond, context }) => {
     if (!assertValidParams(params, validateConfigSetParams, "config.set", respond)) {
+      return;
+    }
+    if (rejectReadOnlyConfigWrite(context, respond)) {
       return;
     }
     const writeSnapshot = await readConfigWriteSnapshotOrRespond(params, respond);
@@ -942,6 +957,9 @@ export const configHandlers: GatewayRequestHandlers = {
   },
   "config.patch": async ({ params, respond, client, context }) => {
     if (!assertValidParams(params, validateConfigPatchParams, "config.patch", respond)) {
+      return;
+    }
+    if (rejectReadOnlyConfigWrite(context, respond)) {
       return;
     }
     const hashlessPatch = resolveBaseHashParam(params) === null;
@@ -1172,6 +1190,9 @@ export const configHandlers: GatewayRequestHandlers = {
     if (!assertValidParams(params, validateConfigApplyParams, "config.apply", respond)) {
       return;
     }
+    if (rejectReadOnlyConfigWrite(context, respond)) {
+      return;
+    }
     const writeSnapshot = await readConfigWriteSnapshotOrRespond(params, respond);
     if (!writeSnapshot) {
       return;
@@ -1233,6 +1254,9 @@ export const configHandlers: GatewayRequestHandlers = {
   },
   "config.openFile": async ({ params, respond, context }) => {
     if (!assertValidParams(params, validateConfigGetParams, "config.openFile", respond)) {
+      return;
+    }
+    if (rejectReadOnlyConfigWrite(context, respond)) {
       return;
     }
     const configPath = createConfigIO().configPath;

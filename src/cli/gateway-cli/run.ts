@@ -34,6 +34,12 @@ import {
 import type { GatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setGatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setVerbose } from "../../globals.js";
+import {
+  formatHostingProfileIds,
+  HOSTING_PROFILE_ENV,
+  parseHostingProfileId,
+} from "../../hosting/profiles.js";
+import type { HostingProfileId } from "../../hosting/types.js";
 import { isTruthyEnvValue } from "../../infra/env.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import {
@@ -283,8 +289,23 @@ async function readGatewayStartupConfig(params: {
   cfg: OpenClawConfig;
   snapshot: ConfigFileSnapshot | null;
   startupConfigSnapshotRead?: ReadConfigFileSnapshotWithPluginMetadataResult;
+  configLayersReadOnly?: boolean;
 }> {
-  const { readConfigFileSnapshotWithPluginMetadata } = await import("../../config/config.js");
+  const [{ loadConfigLayers }, { readConfigFileSnapshotWithPluginMetadata }] = await Promise.all([
+    import("./config-layers.js"),
+    import("../../config/config.js"),
+  ]);
+  const layeredConfig = await params.startupTrace.measure("cli.config-layers", () =>
+    loadConfigLayers(params.opts.configLayer),
+  );
+  if (layeredConfig) {
+    return {
+      cfg: layeredConfig.snapshot.config,
+      snapshot: layeredConfig.snapshot,
+      startupConfigSnapshotRead: layeredConfig,
+      configLayersReadOnly: true,
+    };
+  }
   let blockedRecoveryConfig: OpenClawConfig | null = null;
   const snapshotRead: ReadConfigFileSnapshotWithPluginMetadataResult | null =
     await params.startupTrace.measure("cli.config-snapshot", () =>
@@ -707,6 +728,18 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
     return;
   }
   setVerbose(Boolean(opts.verbose));
+  const hostingProfileRaw = toOptionString(opts.hostingProfile);
+  let hostingProfileOverride: HostingProfileId | undefined;
+  if (hostingProfileRaw !== undefined) {
+    const hostingProfile = parseHostingProfileId(hostingProfileRaw);
+    if (!hostingProfile) {
+      defaultRuntime.error(`Invalid --hosting-profile. Use ${formatHostingProfileIds()}.`);
+      defaultRuntime.exit(1);
+      return;
+    }
+    hostingProfileOverride = hostingProfile;
+    process.env[HOSTING_PROFILE_ENV] = hostingProfile;
+  }
   if (opts.cliBackendLogs || opts.claudeCliLogs) {
     setConsoleSubsystemFilter(["agent/cli-backend"]);
     process.env.OPENCLAW_CLI_BACKEND_LOG_OUTPUT = "1";
@@ -766,6 +799,15 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
 
   setConsoleTimestampPrefix(true);
 
+  const configLayersRequested =
+    typeof opts.configLayer === "string" ||
+    (Array.isArray(opts.configLayer) && opts.configLayer.length > 0);
+  if (devMode && configLayersRequested) {
+    defaultRuntime.error("--dev cannot be combined with --config-layer");
+    defaultRuntime.exit(EXIT_CONFIG_ERROR);
+    return;
+  }
+
   if (devMode) {
     if (opts.reset) {
       // Recheck immediately before full reset; gateway module loading above can take seconds.
@@ -787,11 +829,16 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
   }
 
   gatewayLog.info("loading configuration…");
-  const { cfg, lowerPrecedenceEnv, snapshot, startupConfigSnapshotRead } =
-    await readGatewayStartupConfigWithShellEnv({
-      opts,
-      startupTrace,
-    });
+  const {
+    cfg,
+    lowerPrecedenceEnv,
+    snapshot,
+    startupConfigSnapshotRead,
+    configLayersReadOnly = false,
+  } = await readGatewayStartupConfigWithShellEnv({
+    opts,
+    startupTrace,
+  });
   if (
     !enforceGatewayRunFutureConfigGuard({
       opts,
@@ -1181,10 +1228,15 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
       beginBoot,
       completeBoot,
       start: async ({ startupStartedAt, requestHotReloadRecovery } = {}) => {
-        const startupConfigSnapshotReadForThisStart = startupConfigSnapshotReadForNextStart;
-        startupConfigSnapshotReadForNextStart = undefined;
+        const startupConfigSnapshotReadForThisStart = configLayersReadOnly
+          ? startupConfigSnapshotRead
+          : startupConfigSnapshotReadForNextStart;
+        if (!configLayersReadOnly) {
+          startupConfigSnapshotReadForNextStart = undefined;
+        }
         return await startGatewayServer(port, {
           bind,
+          ...(hostingProfileOverride ? { hostingProfileOverride } : {}),
           auth: authOverride,
           tailscale: tailscaleOverride,
           startupStartedAt,
@@ -1192,6 +1244,7 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
           ...(startupConfigSnapshotReadForThisStart
             ? { startupConfigSnapshotRead: startupConfigSnapshotReadForThisStart }
             : {}),
+          ...(configLayersReadOnly ? { configLayersReadOnly: true } : {}),
           ...(envSidecarStartupMode !== "start" ? { sidecarStartup: envSidecarStartupMode } : {}),
           ...(channelAutostartSuppression ? { channelAutostartSuppression } : {}),
           ...(devMode
@@ -1275,33 +1328,59 @@ async function runGatewayCommandOnce(opts: GatewayRunOpts, hooks: GatewayRunRunt
   }
 }
 
+const GATEWAY_INVOCATION_PROFILE_ENV_KEYS = [HOSTING_PROFILE_ENV] as const;
+
+function captureGatewayInvocationProfileEnvironment(): Record<string, string | undefined> {
+  return Object.fromEntries(
+    GATEWAY_INVOCATION_PROFILE_ENV_KEYS.map((key) => [key, process.env[key]]),
+  );
+}
+
+function restoreGatewayInvocationProfileEnvironment(
+  snapshot: Record<string, string | undefined>,
+): void {
+  for (const key of GATEWAY_INVOCATION_PROFILE_ENV_KEYS) {
+    const value = snapshot[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
 /** Run foreground Gateway startup with one consent-gated invalid-config repair attempt. */
 export async function runGatewayCommand(
   opts: GatewayRunOpts,
   hooks: GatewayRunRuntimeHooks = {},
   recoveryDeps?: InvalidConfigRecoveryDeps,
 ) {
+  const profileEnvironment = captureGatewayInvocationProfileEnvironment();
   try {
-    await runGatewayCommandOnce(opts, hooks);
-  } catch (error) {
-    if (!isInvalidConfigError(error)) {
-      throw error;
-    }
-    defaultRuntime.error(`Gateway failed to start: ${formatErrorMessage(error)}`);
-    if (opts.allowUnconfigured || !isDoctorRecoverableInvalidConfigError(error)) {
+    try {
+      await runGatewayCommandOnce(opts, hooks);
+    } catch (error) {
+      if (!isInvalidConfigError(error)) {
+        throw error;
+      }
+      defaultRuntime.error(`Gateway failed to start: ${formatErrorMessage(error)}`);
+      if (opts.allowUnconfigured || !isDoctorRecoverableInvalidConfigError(error)) {
+        defaultRuntime.exit(EXIT_CONFIG_ERROR);
+        return;
+      }
+      const { offerInvalidConfigRecovery } = await import("../invalid-config-recovery.js");
+      const recovery = await offerInvalidConfigRecovery({
+        runtime: defaultRuntime,
+        deps: recoveryDeps,
+        retry: async () => await runGatewayCommandOnce(opts, hooks),
+      });
+      if (recovery.status === "recovered") {
+        return;
+      }
       defaultRuntime.exit(EXIT_CONFIG_ERROR);
-      return;
     }
-    const { offerInvalidConfigRecovery } = await import("../invalid-config-recovery.js");
-    const recovery = await offerInvalidConfigRecovery({
-      runtime: defaultRuntime,
-      deps: recoveryDeps,
-      retry: async () => await runGatewayCommandOnce(opts, hooks),
-    });
-    if (recovery.status === "recovered") {
-      return;
-    }
-    defaultRuntime.exit(EXIT_CONFIG_ERROR);
+  } finally {
+    restoreGatewayInvocationProfileEnvironment(profileEnvironment);
   }
 }
 

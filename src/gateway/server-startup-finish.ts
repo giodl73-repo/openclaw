@@ -142,6 +142,7 @@ export async function finishGatewayStartup(params: {
     nodeReapprovalCoordinator,
     preauthHandshakeTimeoutMs,
     isGatewayStartupPending,
+    getReadiness,
     attachedGatewayExtraHandlers,
     startListening,
     loadStartupPluginsModule,
@@ -200,6 +201,13 @@ export async function finishGatewayStartup(params: {
       sessionObserver,
       getMcpAppSandboxPort,
       ensureSandboxHostPort,
+      ...(opts.configLayersReadOnly
+        ? {
+            configSnapshot,
+            configReadOnlyReason:
+              "configuration writes are unavailable while --config-layer is active",
+          }
+        : {}),
       resolveTerminalLaunchPolicy: terminalLaunchPolicy.resolve,
       isTerminalEnabled: terminalLaunchPolicy.isEnabled,
       execApprovalManager,
@@ -212,6 +220,7 @@ export async function finishGatewayStartup(params: {
       loadGatewayModelCatalog,
       loadGatewayModelCatalogSnapshot,
       getHealthCache,
+      getReadiness,
       refreshHealthSnapshot: refreshGatewayHealthSnapshotWithRuntime,
       logHealth,
       logGateway: log,
@@ -513,6 +522,7 @@ export async function finishGatewayStartup(params: {
           waitForPostReadyWork: params.waitForPostReadyWork,
           providerAuthPrewarm: {
             getConfig: getRuntimeConfig,
+            ...pluginRuntime.modelRouteReadinessStartupOptions(cfgAtStart),
           },
         }),
     ),
@@ -533,97 +543,103 @@ export async function finishGatewayStartup(params: {
   postAttachRuntimeReturned = true;
   activateScheduledServicesWhenReady();
 
-  const { startManagedGatewayConfigReloader } = await import("./server-reload-handlers.js");
-  runtimeState.configReloader = startManagedGatewayConfigReloader({
-    minimalTestGateway,
-    initialConfig: cfgAtStart,
-    initialCompareConfig: startupLastGoodSnapshot.sourceConfig,
-    initialSnapshotRawHash: startupLastGoodSnapshot.exists
-      ? (startupLastGoodSnapshot.hash ?? null)
-      : null,
-    initialAuthoredConfig: startupLastGoodSnapshot.parsed,
-    initialIncludedPaths: startupLastGoodSnapshot.includedPaths ?? [],
-    initialSnapshotValid: startupLastGoodSnapshot.valid,
-    initialSnapshotIssues: startupLastGoodSnapshot.issues,
-    initialInternalWriteHash: startupInternalWriteHash,
-    watchPath: configSnapshot.path,
-    readSnapshot: readConfigFileSnapshotForRuntimeTransaction,
-    promoteSnapshot: promoteConfigSnapshotToLastKnownGood,
-    subscribeToWrites: (listener) =>
-      registerConfigWriteListener(listener, {
-        ownsRuntimeActivationFor: configSnapshot.path,
-        preCommitRuntimePreflight: async (sourceConfig, runtimeRefresh) => {
-          const candidate = prepareReloadCandidate({
-            runtimeConfig: sourceConfig,
-            sourceConfig,
-          });
-          await activateRuntimeSecrets(candidate.runtimeConfig, {
-            reason: "reload",
-            activate: false,
-            env: candidate.runtimeEnv.env,
-            includeAuthStoreRefs: runtimeRefresh?.includeAuthStoreRefs,
-          });
-          return candidate;
-        },
+  if (!opts.configLayersReadOnly) {
+    const { startManagedGatewayConfigReloader } = await import("./server-reload-handlers.js");
+    runtimeState.configReloader = startManagedGatewayConfigReloader({
+      minimalTestGateway,
+      initialConfig: cfgAtStart,
+      initialCompareConfig: startupLastGoodSnapshot.sourceConfig,
+      initialSnapshotRawHash: startupLastGoodSnapshot.exists
+        ? (startupLastGoodSnapshot.hash ?? null)
+        : null,
+      initialAuthoredConfig: startupLastGoodSnapshot.parsed,
+      initialIncludedPaths: startupLastGoodSnapshot.includedPaths ?? [],
+      initialSnapshotValid: startupLastGoodSnapshot.valid,
+      initialSnapshotIssues: startupLastGoodSnapshot.issues,
+      initialInternalWriteHash: startupInternalWriteHash,
+      watchPath: configSnapshot.path,
+      readSnapshot: readConfigFileSnapshotForRuntimeTransaction,
+      promoteSnapshot: promoteConfigSnapshotToLastKnownGood,
+      subscribeToWrites: (listener) =>
+        registerConfigWriteListener(listener, {
+          ownsRuntimeActivationFor: configSnapshot.path,
+          preCommitRuntimePreflight: async (sourceConfig, runtimeRefresh) => {
+            const candidate = prepareReloadCandidate({
+              runtimeConfig: sourceConfig,
+              sourceConfig,
+            });
+            await activateRuntimeSecrets(candidate.runtimeConfig, {
+              reason: "reload",
+              activate: false,
+              env: candidate.runtimeEnv.env,
+              includeAuthStoreRefs: runtimeRefresh?.includeAuthStoreRefs,
+            });
+            return candidate;
+          },
+        }),
+      deps,
+      broadcast,
+      getState: () => ({
+        hooksConfig: runtimeState.hooksConfig,
+        hookClientIpConfig: runtimeState.hookClientIpConfig,
+        heartbeatRunner: runtimeState.heartbeatRunner,
+        cronState: runtimeState.cronState,
+        channelHealthMonitor: runtimeState.channelHealthMonitor,
       }),
-    deps,
-    broadcast,
-    getState: () => ({
-      hooksConfig: runtimeState.hooksConfig,
-      hookClientIpConfig: runtimeState.hookClientIpConfig,
-      heartbeatRunner: runtimeState.heartbeatRunner,
-      cronState: runtimeState.cronState,
-      channelHealthMonitor: runtimeState.channelHealthMonitor,
-    }),
-    setState: (nextState) => {
-      const cronStateChanged = nextState.cronState !== runtimeState.cronState;
-      runtimeState.hooksConfig = nextState.hooksConfig;
-      runtimeState.hookClientIpConfig = nextState.hookClientIpConfig;
-      runtimeState.heartbeatRunner = nextState.heartbeatRunner;
-      runtimeState.cronState = nextState.cronState;
-      deps.cron = runtimeState.cronState.cron;
-      runtimeState.channelHealthMonitor = nextState.channelHealthMonitor;
-      if (cronStateChanged) {
+      setState: (nextState) => {
+        const cronStateChanged = nextState.cronState !== runtimeState.cronState;
+        runtimeState.hooksConfig = nextState.hooksConfig;
+        runtimeState.hookClientIpConfig = nextState.hookClientIpConfig;
+        runtimeState.heartbeatRunner = nextState.heartbeatRunner;
+        runtimeState.cronState = nextState.cronState;
+        deps.cron = runtimeState.cronState.cron;
+        runtimeState.channelHealthMonitor = nextState.channelHealthMonitor;
+        if (cronStateChanged) {
+          cronStartState.handled = true;
+        }
+      },
+      startChannel,
+      stopChannel,
+      getChannelAutostartSuppression: channelManager.getAutostartSuppression,
+      stopPostReadySidecars: stopRegisteredPostReadySidecars,
+      reloadPlugins: reloadAttachedGatewayPlugins,
+      logHooks,
+      logChannels,
+      logCron,
+      logReload,
+      cronReconciliation,
+      onCronRestart: () => {
         cronStartState.handled = true;
-      }
-    },
-    startChannel,
-    stopChannel,
-    getChannelAutostartSuppression: channelManager.getAutostartSuppression,
-    stopPostReadySidecars: stopRegisteredPostReadySidecars,
-    reloadPlugins: reloadAttachedGatewayPlugins,
-    logHooks,
-    logChannels,
-    logCron,
-    logReload,
-    cronReconciliation,
-    onCronRestart: () => {
-      cronStartState.handled = true;
-    },
-    prepareTerminalConfig: (plan, nextConfig) => {
-      terminalLaunchPolicy.prepareConfig(nextConfig, { restartPending: plan.restartGateway });
-    },
-    reconcileTerminalSessions: () => {
-      terminalSessions.closeDisallowedAgents((agentId) => terminalLaunchPolicy.resolve(agentId).ok);
-    },
-    commitTerminalConfig: (nextConfig) => {
-      terminalLaunchPolicy.commitConfig();
-      workerLiveEvents?.rebindAll(nextConfig);
-    },
-    acceptTerminalConfig: terminalLaunchPolicy.acceptConfig,
-    channelManager,
-    activateRuntimeSecrets,
-    prepareConfigCandidate: prepareReloadCandidate,
-    applyRuntimeConfigOverrides: applyFixedGatewayOverlays,
-    resolveSharedGatewaySessionGenerationForConfig,
-    sharedGatewaySessionGenerationState,
-    clients,
-    ...(opts.hotReloadRecovery ? { requestRecoveryRestart: opts.hotReloadRecovery } : {}),
-    restartRecoveryAvailable: opts.hotReloadRecovery !== undefined,
-  });
-  await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
-    log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
-  });
+      },
+      prepareTerminalConfig: (plan, nextConfig) =>
+        terminalLaunchPolicy.prepareConfig(nextConfig, { restartPending: plan.restartGateway }),
+      reconcileTerminalSessions: () =>
+        terminalSessions.closeDisallowedAgents(
+          (agentId) => terminalLaunchPolicy.resolve(agentId).ok,
+        ),
+      commitTerminalConfig: (nextConfig) => {
+        terminalLaunchPolicy.commitConfig();
+        pluginRuntime.readinessSnapshot = pluginRuntime.makeState(
+          nextConfig,
+          pluginRuntime.registry,
+        );
+        workerLiveEvents?.rebindAll(nextConfig);
+      },
+      acceptTerminalConfig: terminalLaunchPolicy.acceptConfig,
+      channelManager,
+      activateRuntimeSecrets,
+      prepareConfigCandidate: prepareReloadCandidate,
+      applyRuntimeConfigOverrides: applyFixedGatewayOverlays,
+      resolveSharedGatewaySessionGenerationForConfig,
+      sharedGatewaySessionGenerationState,
+      clients,
+      ...(opts.hotReloadRecovery ? { requestRecoveryRestart: opts.hotReloadRecovery } : {}),
+      restartRecoveryAvailable: opts.hotReloadRecovery !== undefined,
+    });
+    await promoteConfigSnapshotToLastKnownGood(startupLastGoodSnapshot).catch((err: unknown) => {
+      log.warn(`gateway: failed to promote config last-known-good backup: ${String(err)}`);
+    });
+  }
   if (!minimalTestGateway) {
     const gatewayRuntimeServices = await loadScheduledServicesModule();
     postReadyState.maintenanceTimer = gatewayRuntimeServices.scheduleGatewayPostReadyMaintenance({

@@ -1,4 +1,5 @@
 import type { AmbientEnvTriggerPolicy } from "../channels/config-presence.js";
+import type { HostingProfileId } from "../hosting/types.js";
 import { normalizeDevicePublicKeyBase64Url } from "../infra/device-identity.js";
 import type { EffectiveOperatorDeviceIdentity } from "../infra/device-pairing.js";
 import type { GatewayRestartEmitter } from "../infra/restart.js";
@@ -16,6 +17,8 @@ export type GatewayServer = {
 };
 
 export type GatewayServerOptions = {
+  /** Optional standard hosting profile selected by the current invocation. */
+  hostingProfileOverride?: HostingProfileId;
   /**
    * Bind address policy for the Gateway WebSocket/HTTP server.
    * - loopback: 127.0.0.1
@@ -64,6 +67,8 @@ export type GatewayServerOptions = {
   startupConfigSnapshotRead?: import("../config/io.js").ReadConfigFileSnapshotWithPluginMetadataResult;
   /** Restart request override; direct servers fail closed on restart-required reloads. */
   hotReloadRecovery?: GatewayRestartEmitter;
+  /** Keep CLI-composed configuration stable and read-only for this server lifetime. */
+  configLayersReadOnly?: boolean;
 };
 
 export function shouldRetainControlUiDeviceAuthMigrationSession(params: {
