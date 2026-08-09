@@ -426,6 +426,7 @@ function validateTraceRelationships(operations, failures) {
     archiveDelete.result === "partial" &&
     archiveDelete.target?.sessionRef === exportOperation.target?.sessionRef &&
     archiveDelete.target?.currentGenerationRef === exportOperation.target?.currentGenerationRef &&
+    archiveDelete.settlements?.[2]?.copyRef === exportOperation.export?.copyRef &&
     purge?.kind === "delete" &&
     purge.mode === "purge" &&
     purge.result === "complete" &&
@@ -500,10 +501,16 @@ export function validateSessionCopyLifecycleFixture(input) {
   }
   keys(input.inventory, KEYS.inventory, "inventory", failures);
   const inventory = {
-    sessionRefs: new Set(input.inventory?.sessionRefs ?? []),
-    generationRefs: new Set(input.inventory?.generationRefs ?? []),
-    copyRefs: new Set(input.inventory?.copyRefs ?? []),
-    operationIds: new Set(input.inventory?.operationIds ?? []),
+    sessionRefs: new Set(
+      Array.isArray(input.inventory?.sessionRefs) ? input.inventory.sessionRefs : [],
+    ),
+    generationRefs: new Set(
+      Array.isArray(input.inventory?.generationRefs) ? input.inventory.generationRefs : [],
+    ),
+    copyRefs: new Set(Array.isArray(input.inventory?.copyRefs) ? input.inventory.copyRefs : []),
+    operationIds: new Set(
+      Array.isArray(input.inventory?.operationIds) ? input.inventory.operationIds : [],
+    ),
   };
   if (
     !uniqueRefs(input.inventory?.sessionRefs, SESSION_RE) ||
