@@ -1,0 +1,265 @@
+{
+  "contractVersion": 1,
+  "authority": "none",
+  "fixtureId": "session-copy-lifecycle-evid-010",
+  "inventory": {
+    "sessionRefs": [
+      "session-sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "session-sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    ],
+    "generationRefs": [
+      "generation-sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "generation-sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "generation-sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "copyRefs": [
+      "copy-sha256:0101010101010101010101010101010101010101010101010101010101010101",
+      "copy-sha256:0202020202020202020202020202020202020202020202020202020202020202",
+      "copy-sha256:0303030303030303030303030303030303030303030303030303030303030303",
+      "copy-sha256:0404040404040404040404040404040404040404040404040404040404040404",
+      "copy-sha256:0505050505050505050505050505050505050505050505050505050505050505",
+      "copy-sha256:0606060606060606060606060606060606060606060606060606060606060606",
+      "copy-sha256:0707070707070707070707070707070707070707070707070707070707070707",
+      "copy-sha256:0808080808080808080808080808080808080808080808080808080808080808",
+      "copy-sha256:0909090909090909090909090909090909090909090909090909090909090909",
+      "copy-sha256:1010101010101010101010101010101010101010101010101010101010101010",
+      "copy-sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    ],
+    "operationIds": [
+      "operation-sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "operation-sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "operation-sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "operation-sha256:9999999999999999999999999999999999999999999999999999999999999999"
+    ]
+  },
+  "operations": [
+    {
+      "operationId": "operation-sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "kind": "export",
+      "target": {
+        "sessionRef": "session-sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "currentGenerationRef": "generation-sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "expectedGenerationRef": "generation-sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "authorization": {
+        "requesterRef": "principal-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "policyGenerationRef": "policy-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "export": {
+        "copyRef": "copy-sha256:0303030303030303030303030303030303030303030303030303030303030303",
+        "owner": "workspace-export",
+        "format": "html",
+        "schemaVersion": 1,
+        "includedClasses": [
+          "system-prompt",
+          "tool-definitions",
+          "transcript"
+        ],
+        "omittedClasses": [
+          "delegated-backend-transcript"
+        ],
+        "warnings": [
+          "DELEGATED_BACKEND_OMITTED"
+        ],
+        "integrity": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "disclosureClass": "confidential",
+        "expiresAt": "2026-09-08T00:00:00.000Z"
+      },
+      "result": "complete",
+      "certainty": "confirmed"
+    },
+    {
+      "operationId": "operation-sha256:7777777777777777777777777777777777777777777777777777777777777777",
+      "kind": "delete",
+      "mode": "archive-and-remove",
+      "target": {
+        "sessionRef": "session-sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "currentGenerationRef": "generation-sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "expectedGenerationRef": "generation-sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "authorization": {
+        "requesterRef": "principal-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "policyGenerationRef": "policy-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "mutation": {
+        "registry": "removed",
+        "transcript": "removed",
+        "indexes": "removed_transactionally",
+        "archiveCreated": true
+      },
+      "settlements": [
+        {
+          "copyRef": "copy-sha256:0101010101010101010101010101010101010101010101010101010101010101",
+          "owner": "canonical-transcript",
+          "relationship": "canonical",
+          "required": true,
+          "initialResult": "complete",
+          "finalResult": "complete",
+          "retryable": false
+        },
+        {
+          "copyRef": "copy-sha256:0202020202020202020202020202020202020202020202020202020202020202",
+          "owner": "transcript-index",
+          "relationship": "transactional-derived",
+          "required": true,
+          "initialResult": "complete",
+          "finalResult": "complete",
+          "retryable": false
+        },
+        {
+          "copyRef": "copy-sha256:0303030303030303030303030303030303030303030303030303030303030303",
+          "owner": "workspace-export",
+          "relationship": "user-created-export",
+          "required": true,
+          "initialResult": "retained",
+          "finalResult": "retained",
+          "retryable": false
+        },
+        {
+          "copyRef": "copy-sha256:0404040404040404040404040404040404040404040404040404040404040404",
+          "owner": "delete-archive",
+          "relationship": "retained-archive",
+          "required": true,
+          "initialResult": "retained",
+          "finalResult": "retained",
+          "retryable": false,
+          "retainUntil": "2026-10-08T00:00:00.000Z"
+        },
+        {
+          "copyRef": "copy-sha256:0505050505050505050505050505050505050505050505050505050505050505",
+          "owner": "qmd-live-projection",
+          "relationship": "eventual-derived",
+          "required": true,
+          "initialResult": "deferred",
+          "finalResult": "complete",
+          "retryable": true
+        },
+        {
+          "copyRef": "copy-sha256:0606060606060606060606060606060606060606060606060606060606060606",
+          "owner": "qmd-archive-projection",
+          "relationship": "retained-derived",
+          "required": true,
+          "initialResult": "retained",
+          "finalResult": "retained",
+          "retryable": false
+        },
+        {
+          "copyRef": "copy-sha256:0707070707070707070707070707070707070707070707070707070707070707",
+          "owner": "backup",
+          "relationship": "retained-backup",
+          "required": true,
+          "initialResult": "retained",
+          "finalResult": "retained",
+          "retryable": false,
+          "retainUntil": "2026-11-08T00:00:00.000Z"
+        },
+        {
+          "copyRef": "copy-sha256:0808080808080808080808080808080808080808080808080808080808080808",
+          "owner": "provider",
+          "relationship": "external-copy",
+          "required": true,
+          "initialResult": "externally_controlled",
+          "finalResult": "externally_controlled",
+          "retryable": false
+        }
+      ],
+      "restartReconciled": true,
+      "result": "partial",
+      "aggregateAssurance": "complete",
+      "certainty": "confirmed"
+    },
+    {
+      "operationId": "operation-sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "kind": "delete",
+      "mode": "purge",
+      "target": {
+        "sessionRef": "session-sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "currentGenerationRef": "generation-sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "expectedGenerationRef": "generation-sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "authorization": {
+        "requesterRef": "principal-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "policyGenerationRef": "policy-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "mutation": {
+        "registry": "removed",
+        "transcript": "removed",
+        "indexes": "removed_transactionally",
+        "archiveCreated": false
+      },
+      "settlements": [
+        {
+          "copyRef": "copy-sha256:0909090909090909090909090909090909090909090909090909090909090909",
+          "owner": "canonical-transcript",
+          "relationship": "canonical",
+          "required": true,
+          "initialResult": "complete",
+          "finalResult": "complete",
+          "retryable": false
+        },
+        {
+          "copyRef": "copy-sha256:1010101010101010101010101010101010101010101010101010101010101010",
+          "owner": "transcript-index",
+          "relationship": "transactional-derived",
+          "required": true,
+          "initialResult": "complete",
+          "finalResult": "complete",
+          "retryable": false
+        },
+        {
+          "copyRef": "copy-sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "owner": "qmd-live-projection",
+          "relationship": "eventual-derived",
+          "required": true,
+          "initialResult": "deferred",
+          "finalResult": "complete",
+          "retryable": true
+        }
+      ],
+      "restartReconciled": true,
+      "result": "complete",
+      "aggregateAssurance": "complete",
+      "certainty": "confirmed"
+    },
+    {
+      "operationId": "operation-sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "kind": "delete",
+      "mode": "purge",
+      "target": {
+        "sessionRef": "session-sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "currentGenerationRef": "generation-sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "expectedGenerationRef": "generation-sha256:5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      "authorization": {
+        "requesterRef": "principal-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "policyGenerationRef": "policy-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "mutation": {
+        "registry": "not_started",
+        "transcript": "not_started",
+        "indexes": "not_started",
+        "archiveCreated": false
+      },
+      "settlements": [],
+      "restartReconciled": false,
+      "result": "blocked",
+      "reason": "GENERATION_CHANGED",
+      "aggregateAssurance": "complete",
+      "certainty": "confirmed"
+    }
+  ],
+  "finalState": {
+    "exportCompleteCount": 1,
+    "deleteCompleteCount": 1,
+    "deletePartialCount": 1,
+    "blockedCount": 1,
+    "unknownCount": 0,
+    "aggregateAssurance": "complete"
+  },
+  "contract": {
+    "name": "session-copy-lifecycle",
+    "version": "1.0.0",
+    "authority": "none",
+    "digest": "hmac-sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  }
+}

@@ -70,6 +70,15 @@ Release proof stays referenced by immutable identity, readiness stays bound to
 the candidate service incarnation, code and state recovery certainty remain
 separate, and authority remains `none`.
 
+EVID-010 adds the fork-only `lobster.scl.session-copy-lifecycle.v1` fixture.
+It keeps export and deletion as separate operations over one owner-emitted copy
+graph. It proves one exact-generation export, one ordinary deletion that
+truthfully remains partial while archives, backup, export, and provider copies
+survive, one bounded incognito-style purge after restart reconciliation, and
+one stale-generation refusal before mutation. It adds no universal session
+store, copy database, privacy service, retention owner, or deletion authority,
+and authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
