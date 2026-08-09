@@ -87,6 +87,16 @@ block before activation or mutation. It adds no shared extension manifest,
 catalog, installer, runtime loader, or compatibility authority, and authority
 remains `none`.
 
+EVID-012 adds the fork-only
+`lobster.rfn.protocol-negotiation-evolution.v1` fixture. It preserves the
+TypeScript Gateway as the protocol owner and proves that N-1 admission is
+restricted to node and probe modes, while the same adjacent operator range is
+refused with structured mismatch details. Swift and Kotlin have guarded node
+ranges; the Rust Quick Chat client remains current-only, and the fixture does
+not claim Rust adjacent-version conformance or a release-duration policy.
+It adds no transport, protocol dispatcher, downgrade adapter, release policy,
+or runtime authority, and authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
