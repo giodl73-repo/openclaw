@@ -34,6 +34,12 @@ type RepairResult = {
   mutationCount: number;
 };
 
+type RepairTarget = {
+  cell: string;
+  childOperationId: string;
+  attemptId: string;
+};
+
 type FleetRepairInput = {
   parent: {
     id: string;
@@ -47,6 +53,8 @@ type FleetRepairInput = {
     eligibilityDigest: string;
     eligibleCells: string[];
     requestedCells: string[];
+    targetSetDigest: string;
+    targetAttempts: RepairTarget[];
     results: RepairResult[];
   };
   projectionMutationAttempted: boolean;
@@ -206,6 +214,66 @@ describe("lobster.ops.fleet-targeted-repair.v1", () => {
     });
   });
 
+  it("binds repair settlement identities to the admitted target", () => {
+    const candidate = input();
+    candidate.repair.results[0]!.childOperationId = cell(candidate, "alpha").childOperationId;
+    candidate.repair.results[0]!.activeAttemptId = cell(candidate, "alpha").nextAttemptId;
+
+    expect(validateFleetTargetedRepair(candidate, owner()).failures).toContainEqual({
+      code: "RepairSettlementIdentityMismatch",
+      cell: "beta",
+    });
+  });
+
+  it("rejects reused or unreceipted repair target identities", () => {
+    const reused = input();
+    reused.repair.targetAttempts[0]!.childOperationId = cell(reused, "alpha").childOperationId;
+    reused.repair.targetAttempts[0]!.attemptId = cell(reused, "alpha").nextAttemptId;
+    reused.repair.results[0]!.childOperationId = reused.repair.targetAttempts[0]!.childOperationId;
+    reused.repair.results[0]!.activeAttemptId = reused.repair.targetAttempts[0]!.attemptId;
+
+    expect(validateFleetTargetedRepair(reused, owner()).failures).toEqual(
+      expect.arrayContaining([
+        { code: "RepairTargetIdentityReused", cell: "beta" },
+        { code: "RepairTargetReceiptMismatch" },
+      ]),
+    );
+  });
+
+  it("keeps rollout, child-operation, repair, and target identities distinct", () => {
+    const parentCollision = input();
+    cell(parentCollision, "alpha").childOperationId = parentCollision.parent.id;
+    const siblingCollision = input();
+    cell(siblingCollision, "beta").childOperationId = cell(
+      siblingCollision,
+      "alpha",
+    ).childOperationId;
+    const attemptCollision = input();
+    cell(attemptCollision, "beta").priorAttemptId = cell(attemptCollision, "alpha").priorAttemptId;
+    const repairCollision = input();
+    repairCollision.repair.id = cell(repairCollision, "alpha").childOperationId;
+    const targetCollision = input();
+    targetCollision.repair.targetAttempts[0]!.childOperationId = targetCollision.repair.id;
+    targetCollision.repair.results[0]!.childOperationId = targetCollision.repair.id;
+
+    expect(validateFleetTargetedRepair(parentCollision, owner()).failures).toContainEqual({
+      code: "ParentOperationIdentityCollision",
+    });
+    expect(validateFleetTargetedRepair(siblingCollision, owner()).failures).toContainEqual({
+      code: "ParentOperationIdentityCollision",
+    });
+    expect(validateFleetTargetedRepair(attemptCollision, owner()).failures).toContainEqual({
+      code: "ParentAttemptIdentityCollision",
+    });
+    expect(validateFleetTargetedRepair(repairCollision, owner()).failures).toContainEqual({
+      code: "RepairIdentityReused",
+    });
+    expect(validateFleetTargetedRepair(targetCollision, owner()).failures).toContainEqual({
+      code: "RepairTargetIdentityReused",
+      cell: "beta",
+    });
+  });
+
   it("rejects repair evidence when an ineligible target was mutated", () => {
     const candidate = input(1);
     candidate.repair.results = [
@@ -274,6 +342,29 @@ describe("lobster.ops.fleet-targeted-repair.v1", () => {
       writeFileSync(tempPath, JSON.stringify(value), "utf8");
       expect(() => runFixture(tempPath)).toThrow(
         "fleet targeted repair fixture envelope is invalid",
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses fixture mutation evidence for an inadmissible widened repair", () => {
+    const value = fixture();
+    value.cases[1].input.repair.results = [
+      {
+        cell: "alpha",
+        childOperationId: "8".repeat(64),
+        result: "upgraded",
+        activeAttemptId: "9".repeat(32),
+        mutationCount: 1,
+      },
+    ];
+    const tempDir = mkdtempSync(join(tmpdir(), "openclaw-fleet-targeted-repair-"));
+    const tempPath = join(tempDir, "fixture.json");
+    try {
+      writeFileSync(tempPath, JSON.stringify(value), "utf8");
+      expect(() => runFixture(tempPath)).toThrow(
+        "Fixture case widened-repair-is-refused-before-mutation did not match its expected result",
       );
     } finally {
       rmSync(tempDir, { recursive: true, force: true });

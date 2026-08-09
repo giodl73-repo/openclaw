@@ -30,9 +30,12 @@ const REPAIR_KEYS = new Set([
   "eligibilityDigest",
   "id",
   "requestedCells",
+  "targetAttempts",
+  "targetSetDigest",
   "results",
   "sourceParentId",
 ]);
+const REPAIR_TARGET_KEYS = new Set(["attemptId", "cell", "childOperationId"]);
 const REPAIR_RESULT_KEYS = new Set([
   "activeAttemptId",
   "cell",
@@ -40,7 +43,14 @@ const REPAIR_RESULT_KEYS = new Set([
   "mutationCount",
   "result",
 ]);
-const EXPECTED_KEYS = new Set(["after", "before", "failure", "status"]);
+const EXPECTED_KEYS = new Set([
+  "after",
+  "before",
+  "failure",
+  "failures",
+  "mutationCounts",
+  "status",
+]);
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const ATTEMPT_PATTERN = /^[0-9a-f]{32}$/;
 const CELL_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
@@ -165,6 +175,16 @@ function validRepairResult(result) {
   );
 }
 
+function validRepairTarget(target) {
+  return (
+    hasOnlyKeys(target, REPAIR_TARGET_KEYS) &&
+    typeof target.cell === "string" &&
+    CELL_PATTERN.test(target.cell) &&
+    HASH_PATTERN.test(target.childOperationId) &&
+    ATTEMPT_PATTERN.test(target.attemptId)
+  );
+}
+
 export function validateFleetTargetedRepair(input, owner) {
   const failures = [];
   if (containsSensitiveField(input)) {
@@ -193,6 +213,10 @@ export function validateFleetTargetedRepair(input, owner) {
   }
   const cells = normalizedCells(parent?.cells);
   const cellIds = cells.map((cell) => cell.cell);
+  const parentOperationIds = new Set(cells.map((cell) => cell.childOperationId));
+  const parentAttemptIds = new Set(
+    cells.flatMap((cell) => [cell.priorAttemptId, cell.nextAttemptId]),
+  );
   if (
     !Array.isArray(parent?.cells) ||
     parent.cells.length !== cells.length ||
@@ -200,6 +224,16 @@ export function validateFleetTargetedRepair(input, owner) {
     new Set(cellIds).size !== cellIds.length
   ) {
     failures.push({ code: "TargetCellInventoryMismatch" });
+  }
+  if (
+    HASH_PATTERN.test(parent?.id) &&
+    (parentOperationIds.size !== cells.length ||
+      new Set([parent.id, ...parentOperationIds]).size !== cells.length + 1)
+  ) {
+    failures.push({ code: "ParentOperationIdentityCollision" });
+  }
+  if (parentAttemptIds.size !== cells.length * 2) {
+    failures.push({ code: "ParentAttemptIdentityCollision" });
   }
   if (
     HASH_PATTERN.test(parent?.id) &&
@@ -242,12 +276,19 @@ export function validateFleetTargetedRepair(input, owner) {
     !hasOnlyKeys(repair, REPAIR_KEYS) ||
     !HASH_PATTERN.test(repair?.id) ||
     !HASH_PATTERN.test(repair?.sourceParentId) ||
-    !HASH_PATTERN.test(repair?.eligibilityDigest)
+    !HASH_PATTERN.test(repair?.eligibilityDigest) ||
+    !HASH_PATTERN.test(repair?.targetSetDigest)
   ) {
     failures.push({ code: "RepairInvalid" });
   }
   if (repair?.sourceParentId !== parent?.id) {
     failures.push({ code: "RepairSourceParentMismatch" });
+  }
+  if (
+    HASH_PATTERN.test(repair?.id) &&
+    (repair.id === parent?.id || parentOperationIds.has(repair.id))
+  ) {
+    failures.push({ code: "RepairIdentityReused" });
   }
   const declaredEligible = sortedStrings(repair?.eligibleCells);
   if (
@@ -278,6 +319,44 @@ export function validateFleetTargetedRepair(input, owner) {
       failures.push({ code: "RepairTargetNotEligible", cell });
     }
   }
+  const targetAttempts = Array.isArray(repair?.targetAttempts)
+    ? repair.targetAttempts
+        .filter(validRepairTarget)
+        .toSorted((left, right) => left.cell.localeCompare(right.cell))
+    : [];
+  const targetAttemptCells = targetAttempts.map((target) => target.cell);
+  if (
+    !Array.isArray(repair?.targetAttempts) ||
+    repair.targetAttempts.length !== targetAttempts.length ||
+    stable(targetAttemptCells) !== stable(requestedCells) ||
+    new Set(targetAttemptCells).size !== targetAttemptCells.length ||
+    new Set(targetAttempts.map((target) => target.childOperationId)).size !==
+      targetAttempts.length ||
+    new Set(targetAttempts.map((target) => target.attemptId)).size !== targetAttempts.length
+  ) {
+    failures.push({ code: "RepairTargetIdentityInvalid" });
+  }
+  for (const target of targetAttempts) {
+    if (
+      target.childOperationId === parent?.id ||
+      target.childOperationId === repair?.id ||
+      parentOperationIds.has(target.childOperationId) ||
+      parentAttemptIds.has(target.attemptId)
+    ) {
+      failures.push({ code: "RepairTargetIdentityReused", cell: target.cell });
+    }
+  }
+  if (
+    HASH_PATTERN.test(repair?.id) &&
+    repair?.targetSetDigest !==
+      digest({
+        repairId: repair.id,
+        sourceParentId: parent?.id,
+        targets: targetAttempts,
+      })
+  ) {
+    failures.push({ code: "RepairTargetReceiptMismatch" });
+  }
 
   const hasIneligibleTarget = failures.some(
     (failure) => failure.code === "RepairTargetNotEligible",
@@ -298,6 +377,16 @@ export function validateFleetTargetedRepair(input, owner) {
       new Set(resultCells).size !== resultCells.length
     ) {
       failures.push({ code: "RepairSettlementMismatch" });
+    }
+    for (const result of validResults) {
+      const target = targetAttempts.find((candidate) => candidate.cell === result.cell);
+      if (
+        !target ||
+        result.childOperationId !== target.childOperationId ||
+        result.activeAttemptId !== target.attemptId
+      ) {
+        failures.push({ code: "RepairSettlementIdentityMismatch", cell: result.cell });
+      }
     }
   }
 
@@ -361,7 +450,9 @@ export function runFixture(path = resolve(ROOT, ".lobster/fleet-targeted-repair-
       status: result.status,
       before: result.before,
       after: result.after,
+      mutationCounts: result.mutationCounts,
       failure: result.failure,
+      failures: result.failures,
     };
     if (stable(actual) !== stable(entry.expected)) {
       throw new Error(`Fixture case ${entry.id} did not match its expected result`);

@@ -69,6 +69,14 @@
           "requestedCells": [
             "beta"
           ],
+          "targetSetDigest": "96b15ff8330a69a67694eb7fa516623f9307cd35ada295ffe0a041b9b0d8b666",
+          "targetAttempts": [
+            {
+              "cell": "beta",
+              "childOperationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "attemptId": "77777777777777777777777777777777"
+            }
+          ],
           "results": [
             {
               "cell": "beta",
@@ -86,7 +94,13 @@
         "status": "accepted",
         "before": "partial",
         "after": "converged",
-        "failure": null
+        "mutationCounts": {
+          "alpha": 1,
+          "beta": 2,
+          "gamma": 1
+        },
+        "failure": null,
+        "failures": []
       }
     },
     {
@@ -150,6 +164,19 @@
             "alpha",
             "beta"
           ],
+          "targetSetDigest": "d7eff508638e037b95a83765518df05e256714ff828e6b8a975afe90456d7c7f",
+          "targetAttempts": [
+            {
+              "cell": "alpha",
+              "childOperationId": "8888888888888888888888888888888888888888888888888888888888888888",
+              "attemptId": "99999999999999999999999999999999"
+            },
+            {
+              "cell": "beta",
+              "childOperationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "attemptId": "77777777777777777777777777777777"
+            }
+          ],
           "results": []
         },
         "projectionMutationAttempted": false,
@@ -159,10 +186,21 @@
         "status": "rejected",
         "before": "partial",
         "after": "blocked",
+        "mutationCounts": {
+          "alpha": 1,
+          "beta": 1,
+          "gamma": 1
+        },
         "failure": {
           "code": "RepairTargetNotEligible",
           "cell": "alpha"
-        }
+        },
+        "failures": [
+          {
+            "code": "RepairTargetNotEligible",
+            "cell": "alpha"
+          }
+        ]
       }
     }
   ]
