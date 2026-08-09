@@ -87,6 +87,18 @@ describe("lobster.rfn.protocol-negotiation-evolution.v1", () => {
     }
   });
 
+  it("keeps the adjacent probe exception distinct from node compatibility", () => {
+    const candidate = input();
+    candidate.role = "operator";
+    candidate.mode = "probe";
+
+    expect(validateProtocolNegotiation(candidate, owner())).toMatchObject({
+      status: "accepted",
+      compatibilityMode: "legacy-probe",
+      emittedProtocol: 4,
+    });
+  });
+
   it("accepts current protocol overlap without selecting a lower protocol", () => {
     const candidate = input();
     candidate.minProtocol = 3;
