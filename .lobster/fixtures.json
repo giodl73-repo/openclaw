@@ -220,6 +220,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.rfn.protocol-negotiation-evolution.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "the current TypeScript Gateway admits exactly the role-bounded adjacent node range and emits its current protocol while cross-language evidence remains implementation-specific",
+      "structuredFailure": "protocol range, role boundary, owner constants, implementation evidence, pre-admission mutation, release-duration claim, Rust adjacent-version claim, authority, or sensitive payload mismatch",
+      "runner": "scripts/lobster-protocol-negotiation-evolution.mjs",
+      "evidence": ".lobster/protocol-negotiation-evolution-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

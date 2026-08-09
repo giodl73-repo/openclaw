@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.protocol-negotiation-evolution.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "currentProtocol": 4,
+    "minimumClientProtocol": 4,
+    "minimumNodeProtocol": 3,
+    "minimumProbeProtocol": 3,
+    "compatibilityWindow": "role-bounded-current-and-previous",
+    "releaseDuration": "undeclared"
+  },
+  "implementationEvidence": [
+    {
+      "id": "swift-openclaw-kit",
+      "language": "swift",
+      "role": "node",
+      "minProtocol": 3,
+      "maxProtocol": 4,
+      "evidence": "constant-guard"
+    },
+    {
+      "id": "kotlin-android-node",
+      "language": "kotlin",
+      "role": "node",
+      "minProtocol": 3,
+      "maxProtocol": 4,
+      "evidence": "constant-guard"
+    },
+    {
+      "id": "rust-linux-quick-chat",
+      "language": "rust",
+      "role": "operator",
+      "minProtocol": 4,
+      "maxProtocol": 4,
+      "evidence": "current-only-source"
+    }
+  ],
+  "cases": [
+    {
+      "id": "adjacent-node-protocol-is-role-bounded",
+      "input": {
+        "role": "node",
+        "mode": "node",
+        "minProtocol": 3,
+        "maxProtocol": 3,
+        "runtimeMutationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "accepted",
+        "compatibilityMode": "legacy-node",
+        "emittedProtocol": 4,
+        "failure": null
+      }
+    },
+    {
+      "id": "adjacent-operator-protocol-is-refused",
+      "input": {
+        "role": "operator",
+        "mode": "cli",
+        "minProtocol": 3,
+        "maxProtocol": 3,
+        "runtimeMutationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "rejected",
+        "compatibilityMode": "none",
+        "emittedProtocol": null,
+        "failure": {
+          "code": "PROTOCOL_MISMATCH",
+          "clientMinProtocol": 3,
+          "clientMaxProtocol": 3,
+          "expectedProtocol": 4,
+          "minimumProbeProtocol": 3
+        }
+      }
+    }
+  ]
+}
