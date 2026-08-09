@@ -280,6 +280,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-live-admission.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "a clean-built Rust process completes the current authenticated node handshake with an owner-approved empty capability surface",
+      "structuredFailure": "the same Rust process offering obsolete protocol v1 is refused with the Gateway-owned PROTOCOL_MISMATCH detail before admission",
+      "runner": "scripts/lobster-rust-gateway-live-admission.mjs",
+      "evidence": ".lobster/rust-gateway-live-admission-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

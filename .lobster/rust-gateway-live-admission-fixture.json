@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-live-admission.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "authentication": "device-v3-challenge-signature-and-node-token",
+    "capabilitySurfaceOwner": "openclaw-node-pairing",
+    "authority": "none"
+  },
+  "cases": [
+    {
+      "id": "current-protocol-admitted",
+      "input": {
+        "minProtocol": 4,
+        "maxProtocol": 4,
+        "role": "node",
+        "scopes": [],
+        "commands": []
+      },
+      "expected": {
+        "status": "accepted",
+        "authority": "none",
+        "selectedProtocol": 4,
+        "role": "node",
+        "scopes": [],
+        "commandsDeclared": 0,
+        "invocationExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false
+      }
+    },
+    {
+      "id": "obsolete-protocol-refused",
+      "input": {
+        "minProtocol": 1,
+        "maxProtocol": 1,
+        "role": "node",
+        "scopes": [],
+        "commands": []
+      },
+      "expected": {
+        "status": "rejected",
+        "authority": "none",
+        "code": "INVALID_REQUEST",
+        "message": "protocol mismatch",
+        "detailCode": "PROTOCOL_MISMATCH",
+        "commandsDeclared": 0,
+        "invocationExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false
+      }
+    }
+  ]
+}

@@ -56,11 +56,15 @@ describe("Lobster Wave 0 contracts", () => {
       contractCount: 9,
       sharedResultCount: 12,
       relationshipReferenceCount: 17,
-      fixtureCount: 14,
+      fixtureCount: 15,
       ledgerEntryCount: 20,
     });
     expect(first.contractSetDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(second).toEqual(first);
+    expect(inputs().fixtures.fixtures.at(-1).runners).toEqual({
+      typescript: "required",
+      rust: "required",
+    });
   });
 
   it("rejects reordered or missing execution dependencies", () => {
@@ -127,6 +131,12 @@ describe("Lobster Wave 0 contracts", () => {
     delete implementedWithoutRunner.fixtures.fixtures[0].runner;
     expect(() => validateContracts(implementedWithoutRunner)).toThrow(
       "fixture lobster.exa.owner-projection.v1.runner",
+    );
+
+    const invalidRustRunner = inputs();
+    invalidRustRunner.fixtures.fixtures.at(-1).runners.rust = "preferred";
+    expect(() => validateContracts(invalidRustRunner)).toThrow(
+      "required TypeScript and valid Rust runner expectations",
     );
 
     const numericFixtureId = inputs();
