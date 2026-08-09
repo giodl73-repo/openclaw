@@ -11,16 +11,52 @@ import {
 const SCRIPT = resolve("scripts/lobster-mixed-owner-restore-composition.mjs");
 const FIXTURE = resolve(".lobster/mixed-owner-restore-composition-fixture.json");
 
+type SnapshotFact = {
+  owner: string;
+  snapshotId: string;
+  schemaVersion: number;
+  verified: boolean;
+  targetFresh: boolean;
+  digest: string;
+  sizeBytes: number;
+};
+
+type RestoreInput = {
+  requiredOwners: string[];
+  snapshots: SnapshotFact[];
+  publicationAttempted: boolean;
+  authority: string;
+  databasePath?: string;
+};
+
+type RestoreOwner = {
+  id: string;
+  supportedSchemas: {
+    global: number;
+    agent: number;
+  };
+  restoreMode: string;
+  publicationAtomicity: string;
+};
+
 function fixture() {
   return JSON.parse(readFileSync(FIXTURE, "utf8"));
 }
 
-function input(caseIndex = 0): Record<string, unknown> {
+function input(caseIndex = 0): RestoreInput {
   return structuredClone(fixture().cases[caseIndex].input);
 }
 
-function owner(): Record<string, unknown> {
+function owner(): RestoreOwner {
   return structuredClone(fixture().owner);
+}
+
+function snapshot(value: RestoreInput, index: number): SnapshotFact {
+  const entry = value.snapshots[index];
+  if (!entry) {
+    throw new Error(`fixture snapshot ${index} is missing`);
+  }
+  return entry;
 }
 
 describe("lobster.kcc.mixed-owner-restore-composition.v1", () => {
@@ -66,7 +102,7 @@ describe("lobster.kcc.mixed-owner-restore-composition.v1", () => {
 
   it("rejects duplicate or mismatched snapshot owners", () => {
     const duplicate = input();
-    duplicate.snapshots[1].owner = "global";
+    snapshot(duplicate, 1).owner = "global";
 
     expect(validateMixedOwnerRestoreComposition(duplicate, owner()).failures).toContainEqual({
       code: "SnapshotOwnerInventoryMismatch",
@@ -75,8 +111,8 @@ describe("lobster.kcc.mixed-owner-restore-composition.v1", () => {
 
   it("requires immutable snapshot identities and digests", () => {
     const candidate = input();
-    candidate.snapshots[0].snapshotId = "mutable";
-    candidate.snapshots[1].digest = "invalid";
+    snapshot(candidate, 0).snapshotId = "mutable";
+    snapshot(candidate, 1).digest = "invalid";
 
     expect(validateMixedOwnerRestoreComposition(candidate, owner()).failures).toContainEqual({
       code: "SnapshotFactsInvalid",
@@ -85,8 +121,8 @@ describe("lobster.kcc.mixed-owner-restore-composition.v1", () => {
 
   it("requires verified snapshots and fresh targets", () => {
     const candidate = input();
-    candidate.snapshots[0].verified = false;
-    candidate.snapshots[1].targetFresh = false;
+    snapshot(candidate, 0).verified = false;
+    snapshot(candidate, 1).targetFresh = false;
 
     expect(validateMixedOwnerRestoreComposition(candidate, owner()).failures).toEqual(
       expect.arrayContaining([
