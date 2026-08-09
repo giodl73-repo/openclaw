@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.kcc.mixed-owner-restore-composition.v1",
+  "owner": {
+    "id": "openclaw-typescript-sqlite-snapshot",
+    "supportedSchemas": {
+      "global": 6,
+      "agent": 16
+    },
+    "restoreMode": "fresh-only",
+    "publicationAtomicity": "per-owner-only"
+  },
+  "cases": [
+    {
+      "id": "verified-current-owner-set-is-ready",
+      "input": {
+        "requiredOwners": [
+          "global",
+          "agent:ops-team"
+        ],
+        "snapshots": [
+          {
+            "owner": "global",
+            "snapshotId": "1111111111111111111111111111111111111111111111111111111111111111",
+            "schemaVersion": 6,
+            "verified": true,
+            "targetFresh": true,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "sizeBytes": 4096
+          },
+          {
+            "owner": "agent:ops-team",
+            "snapshotId": "2222222222222222222222222222222222222222222222222222222222222222",
+            "schemaVersion": 16,
+            "verified": true,
+            "targetFresh": true,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "sizeBytes": 8192
+          }
+        ],
+        "publicationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "accepted",
+        "readiness": "ready-for-owner-native-restore",
+        "failure": null
+      }
+    },
+    {
+      "id": "incompatible-agent-blocks-entire-set",
+      "input": {
+        "requiredOwners": [
+          "global",
+          "agent:ops-team"
+        ],
+        "snapshots": [
+          {
+            "owner": "global",
+            "snapshotId": "3333333333333333333333333333333333333333333333333333333333333333",
+            "schemaVersion": 6,
+            "verified": true,
+            "targetFresh": true,
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "sizeBytes": 4096
+          },
+          {
+            "owner": "agent:ops-team",
+            "snapshotId": "4444444444444444444444444444444444444444444444444444444444444444",
+            "schemaVersion": 17,
+            "verified": true,
+            "targetFresh": true,
+            "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "sizeBytes": 8192
+          }
+        ],
+        "publicationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "rejected",
+        "readiness": "blocked",
+        "failure": {
+          "code": "OwnerSchemaIncompatible",
+          "owner": "agent:ops-team",
+          "actualSchemaVersion": 17,
+          "supportedSchemaVersion": 16
+        }
+      }
+    }
+  ]
+}

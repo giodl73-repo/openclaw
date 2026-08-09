@@ -1953,7 +1953,8 @@
     "lobster:release-activation": "node scripts/lobster-release-activation.mjs",
     "lobster:session-copy-lifecycle": "node scripts/lobster-session-copy-lifecycle.mjs",
     "lobster:inert-definition-compatibility": "node scripts/lobster-inert-definition-compatibility.mjs",
-    "lobster:protocol-negotiation-evolution": "node scripts/lobster-protocol-negotiation-evolution.mjs"
+    "lobster:protocol-negotiation-evolution": "node scripts/lobster-protocol-negotiation-evolution.mjs",
+    "lobster:mixed-owner-restore-composition": "node scripts/lobster-mixed-owner-restore-composition.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
