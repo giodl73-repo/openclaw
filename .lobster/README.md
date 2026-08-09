@@ -115,6 +115,19 @@ is refused before repair mutation. It adds no production Fleet coordinator,
 multi-host controller, containment or break-glass authority, container runtime
 mutation, or runtime authority, and authority remains `none`.
 
+EVID-015 adds the fork-only
+`lobster.rfn.rust-gateway-live-admission.v1` fixture. It preserves the
+TypeScript Gateway and node-pairing stores as owners while a clean-built Rust
+process completes the real protocol-v4 nonce, device-v3 signature, device-token,
+and empty capability-surface handshake. The same process offering obsolete
+protocol v1 is refused with the Gateway-owned `PROTOCOL_MISMATCH` detail. It
+proves authenticated admission only: no command is declared, no invocation is
+executed, and runtime readiness, Rust authority, migration, release, rollback,
+or TypeScript deletion remain unproven. Authority remains `none`.
+This is the first fixture to promote its Rust runner from
+`optional-until-cutover` to `required`; other fixtures retain their existing
+runner expectation.
+
 Reconstruct from a clean clone:
 
 ```text

@@ -764,9 +764,11 @@ function validateFixtures(manifest, fixtures) {
     }
     if (
       fixture.runners?.typescript !== "required" ||
-      fixture.runners?.rust !== "optional-until-cutover"
+      !["optional-until-cutover", "required"].includes(fixture.runners?.rust)
     ) {
-      fail(`fixture ${fixture.id} must define TypeScript and Rust runner expectations`);
+      fail(
+        `fixture ${fixture.id} must define required TypeScript and valid Rust runner expectations`,
+      );
     }
   }
 }
