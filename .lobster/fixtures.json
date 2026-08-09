@@ -180,6 +180,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.scl.session-copy-lifecycle.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "export creates one generation-bound disclosed copy, ordinary deletion reports retained and external copies as partial after restart reconciliation, and bounded incognito purge removes every required local copy",
+      "structuredFailure": "stale generation, invalid export disclosure or omissions, archive/purge mutation mismatch, hidden deferred or external settlement, copy inventory drift, aggregate assurance overclaim, or sensitive payload",
+      "runner": "scripts/lobster-session-copy-lifecycle.mjs",
+      "evidence": ".lobster/session-copy-lifecycle-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }

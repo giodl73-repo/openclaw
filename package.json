@@ -1950,7 +1950,8 @@
     "lobster:immutable-lifecycle-obligations": "node scripts/lobster-immutable-lifecycle-obligations.mjs",
     "lobster:remote-node-invocation-trust": "node scripts/lobster-remote-node-invocation-trust.mjs",
     "lobster:authorized-external-action": "node scripts/lobster-authorized-external-action.mjs",
-    "lobster:release-activation": "node scripts/lobster-release-activation.mjs"
+    "lobster:release-activation": "node scripts/lobster-release-activation.mjs",
+    "lobster:session-copy-lifecycle": "node scripts/lobster-session-copy-lifecycle.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
