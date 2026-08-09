@@ -106,6 +106,15 @@ publication attempt. The fixture does not claim a shared capture generation,
 cross-database transaction, completed restore, overwrite path, migration
 authority, or runtime authority, and authority remains `none`.
 
+EVID-014 adds the fork-only `lobster.ops.fleet-targeted-repair.v1` fixture.
+It preserves OpenClaw Fleet's tenant-cell identity, per-cell operation lease,
+exact attempt labels, health-gated upgrade, and previous-attempt restoration.
+It proves one immutable three-cell rollout can select only its failed/restored
+child for repair and converge without replaying healthy cells; a widened repair
+is refused before repair mutation. It adds no production Fleet coordinator,
+multi-host controller, containment or break-glass authority, container runtime
+mutation, or runtime authority, and authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text

@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.ops.fleet-targeted-repair.v1",
+  "owner": {
+    "id": "openclaw-typescript-fleet",
+    "unitOwner": "tenant-cell",
+    "leaseScope": "fleet-cell-operation",
+    "failureRecovery": "previous-attempt-restoration",
+    "projectionAuthority": "none"
+  },
+  "cases": [
+    {
+      "id": "repair-only-failed-restored-cell",
+      "input": {
+        "parent": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "targetSetDigest": "290a8236f2d95c5cdf99f3554293dfb87be20856dd0c30038221687b28bd6e74",
+          "cells": [
+            {
+              "cell": "alpha",
+              "childOperationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "priorAttemptId": "11111111111111111111111111111111",
+              "nextAttemptId": "22222222222222222222222222222222"
+            },
+            {
+              "cell": "beta",
+              "childOperationId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "priorAttemptId": "33333333333333333333333333333333",
+              "nextAttemptId": "44444444444444444444444444444444"
+            },
+            {
+              "cell": "gamma",
+              "childOperationId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "priorAttemptId": "55555555555555555555555555555555",
+              "nextAttemptId": "66666666666666666666666666666666"
+            }
+          ],
+          "outcomes": [
+            {
+              "cell": "alpha",
+              "result": "upgraded",
+              "activeAttemptId": "22222222222222222222222222222222",
+              "settlementRevision": 1,
+              "mutationCount": 1
+            },
+            {
+              "cell": "beta",
+              "result": "failed-previous-restored",
+              "activeAttemptId": "33333333333333333333333333333333",
+              "settlementRevision": 1,
+              "mutationCount": 1
+            },
+            {
+              "cell": "gamma",
+              "result": "upgraded",
+              "activeAttemptId": "66666666666666666666666666666666",
+              "settlementRevision": 1,
+              "mutationCount": 1
+            }
+          ]
+        },
+        "repair": {
+          "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "sourceParentId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "eligibilityDigest": "af385a135530f3087cf54ca47b1f8ebc4fac89bf43168d85296e7ace4da35e65",
+          "eligibleCells": [
+            "beta"
+          ],
+          "requestedCells": [
+            "beta"
+          ],
+          "results": [
+            {
+              "cell": "beta",
+              "childOperationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "result": "upgraded",
+              "activeAttemptId": "77777777777777777777777777777777",
+              "mutationCount": 1
+            }
+          ]
+        },
+        "projectionMutationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "accepted",
+        "before": "partial",
+        "after": "converged",
+        "failure": null
+      }
+    },
+    {
+      "id": "widened-repair-is-refused-before-mutation",
+      "input": {
+        "parent": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "targetSetDigest": "290a8236f2d95c5cdf99f3554293dfb87be20856dd0c30038221687b28bd6e74",
+          "cells": [
+            {
+              "cell": "alpha",
+              "childOperationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "priorAttemptId": "11111111111111111111111111111111",
+              "nextAttemptId": "22222222222222222222222222222222"
+            },
+            {
+              "cell": "beta",
+              "childOperationId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "priorAttemptId": "33333333333333333333333333333333",
+              "nextAttemptId": "44444444444444444444444444444444"
+            },
+            {
+              "cell": "gamma",
+              "childOperationId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "priorAttemptId": "55555555555555555555555555555555",
+              "nextAttemptId": "66666666666666666666666666666666"
+            }
+          ],
+          "outcomes": [
+            {
+              "cell": "alpha",
+              "result": "upgraded",
+              "activeAttemptId": "22222222222222222222222222222222",
+              "settlementRevision": 1,
+              "mutationCount": 1
+            },
+            {
+              "cell": "beta",
+              "result": "failed-previous-restored",
+              "activeAttemptId": "33333333333333333333333333333333",
+              "settlementRevision": 1,
+              "mutationCount": 1
+            },
+            {
+              "cell": "gamma",
+              "result": "upgraded",
+              "activeAttemptId": "66666666666666666666666666666666",
+              "settlementRevision": 1,
+              "mutationCount": 1
+            }
+          ]
+        },
+        "repair": {
+          "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "sourceParentId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "eligibilityDigest": "af385a135530f3087cf54ca47b1f8ebc4fac89bf43168d85296e7ace4da35e65",
+          "eligibleCells": [
+            "beta"
+          ],
+          "requestedCells": [
+            "alpha",
+            "beta"
+          ],
+          "results": []
+        },
+        "projectionMutationAttempted": false,
+        "authority": "none"
+      },
+      "expected": {
+        "status": "rejected",
+        "before": "partial",
+        "after": "blocked",
+        "failure": {
+          "code": "RepairTargetNotEligible",
+          "cell": "alpha"
+        }
+      }
+    }
+  ]
+}

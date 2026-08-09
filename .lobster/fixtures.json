@@ -260,6 +260,26 @@
         "typescript": "required",
         "rust": "optional-until-cutover"
       }
+    },
+    {
+      "id": "lobster.ops.fleet-targeted-repair.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript",
+      "status": "implemented",
+      "acceptedResult": "one immutable three-cell rollout projects a failed/restored child as the sole repair target and converges without replaying healthy cells",
+      "structuredFailure": "target-set, child identity, settlement, repair eligibility, healthy-cell replay, projection mutation, authority, or sensitive payload mismatch",
+      "runner": "scripts/lobster-fleet-targeted-repair.mjs",
+      "evidence": ".lobster/fleet-targeted-repair-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "optional-until-cutover"
+      }
     }
   ]
 }
