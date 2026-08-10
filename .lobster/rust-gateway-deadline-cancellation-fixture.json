@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-deadline-cancellation.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "deadlineOwner": "openclaw-node-invoke",
+    "cancellationOwner": "openclaw-node-invoke",
+    "authority": "none"
+  },
+  "cases": [
+    {
+      "id": "deadline-cancels-and-fences-late-result",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        },
+        "timeoutMs": 30000
+      },
+      "expected": {
+        "deadlineRequestDispatched": true,
+        "deadlineCallerGatewayCode": "UNAVAILABLE",
+        "deadlineCallerInvokeCode": "TIMEOUT",
+        "cancellationObserved": true,
+        "cancellationRequestCorrelated": true,
+        "lateResultRpcAccepted": true,
+        "lateResultIgnored": true
+      }
+    },
+    {
+      "id": "fresh-request-after-deadline-executes",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        },
+        "timeoutMs": 10000
+      },
+      "expected": {
+        "status": "deadline-cancel-fenced-and-fresh-work-accepted",
+        "authority": "none",
+        "selectedProtocol": 4,
+        "rustProcessChanged": true,
+        "connectionChanged": true,
+        "pairingGenerationChanged": false,
+        "pendingCapabilityApproval": false,
+        "freshRequestDiffers": true,
+        "freshRequestsReceived": 1,
+        "freshResultAccepted": true,
+        "sideEffectsExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false
+      }
+    }
+  ]
+}

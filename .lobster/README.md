@@ -175,6 +175,18 @@ proves neither durable invocation recovery, effects, runtime readiness,
 Rust-owned durable state, Rust authority, migration, rollback, nor TypeScript
 deletion. Authority remains `none`.
 
+EVID-020 adds the fork-only
+`lobster.rfn.rust-gateway-deadline-cancellation.v1` fixture. The TypeScript
+Gateway owns one absolute invocation deadline. After Rust observes the
+side-effect-free `system.which` request, the deadline settles the caller with
+`TIMEOUT` and emits a correlated `node.invoke.cancel`. Rust observes that exact
+cancel, submits its result afterward, and the Gateway explicitly ignores it.
+A distinct Rust process then settles one fresh request on a new connection
+without renewed capability approval or pairing-generation change. The slice
+does not prove arbitrary caller abort, cooperative effect interruption,
+streaming, idle deadlines, runtime readiness, Rust authority, migration,
+rollback, or TypeScript deletion. Authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
