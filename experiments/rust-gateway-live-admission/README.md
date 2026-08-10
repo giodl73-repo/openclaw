@@ -16,6 +16,13 @@ operator approval of exactly `system.which`, and settles one correlated
 refuses an undeclared `system.notify` before Rust receives it. This remains a
 side-effect-free evidence slice, not a general node runtime.
 
+The EVID-018 lane starts a real Gateway child process and Rust worker, executes
+the approved `system.which` surface, stops both processes, and starts fresh
+processes against the same durable Gateway state and persisted Rust
+identity and owner-issued node token. It proves the pairing generation survives
+and no renewed capability approval is required; it does not prove runtime
+readiness, Rust-owned durable state, effects, or authority.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -26,6 +33,7 @@ supported Node 24 range:
 corepack pnpm lobster:rust-gateway-live-admission
 corepack pnpm lobster:rust-gateway-side-effect-free-invocation
 corepack pnpm lobster:rust-gateway-reconnect-continuity
+corepack pnpm lobster:rust-gateway-cold-restart-continuity
 ```
 
 The first successful Gateway connection can spend several minutes compiling

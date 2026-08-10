@@ -385,7 +385,7 @@ export async function createOpenClawTestInstance(
       });
     },
     startGateway: async () => {
-      if (child && !hasChildExited(child) && !child.killed) {
+      if (child && !hasChildExited(child)) {
         return;
       }
       const entrypoint = await resolveGatewayEntrypoint(cwd);
@@ -442,7 +442,7 @@ export async function createOpenClawTestInstance(
         child,
         options.stopTimeoutMs ?? GATEWAY_STOP_TIMEOUT_MS,
       );
-      if (!exited && !hasChildExited(child) && !child.killed) {
+      if (!exited && !hasChildExited(child)) {
         try {
           signalOpenClawTestProcess(child, "SIGKILL");
         } catch {
@@ -452,16 +452,18 @@ export async function createOpenClawTestInstance(
       }
       if (exited) {
         child = undefined;
+        return;
       }
+      throw new Error(`gateway did not exit after forced shutdown\n${formatLogs(stdout, stderr)}`);
     },
     logs: () => formatLogs(stdout, stderr),
     cleanup: async () => {
       if (cleaned) {
         return;
       }
-      cleaned = true;
       await instance.stopGateway();
       await state.cleanup();
+      cleaned = true;
     },
   };
 
