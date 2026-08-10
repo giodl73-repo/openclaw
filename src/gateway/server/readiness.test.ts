@@ -2,6 +2,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChannelId } from "../../channels/plugins/index.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
+import {
+  buildHostingProfileConditions,
+  buildHostingProfileSubjects,
+} from "../../hosting/profiles.js";
 import { buildRuntimeReadiness, type ReadinessCondition } from "../../readiness/conditions.js";
 import { createGatewayReadinessIdentity } from "../../readiness/subjects.js";
 import type { ChannelRuntimeSnapshot } from "../server-channel-runtime.types.js";
@@ -716,6 +720,22 @@ describe("canonical configured Gateway readiness", () => {
       identity: testReadinessIdentity(),
       evaluateGateway: () => gateway,
       evaluateRuntime: () => new Promise<never>(() => {}),
+      failureContext: {
+        conditions: buildHostingProfileConditions("container", {
+          bind: "lan",
+          bindHost: "0.0.0.0",
+          port: 18789,
+          authMode: "token",
+          trustedProxySources: [],
+          trustedProxyAllowLoopback: false,
+        }).filter((condition) => condition.type === "ProfileSelected"),
+        subjects: buildHostingProfileSubjects({ profile: "container", source: "config" }),
+      },
+      profileMetadata: {
+        profileContractVersion: 1,
+        profile: "container",
+        profileSource: "config",
+      },
       timeoutMs: 5,
     });
 
@@ -723,6 +743,17 @@ describe("canonical configured Gateway readiness", () => {
       ready: false,
       failing: ["ReadinessEvaluationTimedOut"],
       failures: ["ReadinessEvaluationTimedOut"],
+      profileContractVersion: 1,
+      profile: "container",
+      profileSource: "config",
+      identity: {
+        subjects: expect.arrayContaining([
+          expect.objectContaining({
+            ref: "openclaw/hosting-profile/selected",
+            id: "container",
+          }),
+        ]),
+      },
     });
     expect(result.conditions).toContainEqual({
       type: "ReadinessEvaluationComplete",
@@ -876,5 +907,46 @@ describe("evaluateConfiguredGatewayReadiness", () => {
 
     expect(result.ready).toBe(false);
     expect(result.failures).toEqual(["ReadinessEvaluationFailed"]);
+  });
+
+  it("allows a selected hosting profile to opt into canonical evaluation", async () => {
+    const result = await evaluateConfiguredGatewayReadiness({
+      identity: testReadinessIdentity(),
+      config: {},
+      canonicalEvaluationEnabled: true,
+      evaluateGateway: () => readySnapshot() as ReadinessResult,
+      evaluateRuntime: async () => {
+        throw new Error("profile runtime evaluation failed");
+      },
+      failureContext: {
+        conditions: buildHostingProfileConditions("container", {
+          bind: "lan",
+          bindHost: "0.0.0.0",
+          port: 18789,
+          authMode: "token",
+          trustedProxySources: [],
+          trustedProxyAllowLoopback: false,
+        }).filter((condition) => condition.type === "ProfileSelected"),
+        subjects: buildHostingProfileSubjects({ profile: "container", source: "environment" }),
+      },
+      profileMetadata: {
+        profileContractVersion: 1,
+        profile: "container",
+        profileSource: "environment",
+      },
+    });
+
+    expect(result).toMatchObject({
+      ready: false,
+      failures: ["ReadinessEvaluationFailed"],
+      profileContractVersion: 1,
+      profile: "container",
+      profileSource: "environment",
+      identity: {
+        subjects: expect.arrayContaining([
+          expect.objectContaining({ ref: "openclaw/hosting-profile/selected", id: "container" }),
+        ]),
+      },
+    });
   });
 });
