@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-unclean-restart-fencing.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "pairingOwner": "openclaw-device-pairing-store",
+    "dispatchOwner": "openclaw-node-invoke",
+    "authority": "none"
+  },
+  "cases": [
+    {
+      "id": "pre-crash-invocation-cannot-settle-after-restart",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        },
+        "resultDelayMs": 60000
+      },
+      "expected": {
+        "oldInvocationDispatched": true,
+        "oldCallerObservedTransportLoss": true,
+        "staleResultRpcAccepted": true,
+        "staleResultIgnored": true
+      }
+    },
+    {
+      "id": "fresh-post-crash-invocation-executes",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        }
+      },
+      "expected": {
+        "status": "stale-result-fenced-and-fresh-work-accepted",
+        "authority": "none",
+        "selectedProtocol": 4,
+        "gatewayProcessChanged": true,
+        "rustProcessesChanged": true,
+        "pairingGenerationChanged": false,
+        "pendingCapabilityApproval": false,
+        "persistedNodeTokenReused": true,
+        "freshRequestDiffers": true,
+        "freshRequestsReceived": 1,
+        "freshResultAccepted": true,
+        "sideEffectsExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false
+      }
+    }
+  ]
+}

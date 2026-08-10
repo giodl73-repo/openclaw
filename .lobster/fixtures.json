@@ -360,6 +360,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-unclean-restart-fencing.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "a restarted Gateway explicitly ignores the pre-crash request ID and accepts one distinct side-effect-free invocation from a fresh Rust process",
+      "structuredFailure": "the in-flight caller observes transport loss while process incarnation, durable pairing generation, stale-result fencing, fresh request identity, or capability approval continuity mismatches",
+      "runner": "scripts/lobster-rust-gateway-unclean-restart-fencing.mjs",
+      "evidence": ".lobster/rust-gateway-unclean-restart-fencing-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

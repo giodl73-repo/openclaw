@@ -344,6 +344,59 @@ fn send_invoke_result(
     }
 }
 
+fn send_stale_invoke_result(
+    url: &str,
+    identity_path: &Path,
+    min_protocol: u64,
+    max_protocol: u64,
+    request_id: &str,
+) -> Result<(Value, bool), String> {
+    match open_gateway(
+        url,
+        identity_path,
+        min_protocol,
+        max_protocol,
+        invocation_platform(),
+        invocation_platform(),
+        &[SYSTEM_WHICH_COMMAND],
+    )? {
+        GatewayConnection::Accepted(mut session) => {
+            let result_disposition = send_invoke_result(
+                &mut session.socket,
+                request_id,
+                &session.identity.device_id,
+                json!({ "bins": { "node": "stale-result-must-not-settle" } }),
+            )?;
+            let result_accepted =
+                result_disposition.get("accepted").and_then(Value::as_bool) == Some(true);
+            let result_ignored =
+                result_disposition.get("ignored").and_then(Value::as_bool) == Some(true);
+            Ok((
+                json!({
+                    "status": if result_accepted && result_ignored {
+                        "stale-result-ignored"
+                    } else {
+                        "stale-result-not-fenced"
+                    },
+                    "authority": "none",
+                    "deviceId": session.identity.device_id,
+                    "selectedProtocol": session.hello.get("protocol"),
+                    "requestId": request_id,
+                    "resultAccepted": result_accepted,
+                    "resultIgnored": result_ignored,
+                    "resultGatewayCode": result_disposition.get("gatewayCode"),
+                    "resultReasonCode": result_disposition.get("reasonCode"),
+                    "sideEffectsExecuted": false,
+                    "runtimeReadinessProven": false,
+                    "rustAuthorityProven": false
+                }),
+                result_accepted && result_ignored,
+            ))
+        }
+        GatewayConnection::Rejected(result) => Ok((result, false)),
+    }
+}
+
 fn send_unsupported_command(
     socket: &mut GatewaySocket,
     request_id: &str,
@@ -561,8 +614,29 @@ fn main() -> ExitCode {
                 })
             })
         }
+        [command, url, path, min_protocol, max_protocol, request_id]
+            if command == "send-stale-result" =>
+        {
+            let min_protocol = min_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid min protocol: {error}"));
+            let max_protocol = max_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid max protocol: {error}"));
+            min_protocol.and_then(|min_protocol| {
+                max_protocol.and_then(|max_protocol| {
+                    send_stale_invoke_result(
+                        url,
+                        Path::new(path),
+                        min_protocol,
+                        max_protocol,
+                        request_id,
+                    )
+                })
+            })
+        }
         _ => Err(
-            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms>"
+            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
                 .to_owned(),
         ),
     };

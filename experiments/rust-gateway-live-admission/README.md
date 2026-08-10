@@ -23,6 +23,15 @@ identity and owner-issued node token. It proves the pairing generation survives
 and no renewed capability approval is required; it does not prove runtime
 readiness, Rust-owned durable state, effects, or authority.
 
+The EVID-019 lane kills the Gateway and a delayed Rust worker after dispatch.
+After restart, a fresh authenticated Rust process submits the old request ID
+and proves the new Gateway explicitly ignores it because ordinary invocation
+state is process-local. The interrupted caller observes transport loss, and
+another fresh Rust process then settles exactly one new
+`system.which` request without renewed capability approval. This proves
+unclean-restart fencing, not durable invocation recovery or exactly-once
+effects.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -34,6 +43,7 @@ corepack pnpm lobster:rust-gateway-live-admission
 corepack pnpm lobster:rust-gateway-side-effect-free-invocation
 corepack pnpm lobster:rust-gateway-reconnect-continuity
 corepack pnpm lobster:rust-gateway-cold-restart-continuity
+corepack pnpm lobster:rust-gateway-unclean-restart-fencing
 ```
 
 The first successful Gateway connection can spend several minutes compiling

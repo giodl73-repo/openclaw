@@ -60,6 +60,7 @@ export type OpenClawTestInstance = {
     options?: { timeoutMs?: number },
   ) => Promise<OpenClawTestInstanceCommandResult>;
   startGateway: () => Promise<void>;
+  crashGateway: () => Promise<void>;
   stopGateway: () => Promise<void>;
   logs: () => string;
   cleanup: () => Promise<void>;
@@ -426,6 +427,22 @@ export async function createOpenClawTestInstance(
         await instance.stopGateway();
         throw err;
       }
+    },
+    crashGateway: async () => {
+      if (!child) {
+        return;
+      }
+      if (!hasChildExited(child)) {
+        signalOpenClawTestProcess(child, "SIGKILL");
+      }
+      const exited = await waitForGatewayExit(
+        child,
+        options.stopTimeoutMs ?? GATEWAY_STOP_TIMEOUT_MS,
+      );
+      if (!exited) {
+        throw new Error(`gateway did not exit after crash signal\n${formatLogs(stdout, stderr)}`);
+      }
+      child = undefined;
     },
     stopGateway: async () => {
       if (!child) {
