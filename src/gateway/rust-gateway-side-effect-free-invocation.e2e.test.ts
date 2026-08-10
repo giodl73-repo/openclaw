@@ -2,7 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import {
@@ -20,7 +20,9 @@ const FIXTURE_PATH = resolve(".lobster/rust-gateway-side-effect-free-invocation-
 const CARGO = resolveCargoExecutable();
 const INVOCATION_PLATFORM =
   process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
-const inferredCargoHome = isAbsolute(CARGO) ? resolve(dirname(CARGO), "..") : undefined;
+const cargoParent = isAbsolute(CARGO) ? resolve(dirname(CARGO), "..") : undefined;
+const inferredCargoHome =
+  cargoParent && basename(cargoParent).toLowerCase() === ".cargo" ? cargoParent : undefined;
 const cargoToolchainEnv = {
   ...(process.env.CARGO_HOME
     ? { CARGO_HOME: process.env.CARGO_HOME }
@@ -120,7 +122,9 @@ async function approvePendingNodeSurface(ws: WebSocket, nodeId: string): Promise
       expect(approved.ok).toBe(true);
       return;
     }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    await new Promise<void>((resolveDelay) => {
+      setTimeout(resolveDelay, 100);
+    });
   }
   throw new Error("timed out waiting for the Rust node capability declaration");
 }
@@ -136,7 +140,9 @@ async function waitForConnectedNode(ws: WebSocket, nodeId: string): Promise<void
       expect(node.commands).toEqual(["system.which"]);
       return;
     }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    await new Promise<void>((resolveDelay) => {
+      setTimeout(resolveDelay, 100);
+    });
   }
   throw new Error("timed out waiting for the Rust invocation node");
 }
