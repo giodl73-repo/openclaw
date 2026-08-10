@@ -151,6 +151,17 @@ neither process restart state nor runtime readiness, effects, Rust authority,
 canary selection, migration, rollback, or TypeScript deletion. Authority
 remains `none`.
 
+EVID-018 adds the fork-only
+`lobster.rfn.rust-gateway-cold-restart-continuity.v1` fixture. A real Gateway
+child process and a real Rust process execute one approved, side-effect-free
+`system.which` invocation, both processes stop, and fresh processes reuse the
+same durable Gateway state, persisted device identity, and persisted
+owner-issued node token. The second
+invocation requires no renewed capability approval and retains the same pairing
+generation. The slice proves neither runtime readiness, Rust-owned durable
+state, effects, Rust authority, canary selection, migration, rollback, nor
+TypeScript deletion. Authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text

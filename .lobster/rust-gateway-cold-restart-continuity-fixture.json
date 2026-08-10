@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-cold-restart-continuity.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "pairingOwner": "openclaw-device-pairing-store",
+    "dispatchOwner": "openclaw-node-invoke",
+    "authority": "none"
+  },
+  "case": {
+    "id": "cold-process-restart-reuses-approved-surface",
+    "input": {
+      "command": "system.which",
+      "params": {
+        "bins": ["node"]
+      }
+    },
+    "expected": {
+      "status": "executed-before-and-after-restart",
+      "authority": "none",
+      "selectedProtocol": 4,
+      "command": "system.which",
+      "gatewayProcessChanged": true,
+      "rustProcessChanged": true,
+      "pairingGenerationChanged": false,
+      "pendingCapabilityApproval": false,
+      "persistedNodeTokenReused": true,
+      "firstResultAccepted": true,
+      "secondResultAccepted": true,
+      "sideEffectsExecuted": false,
+      "runtimeReadinessProven": false,
+      "rustAuthorityProven": false
+    }
+  }
+}

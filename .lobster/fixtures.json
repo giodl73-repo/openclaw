@@ -340,6 +340,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-cold-restart-continuity.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "fresh Gateway and Rust processes reuse one durable approved device identity and token to execute the same side-effect-free command without renewed capability approval",
+      "structuredFailure": "process incarnation, durable pairing generation, pending approval, token reuse, command result, side-effect, or authority mismatch",
+      "runner": "scripts/lobster-rust-gateway-cold-restart-continuity.mjs",
+      "evidence": ".lobster/rust-gateway-cold-restart-continuity-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }
