@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tungstenite::{Message, connect};
@@ -15,8 +15,12 @@ use tungstenite::{Message, connect};
 const CLIENT_ID: &str = "node-host";
 const CLIENT_MODE: &str = "node";
 const CLIENT_VERSION: &str = "rust-gateway-live-admission/0.1.0";
-const PLATFORM: &str = "rust";
+const ADMISSION_PLATFORM: &str = "rust";
 const ROLE: &str = "node";
+const SYSTEM_WHICH_COMMAND: &str = "system.which";
+
+type GatewaySocket =
+    tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +33,17 @@ struct StoredIdentity {
 struct PublicIdentity {
     device_id: String,
     public_key: String,
+}
+
+struct GatewaySession {
+    socket: GatewaySocket,
+    identity: PublicIdentity,
+    hello: Value,
+}
+
+enum GatewayConnection {
+    Accepted(Box<GatewaySession>),
+    Rejected(Value),
 }
 
 fn load_signing_key(path: &Path) -> Result<SigningKey, String> {
@@ -70,9 +85,7 @@ fn write_identity(path: &Path) -> Result<PublicIdentity, String> {
     Ok(public_identity(&signing_key))
 }
 
-fn read_json_message(
-    socket: &mut tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
-) -> Result<Value, String> {
+fn read_json_message(socket: &mut GatewaySocket) -> Result<Value, String> {
     loop {
         let message = socket
             .read()
@@ -93,12 +106,15 @@ fn read_json_message(
     }
 }
 
-fn connect_gateway(
+fn open_gateway(
     url: &str,
     identity_path: &Path,
     min_protocol: u64,
     max_protocol: u64,
-) -> Result<(Value, bool), String> {
+    platform: &str,
+    device_family: &str,
+    commands: &[&str],
+) -> Result<GatewayConnection, String> {
     let device_token = env::var("OPENCLAW_RUST_CANARY_DEVICE_TOKEN")
         .map_err(|_| "OPENCLAW_RUST_CANARY_DEVICE_TOKEN is required".to_owned())?;
     let signing_key = load_signing_key(identity_path)?;
@@ -126,13 +142,23 @@ fn connect_gateway(
         signed_at.to_string().as_str(),
         device_token.as_str(),
         nonce,
-        PLATFORM,
-        "",
+        platform,
+        device_family,
     ]
     .join("|");
     let signature =
         URL_SAFE_NO_PAD.encode(signing_key.sign(signature_payload.as_bytes()).to_bytes());
     let request_id = "rust-gateway-live-admission-connect";
+    let mut client = json!({
+        "id": CLIENT_ID,
+        "displayName": "Rust Gateway live admission",
+        "version": CLIENT_VERSION,
+        "platform": platform,
+        "mode": CLIENT_MODE
+    });
+    if !device_family.is_empty() {
+        client["deviceFamily"] = Value::String(device_family.to_owned());
+    }
     let frame = json!({
         "type": "req",
         "id": request_id,
@@ -140,14 +166,8 @@ fn connect_gateway(
         "params": {
             "minProtocol": min_protocol,
             "maxProtocol": max_protocol,
-            "client": {
-                "id": CLIENT_ID,
-                "displayName": "Rust Gateway live admission",
-                "version": CLIENT_VERSION,
-                "platform": PLATFORM,
-                "mode": CLIENT_MODE
-            },
-            "commands": [],
+            "client": client,
+            "commands": commands,
             "role": ROLE,
             "scopes": [],
             "device": {
@@ -173,25 +193,18 @@ fn connect_gateway(
             continue;
         }
         if response.get("ok").and_then(Value::as_bool) == Some(true) {
-            let payload = response
+            let hello = response
                 .get("payload")
+                .cloned()
                 .ok_or_else(|| "hello response omitted payload".to_owned())?;
-            let result = json!({
-                "status": "accepted",
-                "authority": "none",
-                "deviceId": identity.device_id,
-                "selectedProtocol": payload.get("protocol"),
-                "role": payload.pointer("/auth/role"),
-                "scopes": payload.pointer("/auth/scopes"),
-                "commandsDeclared": 0,
-                "invocationExecuted": false,
-                "runtimeReadinessProven": false,
-                "rustAuthorityProven": false
-            });
-            return Ok((result, true));
+            return Ok(GatewayConnection::Accepted(Box::new(GatewaySession {
+                socket,
+                identity,
+                hello,
+            })));
         }
         let error = response.get("error").cloned().unwrap_or(Value::Null);
-        let result = json!({
+        return Ok(GatewayConnection::Rejected(json!({
             "status": "rejected",
             "authority": "none",
             "deviceId": identity.device_id,
@@ -202,8 +215,244 @@ fn connect_gateway(
             "invocationExecuted": false,
             "runtimeReadinessProven": false,
             "rustAuthorityProven": false
-        });
-        return Ok((result, false));
+        })));
+    }
+}
+
+fn connect_gateway(
+    url: &str,
+    identity_path: &Path,
+    min_protocol: u64,
+    max_protocol: u64,
+) -> Result<(Value, bool), String> {
+    match open_gateway(
+        url,
+        identity_path,
+        min_protocol,
+        max_protocol,
+        ADMISSION_PLATFORM,
+        "",
+        &[],
+    )? {
+        GatewayConnection::Accepted(session) => Ok((
+            json!({
+                "status": "accepted",
+                "authority": "none",
+                "deviceId": session.identity.device_id,
+                "selectedProtocol": session.hello.get("protocol"),
+                "role": session.hello.pointer("/auth/role"),
+                "scopes": session.hello.pointer("/auth/scopes"),
+                "commandsDeclared": 0,
+                "invocationExecuted": false,
+                "runtimeReadinessProven": false,
+                "rustAuthorityProven": false
+            }),
+            true,
+        )),
+        GatewayConnection::Rejected(result) => Ok((result, false)),
+    }
+}
+
+fn executable_extensions() -> Vec<String> {
+    if cfg!(windows) {
+        env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned())
+            .split(';')
+            .map(|extension| extension.to_ascii_lowercase())
+            .collect()
+    } else {
+        vec![String::new()]
+    }
+}
+
+fn invocation_platform() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+fn resolve_executable(bin: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    for directory in env::split_paths(&path) {
+        for extension in executable_extensions() {
+            let candidate =
+                if extension.is_empty() || bin.to_ascii_lowercase().ends_with(extension.as_str()) {
+                    directory.join(bin)
+                } else {
+                    directory.join(format!("{bin}{extension}"))
+                };
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn send_invoke_result(
+    socket: &mut GatewaySocket,
+    request_id: &str,
+    node_id: &str,
+    result: Value,
+) -> Result<(), String> {
+    let rpc_id = "rust-gateway-side-effect-free-invocation-result";
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "req",
+                "id": rpc_id,
+                "method": "node.invoke.result",
+                "params": {
+                    "id": request_id,
+                    "nodeId": node_id,
+                    "ok": true,
+                    "payloadJSON": result.to_string()
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .map_err(|error| format!("failed to send invoke result: {error}"))?;
+    loop {
+        let response = read_json_message(socket)?;
+        if response.get("type").and_then(Value::as_str) == Some("res")
+            && response.get("id").and_then(Value::as_str) == Some(rpc_id)
+        {
+            if response.get("ok").and_then(Value::as_bool) == Some(true) {
+                return Ok(());
+            }
+            return Err(format!(
+                "gateway rejected invoke result: {}",
+                response.get("error").unwrap_or(&Value::Null)
+            ));
+        }
+    }
+}
+
+fn send_unsupported_command(
+    socket: &mut GatewaySocket,
+    request_id: &str,
+    node_id: &str,
+    command: &str,
+) -> Result<(), String> {
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "req",
+                "id": "rust-gateway-unsupported-command-result",
+                "method": "node.invoke.result",
+                "params": {
+                    "id": request_id,
+                    "nodeId": node_id,
+                    "ok": false,
+                    "error": {
+                        "code": "UNSUPPORTED_COMMAND",
+                        "message": format!("unsupported Rust invocation command: {command}")
+                    }
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .map_err(|error| format!("failed to send unsupported-command result: {error}"))
+}
+
+fn serve_one_invocation(
+    url: &str,
+    identity_path: &Path,
+    min_protocol: u64,
+    max_protocol: u64,
+) -> Result<(Value, bool), String> {
+    let GatewayConnection::Accepted(mut session) = open_gateway(
+        url,
+        identity_path,
+        min_protocol,
+        max_protocol,
+        invocation_platform(),
+        invocation_platform(),
+        &[SYSTEM_WHICH_COMMAND],
+    )?
+    else {
+        return Err("gateway rejected the invocation worker connection".to_owned());
+    };
+    let mut requests_received = 0_u64;
+    let mut unsupported_commands_received = 0_u64;
+    loop {
+        let event = read_json_message(&mut session.socket)?;
+        if event.get("type").and_then(Value::as_str) != Some("event")
+            || event.get("event").and_then(Value::as_str) != Some("node.invoke.request")
+        {
+            continue;
+        }
+        requests_received += 1;
+        let payload = event
+            .get("payload")
+            .ok_or_else(|| "node.invoke.request omitted payload".to_owned())?;
+        let request_id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "node.invoke.request omitted id".to_owned())?;
+        let node_id = payload
+            .get("nodeId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "node.invoke.request omitted nodeId".to_owned())?;
+        let command = payload
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "node.invoke.request omitted command".to_owned())?;
+        if command != SYSTEM_WHICH_COMMAND {
+            unsupported_commands_received += 1;
+            send_unsupported_command(&mut session.socket, request_id, node_id, command)?;
+            continue;
+        }
+        let params = payload
+            .get("paramsJSON")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "system.which omitted paramsJSON".to_owned())
+            .and_then(|raw| {
+                serde_json::from_str::<Value>(raw)
+                    .map_err(|error| format!("system.which paramsJSON is invalid: {error}"))
+            })?;
+        let bins = params
+            .get("bins")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "system.which requires bins".to_owned())?;
+        let mut found = serde_json::Map::new();
+        for bin in bins {
+            let bin = bin
+                .as_str()
+                .ok_or_else(|| "system.which bins must contain strings".to_owned())?;
+            if let Some(path) = resolve_executable(bin) {
+                found.insert(
+                    bin.to_owned(),
+                    Value::String(path.to_string_lossy().into_owned()),
+                );
+            }
+        }
+        let result = json!({ "bins": found });
+        send_invoke_result(&mut session.socket, request_id, node_id, result.clone())?;
+        return Ok((
+            json!({
+                "status": "executed",
+                "authority": "none",
+                "deviceId": session.identity.device_id,
+                "selectedProtocol": session.hello.get("protocol"),
+                "command": command,
+                "requestId": request_id,
+                "resultRequestId": request_id,
+                "requestsReceived": requests_received,
+                "unsupportedCommandsReceived": unsupported_commands_received,
+                "result": result,
+                "sideEffectsExecuted": false,
+                "runtimeReadinessProven": false,
+                "rustAuthorityProven": false
+            }),
+            true,
+        ));
     }
 }
 
@@ -228,8 +477,21 @@ fn main() -> ExitCode {
                 })
             })
         }
+        [command, url, path, min_protocol, max_protocol] if command == "serve-one" => {
+            let min_protocol = min_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid min protocol: {error}"));
+            let max_protocol = max_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid max protocol: {error}"));
+            min_protocol.and_then(|min_protocol| {
+                max_protocol.and_then(|max_protocol| {
+                    serve_one_invocation(url, Path::new(path), min_protocol, max_protocol)
+                })
+            })
+        }
         _ => Err(
-            "usage: rust-gateway-live-admission identity <identity.json> | connect <ws-url> <identity.json> <min-protocol> <max-protocol>"
+            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one <ws-url> <identity.json> <min-protocol> <max-protocol>"
                 .to_owned(),
         ),
     };

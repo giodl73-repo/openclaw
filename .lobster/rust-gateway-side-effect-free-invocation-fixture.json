@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-side-effect-free-invocation.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "authentication": "device-v3-challenge-signature-and-node-token",
+    "capabilitySurfaceOwner": "openclaw-node-pairing",
+    "dispatchOwner": "openclaw-node-invoke",
+    "authority": "none"
+  },
+  "cases": [
+    {
+      "id": "declared-system-which-executed",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        }
+      },
+      "expected": {
+        "status": "executed",
+        "authority": "none",
+        "selectedProtocol": 4,
+        "command": "system.which",
+        "requestsReceived": 1,
+        "unsupportedCommandsReceived": 0,
+        "sideEffectsExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false
+      }
+    },
+    {
+      "id": "undeclared-system-notify-refused",
+      "input": {
+        "command": "system.notify",
+        "params": {
+          "title": "must-not-run",
+          "body": "must-not-run"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "INVALID_REQUEST",
+        "reason": "command not declared by node",
+        "dispatchedToRust": false
+      }
+    }
+  ]
+}

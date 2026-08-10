@@ -128,6 +128,17 @@ This is the first fixture to promote its Rust runner from
 `optional-until-cutover` to `required`; other fixtures retain their existing
 runner expectation.
 
+EVID-016 adds the fork-only
+`lobster.rfn.rust-gateway-side-effect-free-invocation.v1` fixture. It preserves
+the TypeScript Gateway, node pairing, command policy, and invocation registry as
+owners while the admitted Rust process declares and executes only
+`system.which`. Operator approval rotates the live pairing generation before
+the Gateway dispatches one request with exact connection and pairing fences.
+An allowlisted but undeclared `system.notify` request is refused before Rust
+dispatch. The slice executes no effect and does not prove runtime readiness,
+Rust authority, restart safety, canary selection, migration, rollback, or
+TypeScript deletion. Authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
