@@ -162,6 +162,19 @@ generation. The slice proves neither runtime readiness, Rust-owned durable
 state, effects, Rust authority, canary selection, migration, rollback, nor
 TypeScript deletion. Authority remains `none`.
 
+EVID-019 adds the fork-only
+`lobster.rfn.rust-gateway-unclean-restart-fencing.v1` fixture. A delayed
+`system.which` request is observed by a real Rust process before the Gateway
+and worker are killed. A fresh Gateway process reuses the durable pairing
+generation but has no process-local pending invocation: a fresh authenticated
+Rust process submits the old request ID and receives an explicit ignored
+disposition, then a distinct Rust process settles exactly one new request.
+The interrupted caller observes transport loss rather than recovered success.
+The slice
+proves neither durable invocation recovery, effects, runtime readiness,
+Rust-owned durable state, Rust authority, migration, rollback, nor TypeScript
+deletion. Authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
