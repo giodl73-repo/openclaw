@@ -303,7 +303,7 @@ describe("Rust Gateway unclean-restart fencing evidence", () => {
       timeoutMs: 120_000,
     }).then(
       (value) => ({ kind: "resolved" as const, value }),
-      (error) => ({ kind: "rejected" as const, error: String(error) }),
+      (error: unknown) => ({ kind: "rejected" as const, error: String(error) }),
     );
     let oldDispatch: Record<string, unknown> | undefined;
     await vi.waitFor(
