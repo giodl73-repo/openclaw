@@ -1,6 +1,5 @@
 import { cliCommandCatalog } from "../cli/command-catalog.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
-import { routedCommandDefinitions } from "../cli/program/routed-command-definitions.js";
 import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
 import { listCliCatalogSurfaces } from "./registry.js";
 
@@ -122,7 +121,7 @@ function buildCommandRoutes(): readonly CliCatalogListCommandRoute[] {
 function buildRoutedOperations(
   routes = buildCommandRoutes(),
 ): readonly CliCatalogListRoutedOperation[] {
-  return Object.keys(routedCommandDefinitions)
+  return [...new Set(routes.flatMap((route) => (route.routeId ? [route.routeId] : [])))]
     .toSorted()
     .map((id) => ({
       id,

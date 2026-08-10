@@ -971,7 +971,9 @@ export function buildAgentSystemPrompt(params: {
   const skillWorkshopSection = availableTools.has(SKILL_WORKSHOP_TOOL_NAME)
     ? buildSkillWorkshopPromptSection()
     : [];
-  const cliCatalogOverlaySection = buildCliCatalogOverlayPromptSection();
+  const cliCatalogOverlaySection = buildCliCatalogOverlayPromptSection({
+    availableTools: availableTools.size > 0 ? availableTools : undefined,
+  });
   const memorySection = buildMemorySection({
     isMinimal,
     includeMemorySection: params.includeMemorySection,

@@ -29,4 +29,16 @@ describe("buildCliCatalogOverlayPromptSection", () => {
     expect(section.length).toBeLessThan(1800);
     expect(approxTokens).toBeLessThan(450);
   });
+
+  it("filters unavailable tool-backed surfaces when tools are scoped", () => {
+    const section = buildCliCatalogOverlayPromptSection({
+      availableTools: new Set(["read", "session_status"]),
+    }).join("\n");
+
+    expect(section).toContain("session_status");
+    expect(section).toContain("- gateway:");
+    expect(section).not.toContain("skill_workshop");
+    expect(section).not.toContain("sessions_spawn");
+    expect(section).not.toContain("commands=process");
+  });
 });

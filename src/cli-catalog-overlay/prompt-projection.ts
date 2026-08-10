@@ -1,4 +1,4 @@
-import { buildCatalogList } from "./list.js";
+import { cliCommandCatalog } from "../cli/command-catalog.js";
 import { listCliCatalogSurfaces } from "./registry.js";
 
 export type CliCatalogPromptSurface = {
@@ -30,13 +30,34 @@ const ROUTED_OPERATION_TITLES: Readonly<Record<string, string>> = {
   "tasks-list": "List tasks",
 };
 
+type PromptRoutedOperation = {
+  readonly id: string;
+  readonly commandPaths: readonly (readonly string[])[];
+};
+
 function routedOperationRisk(id: string): "low" | "medium" {
   return id === "config-unset" ? "medium" : "low";
 }
 
+function listPromptRoutedOperations(): readonly PromptRoutedOperation[] {
+  const byId = new Map<string, string[][]>();
+  for (const entry of cliCommandCatalog) {
+    const id = entry.route?.id;
+    if (!id) {
+      continue;
+    }
+    const commandPaths = byId.get(id) ?? [];
+    commandPaths.push([...entry.commandPath]);
+    byId.set(id, commandPaths);
+  }
+
+  return [...byId.entries()]
+    .toSorted(([left], [right]) => left.localeCompare(right))
+    .map(([id, commandPaths]) => ({ id, commandPaths }));
+}
+
 export function listCliCatalogPromptSurfaces(): readonly CliCatalogPromptSurface[] {
-  const catalog = buildCatalogList();
-  const routedOperations = catalog.cli.routedOperations.map((operation) => ({
+  const routedOperations = listPromptRoutedOperations().map((operation) => ({
     id: operation.id,
     title: ROUTED_OPERATION_TITLES[operation.id] ?? operation.id,
     kind: "routed-operation",
