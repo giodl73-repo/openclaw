@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-reconnect-continuity.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "connectionOwner": "openclaw-node-registry",
+    "dispatchOwner": "openclaw-node-invoke",
+    "authority": "none"
+  },
+  "cases": [
+    {
+      "id": "replacement-connection-executes",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        }
+      },
+      "expected": {
+        "status": "executed",
+        "authority": "none",
+        "selectedProtocol": 4,
+        "command": "system.which",
+        "resultAccepted": true,
+        "resultIgnored": false,
+        "sideEffectsExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false
+      }
+    },
+    {
+      "id": "superseded-connection-late-result-refused",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        },
+        "resultDelayMs": 5000
+      },
+      "expected": {
+        "gatewayCode": "UNAVAILABLE",
+        "invokeCode": "DISCONNECTED",
+        "processStatus": "late-result-refused",
+        "resultAccepted": false,
+        "resultIgnored": false,
+        "resultGatewayCode": "UNAVAILABLE",
+        "resultReasonCode": "PAIRING_CHANGED",
+        "connectionChanged": true,
+        "pairingGenerationChanged": false,
+        "sideEffectsExecuted": false,
+        "authority": "none"
+      }
+    }
+  ]
+}

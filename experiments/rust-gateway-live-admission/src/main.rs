@@ -7,8 +7,11 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tungstenite::{Message, connect};
 
@@ -298,7 +301,7 @@ fn send_invoke_result(
     request_id: &str,
     node_id: &str,
     result: Value,
-) -> Result<(), String> {
+) -> Result<Value, String> {
     let rpc_id = "rust-gateway-side-effect-free-invocation-result";
     socket
         .send(Message::Text(
@@ -323,12 +326,20 @@ fn send_invoke_result(
             && response.get("id").and_then(Value::as_str) == Some(rpc_id)
         {
             if response.get("ok").and_then(Value::as_bool) == Some(true) {
-                return Ok(());
+                return Ok(json!({
+                    "accepted": true,
+                    "ignored": response.pointer("/payload/ignored").and_then(Value::as_bool)
+                        == Some(true),
+                    "gatewayCode": null,
+                    "reasonCode": null
+                }));
             }
-            return Err(format!(
-                "gateway rejected invoke result: {}",
-                response.get("error").unwrap_or(&Value::Null)
-            ));
+            return Ok(json!({
+                "accepted": false,
+                "ignored": false,
+                "gatewayCode": response.pointer("/error/code"),
+                "reasonCode": response.pointer("/error/details/code")
+            }));
         }
     }
 }
@@ -366,6 +377,7 @@ fn serve_one_invocation(
     identity_path: &Path,
     min_protocol: u64,
     max_protocol: u64,
+    result_delay_ms: u64,
 ) -> Result<(Value, bool), String> {
     let GatewayConnection::Accepted(mut session) = open_gateway(
         url,
@@ -434,10 +446,38 @@ fn serve_one_invocation(
             }
         }
         let result = json!({ "bins": found });
-        send_invoke_result(&mut session.socket, request_id, node_id, result.clone())?;
+        if result_delay_ms > 0 {
+            println!(
+                "{}",
+                json!({
+                    "status": "result-delayed",
+                    "requestId": request_id,
+                    "delayMs": result_delay_ms
+                })
+            );
+            io::stdout()
+                .flush()
+                .map_err(|error| format!("failed to flush delayed-result evidence: {error}"))?;
+            thread::sleep(Duration::from_millis(result_delay_ms));
+        }
+        let result_disposition =
+            send_invoke_result(&mut session.socket, request_id, node_id, result.clone())?;
+        let result_accepted =
+            result_disposition.get("accepted").and_then(Value::as_bool) == Some(true);
+        let result_ignored =
+            result_disposition.get("ignored").and_then(Value::as_bool) == Some(true);
+        if result_delay_ms == 0 && !result_accepted {
+            return Err(format!(
+                "gateway rejected current invoke result: {result_disposition}"
+            ));
+        }
         return Ok((
             json!({
-                "status": "executed",
+                "status": if result_accepted {
+                    if result_ignored { "late-result-ignored" } else { "executed" }
+                } else {
+                    "late-result-refused"
+                },
                 "authority": "none",
                 "deviceId": session.identity.device_id,
                 "selectedProtocol": session.hello.get("protocol"),
@@ -447,6 +487,11 @@ fn serve_one_invocation(
                 "requestsReceived": requests_received,
                 "unsupportedCommandsReceived": unsupported_commands_received,
                 "result": result,
+                "resultDelayMs": result_delay_ms,
+                "resultAccepted": result_accepted,
+                "resultIgnored": result_ignored,
+                "resultGatewayCode": result_disposition.get("gatewayCode"),
+                "resultReasonCode": result_disposition.get("reasonCode"),
                 "sideEffectsExecuted": false,
                 "runtimeReadinessProven": false,
                 "rustAuthorityProven": false
@@ -486,12 +531,38 @@ fn main() -> ExitCode {
                 .map_err(|error| format!("invalid max protocol: {error}"));
             min_protocol.and_then(|min_protocol| {
                 max_protocol.and_then(|max_protocol| {
-                    serve_one_invocation(url, Path::new(path), min_protocol, max_protocol)
+                    serve_one_invocation(url, Path::new(path), min_protocol, max_protocol, 0)
+                })
+            })
+        }
+        [command, url, path, min_protocol, max_protocol, delay_ms]
+            if command == "serve-one-delayed" =>
+        {
+            let min_protocol = min_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid min protocol: {error}"));
+            let max_protocol = max_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid max protocol: {error}"));
+            let delay_ms = delay_ms
+                .parse::<u64>()
+                .map_err(|error| format!("invalid result delay: {error}"));
+            min_protocol.and_then(|min_protocol| {
+                max_protocol.and_then(|max_protocol| {
+                    delay_ms.and_then(|delay_ms| {
+                        serve_one_invocation(
+                            url,
+                            Path::new(path),
+                            min_protocol,
+                            max_protocol,
+                            delay_ms,
+                        )
+                    })
                 })
             })
         }
         _ => Err(
-            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one <ws-url> <identity.json> <min-protocol> <max-protocol>"
+            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms>"
                 .to_owned(),
         ),
     };

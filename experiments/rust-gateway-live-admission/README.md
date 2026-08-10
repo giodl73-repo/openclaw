@@ -25,6 +25,7 @@ supported Node 24 range:
 ```text
 corepack pnpm lobster:rust-gateway-live-admission
 corepack pnpm lobster:rust-gateway-side-effect-free-invocation
+corepack pnpm lobster:rust-gateway-reconnect-continuity
 ```
 
 The first successful Gateway connection can spend several minutes compiling
