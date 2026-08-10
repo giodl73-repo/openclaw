@@ -1,4 +1,5 @@
 import path from "node:path";
+import { registerOpenClawStateDatabaseLifecycleListener } from "./openclaw-state-db-cache.js";
 
 type OpenClawStateDatabaseReadinessStatus = "active" | "failed" | "inactive";
 
@@ -25,3 +26,11 @@ export function getOpenClawStateDatabaseReadiness(
 export function clearOpenClawStateDatabaseReadinessForTest(): void {
   readinessByPath.clear();
 }
+
+registerOpenClawStateDatabaseLifecycleListener((event) => {
+  if (event.kind === "opened") {
+    publishOpenClawStateDatabaseReadiness(event.database.path, "active");
+    return;
+  }
+  publishOpenClawStateDatabaseReadiness(event.path, event.kind === "closed" ? "inactive" : "failed");
+});

@@ -34,7 +34,10 @@ import {
   recordOpenClawStateDatabaseOpenFailure,
   clearOpenClawStateDatabaseOpenFailure,
 } from "./openclaw-state-db-cache.js";
-import { publishOpenClawStateDatabaseReadiness } from "./openclaw-state-db-readiness.js";
+import {
+  clearOpenClawStateDatabaseReadinessForTest,
+  publishOpenClawStateDatabaseReadiness,
+} from "./openclaw-state-db-readiness.js";
 import {
   OPENCLAW_DATABASE_SCHEMA_DOCS_URL,
   LAZY_ADDITIVE_STATE_TABLES,
@@ -593,6 +596,7 @@ function openOpenClawStateDatabaseWithBusyTimeout(
     deferredStateDatabases.add(database.db);
     reconcileOpenClawStateSchemaPublication(options);
   }
+  publishOpenClawStateDatabaseReadiness(pathname, "active");
   return database;
 }
 
@@ -749,6 +753,10 @@ export {
   closeOpenClawStateDatabaseByPath,
   closeOpenClawStateDatabase,
   isOpenClawStateDatabaseOpen,
-  closeOpenClawStateDatabaseForTest,
   confirmOpenClawStateDatabaseIntegrity,
 } from "./openclaw-state-db-cache.js";
+
+export function closeOpenClawStateDatabaseForTest(): void {
+  stateDbCache.closeOpenClawStateDatabaseForTest();
+  clearOpenClawStateDatabaseReadinessForTest();
+}
