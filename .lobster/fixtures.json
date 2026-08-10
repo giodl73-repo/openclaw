@@ -320,6 +320,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-reconnect-continuity.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "a replacement Rust connection retains the approved side-effect-free surface and settles a new invocation through a distinct connection fence",
+      "structuredFailure": "the superseded connection's pending invocation settles disconnected and its delayed result is refused before request dispatch as pairing changed",
+      "runner": "scripts/lobster-rust-gateway-reconnect-continuity.mjs",
+      "evidence": ".lobster/rust-gateway-reconnect-continuity-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

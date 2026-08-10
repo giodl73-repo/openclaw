@@ -139,6 +139,18 @@ dispatch. The slice executes no effect and does not prove runtime readiness,
 Rust authority, restart safety, canary selection, migration, rollback, or
 TypeScript deletion. Authority remains `none`.
 
+EVID-017 adds the fork-only
+`lobster.rfn.rust-gateway-reconnect-continuity.v1` fixture. Two real Rust
+processes reuse one approved device identity. The replacement connection
+retires the original connection's pending `system.which` invocation with
+`DISCONNECTED`; the superseded connection's delayed result is refused before
+request dispatch with `PAIRING_CHANGED`, and a fresh invocation succeeds only
+through the replacement connection ID while the pairing generation remains
+unchanged. The slice proves
+neither process restart state nor runtime readiness, effects, Rust authority,
+canary selection, migration, rollback, or TypeScript deletion. Authority
+remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
