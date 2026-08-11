@@ -420,6 +420,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-stream-input.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "the Gateway rejects oversized input without consuming sequence, delivers two bounded ordered frames to Rust, settles the invocation, and fences post-settlement input",
+      "structuredFailure": "input size, sequence, payload, route, terminal-state, result, or authority mismatch",
+      "runner": "scripts/lobster-rust-gateway-stream-input.mjs",
+      "evidence": ".lobster/rust-gateway-stream-input-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

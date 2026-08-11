@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-stream-input.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "inputOwner": "openclaw-node-invoke",
+    "authority": "none"
+  },
+  "cases": [
+    {
+      "id": "bounded-ordered-input-and-terminal-fencing",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        },
+        "timeoutMs": 60000,
+        "frames": [
+          {
+            "kind": "data",
+            "data": "first"
+          },
+          {
+            "kind": "resize",
+            "cols": 90,
+            "rows": 30
+          }
+        ]
+      },
+      "expected": {
+        "requestDispatched": true,
+        "oversizedInputRejected": true,
+        "deliveredSequences": [0, 1],
+        "deliveredInputs": [
+          {
+            "kind": "data",
+            "data": "first"
+          },
+          {
+            "kind": "resize",
+            "cols": 90,
+            "rows": 30
+          }
+        ],
+        "resultAccepted": true,
+        "resultIgnored": false,
+        "postSettlementInputRejected": true,
+        "sideEffectsExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false,
+        "authority": "none"
+      }
+    }
+  ]
+}
