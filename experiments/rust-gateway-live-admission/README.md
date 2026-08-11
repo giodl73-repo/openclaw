@@ -40,6 +40,14 @@ process and connection. This proves hard-deadline cancellation signaling and
 late-result fencing, not arbitrary caller abort or cooperative interruption of
 effects.
 
+The EVID-021 lane uses the production in-process streaming registry seam. Rust
+sends progress sequences `1` then `0`; the Gateway delivers `0` then `1`,
+settles the stream after its idle window, and emits a correlated cancel. Rust's
+later progress and result are both explicitly ignored before a fresh process
+settles one distinct request. This proves ordering, inactivity ownership, and
+late-frame fencing for side-effect-free evidence, not cooperative interruption
+of effects or a new public streaming API.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -53,6 +61,7 @@ corepack pnpm lobster:rust-gateway-reconnect-continuity
 corepack pnpm lobster:rust-gateway-cold-restart-continuity
 corepack pnpm lobster:rust-gateway-unclean-restart-fencing
 corepack pnpm lobster:rust-gateway-deadline-cancellation
+corepack pnpm lobster:rust-gateway-stream-idle-timeout
 ```
 
 The first successful Gateway connection can spend several minutes compiling

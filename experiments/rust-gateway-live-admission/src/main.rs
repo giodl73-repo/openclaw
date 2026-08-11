@@ -344,6 +344,52 @@ fn send_invoke_result(
     }
 }
 
+fn send_invoke_progress(
+    socket: &mut GatewaySocket,
+    request_id: &str,
+    node_id: &str,
+    seq: u64,
+    chunk: &str,
+) -> Result<Value, String> {
+    let rpc_id = format!("rust-gateway-invocation-progress-{seq}");
+    socket
+        .send(Message::Text(
+            json!({
+                "type": "req",
+                "id": rpc_id,
+                "method": "node.invoke.progress",
+                "params": {
+                    "invokeId": request_id,
+                    "nodeId": node_id,
+                    "seq": seq,
+                    "chunk": chunk
+                }
+            })
+            .to_string()
+            .into(),
+        ))
+        .map_err(|error| format!("failed to send invoke progress: {error}"))?;
+    loop {
+        let response = read_json_message(socket)?;
+        if response.get("type").and_then(Value::as_str) == Some("res")
+            && response.get("id").and_then(Value::as_str) == Some(rpc_id.as_str())
+        {
+            if response.get("ok").and_then(Value::as_bool) == Some(true) {
+                return Ok(json!({
+                    "accepted": true,
+                    "ignored": response.pointer("/payload/ignored").and_then(Value::as_bool)
+                        == Some(true)
+                }));
+            }
+            return Ok(json!({
+                "accepted": false,
+                "ignored": false,
+                "gatewayCode": response.pointer("/error/code")
+            }));
+        }
+    }
+}
+
 fn send_stale_invoke_result(
     url: &str,
     identity_path: &Path,
@@ -430,6 +476,7 @@ enum ResultMode {
     Immediate,
     Delayed(u64),
     AfterCancel,
+    StreamUntilIdle,
 }
 
 fn serve_one_invocation(
@@ -507,6 +554,8 @@ fn serve_one_invocation(
         }
         let result = json!({ "bins": found });
         let mut cancellation_request_id: Option<String> = None;
+        let mut progress_dispositions: Vec<Value> = Vec::new();
+        let mut late_progress_disposition: Option<Value> = None;
         let result_delay_ms = match result_mode {
             ResultMode::Immediate => 0,
             ResultMode::Delayed(delay_ms) => {
@@ -558,8 +607,67 @@ fn serve_one_invocation(
                 }
                 0
             }
+            ResultMode::StreamUntilIdle => {
+                progress_dispositions.push(send_invoke_progress(
+                    &mut session.socket,
+                    request_id,
+                    node_id,
+                    1,
+                    "second",
+                )?);
+                progress_dispositions.push(send_invoke_progress(
+                    &mut session.socket,
+                    request_id,
+                    node_id,
+                    0,
+                    "first",
+                )?);
+                println!(
+                    "{}",
+                    json!({
+                        "status": "progress-sent-awaiting-idle-cancel",
+                        "requestId": request_id,
+                        "sentSequences": [1, 0]
+                    })
+                );
+                io::stdout()
+                    .flush()
+                    .map_err(|error| format!("failed to flush stream evidence: {error}"))?;
+                loop {
+                    let cancel = read_json_message(&mut session.socket)?;
+                    if cancel.get("type").and_then(Value::as_str) != Some("event")
+                        || cancel.get("event").and_then(Value::as_str) != Some("node.invoke.cancel")
+                    {
+                        continue;
+                    }
+                    let cancel_request_id = cancel
+                        .pointer("/payload/invokeId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "node.invoke.cancel omitted invokeId".to_owned())?;
+                    let cancel_node_id = cancel
+                        .pointer("/payload/nodeId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "node.invoke.cancel omitted nodeId".to_owned())?;
+                    if cancel_request_id != request_id || cancel_node_id != node_id {
+                        continue;
+                    }
+                    cancellation_request_id = Some(cancel_request_id.to_owned());
+                    break;
+                }
+                late_progress_disposition = Some(send_invoke_progress(
+                    &mut session.socket,
+                    request_id,
+                    node_id,
+                    2,
+                    "late",
+                )?);
+                0
+            }
         };
-        let cancellation_expected = matches!(result_mode, ResultMode::AfterCancel);
+        let cancellation_expected = matches!(
+            result_mode,
+            ResultMode::AfterCancel | ResultMode::StreamUntilIdle
+        );
         let cancellation_observed = cancellation_request_id.as_deref() == Some(request_id);
         if cancellation_expected && !cancellation_observed {
             return Err("matching node.invoke.cancel was not observed".to_owned());
@@ -575,11 +683,31 @@ fn serve_one_invocation(
                 "gateway rejected current invoke result: {result_disposition}"
             ));
         }
-        let proof_accepted =
-            !cancellation_expected || (result_accepted && result_ignored && cancellation_observed);
+        let stream_expected = matches!(result_mode, ResultMode::StreamUntilIdle);
+        let progress_accepted = progress_dispositions.iter().all(|disposition| {
+            disposition.get("accepted").and_then(Value::as_bool) == Some(true)
+                && disposition.get("ignored").and_then(Value::as_bool) == Some(false)
+        });
+        let late_progress_ignored = late_progress_disposition
+            .as_ref()
+            .is_some_and(|disposition| {
+                disposition.get("accepted").and_then(Value::as_bool) == Some(true)
+                    && disposition.get("ignored").and_then(Value::as_bool) == Some(true)
+            });
+        let proof_accepted = if stream_expected {
+            progress_accepted
+                && late_progress_ignored
+                && result_accepted
+                && result_ignored
+                && cancellation_observed
+        } else {
+            !cancellation_expected || (result_accepted && result_ignored && cancellation_observed)
+        };
         return Ok((
             json!({
-                "status": if cancellation_expected {
+                "status": if stream_expected {
+                    if proof_accepted { "idle-cancel-observed" } else { "idle-cancel-not-fenced" }
+                } else if cancellation_expected {
                     if proof_accepted { "deadline-cancel-observed" } else { "deadline-cancel-not-fenced" }
                 } else if result_accepted {
                     if result_ignored { "late-result-ignored" } else { "executed" }
@@ -598,6 +726,13 @@ fn serve_one_invocation(
                 "resultDelayMs": result_delay_ms,
                 "cancellationObserved": cancellation_observed,
                 "cancellationRequestId": cancellation_request_id,
+                "progressDispositions": progress_dispositions,
+                "lateProgressAccepted": late_progress_disposition
+                    .as_ref()
+                    .and_then(|disposition| disposition.get("accepted")),
+                "lateProgressIgnored": late_progress_disposition
+                    .as_ref()
+                    .and_then(|disposition| disposition.get("ignored")),
                 "resultAccepted": result_accepted,
                 "resultIgnored": result_ignored,
                 "resultGatewayCode": result_disposition.get("gatewayCode"),
@@ -696,6 +831,25 @@ fn main() -> ExitCode {
                 })
             })
         }
+        [command, url, path, min_protocol, max_protocol] if command == "serve-one-stream-idle" => {
+            let min_protocol = min_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid min protocol: {error}"));
+            let max_protocol = max_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid max protocol: {error}"));
+            min_protocol.and_then(|min_protocol| {
+                max_protocol.and_then(|max_protocol| {
+                    serve_one_invocation(
+                        url,
+                        Path::new(path),
+                        min_protocol,
+                        max_protocol,
+                        ResultMode::StreamUntilIdle,
+                    )
+                })
+            })
+        }
         [command, url, path, min_protocol, max_protocol, request_id]
             if command == "send-stale-result" =>
         {
@@ -718,7 +872,7 @@ fn main() -> ExitCode {
             })
         }
         _ => Err(
-            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one|serve-one-after-cancel <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
+            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one|serve-one-after-cancel|serve-one-stream-idle <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
                 .to_owned(),
         ),
     };

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-stream-idle-timeout.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "minimumNodeProtocolVersion": 3,
+    "progressOwner": "openclaw-node-invoke",
+    "idleTimeoutOwner": "openclaw-node-invoke",
+    "authority": "none"
+  },
+  "cases": [
+    {
+      "id": "ordered-progress-idle-cancel-and-late-frame-fencing",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        },
+        "timeoutMs": 60000,
+        "idleTimeoutMs": 5000
+      },
+      "expected": {
+        "streamRequestDispatched": true,
+        "sentSequences": [1, 0],
+        "deliveredProgress": ["first", "second"],
+        "invokeCode": "IDLE_TIMEOUT",
+        "cancellationObserved": true,
+        "cancellationRequestCorrelated": true,
+        "lateProgressRpcAccepted": true,
+        "lateProgressIgnored": true,
+        "lateResultRpcAccepted": true,
+        "lateResultIgnored": true
+      }
+    },
+    {
+      "id": "fresh-request-after-idle-timeout-executes",
+      "input": {
+        "command": "system.which",
+        "params": {
+          "bins": ["node"]
+        },
+        "timeoutMs": 10000
+      },
+      "expected": {
+        "status": "ordered-idle-cancel-fenced-and-fresh-work-accepted",
+        "authority": "none",
+        "selectedProtocol": 4,
+        "rustProcessChanged": true,
+        "connectionChanged": true,
+        "pairingGenerationChanged": false,
+        "pendingCapabilityApproval": false,
+        "freshRequestDiffers": true,
+        "freshRequestsReceived": 1,
+        "freshResultAccepted": true,
+        "sideEffectsExecuted": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false
+      }
+    }
+  ]
+}
