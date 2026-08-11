@@ -28,6 +28,14 @@ Before editing, locate:
 
 Extend an existing owner boundary. If the surface is not enrolled, add one bounded owner declaration and its scoped gate as part of the slice; do not create a second shared runtime or a global catalog.
 
+For `localization/surfaces.json`, keep declarations machine-reviewable:
+
+- an `adopted` source must match exactly one catalog area by owner, namespace, and source path;
+- a `conforming-pipeline` source must use a pipeline ID already registered by the gate;
+- `english-only` and `platform-constrained` must use their finite reason/platform values;
+- `deferred` must name a durable blocker issue and GitHub review owner; and
+- never add adapter exclusions. Generated targets are derived from `localization/catalogs.json` and validated as regular, repository-contained files.
+
 Ask the owning maintainer before changing approval, authentication, authorization, destructive-action, privacy, recovery, Gateway protocol, channel safety, Plugin SDK, command metadata, or skill metadata copy.
 
 ## Implement a message
@@ -63,6 +71,18 @@ Treat every English edit as a new source revision:
 5. run the scoped catalog gate and renderer tests.
 
 Keeping the same key does not make an older translation current.
+
+## Use catalog automation
+
+When `localization/catalogs.json` owns the surface:
+
+1. Run `pnpm localization:catalogs:detect` locally; detection is credential-free.
+2. Mark the PR ready only after its reviewed English and source catalog are stable.
+3. For a same-repository PR targeting the default branch, the scoped CI gate blocks stale or missing generated targets. A maintainer can dispatch `Localization Catalog Refresh` with the PR number to generate all stale locales and commit one validated batch back to the unchanged head branch.
+4. For a fork PR, CI reports drift without requiring secrets or write access. After merge, the trusted main-branch workflow reconciles the same registry-owned targets in one generated follow-up PR with auto-merge disabled.
+5. Review and merge the generated catalog changes through the original surface owner boundary.
+
+Never put provider credentials in a pull request job. The trusted workflow owns generation; the ordinary CI gate only validates registry, source revision, keys, placeholders, protected literals, and generated artifacts.
 
 ## Add a locale
 
