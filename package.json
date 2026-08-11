@@ -1961,7 +1961,8 @@
     "lobster:rust-gateway-reconnect-continuity": "node scripts/lobster-rust-gateway-reconnect-continuity.mjs",
     "lobster:rust-gateway-cold-restart-continuity": "node scripts/lobster-rust-gateway-cold-restart-continuity.mjs",
     "lobster:rust-gateway-unclean-restart-fencing": "node scripts/lobster-rust-gateway-unclean-restart-fencing.mjs",
-    "lobster:rust-gateway-deadline-cancellation": "node scripts/lobster-rust-gateway-deadline-cancellation.mjs"
+    "lobster:rust-gateway-deadline-cancellation": "node scripts/lobster-rust-gateway-deadline-cancellation.mjs",
+    "lobster:rust-gateway-stream-idle-timeout": "node scripts/lobster-rust-gateway-stream-idle-timeout.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

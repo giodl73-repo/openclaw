@@ -400,6 +400,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-stream-idle-timeout.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "the Gateway orders Rust progress, settles an idle stream, emits the correlated cancel, ignores late progress and result, and accepts one distinct fresh invocation",
+      "structuredFailure": "progress order, idle-timeout ownership, cancel correlation, late-frame fencing, fresh request identity, connection generation, or capability approval continuity mismatches",
+      "runner": "scripts/lobster-rust-gateway-stream-idle-timeout.mjs",
+      "evidence": ".lobster/rust-gateway-stream-idle-timeout-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

@@ -187,6 +187,17 @@ does not prove arbitrary caller abort, cooperative effect interruption,
 streaming, idle deadlines, runtime readiness, Rust authority, migration,
 rollback, or TypeScript deletion. Authority remains `none`.
 
+EVID-021 adds the fork-only
+`lobster.rfn.rust-gateway-stream-idle-timeout.v1` fixture. Rust emits
+side-effect-free progress out of order; the TypeScript Gateway buffers and
+delivers it in sequence, then owns the inactivity deadline after progress
+stops. Rust observes the correlated cancel and submits both a late progress
+frame and late result, which the Gateway explicitly ignores. A distinct Rust
+process then settles one fresh request without renewed capability approval or
+pairing-generation change. The slice does not prove effect interruption,
+streaming input, runtime readiness, Rust authority, migration, rollback, or
+TypeScript deletion. Authority remains `none`.
+
 Reconstruct from a clean clone:
 
 ```text
