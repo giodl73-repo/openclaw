@@ -425,12 +425,19 @@ fn send_unsupported_command(
         .map_err(|error| format!("failed to send unsupported-command result: {error}"))
 }
 
+#[derive(Clone, Copy)]
+enum ResultMode {
+    Immediate,
+    Delayed(u64),
+    AfterCancel,
+}
+
 fn serve_one_invocation(
     url: &str,
     identity_path: &Path,
     min_protocol: u64,
     max_protocol: u64,
-    result_delay_ms: u64,
+    result_mode: ResultMode,
 ) -> Result<(Value, bool), String> {
     let GatewayConnection::Accepted(mut session) = open_gateway(
         url,
@@ -499,19 +506,63 @@ fn serve_one_invocation(
             }
         }
         let result = json!({ "bins": found });
-        if result_delay_ms > 0 {
-            println!(
-                "{}",
-                json!({
-                    "status": "result-delayed",
-                    "requestId": request_id,
-                    "delayMs": result_delay_ms
-                })
-            );
-            io::stdout()
-                .flush()
-                .map_err(|error| format!("failed to flush delayed-result evidence: {error}"))?;
-            thread::sleep(Duration::from_millis(result_delay_ms));
+        let mut cancellation_request_id: Option<String> = None;
+        let result_delay_ms = match result_mode {
+            ResultMode::Immediate => 0,
+            ResultMode::Delayed(delay_ms) => {
+                println!(
+                    "{}",
+                    json!({
+                        "status": "result-delayed",
+                        "requestId": request_id,
+                        "delayMs": delay_ms
+                    })
+                );
+                io::stdout()
+                    .flush()
+                    .map_err(|error| format!("failed to flush delayed-result evidence: {error}"))?;
+                thread::sleep(Duration::from_millis(delay_ms));
+                delay_ms
+            }
+            ResultMode::AfterCancel => {
+                println!(
+                    "{}",
+                    json!({
+                        "status": "awaiting-cancel",
+                        "requestId": request_id
+                    })
+                );
+                io::stdout()
+                    .flush()
+                    .map_err(|error| format!("failed to flush cancel-wait evidence: {error}"))?;
+                loop {
+                    let cancel = read_json_message(&mut session.socket)?;
+                    if cancel.get("type").and_then(Value::as_str) != Some("event")
+                        || cancel.get("event").and_then(Value::as_str) != Some("node.invoke.cancel")
+                    {
+                        continue;
+                    }
+                    let cancel_request_id = cancel
+                        .pointer("/payload/invokeId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "node.invoke.cancel omitted invokeId".to_owned())?;
+                    let cancel_node_id = cancel
+                        .pointer("/payload/nodeId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "node.invoke.cancel omitted nodeId".to_owned())?;
+                    if cancel_request_id != request_id || cancel_node_id != node_id {
+                        continue;
+                    }
+                    cancellation_request_id = Some(cancel_request_id.to_owned());
+                    break;
+                }
+                0
+            }
+        };
+        let cancellation_expected = matches!(result_mode, ResultMode::AfterCancel);
+        let cancellation_observed = cancellation_request_id.as_deref() == Some(request_id);
+        if cancellation_expected && !cancellation_observed {
+            return Err("matching node.invoke.cancel was not observed".to_owned());
         }
         let result_disposition =
             send_invoke_result(&mut session.socket, request_id, node_id, result.clone())?;
@@ -519,14 +570,18 @@ fn serve_one_invocation(
             result_disposition.get("accepted").and_then(Value::as_bool) == Some(true);
         let result_ignored =
             result_disposition.get("ignored").and_then(Value::as_bool) == Some(true);
-        if result_delay_ms == 0 && !result_accepted {
+        if matches!(result_mode, ResultMode::Immediate) && !result_accepted {
             return Err(format!(
                 "gateway rejected current invoke result: {result_disposition}"
             ));
         }
+        let proof_accepted =
+            !cancellation_expected || (result_accepted && result_ignored && cancellation_observed);
         return Ok((
             json!({
-                "status": if result_accepted {
+                "status": if cancellation_expected {
+                    if proof_accepted { "deadline-cancel-observed" } else { "deadline-cancel-not-fenced" }
+                } else if result_accepted {
                     if result_ignored { "late-result-ignored" } else { "executed" }
                 } else {
                     "late-result-refused"
@@ -541,6 +596,8 @@ fn serve_one_invocation(
                 "unsupportedCommandsReceived": unsupported_commands_received,
                 "result": result,
                 "resultDelayMs": result_delay_ms,
+                "cancellationObserved": cancellation_observed,
+                "cancellationRequestId": cancellation_request_id,
                 "resultAccepted": result_accepted,
                 "resultIgnored": result_ignored,
                 "resultGatewayCode": result_disposition.get("gatewayCode"),
@@ -549,7 +606,7 @@ fn serve_one_invocation(
                 "runtimeReadinessProven": false,
                 "rustAuthorityProven": false
             }),
-            true,
+            proof_accepted,
         ));
     }
 }
@@ -584,7 +641,13 @@ fn main() -> ExitCode {
                 .map_err(|error| format!("invalid max protocol: {error}"));
             min_protocol.and_then(|min_protocol| {
                 max_protocol.and_then(|max_protocol| {
-                    serve_one_invocation(url, Path::new(path), min_protocol, max_protocol, 0)
+                    serve_one_invocation(
+                        url,
+                        Path::new(path),
+                        min_protocol,
+                        max_protocol,
+                        ResultMode::Immediate,
+                    )
                 })
             })
         }
@@ -608,9 +671,28 @@ fn main() -> ExitCode {
                             Path::new(path),
                             min_protocol,
                             max_protocol,
-                            delay_ms,
+                            ResultMode::Delayed(delay_ms),
                         )
                     })
+                })
+            })
+        }
+        [command, url, path, min_protocol, max_protocol] if command == "serve-one-after-cancel" => {
+            let min_protocol = min_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid min protocol: {error}"));
+            let max_protocol = max_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid max protocol: {error}"));
+            min_protocol.and_then(|min_protocol| {
+                max_protocol.and_then(|max_protocol| {
+                    serve_one_invocation(
+                        url,
+                        Path::new(path),
+                        min_protocol,
+                        max_protocol,
+                        ResultMode::AfterCancel,
+                    )
                 })
             })
         }
@@ -636,7 +718,7 @@ fn main() -> ExitCode {
             })
         }
         _ => Err(
-            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
+            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one|serve-one-after-cancel <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
                 .to_owned(),
         ),
     };

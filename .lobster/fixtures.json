@@ -380,6 +380,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-deadline-cancellation.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "the Gateway deadline settles the caller, emits a correlated cancel observed by Rust, ignores the late result, and accepts one distinct fresh invocation",
+      "structuredFailure": "deadline ownership, caller outcome, cancel correlation, late-result fencing, fresh request identity, connection generation, or capability approval continuity mismatches",
+      "runner": "scripts/lobster-rust-gateway-deadline-cancellation.mjs",
+      "evidence": ".lobster/rust-gateway-deadline-cancellation-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

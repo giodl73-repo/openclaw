@@ -32,6 +32,14 @@ another fresh Rust process then settles exactly one new
 unclean-restart fencing, not durable invocation recovery or exactly-once
 effects.
 
+The EVID-020 lane keeps the Gateway authoritative for one absolute invocation
+deadline. Rust observes the request and its correlated `node.invoke.cancel`;
+the caller receives the Gateway-owned `TIMEOUT`, Rust's later result is
+explicitly ignored, and one fresh request succeeds through a distinct Rust
+process and connection. This proves hard-deadline cancellation signaling and
+late-result fencing, not arbitrary caller abort or cooperative interruption of
+effects.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -44,6 +52,7 @@ corepack pnpm lobster:rust-gateway-side-effect-free-invocation
 corepack pnpm lobster:rust-gateway-reconnect-continuity
 corepack pnpm lobster:rust-gateway-cold-restart-continuity
 corepack pnpm lobster:rust-gateway-unclean-restart-fencing
+corepack pnpm lobster:rust-gateway-deadline-cancellation
 ```
 
 The first successful Gateway connection can spend several minutes compiling
