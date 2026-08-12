@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
-import crypto from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import crypto, { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,9 @@ import { connectReq, rpcReq, trackConnectChallengeNonce } from "./test-helpers.j
 const MANIFEST = resolve("experiments/rust-gateway-live-admission/Cargo.toml");
 const FIXTURE_PATH = resolve(".lobster/rust-gateway-side-effect-free-invocation-fixture.json");
 const CARGO = resolveCargoExecutable();
+const PROVIDED_ARTIFACT = process.env.OPENCLAW_RUST_ARTIFACT_BINARY;
+const EXPECTED_ARTIFACT_SHA256 = process.env.OPENCLAW_RUST_ARTIFACT_SHA256;
+const ARTIFACT_RECEIPT_PATH = process.env.OPENCLAW_RUST_ARTIFACT_RECEIPT_PATH;
 const INVOCATION_PLATFORM =
   process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
 const cargoParent = isAbsolute(CARGO) ? resolve(dirname(CARGO), "..") : undefined;
@@ -161,13 +164,15 @@ describe("Rust Gateway side-effect-free invocation", () => {
   const stateDir = mkdtempSync(join(tmpdir(), "openclaw-rust-gateway-invocation-"));
   const identityPath = join(stateDir, "rust-identity.json");
   const cargoTargetDir = join(stateDir, "cargo-target");
-  const binary = join(
-    cargoTargetDir,
-    "debug",
-    process.platform === "win32"
-      ? "rust-gateway-live-admission.exe"
-      : "rust-gateway-live-admission",
-  );
+  const binary = PROVIDED_ARTIFACT
+    ? resolve(PROVIDED_ARTIFACT)
+    : join(
+        cargoTargetDir,
+        "debug",
+        process.platform === "win32"
+          ? "rust-gateway-live-admission.exe"
+          : "rust-gateway-live-admission",
+      );
   const invokeSpy = vi.spyOn(NodeRegistry.prototype, "invoke");
   let server: GatewayServer | undefined;
   let operator: WebSocket | undefined;
@@ -182,15 +187,33 @@ describe("Rust Gateway side-effect-free invocation", () => {
     });
     process.env.OPENCLAW_STATE_DIR = stateDir;
     process.env.OPENCLAW_TEST_MINIMAL_GATEWAY = "1";
-    execFileSync(CARGO, ["build", "--locked", "--manifest-path", MANIFEST], {
-      encoding: "utf8",
-      stdio: "pipe",
-      env: {
-        ...process.env,
-        ...cargoToolchainEnv,
-        CARGO_TARGET_DIR: cargoTargetDir,
-      },
-    });
+    if (PROVIDED_ARTIFACT) {
+      expect(existsSync(binary)).toBe(true);
+      expect(EXPECTED_ARTIFACT_SHA256).toMatch(/^[0-9a-f]{64}$/u);
+      expect(createHash("sha256").update(readFileSync(binary)).digest("hex")).toBe(
+        EXPECTED_ARTIFACT_SHA256,
+      );
+      expect(JSON.parse(execFileSync(binary, ["artifact-profile"], { encoding: "utf8" }))).toEqual({
+        schemaVersion: 1,
+        profileId: "rust-gateway-side-effect-free-v1",
+        clientVersion: "rust-gateway-live-admission/0.1.0",
+        commands: ["system.which"],
+        sideEffectsAllowed: false,
+        runtimeReadinessProven: false,
+        rustAuthorityProven: false,
+        authority: "none",
+      });
+    } else {
+      execFileSync(CARGO, ["build", "--locked", "--manifest-path", MANIFEST], {
+        encoding: "utf8",
+        stdio: "pipe",
+        env: {
+          ...process.env,
+          ...cargoToolchainEnv,
+          CARGO_TARGET_DIR: cargoTargetDir,
+        },
+      });
+    }
     identity = JSON.parse(
       execFileSync(binary, ["identity", identityPath], { encoding: "utf8" }),
     ) as PublicIdentity;
@@ -309,6 +332,25 @@ describe("Rust Gateway side-effect-free invocation", () => {
         expectedConnId: expect.any(String),
         expectedPairingGeneration: expect.any(String),
       });
+      if (PROVIDED_ARTIFACT) {
+        expect(ARTIFACT_RECEIPT_PATH).toBeTruthy();
+        writeFileSync(
+          ARTIFACT_RECEIPT_PATH!,
+          `${JSON.stringify({
+            artifactSha256: EXPECTED_ARTIFACT_SHA256,
+            profileId: "rust-gateway-side-effect-free-v1",
+            selectedProtocol: PROTOCOL_VERSION,
+            commands: ["system.which"],
+            connectionGeneration: dispatch?.expectedConnId,
+            pairingGeneration: dispatch?.expectedPairingGeneration,
+            boundedProfileReadinessProven: true,
+            runtimeReadinessProven: false,
+            rustAuthorityProven: false,
+            authority: "none",
+          })}\n`,
+          { encoding: "utf8", mode: 0o600 },
+        );
+      }
 
       const processResult = await rustResult;
       expect(processResult.status).toBe(0);

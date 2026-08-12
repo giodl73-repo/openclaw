@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-artifact-readiness.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "protocolVersion": 4,
+    "authority": "none"
+  },
+  "accepted": {
+    "input": {
+      "profileId": "rust-gateway-side-effect-free-v1",
+      "commands": ["system.which"],
+      "artifactDigestAlgorithm": "sha256"
+    },
+    "expected": {
+      "profileId": "rust-gateway-side-effect-free-v1",
+      "commands": ["system.which"],
+      "freshInstall": true,
+      "artifactBoundReceipt": true,
+      "boundedProfileReadinessProven": true,
+      "runtimeReadinessProven": false,
+      "rustAuthorityProven": false,
+      "authority": "none"
+    }
+  },
+  "rejected": {
+    "input": {
+      "mutation": "append-one-byte-after-admission-digest"
+    },
+    "expected": {
+      "code": "ARTIFACT_DIGEST_MISMATCH",
+      "rejectedBeforeProcessLaunch": true,
+      "rejectedBeforeGatewayConnection": true
+    }
+  }
+}

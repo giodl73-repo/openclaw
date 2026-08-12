@@ -55,6 +55,16 @@ after terminal settlement. Rust returns the received JSON only as
 side-effect-free evidence. This proves bounded Gateway-to-Rust input transport,
 not terminal semantics, a new public streaming API, or Rust authority.
 
+The EVID-023 lane builds one exact Rust artifact, records its SHA-256 digest,
+copies it into a fresh candidate install, verifies its declared
+`rust-gateway-side-effect-free-v1` profile, and binds a successful live
+`system.which` probe to that digest, profile, protocol, connection generation,
+and pairing generation. A one-byte mutation is rejected before process launch
+or Gateway connection. This proves readiness only for the exact
+side-effect-free profile and artifact. It does not prove general runtime
+readiness, effects, durable Rust-owned state, Rust authority, production
+routing, release promotion, rollback, or TypeScript deletion.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -70,6 +80,7 @@ corepack pnpm lobster:rust-gateway-unclean-restart-fencing
 corepack pnpm lobster:rust-gateway-deadline-cancellation
 corepack pnpm lobster:rust-gateway-stream-idle-timeout
 corepack pnpm lobster:rust-gateway-stream-input
+corepack pnpm lobster:rust-gateway-artifact-readiness
 ```
 
 The first successful Gateway connection can spend several minutes compiling

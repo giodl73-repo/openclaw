@@ -21,6 +21,7 @@ const CLIENT_VERSION: &str = "rust-gateway-live-admission/0.1.0";
 const ADMISSION_PLATFORM: &str = "rust";
 const ROLE: &str = "node";
 const SYSTEM_WHICH_COMMAND: &str = "system.which";
+const ARTIFACT_PROFILE_ID: &str = "rust-gateway-side-effect-free-v1";
 
 type GatewaySocket =
     tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>;
@@ -47,6 +48,19 @@ struct GatewaySession {
 enum GatewayConnection {
     Accepted(Box<GatewaySession>),
     Rejected(Value),
+}
+
+fn artifact_profile() -> Value {
+    json!({
+        "schemaVersion": 1,
+        "profileId": ARTIFACT_PROFILE_ID,
+        "clientVersion": CLIENT_VERSION,
+        "commands": [SYSTEM_WHICH_COMMAND],
+        "sideEffectsAllowed": false,
+        "runtimeReadinessProven": false,
+        "rustAuthorityProven": false,
+        "authority": "none"
+    })
 }
 
 fn load_signing_key(path: &Path) -> Result<SigningKey, String> {
@@ -815,6 +829,7 @@ fn serve_one_invocation(
 fn main() -> ExitCode {
     let args = env::args().skip(1).collect::<Vec<_>>();
     let result = match args.as_slice() {
+        [command] if command == "artifact-profile" => Ok((artifact_profile(), true)),
         [command, path] if command == "identity" => {
             write_identity(Path::new(path)).and_then(|identity| {
                 serde_json::to_value(identity).map_err(|error| error.to_string())
@@ -957,7 +972,7 @@ fn main() -> ExitCode {
             })
         }
         _ => Err(
-            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one|serve-one-after-cancel|serve-one-stream-idle|serve-one-input <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
+            "usage: rust-gateway-live-admission artifact-profile | identity <identity.json> | connect|serve-one|serve-one-after-cancel|serve-one-stream-idle|serve-one-input <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
                 .to_owned(),
         ),
     };

@@ -440,6 +440,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-artifact-readiness.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "one exact SHA-256-bound Rust artifact is fresh-installed, self-describes the bounded side-effect-free profile, and completes a generation-bound live Gateway probe",
+      "structuredFailure": "a post-digest tampered candidate is rejected before process launch or Gateway connection",
+      "runner": "scripts/lobster-rust-gateway-artifact-readiness.mjs",
+      "evidence": ".lobster/rust-gateway-artifact-readiness-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }
