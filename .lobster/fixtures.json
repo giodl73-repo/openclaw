@@ -460,6 +460,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-single-authority.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "one selection generation assigns the bounded canary unit to exactly one ready Rust runtime and invokes only that runtime's artifact-bound live proof",
+      "structuredFailure": "ambiguous TypeScript and Rust eligibility is rejected before either runtime dispatcher is called",
+      "runner": "scripts/lobster-rust-gateway-single-authority.mjs",
+      "evidence": ".lobster/rust-gateway-single-authority-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

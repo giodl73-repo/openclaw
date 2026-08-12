@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-single-authority.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "selectionOwner": "fork-evidence-harness",
+    "effectAuthority": "none",
+    "authority": "none"
+  },
+  "accepted": {
+    "input": {
+      "deploymentUnitId": "canary-unit-7",
+      "selectionGeneration": "selection-generation-1",
+      "profileId": "rust-gateway-side-effect-free-v1",
+      "command": "system.which",
+      "candidates": [
+        {
+          "runtimeId": "typescript-baseline",
+          "runtimeKind": "typescript",
+          "selectionGeneration": "selection-generation-1",
+          "selectedDeploymentUnits": [],
+          "profileId": "rust-gateway-side-effect-free-v1",
+          "commands": ["system.which"],
+          "readiness": {
+            "receiptId": "typescript-current-owner",
+            "boundedProfileReadinessProven": true,
+            "authority": "none"
+          }
+        },
+        {
+          "runtimeId": "rust-canary",
+          "runtimeKind": "rust",
+          "selectionGeneration": "selection-generation-1",
+          "selectedDeploymentUnits": ["canary-unit-7"],
+          "profileId": "rust-gateway-side-effect-free-v1",
+          "commands": ["system.which"],
+          "readiness": {
+            "receiptId": "evid-023-artifact-readiness",
+            "boundedProfileReadinessProven": true,
+            "authority": "none"
+          }
+        }
+      ]
+    },
+    "expected": {
+      "runtimeId": "rust-canary",
+      "typescriptDispatchCount": 0,
+      "rustDispatchCount": 1,
+      "singleDispatchProven": true,
+      "effectAuthority": "none",
+      "productionRuntimeAuthorityProven": false,
+      "authority": "none"
+    }
+  },
+  "rejected": {
+    "input": {
+      "deploymentUnitId": "canary-unit-7",
+      "selectionGeneration": "selection-generation-1",
+      "profileId": "rust-gateway-side-effect-free-v1",
+      "command": "system.which",
+      "candidates": [
+        {
+          "runtimeId": "typescript-baseline",
+          "runtimeKind": "typescript",
+          "selectionGeneration": "selection-generation-1",
+          "selectedDeploymentUnits": ["canary-unit-7"],
+          "profileId": "rust-gateway-side-effect-free-v1",
+          "commands": ["system.which"],
+          "readiness": {
+            "receiptId": "typescript-current-owner",
+            "boundedProfileReadinessProven": true,
+            "authority": "none"
+          }
+        },
+        {
+          "runtimeId": "rust-canary",
+          "runtimeKind": "rust",
+          "selectionGeneration": "selection-generation-1",
+          "selectedDeploymentUnits": ["canary-unit-7"],
+          "profileId": "rust-gateway-side-effect-free-v1",
+          "commands": ["system.which"],
+          "readiness": {
+            "receiptId": "evid-023-artifact-readiness",
+            "boundedProfileReadinessProven": true,
+            "authority": "none"
+          }
+        }
+      ]
+    },
+    "expected": {
+      "code": "AMBIGUOUS_RUNTIME_AUTHORITY",
+      "rejectedBeforeDispatch": true,
+      "dispatchCounts": {
+        "typescript": 0,
+        "rust": 0
+      }
+    }
+  }
+}

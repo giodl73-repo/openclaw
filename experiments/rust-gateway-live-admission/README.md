@@ -65,6 +65,16 @@ side-effect-free profile and artifact. It does not prove general runtime
 readiness, effects, durable Rust-owned state, Rust authority, production
 routing, release promotion, rollback, or TypeScript deletion.
 
+The EVID-024 lane adds a fork-only evidence selector around the existing
+generation-fenced dispatch proof. For one declared deployment unit and
+selection generation, exactly one eligible Rust candidate invokes the EVID-023
+artifact-bound live proof while the TypeScript baseline dispatcher remains
+untouched. If both TypeScript and Rust claim the same unit, selection fails
+before either dispatcher runs. This proves deterministic single dispatch for
+the bounded side-effect-free evidence profile only. It does not add production
+routing, transfer effect authority, prove a general canary controller, or make
+Rust authoritative.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -81,6 +91,7 @@ corepack pnpm lobster:rust-gateway-deadline-cancellation
 corepack pnpm lobster:rust-gateway-stream-idle-timeout
 corepack pnpm lobster:rust-gateway-stream-input
 corepack pnpm lobster:rust-gateway-artifact-readiness
+corepack pnpm lobster:rust-gateway-single-authority
 ```
 
 The first successful Gateway connection can spend several minutes compiling
