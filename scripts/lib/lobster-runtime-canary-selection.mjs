@@ -17,7 +17,7 @@ function isEligibleCandidate(candidate, input) {
   );
 }
 
-export function selectRuntimeCanary(input) {
+function selectRuntimeCanary(input) {
   const eligible = input.candidates.filter((candidate) => isEligibleCandidate(candidate, input));
   if (eligible.length === 0) {
     throw new RuntimeCanarySelectionError(

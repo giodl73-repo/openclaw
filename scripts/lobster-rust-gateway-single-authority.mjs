@@ -89,7 +89,7 @@ try {
   };
   if (
     evidence.selection.runtimeId !== FIXTURE.accepted.expected.runtimeId ||
-    evidence.singleDispatchProven !== true ||
+    !evidence.singleDispatchProven ||
     evidence.authority !== FIXTURE.accepted.expected.authority
   ) {
     fail(`single-authority evidence mismatch: ${JSON.stringify(evidence)}`);
