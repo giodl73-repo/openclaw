@@ -18,8 +18,7 @@ const { loadBundledPluginPublicArtifactModuleSyncMock } = vi.hoisted(() => ({
               targetType: "channels.googlechat.serviceAccount",
               configFile: "openclaw.json",
               pathPattern: "channels.googlechat.serviceAccount",
-              refPathPattern: "channels.googlechat.serviceAccountRef",
-              secretShape: "sibling_ref",
+              secretShape: "secret_input",
               expectedResolvedValue: "string",
               includeInPlan: true,
               includeInConfigure: true,
@@ -54,7 +53,7 @@ const { loadBundledPluginPublicArtifactModuleSyncMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("../plugins/manifest-registry.js", () => ({
-  loadPluginManifestRegistry: loadPluginManifestRegistryMock,
+  loadPluginManifestRegistryCore: loadPluginManifestRegistryMock,
 }));
 
 vi.mock("../plugins/public-surface-loader.js", () => ({
@@ -80,7 +79,7 @@ describe("secret target registry fast path", () => {
       throw new Error("expected googlechat service account target");
     }
     expect(target.entry.id).toBe("channels.googlechat.serviceAccount");
-    expect(target.refPathSegments).toEqual(["channels", "googlechat", "serviceAccountRef"]);
+    expect(target.refPathSegments).toBeUndefined();
     expect(loadBundledPluginPublicArtifactModuleSyncMock).toHaveBeenCalledWith({
       dirName: "googlechat",
       artifactBasename: "secret-contract-api.js",

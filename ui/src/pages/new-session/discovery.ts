@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "../../lib/string-coerce.ts";
 
 export type DraftBranches = {
@@ -7,9 +8,20 @@ export type DraftBranches = {
   headBranch?: string;
 };
 
+export type DraftRepositoryState =
+  | { kind: "idle" }
+  | { kind: "checking"; repoRoot: string }
+  | ({ kind: "git" } & DraftBranches)
+  | { kind: "direct"; repoRoot: string }
+  | { kind: "unavailable"; repoRoot: string };
+
 export type DraftNode = {
   nodeId: string;
   displayName: string;
+  platform?: string;
+  deviceFamily?: string;
+  modelIdentifier?: string;
+  remoteIp?: string;
   connected: boolean;
   canExec: boolean;
   canBrowse: boolean;
@@ -26,9 +38,16 @@ export function readDraftNodes(value: unknown): DraftNode[] {
   const rawNodes = Array.isArray(value) ? value : [];
   return rawNodes
     .flatMap((raw) => {
+      if (!isRecord(raw)) {
+        return [];
+      }
       const node = raw as {
         nodeId?: unknown;
         displayName?: unknown;
+        platform?: unknown;
+        deviceFamily?: unknown;
+        modelIdentifier?: unknown;
+        remoteIp?: unknown;
         connected?: unknown;
         commands?: unknown;
       };
@@ -45,6 +64,10 @@ export function readDraftNodes(value: unknown): DraftNode[] {
         {
           nodeId,
           displayName: normalizeOptionalString(node.displayName) ?? nodeId,
+          platform: normalizeOptionalString(node.platform),
+          deviceFamily: normalizeOptionalString(node.deviceFamily),
+          modelIdentifier: normalizeOptionalString(node.modelIdentifier),
+          remoteIp: normalizeOptionalString(node.remoteIp),
           connected,
           canExec,
           canBrowse: canExec && commands.includes("fs.listDir"),

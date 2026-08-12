@@ -8,6 +8,7 @@ import {
 } from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { clearPluginMetadataLifecycleCaches } from "../../plugins/plugin-metadata-lifecycle.js";
+import { setActiveDegradedSecretOwners } from "../../secrets/runtime-degraded-state.js";
 import { captureEnv, withPathResolutionEnv } from "../../test-utils/env.js";
 import { createFixtureSuite } from "../../test-utils/fixture-suite.js";
 import { createTempHomeEnv, type TempHomeEnv } from "../../test-utils/temp-home.js";
@@ -15,7 +16,7 @@ import { buildWorkspaceSkillCommandSpecs } from "../discovery/command-specs.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
-  getActiveSkillEnvKeys,
+  getActiveSkillEnvKeysCore,
 } from "../runtime/env-overrides.js";
 import { writeSkill } from "../test-support/e2e-test-helpers.js";
 import {
@@ -25,7 +26,7 @@ import {
 } from "../test-support/home-env.test-support.js";
 import type { SkillEntry, SkillSnapshot } from "../types.js";
 import { shouldIncludeSkill } from "./config.js";
-import { buildWorkspaceSkillsPrompt } from "./workspace.js";
+import { buildSkillSnapshot } from "./workspace-skill-prompt.js";
 
 vi.mock("./plugin-skills.js", () => ({
   resolvePluginSkillDirs: () => [],
@@ -42,6 +43,10 @@ const resolveTestSkillDirs = (workspaceDir: string) => ({
 });
 
 const makeWorkspace = async () => await fixtureSuite.createCaseDir("workspace");
+const buildWorkspaceSkillsPrompt = (
+  workspaceDir: string,
+  opts?: Parameters<typeof buildSkillSnapshot>[1],
+): string => buildSkillSnapshot(workspaceDir, opts).prompt;
 const apiKeyField = ["api", "Key"].join("");
 
 function withWorkspaceHome<T>(workspaceDir: string, cb: () => T): T {
@@ -175,6 +180,7 @@ afterAll(async () => {
 afterEach(() => {
   clearRuntimeConfigSnapshot();
   clearPluginMetadataLifecycleCaches();
+  setActiveDegradedSecretOwners([]);
 });
 
 describe("buildWorkspaceSkillCommandSpecs", () => {
@@ -557,9 +563,74 @@ describe("shouldIncludeSkill", () => {
       ).toBe(true);
     });
   });
+
+  it("excludes only the skill whose configured secret is unavailable", () => {
+    setActiveDegradedSecretOwners([
+      {
+        ownerKind: "capability",
+        ownerId: "skill:env-skill",
+        state: "unavailable",
+        paths: ["skills.entries.env-skill.apiKey"],
+        refKeys: ["env:default:MISSING_SKILL_KEY"],
+        reason: "secret provider failed",
+      },
+    ]);
+
+    expect(shouldInclude(rawSkillApiKeyRefConfig("env-skill"))).toBe(false);
+    expect(
+      shouldIncludeSkill({
+        entry: makeSkillEntry("healthy-skill", { always: true }),
+        bundledAllowlist: undefined,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("applySkillEnvOverrides", () => {
+  it("skips only the skill whose configured secret is unavailable", () => {
+    const unavailable = envSkillEntries("cold-skill", {
+      primaryEnv: "COLD_SKILL_KEY",
+      requires: { env: ["COLD_SKILL_KEY"] },
+    });
+    const healthy = envSkillEntries("healthy-skill", {
+      primaryEnv: "HEALTHY_SKILL_KEY",
+      requires: { env: ["HEALTHY_SKILL_KEY"] },
+    });
+    setActiveDegradedSecretOwners([
+      {
+        ownerKind: "capability",
+        ownerId: "skill:cold-skill",
+        state: "unavailable",
+        paths: ["skills.entries.cold-skill.apiKey"],
+        refKeys: ["env:default:MISSING_SKILL_KEY"],
+        reason: "secret provider failed",
+      },
+    ]);
+
+    withClearedEnv(["COLD_SKILL_KEY", "HEALTHY_SKILL_KEY"], () => {
+      const restore = applySkillEnvOverrides({
+        skills: [...unavailable, ...healthy],
+        config: {
+          skills: {
+            entries: {
+              "cold-skill": {
+                apiKey: { source: "env", provider: "default", id: "MISSING_SKILL_KEY" },
+              },
+              "healthy-skill": { apiKey: "healthy" }, // pragma: allowlist secret
+            },
+          },
+        },
+      });
+
+      try {
+        expect(process.env.COLD_SKILL_KEY).toBeUndefined();
+        expect(process.env.HEALTHY_SKILL_KEY).toBe("healthy");
+      } finally {
+        restore();
+      }
+    });
+  });
+
   it("sets and restores env vars", () => {
     const entries = envSkillEntries("env-skill", {
       primaryEnv: "ENV_KEY",
@@ -574,11 +645,11 @@ describe("applySkillEnvOverrides", () => {
 
       try {
         expect(process.env.ENV_KEY).toBe("injected");
-        expect(getActiveSkillEnvKeys().has("ENV_KEY")).toBe(true);
+        expect(getActiveSkillEnvKeysCore().has("ENV_KEY")).toBe(true);
       } finally {
         restore();
         expect(process.env.ENV_KEY).toBeUndefined();
-        expect(getActiveSkillEnvKeys().has("ENV_KEY")).toBe(false);
+        expect(getActiveSkillEnvKeysCore().has("ENV_KEY")).toBe(false);
       }
     });
   });
@@ -596,15 +667,15 @@ describe("applySkillEnvOverrides", () => {
 
       try {
         expect(process.env.ENV_KEY).toBe("injected");
-        expect(getActiveSkillEnvKeys().has("ENV_KEY")).toBe(true);
+        expect(getActiveSkillEnvKeysCore().has("ENV_KEY")).toBe(true);
 
         restoreFirst();
         expect(process.env.ENV_KEY).toBe("injected");
-        expect(getActiveSkillEnvKeys().has("ENV_KEY")).toBe(true);
+        expect(getActiveSkillEnvKeysCore().has("ENV_KEY")).toBe(true);
       } finally {
         restoreSecond();
         expect(process.env.ENV_KEY).toBeUndefined();
-        expect(getActiveSkillEnvKeys().has("ENV_KEY")).toBe(false);
+        expect(getActiveSkillEnvKeysCore().has("ENV_KEY")).toBe(false);
       }
     });
   });

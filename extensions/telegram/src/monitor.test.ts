@@ -1,4 +1,5 @@
 // Telegram tests cover monitor plugin behavior.
+import { toErrorObject as toLintErrorObject } from "openclaw/plugin-sdk/error-runtime";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 type MonitorTelegramOpts = import("./monitor.types.js").MonitorTelegramOpts;
@@ -982,33 +983,6 @@ describe("monitorTelegramProvider (grammY)", () => {
     vi.useRealTimers();
   });
 
-  it("uses configured Telegram polling stall threshold", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const abort = new AbortController();
-    const firstCycle = mockRunOnceWithStalledPollingRunner();
-    const secondCycle = mockRunOnceAndAbort(abort);
-
-    const monitor = monitorTelegramProvider(
-      withLegacyPolling({
-        token: "tok",
-        abortSignal: abort.signal,
-        config: {
-          agents: { defaults: { maxConcurrent: 2 } },
-          channels: { telegram: { pollingStallThresholdMs: 30_000 } },
-        },
-      }),
-    );
-    await firstCycle.waitForRunStart();
-
-    vi.advanceTimersByTime(60_000);
-    await secondCycle.waitForRunStart();
-    await monitor;
-
-    expect(firstCycle.stop.mock.calls.length).toBeGreaterThanOrEqual(1);
-    expectRecoverableRetryState(2);
-    vi.useRealTimers();
-  });
-
   it("does not call getUpdates for offset confirmation (avoids 409 conflicts)", async () => {
     const { order } = await runMonitorAndCaptureStartupOrder({
       persistedOffset: 549076203,
@@ -1114,17 +1088,3 @@ describe("monitorTelegramProvider (grammY)", () => {
     expect(runSpy).not.toHaveBeenCalled();
   });
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

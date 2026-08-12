@@ -1,15 +1,10 @@
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-
-function optionalString(value: unknown, maxLength: number): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed && trimmed.length <= maxLength ? trimmed : undefined;
-}
+import {
+  isRecord,
+  normalizeBoundedOptionalString as readBoundedString,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 
 function piHome(env: NodeJS.ProcessEnv): string {
   const configured = process.platform === "win32" ? env.USERPROFILE?.trim() : env.HOME?.trim();
@@ -52,7 +47,7 @@ function resolveConfiguredPath(
 function settingsSessionDir(file: string): string | undefined {
   try {
     const value = JSON.parse(readFileSync(file, "utf8")) as unknown;
-    return isRecord(value) ? optionalString(value.sessionDir, 4_096) : undefined;
+    return isRecord(value) ? readBoundedString(value.sessionDir, 4_096) : undefined;
   } catch {
     return undefined;
   }
@@ -86,6 +81,22 @@ export function piSessionStore(
     root: path.join(agentDir, "sessions"),
     flat: false,
   };
+}
+
+/** Store root scanned by pi-acp@0.0.26 when resolving a native session id. */
+export function piAcpSessionStoreRoot(env: NodeJS.ProcessEnv): string | undefined {
+  const configuredAgentDir = env.PI_CODING_AGENT_DIR?.trim();
+  // Deliberately stricter than piSessionStore(): pi-acp's session lookup reads
+  // PI_CODING_AGENT_DIR raw, with no `~` expansion (getPiAgentDir, dist/index.js:1044,
+  // reached via findPiSessionFile -> listPiSessions). Expanding `~` here would advertise
+  // Continue on sessions pi-acp then fails to resolve with "Unknown sessionId".
+  if (configuredAgentDir && !isPiSessionCatalogPathAbsolute(configuredAgentDir)) {
+    return undefined;
+  }
+  const agentDir = configuredAgentDir
+    ? path.resolve(configuredAgentDir)
+    : path.join(piHome(env), ".pi", "agent");
+  return path.join(agentDir, "sessions");
 }
 
 export function piSessionStoreAvailable(env: NodeJS.ProcessEnv): boolean {

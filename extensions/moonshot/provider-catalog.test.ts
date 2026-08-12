@@ -40,28 +40,18 @@ describe("moonshot provider catalog", () => {
     expect(provider.baseUrl).toBe(MOONSHOT_BASE_URL);
     expect(provider.api).toBe("openai-completions");
     expect(provider.models.map((model) => model.id)).toEqual([
-      "kimi-k2.6",
       "kimi-k3",
       "kimi-k2.7-code",
-      "kimi-k2.5",
-      "kimi-k2-thinking",
-      "kimi-k2-thinking-turbo",
-      "kimi-k2-turbo",
+      "kimi-k2.7-code-highspeed",
     ]);
-    expect(requireMoonshotModel(provider, "kimi-k2.6").cost).toEqual({
-      input: 0.95,
-      output: 4,
-      cacheRead: 0.16,
-      cacheWrite: 0,
-    });
     expect(requireMoonshotModel(provider, "kimi-k3")).toMatchObject({
       reasoning: true,
       thinkingLevelMap: {
         off: null,
         minimal: null,
-        low: null,
+        low: "low",
         medium: null,
-        high: null,
+        high: "high",
         xhigh: "max",
         max: "max",
       },
@@ -76,7 +66,7 @@ describe("moonshot provider catalog", () => {
       },
       compat: {
         supportsReasoningEffort: true,
-        supportedReasoningEfforts: ["max"],
+        supportedReasoningEfforts: ["low", "high", "max"],
       },
     });
     expect(requireMoonshotModel(provider, "kimi-k2.7-code")).toMatchObject({
@@ -91,11 +81,17 @@ describe("moonshot provider catalog", () => {
         cacheWrite: 0,
       },
     });
-    expect(requireMoonshotModel(provider, "kimi-k2.5").cost).toEqual({
-      input: 0.6,
-      output: 3,
-      cacheRead: 0.1,
-      cacheWrite: 0,
+    expect(requireMoonshotModel(provider, "kimi-k2.7-code-highspeed")).toMatchObject({
+      reasoning: true,
+      input: ["text", "image"],
+      contextWindow: 262144,
+      maxTokens: 262144,
+      cost: {
+        input: 1.9,
+        output: 8,
+        cacheRead: 0.38,
+        cacheWrite: 0,
+      },
     });
   });
 

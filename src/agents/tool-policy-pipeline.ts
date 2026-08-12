@@ -11,7 +11,7 @@ import {
   analyzeAllowlistByToolType,
   buildPluginToolGroups,
   expandPolicyWithPluginGroups,
-  normalizeToolName,
+  normalizeToolPolicyName,
   type DeclaredToolAllowlistContext,
   type ToolPolicyLike,
 } from "./tool-policy.js";
@@ -46,11 +46,11 @@ export type ToolPolicyPipelineStep = {
 };
 
 /** One policy application, exposed for diagnostics that need exclusion provenance. */
-export type ToolPolicyFilterEvent = {
+export type ToolPolicyFilterEvent<TTool extends { name: string } = AnyAgentTool> = {
   step: ToolPolicyPipelineStep;
   policy: ToolPolicyLike;
-  before: readonly AnyAgentTool[];
-  after: readonly AnyAgentTool[];
+  before: readonly TTool[];
+  after: readonly TTool[];
 };
 
 /** Builds the default profile, provider, agent, group, and sender policy layers. */
@@ -132,19 +132,19 @@ export function buildDefaultToolPolicyPipelineSteps(params: {
 }
 
 /** Applies configured policy layers to a tool list and emits deduped warnings/audit events. */
-export function applyToolPolicyPipeline(params: {
-  tools: AnyAgentTool[];
-  toolMeta: (tool: AnyAgentTool) => { pluginId: string } | undefined;
+export function applyToolPolicyPipeline<TTool extends { name: string }>(params: {
+  tools: TTool[];
+  toolMeta: (tool: TTool) => { pluginId: string } | undefined;
   warn: (message: string) => void;
   steps: ToolPolicyPipelineStep[];
   auditLogLevel?: ToolPolicyAuditLogLevel;
   declaredToolAllowlist?: DeclaredToolAllowlistContext;
-  onFilter?: (event: ToolPolicyFilterEvent) => void;
-}): AnyAgentTool[] {
+  onFilter?: (event: ToolPolicyFilterEvent<TTool>) => void;
+}): TTool[] {
   const coreToolNames = new Set(
     params.tools
       .filter((tool) => !params.toolMeta(tool))
-      .map((tool) => normalizeToolName(tool.name))
+      .map((tool) => normalizeToolPolicyName(tool.name))
       .filter(Boolean),
   );
 
@@ -171,7 +171,7 @@ export function applyToolPolicyPipeline(params: {
       if (resolved.unknownAllowlist.length > 0) {
         const unavailableCoreWarningAllowlist = new Set(
           (step.suppressUnavailableCoreToolWarningAllowlist ?? []).map((entry) =>
-            normalizeToolName(entry),
+            normalizeToolPolicyName(entry),
           ),
         );
         const gatedCoreEntries = resolved.unknownAllowlist.filter((entry) =>

@@ -13,10 +13,17 @@ import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import {
+  sessionDeliveryChannel,
+  sessionDeliveryOrigin,
+} from "../../utils/delivery-context.shared.js";
 import { isNativeCommandTurn, resolveCommandTurnContext } from "../command-turn-context.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import { normalizeVerboseLevel } from "../thinking.js";
-import { loadSessionStoreEntry, resolveStorePath } from "./dispatch-from-config.runtime.js";
+import {
+  loadSessionStoreEntry,
+  resolveSessionStorePathCore,
+} from "./dispatch-from-config.runtime.js";
 import type { DispatchFromConfigParams } from "./dispatch-from-config.types.js";
 import { resolveStoredModelOverride } from "./stored-model-override.js";
 
@@ -72,8 +79,7 @@ function resolveHarnessDefaultChannel(params: {
     typeof params.ctx.OriginatingChannel === "string" ? params.ctx.OriginatingChannel : undefined;
 
   return (
-    params.entry?.channel ??
-    params.entry?.origin?.provider ??
+    sessionDeliveryChannel(params.entry) ??
     originatingChannel ??
     params.ctx.Provider ??
     params.ctx.Surface
@@ -125,9 +131,9 @@ function resolveChannelModelCandidate(params: {
     groupSubject: params.entry?.subject ?? params.ctx.GroupSubject,
     parentSessionKey: params.parentSessionKey,
     directUserIds: [
-      params.entry?.origin?.nativeDirectUserId,
-      params.entry?.origin?.from,
-      params.entry?.origin?.to,
+      sessionDeliveryOrigin(params.entry)?.nativeDirectUserId,
+      sessionDeliveryOrigin(params.entry)?.from,
+      sessionDeliveryOrigin(params.entry)?.to,
       params.ctx.OriginatingTo,
       params.ctx.From,
       params.ctx.SenderId,
@@ -160,7 +166,7 @@ function resolveStoredModelCandidate(params: {
         config: params.cfg,
         fallbackAgentId: params.sessionAgentId,
       });
-      const storePath = resolveStorePath(params.cfg.session?.store, { agentId });
+      const storePath = resolveSessionStorePathCore(params.cfg.session?.store, { agentId });
       return loadSessionStoreEntry({
         agentId,
         storePath,
@@ -259,7 +265,9 @@ export function resolveHarnessSourceVisibleRepliesDefault(params: {
           params.entry?.modelSelectionLocked === true ? params.entry.agentHarnessId : undefined,
         agentHarnessRuntimeOverride,
       });
-      return harness.deliveryDefaults?.sourceVisibleReplies;
+      return (
+        harness.deliveryDefaults?.visibleReplies ?? harness.deliveryDefaults?.sourceVisibleReplies
+      );
     };
     const selectedModelCandidate =
       turnModelCandidate ?? storedModelCandidate ?? channelModelCandidate;
@@ -267,7 +275,7 @@ export function resolveHarnessSourceVisibleRepliesDefault(params: {
       return resolveCandidateDefault(selectedModelCandidate);
     }
     const sourceProvider = normalizeOptionalString(
-      params.entry?.origin?.provider ?? params.ctx.Provider ?? params.ctx.Surface,
+      sessionDeliveryOrigin(params.entry)?.provider ?? params.ctx.Provider ?? params.ctx.Surface,
     );
     if (sourceProvider) {
       const sourceDefault = resolveCandidateDefault({ provider: sourceProvider });

@@ -6,7 +6,7 @@ import { CommandLane } from "../process/lanes.js";
 import { MAX_TIMER_TIMEOUT_MS } from "../shared/number-coercion.js";
 
 const sessionAccessorMocks = vi.hoisted(() => ({
-  patchSessionEntry: vi.fn(),
+  patchSessionEntryCore: vi.fn(),
 }));
 
 const commandQueueMocks = vi.hoisted(() => ({
@@ -17,12 +17,14 @@ vi.mock("../config/sessions/session-accessor.js", () => sessionAccessorMocks);
 
 vi.mock("../process/command-queue.js", () => commandQueueMocks);
 
-vi.mock("./command/session.js", () => ({
-  resolveStoredSessionKeyForSessionId: () => ({
+const sessionKeyResolverMocks = vi.hoisted(() => ({
+  resolveStoredSessionKeyForSessionId: vi.fn(() => ({
     sessionKey: "session-key",
     storePath: "/tmp/openclaw-session-suspension-test/sessions.json",
-  }),
+  })),
 }));
+
+vi.mock("./command/session.js", () => sessionKeyResolverMocks);
 
 async function suspendLane(ttlMs: number, cfg: OpenClawConfig, laneId: CommandLane) {
   // All cases exercise the public suspendSession path with fixed failure metadata.
@@ -48,8 +50,60 @@ describe("session suspension", () => {
     const { resetSessionSuspensionStateForTest } =
       await import("./session-suspension.test-support.js");
     resetSessionSuspensionStateForTest();
-    sessionAccessorMocks.patchSessionEntry.mockClear();
+    sessionAccessorMocks.patchSessionEntryCore.mockClear();
     commandQueueMocks.setCommandLaneConcurrency.mockClear();
+  });
+
+  it("resolves the session store with the explicit agent id, never the agentDir basename", async () => {
+    const { suspendSession } = await import("./session-suspension.js");
+    sessionKeyResolverMocks.resolveStoredSessionKeyForSessionId.mockClear();
+
+    await suspendSession({
+      cfg: {} as OpenClawConfig,
+      agentId: "work",
+      // Default layout: <state>/agents/<id>/agent — basename is always "agent".
+      agentDir: "/state/agents/work/agent",
+      sessionId: "session-1",
+      laneId: CommandLane.Main,
+      reason: "quota_exhausted",
+      failedProvider: "anthropic",
+      failedModel: "claude-opus-4-6",
+      ttlMs: 1,
+    });
+
+    expect(sessionKeyResolverMocks.resolveStoredSessionKeyForSessionId).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "work" }),
+    );
+  });
+
+  it("falls back to the registered agent-dir owner when no explicit agent id is given", async () => {
+    const { suspendSession } = await import("./session-suspension.js");
+    const { registerResolvedAgentDir, unregisterResolvedAgentDir } =
+      await import("./agent-dir-registry.js");
+    sessionKeyResolverMocks.resolveStoredSessionKeyForSessionId.mockClear();
+
+    registerResolvedAgentDir({ agentId: "research", agentDir: "/state/agents/research/agent" });
+    try {
+      await suspendSession({
+        cfg: {} as OpenClawConfig,
+        agentDir: "/state/agents/research/agent",
+        sessionId: "session-2",
+        laneId: CommandLane.Main,
+        reason: "quota_exhausted",
+        failedProvider: "anthropic",
+        failedModel: "claude-opus-4-6",
+        ttlMs: 1,
+      });
+    } finally {
+      unregisterResolvedAgentDir({
+        agentId: "research",
+        agentDir: "/state/agents/research/agent",
+      });
+    }
+
+    expect(sessionKeyResolverMocks.resolveStoredSessionKeyForSessionId).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "research" }),
+    );
   });
 
   it("auto-resumes main lane to configured agent concurrency", async () => {
@@ -88,23 +142,74 @@ describe("session suspension", () => {
     );
   });
 
-  it("auto-resumes cron lanes to configured and clamped cron concurrency", async () => {
+  it("auto-resumes hook dispatch to the shared cron concurrency width", async () => {
     vi.useFakeTimers();
 
-    await suspendLane(100, { cron: { maxConcurrentRuns: 3 } } as OpenClawConfig, CommandLane.Cron);
-    await vi.advanceTimersByTimeAsync(100);
+    await suspendLane(100, {} as OpenClawConfig, CommandLane.HookDispatch);
 
-    expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenLastCalledWith(
-      CommandLane.Cron,
-      3,
+    expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenCalledWith(
+      CommandLane.HookDispatch,
+      0,
     );
 
-    await suspendLane(100, { cron: { maxConcurrentRuns: 0 } } as OpenClawConfig, CommandLane.Cron);
     await vi.advanceTimersByTimeAsync(100);
 
     expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenLastCalledWith(
-      CommandLane.Cron,
-      1,
+      CommandLane.HookDispatch,
+      DEFAULT_CRON_MAX_CONCURRENT_RUNS,
+    );
+  });
+
+  it("retargets a suspended hook lane when hooks are disabled before its TTL", async () => {
+    vi.useFakeTimers();
+    const { getSuspendedLaneIdsForGatewayPublication, setGatewayLaneResumeConcurrencies } =
+      await import("./session-suspension.js");
+
+    await suspendLane(100, {} as OpenClawConfig, CommandLane.HookDispatch);
+
+    setGatewayLaneResumeConcurrencies({ [CommandLane.HookDispatch]: 0 });
+    expect(getSuspendedLaneIdsForGatewayPublication()).toEqual(new Set([CommandLane.HookDispatch]));
+
+    commandQueueMocks.setCommandLaneConcurrency.mockClear();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenCalledExactlyOnceWith(
+      CommandLane.HookDispatch,
+      0,
+    );
+  });
+
+  it("uses hooks-off concurrency when a pending suspension write finishes late", async () => {
+    vi.useFakeTimers();
+    const { setGatewayLaneResumeConcurrencies } = await import("./session-suspension.js");
+    let resolvePatch: (() => void) | undefined;
+    sessionAccessorMocks.patchSessionEntryCore.mockImplementationOnce(async (_scope, update) => {
+      await new Promise<void>((resolve) => {
+        resolvePatch = resolve;
+      });
+      return update({});
+    });
+
+    const suspension = suspendLane(100, {} as OpenClawConfig, CommandLane.HookDispatch);
+    await vi.waitFor(() => {
+      expect(resolvePatch).toBeTypeOf("function");
+    });
+
+    setGatewayLaneResumeConcurrencies({ [CommandLane.HookDispatch]: 0 });
+    resolvePatch?.();
+    await suspension;
+
+    expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenLastCalledWith(
+      CommandLane.HookDispatch,
+      0,
+    );
+    commandQueueMocks.setCommandLaneConcurrency.mockClear();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenCalledExactlyOnceWith(
+      CommandLane.HookDispatch,
+      0,
     );
   });
 
@@ -117,7 +222,7 @@ describe("session suspension", () => {
     await suspendLane(Number.MAX_SAFE_INTEGER, {} as OpenClawConfig, CommandLane.Main);
 
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
-    const buildPatch = sessionAccessorMocks.patchSessionEntry.mock.calls[0]?.[1] as (_entry: {
+    const buildPatch = sessionAccessorMocks.patchSessionEntryCore.mock.calls[0]?.[1] as (_entry: {
       quotaSuspension?: unknown;
     }) => {
       quotaSuspension?: { expectedResumeBy?: number };
@@ -156,12 +261,12 @@ describe("session suspension", () => {
     expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenCalledWith(CommandLane.Nested, 0);
     expect(clearSessionSuspensionTimers()).toBe(1);
     commandQueueMocks.setCommandLaneConcurrency.mockClear();
-    sessionAccessorMocks.patchSessionEntry.mockClear();
+    sessionAccessorMocks.patchSessionEntryCore.mockClear();
 
     await suspendLane(100, {} as OpenClawConfig, CommandLane.Nested);
 
     expect(commandQueueMocks.setCommandLaneConcurrency).not.toHaveBeenCalled();
-    expect(sessionAccessorMocks.patchSessionEntry).not.toHaveBeenCalled();
+    expect(sessionAccessorMocks.patchSessionEntryCore).not.toHaveBeenCalled();
 
     enableSessionSuspensionTimersForGatewayStart();
     await suspendLane(100, {} as OpenClawConfig, CommandLane.Nested);
@@ -273,7 +378,7 @@ describe("session suspension", () => {
           laneId?: string;
         }
       | undefined;
-    sessionAccessorMocks.patchSessionEntry.mockImplementationOnce(async (_scope, update) => {
+    sessionAccessorMocks.patchSessionEntryCore.mockImplementationOnce(async (_scope, update) => {
       await new Promise<void>((resolve) => {
         resolvePatch = resolve;
       });
@@ -295,10 +400,37 @@ describe("session suspension", () => {
 
     expect(commandQueueMocks.setCommandLaneConcurrency).not.toHaveBeenCalled();
     expect(writtenQuotaSuspension).toBeUndefined();
-    expect(sessionAccessorMocks.patchSessionEntry).toHaveBeenCalledOnce();
+    expect(sessionAccessorMocks.patchSessionEntryCore).toHaveBeenCalledOnce();
 
     await vi.advanceTimersByTimeAsync(100);
 
+    expect(commandQueueMocks.setCommandLaneConcurrency).not.toHaveBeenCalled();
+  });
+
+  it("does not let a pending suspension regain ownership after test state resets", async () => {
+    let resolvePatch: (() => void) | undefined;
+    let writtenQuotaSuspension: unknown;
+    sessionAccessorMocks.patchSessionEntryCore.mockImplementationOnce(async (_scope, update) => {
+      await new Promise<void>((resolve) => {
+        resolvePatch = resolve;
+      });
+      const patch = update({});
+      writtenQuotaSuspension = patch?.quotaSuspension;
+      return patch;
+    });
+
+    const suspension = suspendLane(100, {} as OpenClawConfig, CommandLane.Main);
+    await vi.waitFor(() => {
+      expect(resolvePatch).toBeTypeOf("function");
+    });
+
+    const { resetSessionSuspensionStateForTest } =
+      await import("./session-suspension.test-support.js");
+    resetSessionSuspensionStateForTest();
+    resolvePatch?.();
+    await suspension;
+
+    expect(writtenQuotaSuspension).toBeUndefined();
     expect(commandQueueMocks.setCommandLaneConcurrency).not.toHaveBeenCalled();
   });
 
@@ -320,7 +452,7 @@ describe("session suspension", () => {
     const initialWritesReleased = new Promise<void>((resolve) => {
       releaseInitialWrites = resolve;
     });
-    sessionAccessorMocks.patchSessionEntry.mockImplementation(async (_scope, update) => {
+    sessionAccessorMocks.patchSessionEntryCore.mockImplementation(async (_scope, update) => {
       const patch = update(storeEntry) as typeof storeEntry | null;
       if (patch && "quotaSuspension" in patch) {
         storeEntry =
@@ -349,9 +481,13 @@ describe("session suspension", () => {
 
   it("still throttles the lane when persistence fails while gateway is active", async () => {
     vi.useFakeTimers();
-    sessionAccessorMocks.patchSessionEntry.mockRejectedValueOnce(new Error("disk busy"));
+    sessionAccessorMocks.patchSessionEntryCore.mockRejectedValueOnce(new Error("disk busy"));
 
-    await suspendLane(100, {} as OpenClawConfig, CommandLane.Main);
+    await suspendLane(
+      100,
+      { agents: { defaults: { maxConcurrent: 4 } } } as OpenClawConfig,
+      CommandLane.Main,
+    );
 
     expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenCalledWith(CommandLane.Main, 0);
     await vi.advanceTimersByTimeAsync(100);

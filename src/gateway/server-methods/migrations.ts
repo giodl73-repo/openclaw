@@ -1,5 +1,6 @@
 // Gateway handlers expose reviewed, memory-only migration plans to trusted operators.
 import crypto from "node:crypto";
+import { stableStringify } from "@openclaw/normalization-core";
 import {
   ErrorCodes,
   errorShape,
@@ -11,13 +12,13 @@ import {
   validateMigrationsMemoryPlanParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { listAgentIds, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
-import { stableStringify } from "../../agents/stable-stringify.js";
 import {
   applyProviderMemoryImport,
   listMemoryMigrationProviders,
   planProviderMemoryImport,
 } from "../../commands/migrate/memory-import.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { formatErrorMessage as errorMessage } from "../../infra/errors.js";
 import { summarizeMigrationItems } from "../../plugin-sdk/migration.js";
 import type { MigrationItem, MigrationPlan, MigrationProviderPlugin } from "../../plugins/types.js";
 import { isValidAgentId, normalizeAgentId } from "../../routing/session-key.js";
@@ -29,10 +30,6 @@ const activeApplies = new Set<string>();
 
 function emptySummary() {
   return summarizeMigrationItems([]);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 type CachedMemoryApply = {
@@ -107,27 +104,13 @@ function fingerprintMemoryPlan(params: {
     .createHash("sha256")
     .update(
       stableStringify({
-        version: 2,
+        version: 3,
         agentId: params.agentId,
         workspace: params.workspace,
         providerId: params.providerId,
         overwrite: params.overwrite === true,
-        plan: {
-          source: params.plan.source,
-          target: params.plan.target ?? null,
-          items: params.plan.items.map((item) => ({
-            id: item.id,
-            kind: item.kind,
-            action: item.action,
-            status: item.status,
-            source: item.source ?? null,
-            target: item.target ?? null,
-            reason: item.reason ?? null,
-            sensitive: item.sensitive === true,
-            sourceRevision: item.sourceRevision ?? null,
-            details: item.details ?? null,
-          })),
-        },
+        // Apply receives the full plan, so every provider-visible field must bind to the review.
+        plan: params.plan,
       }),
     )
     .digest("hex");

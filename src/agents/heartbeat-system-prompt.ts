@@ -4,7 +4,8 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   DEFAULT_HEARTBEAT_EVERY,
-  resolveHeartbeatPrompt as resolveHeartbeatPromptText,
+  HEARTBEAT_CRON_TASK_GUIDANCE,
+  resolveHeartbeatPromptCore as resolveHeartbeatPromptText,
 } from "../auto-reply/heartbeat.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
@@ -59,7 +60,7 @@ function isHeartbeatCadenceEnabled(heartbeat?: HeartbeatConfig): boolean {
 }
 
 /** Returns true when heartbeat guidance should be included in the system prompt. */
-export function shouldIncludeHeartbeatGuidanceForSystemPrompt(params: {
+function shouldIncludeHeartbeatGuidanceForSystemPrompt(params: {
   config?: OpenClawConfig;
   agentId?: string;
   defaultAgentId?: string;
@@ -73,9 +74,6 @@ export function shouldIncludeHeartbeatGuidanceForSystemPrompt(params: {
     return false;
   }
   const heartbeat = resolveHeartbeatConfigForSystemPrompt(params.config, agentId);
-  if (heartbeat?.includeSystemPromptSection === false) {
-    return false;
-  }
   return isHeartbeatCadenceEnabled(heartbeat);
 }
 
@@ -91,5 +89,8 @@ export function resolveHeartbeatPromptForSystemPrompt(params: {
   if (!shouldIncludeHeartbeatGuidanceForSystemPrompt(params)) {
     return undefined;
   }
-  return resolveHeartbeatPromptText(heartbeat?.prompt);
+  const prompt = resolveHeartbeatPromptText(heartbeat?.prompt);
+  return prompt.includes(HEARTBEAT_CRON_TASK_GUIDANCE)
+    ? prompt
+    : `${prompt} ${HEARTBEAT_CRON_TASK_GUIDANCE}`;
 }

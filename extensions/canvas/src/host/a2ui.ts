@@ -56,6 +56,17 @@ async function resolveA2uiRoot(): Promise<string | null> {
   return null;
 }
 
+/**
+ * Test-only: pins the cached A2UI root. Dev checkouts can hold a locally
+ * built `a2ui.bundle.js` in the source tree, which wins candidate resolution
+ * and would shadow test fixtures; pass undefined to restore normal lookup.
+ */
+export function setA2uiRootRealForTest(rootReal: string | undefined): void {
+  cachedA2uiRootReal = rootReal;
+  cachedA2uiResolvedAtMs = rootReal === undefined ? 0 : Date.now();
+  resolvingA2uiRoot = null;
+}
+
 async function resolveA2uiRootReal(): Promise<string | null> {
   const nowMs = Date.now();
   if (
@@ -125,20 +136,25 @@ async function handleA2uiHttpRequestWithRootResolver(
         : ((await detectMime({ filePath: result.realPath })) ?? "application/octet-stream");
     res.setHeader("Cache-Control", "no-store");
 
-    if (req.method === "HEAD") {
-      res.setHeader("Content-Type", mime === "text/html" ? "text/html; charset=utf-8" : mime);
-      res.end();
-      return true;
-    }
-
     if (mime === "text/html") {
       const buf = await result.handle.readFile({ encoding: "utf8" });
+      const body = injectCanvasRuntime(buf, options);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(injectCanvasRuntime(buf, options));
+      if (req.method === "HEAD") {
+        res.setHeader("Content-Length", String(Buffer.byteLength(body)));
+        res.end();
+        return true;
+      }
+      res.end(body);
       return true;
     }
 
     res.setHeader("Content-Type", mime);
+    if (req.method === "HEAD") {
+      res.setHeader("Content-Length", String(result.stat.size));
+      res.end();
+      return true;
+    }
     res.end(await result.handle.readFile());
     return true;
   } finally {

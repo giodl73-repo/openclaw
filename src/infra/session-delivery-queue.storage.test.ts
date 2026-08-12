@@ -1,7 +1,7 @@
 // Covers session delivery queue persistence state transitions.
 import { describe, expect, it } from "vitest";
 import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
-import { withTempDir } from "../test-helpers/temp-dir.js";
+import { withTestDir } from "../test-helpers/temp-dir.js";
 import {
   advanceSessionDeliveryAgentRun,
   completeSessionDelivery,
@@ -40,7 +40,7 @@ describe("session-delivery queue storage", () => {
   }
 
   it("dedupes entries when an idempotency key is reused", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const firstId = await enqueueSessionDelivery(
         {
           kind: "agentTurn",
@@ -68,7 +68,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("grants one initial-attempt lease and releases it for recovery", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const payload = {
         kind: "agentTurn" as const,
         sessionKey: "agent:main:main",
@@ -93,7 +93,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("reports a dead-letter conflict instead of claiming it as pending", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const payload = {
         kind: "agentTurn" as const,
         sessionKey: "agent:main:main",
@@ -113,7 +113,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("lets an explicit enqueue revive a failed idempotency key", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const payload = {
         kind: "systemEvent" as const,
         sessionKey: "agent:main:main",
@@ -129,8 +129,26 @@ describe("session-delivery queue storage", () => {
     });
   });
 
+  it("never revives a failed permanent producer intent", async () => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+      const payload = {
+        kind: "systemEvent" as const,
+        sessionKey: "agent:main:main",
+        text: "restart complete",
+        idempotencyKey: "restart:permanent-failed",
+        completionRetention: "permanent" as const,
+      };
+      const id = await enqueueSessionDelivery(payload, tempDir);
+      await moveSessionDeliveryToFailed(id, tempDir);
+
+      expect(await enqueueSessionDelivery(payload, tempDir)).toBe(id);
+      expect(readSessionQueueStatus(tempDir, id)).toBe("failed");
+      expect(await loadPendingSessionDeliveries(tempDir)).toEqual([]);
+    });
+  });
+
   it("reports a completed conflict after acknowledgement", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const payload = {
         kind: "agentTurn" as const,
         sessionKey: "agent:main:main",
@@ -155,7 +173,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("atomically repairs unreadable pending JSON for an idempotent enqueue", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const payload = {
         kind: "systemEvent" as const,
         sessionKey: "agent:main:main",
@@ -180,7 +198,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("persists retry metadata and retains acked idempotency tombstones", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const id = await enqueueSessionDelivery(
         {
           kind: "systemEvent",
@@ -202,7 +220,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("retains ambiguous attempt ownership and clears it only for a safe retry", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const id = await enqueueSessionDelivery(
         {
           kind: "agentTurn",
@@ -235,7 +253,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("records which agent run attempt consumed retry budget", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const id = await enqueueSessionDelivery(
         {
           kind: "agentTurn",
@@ -263,7 +281,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("persists agent-loop routing and provenance for restart replay", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       await enqueueSessionDelivery(
         {
           kind: "agentTurn",
@@ -300,7 +318,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("advances only the agent run attempt and can focus its retry media", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const id = await enqueueSessionDelivery(
         {
           kind: "agentTurn",
@@ -340,7 +358,7 @@ describe("session-delivery queue storage", () => {
   });
 
   it("moves entries into completed idempotency state", async () => {
-    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const id = await enqueueSessionDelivery(
         {
           kind: "systemEvent",
@@ -353,6 +371,24 @@ describe("session-delivery queue storage", () => {
       await settleSessionDelivery(id, tempDir);
 
       expect(readSessionQueueStatus(tempDir, id)).toBe("completed");
+    });
+  });
+
+  it("retains a permanent completion receipt", async () => {
+    await withTestDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+      const payload = {
+        kind: "systemEvent" as const,
+        sessionKey: "agent:main:main",
+        text: "restart complete",
+        idempotencyKey: "restart:permanent-completed",
+        completionRetention: "permanent" as const,
+      };
+      const id = await enqueueSessionDelivery(payload, tempDir);
+      await settleSessionDelivery(id, tempDir);
+
+      expect(await enqueueSessionDelivery(payload, tempDir)).toBe(id);
+      expect(readSessionQueueStatus(tempDir, id)).toBe("completed");
+      expect(await loadPendingSessionDeliveries(tempDir)).toEqual([]);
     });
   });
 });

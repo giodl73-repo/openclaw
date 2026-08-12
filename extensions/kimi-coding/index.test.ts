@@ -24,6 +24,10 @@ describe("kimi provider plugin", () => {
       provider: "kimi",
       api: "anthropic-messages",
     });
+
+    expect(provider.normalizeModelId?.({ provider: "kimi", modelId: "k3[1m]" } as never)).toBe(
+      "k3",
+    );
   });
 
   it("uses binary thinking with thinking off by default", async () => {
@@ -44,7 +48,7 @@ describe("kimi provider plugin", () => {
     });
   });
 
-  it.each(["k3", "k3[1m]"])("forces %s to max thinking", async (modelId) => {
+  it.each(["k3", "k3-256k"])("exposes %s adaptive thinking levels", async (modelId) => {
     const provider = await registerSingleProviderPlugin(plugin);
 
     expect(
@@ -54,8 +58,17 @@ describe("kimi provider plugin", () => {
         reasoning: true,
       } as never),
     ).toEqual({
-      levels: [{ id: "max", label: "max" }],
-      defaultLevel: "max",
+      levels: [
+        { id: "off" },
+        { id: "minimal" },
+        { id: "low" },
+        { id: "medium" },
+        { id: "high" },
+        { id: "adaptive" },
+        { id: "xhigh" },
+        { id: "max" },
+      ],
+      defaultLevel: "high",
       preserveWhenCatalogReasoningFalse: true,
     });
   });

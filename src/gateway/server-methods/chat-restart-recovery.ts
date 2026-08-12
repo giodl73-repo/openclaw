@@ -14,16 +14,18 @@ import {
   hasRestartRecoveryTerminalRun,
 } from "../../config/sessions/restart-recovery-state.js";
 import {
-  patchSessionEntry,
+  patchSessionEntryCore,
   type SessionTranscriptTurnExpectedState,
   type SessionTranscriptTurnLifecyclePatch,
 } from "../../config/sessions/session-accessor.js";
+import type { InternalSessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { loadOrCreateProcessDeviceIdentity } from "../../infra/device-identity.js";
 import { findRestartRecoveryUnsafeChatAdmissionHook } from "../../plugins/restart-recovery-hook-safety.js";
 import { isCronSessionKey, isSubagentSessionKey } from "../../routing/session-key.js";
 import { isAgentHarnessSessionKey } from "../../sessions/agent-harness-session-key.js";
 import { isAcpSessionKey } from "../../sessions/session-key-utils.js";
+import { sessionDeliveryChannel } from "../../utils/delivery-context.shared.js";
 import { parseInlineDirectives } from "../../utils/directive-tags.js";
 import type { GatewayRecoveryRuntime } from "../server-instance-runtime.types.js";
 import type { GatewayRequestContext } from "./types.js";
@@ -166,7 +168,7 @@ export async function resolveDurableChatClaim(params: {
     }
     try {
       const { retryRestartAbortedMainSessionRecovery } =
-        await import("../../agents/main-session-restart-recovery.js");
+        await import("../../agents/main-session-recovery/main-session-restart-recovery.js");
       await retryRestartAbortedMainSessionRecovery({
         canonicalSessionKey: params.canonicalSessionKey,
         cfg: params.cfg,
@@ -222,9 +224,7 @@ function isRestartSafeChatSession(params: {
     entry.abortedLastRun !== true &&
     entry.archivedAt === undefined &&
     entry.initializationPending !== true &&
-    entry.pendingFinalDelivery !== true &&
-    entry.pendingFinalDeliveryText == null &&
-    entry.pendingFinalDeliveryContext === undefined &&
+    entry.pendingFinalDelivery === undefined &&
     entry.agentHarnessId === undefined &&
     entry.pluginOwnerId === undefined &&
     entry.spawnedBy === undefined &&
@@ -290,7 +290,7 @@ export function resolveRestartSafeChatAdmission(params: {
       now: params.now,
       resetOverride: resolveChannelResetConfig({
         sessionCfg: params.cfg.session,
-        channel: params.entry?.lastChannel ?? params.entry?.channel,
+        channel: sessionDeliveryChannel(params.entry),
       }),
       resetType: resolveSessionResetType({ sessionKey: params.sessionKey }),
       sessionCfg: params.cfg.session,
@@ -305,12 +305,15 @@ export function resolveRestartSafeChatAdmission(params: {
   if (retryableClaim && entry.restartRecoveryDeliveryRequestFingerprint !== request.fingerprint) {
     throw new Error("chat retry does not match its durable admission");
   }
+  const mainRestartRecovery = (entry as InternalSessionEntry).mainRestartRecovery;
   return {
     requestFingerprint: request.fingerprint,
     ...(retryableClaim
       ? {
           retryExpectedState: {
             abortedLastRun: entry.abortedLastRun,
+            mainRestartRecoveryCycleId: mainRestartRecovery?.cycleId,
+            mainRestartRecoveryRevision: mainRestartRecovery?.revision,
             restartRecoveryBeforeAgentReplyState: entry.restartRecoveryBeforeAgentReplyState,
             restartRecoveryDeliveryReceiptState: entry.restartRecoveryDeliveryReceiptState,
             restartRecoveryDeliveryToolCallId: entry.restartRecoveryDeliveryToolCallId,
@@ -326,7 +329,6 @@ export function resolveRestartSafeChatAdmission(params: {
             restartRecoverySourceReplyDeliveryMode: entry.restartRecoverySourceReplyDeliveryMode,
             restartRecoveryTerminalRunIds: entry.restartRecoveryTerminalRunIds,
             status: entry.status,
-            updatedAt: entry.updatedAt,
           },
         }
       : entry.restartRecoveryDeliverySourceRunId
@@ -348,12 +350,13 @@ export function buildRestartSafeChatTranscriptState(params: {
       ? { expectedSessionState: params.admission.retryExpectedState }
       : {}),
     sessionLifecyclePatch: {
-      // Admission precedes runtime plugin loading. The runner atomically turns
-      // this into `pending` before a hook; recovery reloads hooks before resume.
-      restartRecoveryBeforeAgentReplyState: "admitted",
+      // The runner records `pending` only while a hook is executing. With no
+      // checkpoint, recovery simply re-enters the normal agent hook pipeline.
+      restartRecoveryBeforeAgentReplyState: undefined,
       restartRecoveryDeliveryReceiptState: undefined,
       restartRecoveryDeliveryToolCallId: undefined,
       status: "running",
+      lifecycleRunId: params.clientRunId,
       startedAt: params.startedAt,
       endedAt: undefined,
       restartRecoveryDeliveryContext: undefined,
@@ -363,8 +366,6 @@ export function buildRestartSafeChatTranscriptState(params: {
       restartRecoveryRequesterAccountId: undefined,
       restartRecoveryRequesterSenderId: undefined,
       restartRecoverySameChannelThreadRequired: undefined,
-      // This survives runner adoption after the retry fingerprint is cleared.
-      // Recovery uses it to recheck hooks before Gateway agent dispatch.
       restartRecoverySourceIngress: "control-ui",
       restartRecoverySourceReplyDeliveryMode: undefined,
       ...(params.admission.priorTerminalSourceRunId
@@ -388,7 +389,7 @@ export async function terminalizeRestartSafeChatAdmission(params: {
 }): Promise<boolean> {
   const endedAt = Date.now();
   let terminalized = false;
-  await patchSessionEntry(
+  await patchSessionEntryCore(
     { sessionKey: params.sessionKey, storePath: params.storePath },
     (current) => {
       if (
@@ -400,6 +401,7 @@ export async function terminalizeRestartSafeChatAdmission(params: {
       terminalized = true;
       return {
         abortedLastRun: params.retryable ? false : params.status === "killed",
+        lifecycleRunId: undefined,
         endedAt,
         ...(params.retryable
           ? {}

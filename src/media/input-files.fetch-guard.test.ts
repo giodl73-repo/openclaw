@@ -14,9 +14,12 @@ vi.mock("./media-services.js", () => ({
   convertHeicToJpeg: (...args: unknown[]) => convertHeicToJpegMock(...args),
 }));
 
-vi.mock("@openclaw/media-core/mime", () => ({
-  detectMime: (...args: unknown[]) => detectMimeMock(...args),
-}));
+vi.mock("@openclaw/media-core/mime", async () => {
+  const actual = await vi.importActual<typeof import("@openclaw/media-core/mime")>(
+    "@openclaw/media-core/mime",
+  );
+  return { ...actual, detectMime: (...args: unknown[]) => detectMimeMock(...args) };
+});
 
 vi.mock("./pdf-extract.js", () => ({
   extractPdfContent: (...args: unknown[]) => extractPdfContentMock(...args),
@@ -204,6 +207,51 @@ describe("HEIC input image normalization", () => {
         type: "image",
         data: Buffer.from("png-like").toString("base64"),
         mimeType: "image/png",
+      },
+    },
+    {
+      name: "prefers sniffed JPEG when base64 mediaType is absent (OpenAI-compatible endpoint path)",
+      source: {
+        type: "base64",
+        data: Buffer.from("jpeg-bytes").toString("base64"),
+      } as const,
+      limits: createImageSourceLimits(["image/png", "image/jpeg"]),
+      detectedMime: "image/jpeg",
+      expectedImage: {
+        type: "image",
+        data: Buffer.from("jpeg-bytes").toString("base64"),
+        mimeType: "image/jpeg",
+      },
+    },
+    {
+      name: "prefers sniffed JPEG when declared HEIC bytes are actually JPEG",
+      source: {
+        type: "base64",
+        data: Buffer.from("jpeg-bytes").toString("base64"),
+        mediaType: "image/heic",
+      } as const,
+      limits: createImageSourceLimits(["image/heic", "image/jpeg"]),
+      detectedMime: "image/jpeg",
+      expectedImage: {
+        type: "image",
+        data: Buffer.from("jpeg-bytes").toString("base64"),
+        mimeType: "image/jpeg",
+      },
+    },
+    {
+      name: "prefers sniffed MIME for URL images with a generic Content-Type header",
+      source: {
+        type: "url",
+        url: "https://example.com/photo",
+      } as const,
+      limits: createImageSourceLimits(["image/png", "image/webp"], true),
+      detectedMime: "image/webp",
+      fetchedUrl: "https://example.com/photo",
+      fetchedBody: Buffer.from("webp-bytes"),
+      expectedImage: {
+        type: "image",
+        data: Buffer.from("webp-bytes").toString("base64"),
+        mimeType: "image/webp",
       },
     },
   ] as const)("$name", async (testCase) => {

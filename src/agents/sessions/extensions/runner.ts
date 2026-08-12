@@ -4,7 +4,7 @@
 
 import type { KeyId } from "@earendil-works/pi-tui";
 import type { ImageContent, Model } from "../../../llm/types.js";
-import { type Theme, theme } from "../../modes/interactive/theme/theme.js";
+import { interactiveAgentTheme as theme, type Theme } from "../../modes/interactive/theme/theme.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import type { ResourceDiagnostic } from "../diagnostics.js";
 import type { KeybindingsConfig } from "../keybindings.js";
@@ -910,6 +910,12 @@ export class ExtensionRunner {
   }
 
   async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
+    // Cloning the full session history is expensive (it can carry image
+    // payloads) and runs every turn, so skip it unless a context handler
+    // is actually registered. Handlers still receive an isolated clone.
+    if (!this.hasHandlers("context")) {
+      return messages;
+    }
     const ctx = this.createContext();
     let currentMessages = structuredClone(messages);
 

@@ -6,7 +6,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { sliceUtf16Safe, truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import {
-  resolveSessionFilePath,
+  resolveSessionFilePathCore,
   resolveSessionFilePathOptions,
 } from "../../config/sessions/paths.js";
 import {
@@ -425,7 +425,7 @@ function resolveSafeCliSessionFile(params: {
     agentId: sessionAgentId ?? defaultAgentId,
     storePath: params.config?.session?.store,
   });
-  const sessionFile = resolveSessionFilePath(
+  const sessionFile = resolveSessionFilePathCore(
     params.sessionId,
     { sessionFile: params.sessionFile },
     pathOptions,
@@ -482,13 +482,52 @@ async function loadCliSessionEntries(params: {
       );
       return [];
     }
-    return selectSessionTranscriptLeafControlledPath(sessionEntries) ?? sessionEntries;
+    return projectLatestCliHistoryBoundary(
+      selectSessionTranscriptLeafControlledPath(sessionEntries) ?? sessionEntries,
+    );
   } catch (error) {
     if (!isFileNotFoundError(error)) {
       cliBackendLog.warn(`cli session history load failed: ${formatErrorMessage(error)}`);
     }
     return [];
   }
+}
+
+function projectLatestCliHistoryBoundary(entries: unknown[]): unknown[] {
+  const boundaryIndex = entries.findLastIndex((entry) => {
+    const type = (entry as { type?: unknown } | null)?.type;
+    return type === "compaction" || type === "reset";
+  });
+  if (boundaryIndex < 0) {
+    return entries;
+  }
+  const boundary = entries[boundaryIndex] as {
+    type?: unknown;
+    firstKeptEntryId?: unknown;
+  };
+  if (boundary.type !== "reset") {
+    return entries;
+  }
+  const firstKeptIndex =
+    typeof boundary.firstKeptEntryId === "string"
+      ? entries.findIndex(
+          (entry, index) =>
+            index < boundaryIndex &&
+            (entry as { id?: unknown } | null)?.id === boundary.firstKeptEntryId,
+        )
+      : -1;
+  const kept =
+    firstKeptIndex < 0
+      ? []
+      : entries.slice(firstKeptIndex, boundaryIndex).filter((entry) => {
+          const candidate = entry as HistoryEntry;
+          const message = candidate.message as HistoryMessage | undefined;
+          return (
+            candidate.type === "message" &&
+            (message?.role === "user" || message?.role === "assistant")
+          );
+        });
+  return [...kept, ...entries.slice(boundaryIndex + 1)];
 }
 
 /** Checks whether a safe, bounded transcript file exists for a CLI session. */

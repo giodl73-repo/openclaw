@@ -1,3 +1,5 @@
+// Structural formatting stays policy-free. Core and memory-host adapters intentionally inject
+// owner-specific redactors; bypassing them would weaken redaction and break one-argument APIs.
 export type FormatErrorMessageOptions = {
   redact: (text: string) => string;
 };
@@ -121,6 +123,11 @@ export function toErrorObject(value: unknown, fallbackMessage: string): Error {
     Object.assign(error, value);
   }
   return error;
+}
+
+/** Reads Error messages unchanged and stringifies every other value. */
+export function coerceErrorMessage(value: unknown): string {
+  return value instanceof Error ? value.message : String(value);
 }
 
 /** Renders a non-Error cause as useful text without throwing. */

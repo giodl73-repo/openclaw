@@ -1,7 +1,5 @@
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type {
   EmbeddingInput,
   EmbeddingProvider,
@@ -16,6 +14,8 @@ import {
   type MemoryEmbeddingProviderCreateOptions,
   type MemoryEmbeddingProviderCreateResult,
 } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { formatLlamaCppSetupError, resolveNodeLlamaCppImportUrl } from "./node-llama.runtime.js";
 
 type LlamaCppLocalOptions = {
   modelPath?: string;
@@ -42,10 +42,6 @@ type LlamaCppModelIdentity = {
     cacheKeyData: Record<string, unknown>;
   }>;
 };
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
 
 function readLocalOptions(options: { local?: unknown }): LlamaCppLocalOptions {
   const local = options.local as LlamaCppLocalOptions | undefined;
@@ -116,48 +112,6 @@ function textFromEmbeddingInput(input: EmbeddingInput): string {
 
 function toMemoryEmbeddingInput(input: EmbeddingInput): MemoryEmbeddingInput {
   return typeof input === "string" ? { text: input } : input;
-}
-
-function isNodeLlamaCppMissing(err: unknown): boolean {
-  if (!(err instanceof Error)) {
-    return false;
-  }
-  const code = (err as Error & { code?: unknown }).code;
-  return code === "ERR_MODULE_NOT_FOUND" && err.message.includes("node-llama-cpp");
-}
-
-function formatErrorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return String(err);
-}
-
-function formatLlamaCppSetupError(err: unknown): string {
-  const detail = formatErrorMessage(err);
-  const missing = isNodeLlamaCppMissing(err);
-  return [
-    "Local llama.cpp embeddings unavailable.",
-    missing
-      ? "Reason: node-llama-cpp is missing or failed to install."
-      : detail
-        ? `Reason: ${detail}`
-        : undefined,
-    missing && detail ? `Detail: ${detail}` : null,
-    "To enable local GGUF embeddings:",
-    "1) Install the official provider plugin: openclaw plugins install @openclaw/llama-cpp-provider",
-    "2) Use Node 24 for native installs/updates.",
-    "3) If you use pnpm from source: pnpm approve-builds, then pnpm rebuild node-llama-cpp.",
-    'Or set agents.defaults.memorySearch.provider to a remote embedding provider such as "openai", "ollama", "lmstudio", or "voyage".',
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-const requireFromPlugin = createRequire(import.meta.url);
-
-function resolveNodeLlamaCppImportUrl(): string {
-  return pathToFileURL(requireFromPlugin.resolve("node-llama-cpp")).href;
 }
 
 function copyLocalRuntimeFacts(source: object, target: object): void {

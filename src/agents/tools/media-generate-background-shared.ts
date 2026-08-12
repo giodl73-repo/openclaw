@@ -5,9 +5,10 @@
  */
 import crypto from "node:crypto";
 import { getCliSessionBinding } from "../../config/sessions/cli-session-binding.js";
-import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
+import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor.js";
+import { runWithoutOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { clearAgentRunContext, registerAgentRunContext } from "../../infra/agent-events.js";
+import { clearAgentRunContext, registerAgentRunContext } from "../../infra/agent-run-registry.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { parseCronRunScopeSuffix } from "../../sessions/session-key-utils.js";
@@ -26,7 +27,7 @@ import {
   resolveRequiredCompletionDeliveryFailureTerminalResult,
   type RequiredCompletionTerminalResult,
 } from "../../tasks/task-completion-contract.js";
-import type { DeliveryContext } from "../../utils/delivery-context.js";
+import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import {
   mediaUrlsFromGeneratedAttachments,
@@ -37,8 +38,8 @@ import { MEDIA_GENERATION_DELIVERING_COMPLETION_PROGRESS } from "../media-genera
 import {
   deliverSubagentAnnouncement,
   loadRequesterSessionEntry,
-} from "../subagent-announce-delivery.js";
-import { resolveAnnounceOrigin } from "../subagent-announce-origin.js";
+} from "../subagents/announce/subagent-announce-delivery.js";
+import { resolveAnnounceOrigin } from "../subagents/announce/subagent-announce-origin.js";
 
 const log = createSubsystemLogger("agents/tools/media-generate-background-shared");
 const MEDIA_GENERATION_TASK_KEEPALIVE_INTERVAL_MS = 60_000;
@@ -70,7 +71,7 @@ export function shouldDetachMediaGenerationTask(sessionKey: string | undefined):
     return true;
   }
   try {
-    const entry = loadSessionEntry({
+    const entry = loadSessionEntryReadOnly({
       sessionKey: normalizedSessionKey,
       clone: false,
       hydrateSkillPromptRefs: false,
@@ -384,13 +385,13 @@ function buildMediaGenerationReplyInstruction(params: {
   if (params.status === "ok") {
     return [
       `The ${params.completionLabel} is ready for the original chat.`,
-      'Use the current visible-reply contract: if this session requires message-tool replies, call message(action="send") with a short caption and every structured attachment from the internal event, then reply only NO_REPLY.',
-      "Otherwise, write the normal final reply and attach every generated media path with final-reply MEDIA lines.",
+      "Follow the current visible-reply contract with a short user-facing caption and every structured generated attachment from this event.",
+      "Keep internal task/session details private and do not copy the internal event text verbatim.",
     ].join(" ");
   }
   return [
     `${params.completionLabel[0]?.toUpperCase() ?? "T"}${params.completionLabel.slice(1)} generation task failed for the original chat.`,
-    'Use the current visible-reply contract: call message(action="send") when message-tool replies are required, otherwise write the normal final reply.',
+    "Follow the current visible-reply contract with a concise user-facing failure message.",
     "Keep internal task/session details private and do not copy the internal event text verbatim.",
   ].join(" ");
 }
@@ -595,7 +596,8 @@ export function scheduleMediaGenerationTaskCompletion<
       });
     }
   };
-  params.scheduleBackgroundWork(runBackgroundWork);
+  // Detached completion needs its own transcript lock after the parent attempt exits.
+  params.scheduleBackgroundWork(() => runWithoutOwnedSessionTranscriptWrites(runBackgroundWork));
 }
 
 async function wakeMediaGenerationTaskCompletion(params: {
@@ -662,17 +664,19 @@ async function wakeMediaGenerationTaskCompletion(params: {
     sourceTool: params.toolName,
     requesterIsSubagent: false,
     expectsCompletionMessage: true,
-    durableGeneratedMediaHandoff: true,
     bestEffortDeliver: true,
     directIdempotencyKey: announceId,
   });
   if (delivery.delivered) {
     return { status: "delivered" };
   }
-  if (delivery.reason === "completion_handoff_pending") {
+  if (
+    delivery.disposition === "session_queued" ||
+    delivery.reason === "completion_handoff_pending"
+  ) {
     return { status: "pending" };
   }
-  if (delivery.terminal) {
+  if (delivery.disposition === "ambiguous") {
     log.warn("Media generation completion delivery stopped after terminal fallback", {
       taskId: params.handle.taskId,
       runId: params.handle.runId,

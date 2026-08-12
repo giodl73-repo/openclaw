@@ -2,7 +2,7 @@
 // authorization, ordering, and disabled-surface responses.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startOpenAiCompatGatewayServer } from "./openai-compatible-http.test-helpers.js";
-import { getFreePort, installGatewayTestHooks } from "./test-helpers.js";
+import { getGatewayTestPort, installGatewayTestHooks } from "./test-helpers.js";
 
 installGatewayTestHooks({ scope: "suite" });
 
@@ -14,7 +14,7 @@ let enabledPort: number;
 
 beforeAll(async () => {
   ({ startGatewayServer } = await import("./server.js"));
-  enabledPort = await getFreePort();
+  enabledPort = await getGatewayTestPort();
   enabledServer = await startOpenAiCompatGatewayServer({
     startGatewayServer,
     port: enabledPort,
@@ -54,6 +54,11 @@ async function expectMissingReadScope(res: Response) {
     error: {
       type: "forbidden",
       message: "missing scope: operator.read",
+      details: {
+        code: "MISSING_SCOPE",
+        missingScope: "operator.read",
+        requiredScopes: ["operator.read"],
+      },
     },
   });
 }
@@ -109,7 +114,7 @@ describe("OpenAI-compatible models HTTP API (e2e)", () => {
   });
 
   it("rejects when disabled", async () => {
-    const port = await getFreePort();
+    const port = await getGatewayTestPort();
     const server = await startOpenAiCompatGatewayServer({
       startGatewayServer,
       port,
@@ -127,7 +132,7 @@ describe("OpenAI-compatible models HTTP API (e2e)", () => {
   });
 
   it("treats shared-secret bearer auth as full compat operator access", async () => {
-    const port = await getFreePort();
+    const port = await getGatewayTestPort();
     const server = await startOpenAiCompatGatewayServer({
       startGatewayServer,
       port,

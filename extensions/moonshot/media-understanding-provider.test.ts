@@ -1,8 +1,9 @@
+import { oversizedJsonResponse } from "openclaw/plugin-sdk/test-fixtures";
 // Moonshot tests cover media understanding provider plugin behavior.
 import {
   createRequestCaptureJsonFetch,
   installPinnedHostnameTestHooks,
-} from "openclaw/plugin-sdk/test-env";
+} from "openclaw/plugin-sdk/test-media-understanding";
 import { describe, expect, it } from "vitest";
 import { moonshotMediaUnderstandingProvider } from "./media-understanding-provider.js";
 
@@ -16,39 +17,6 @@ async function describeVideo(
     throw new Error("expected Moonshot video description support");
   }
   return await handler(params);
-}
-
-function oversizedJsonResponse(params: { chunkCount: number; chunkSize: number }): {
-  response: Response;
-  getReadCount: () => number;
-  wasCanceled: () => boolean;
-} {
-  const chunk = new Uint8Array(params.chunkSize);
-  let readCount = 0;
-  let canceled = false;
-  return {
-    response: new Response(
-      new ReadableStream<Uint8Array>({
-        pull(controller) {
-          if (readCount >= params.chunkCount) {
-            controller.close();
-            return;
-          }
-          readCount += 1;
-          controller.enqueue(chunk);
-        },
-        cancel() {
-          canceled = true;
-        },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    ),
-    getReadCount: () => readCount,
-    wasCanceled: () => canceled,
-  };
 }
 
 describe("describeMoonshotVideo", () => {

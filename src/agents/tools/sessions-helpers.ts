@@ -21,6 +21,7 @@ export {
   shouldResolveSessionIdInput,
 } from "./sessions-resolution.js";
 import { normalizeOptionalString, type FastMode } from "@openclaw/normalization-core/string-coerce";
+import type { SessionRunStatus } from "../../../packages/gateway-protocol/src/schema/sessions-row.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { parseRawSessionConversationRef } from "../../sessions/session-key-utils.js";
@@ -37,11 +38,8 @@ type SessionListDeliveryContext = {
   threadId?: string | number;
 };
 
-/** Compact run status shown by session tools. */
-export type SessionRunStatus = "running" | "done" | "failed" | "killed" | "timeout";
-
-/** Normalized session row returned by session list-style tools. */
-export type SessionListRow = {
+/** Full Gateway session row consumed by session orchestration internals. */
+export type GatewaySessionListRow = {
   key: string;
   agentId?: string;
   kind: SessionKind;
@@ -93,6 +91,30 @@ export type SessionListRow = {
   messages?: unknown[];
 };
 
+/** Focused model-facing row returned by sessions_list. */
+export type SessionListRow = {
+  key: string;
+  agentId: string;
+  kind: SessionKind;
+  channel: string;
+  label?: string;
+  displayName?: string;
+  derivedTitle?: string;
+  lastMessagePreview?: string;
+  parentSessionKey?: string;
+  updatedAt?: number;
+  archived: boolean;
+  pinned: boolean;
+  stateVersion?: number;
+  model?: string;
+  contextTokens?: number;
+  totalTokens?: number;
+  status?: SessionRunStatus;
+  abortedLastRun?: boolean;
+  childSessions?: string[];
+  messages?: unknown[];
+};
+
 /** Resolves config plus sandbox visibility context for a session tool call. */
 export function resolveSessionToolContext(opts?: {
   agentSessionKey?: string;
@@ -111,7 +133,7 @@ export function resolveSessionToolContext(opts?: {
 }
 
 /** Classifies a session key/gateway kind into the row category used by tools. */
-export function classifySessionKind(params: {
+export function classifySessionListKind(params: {
   key: string;
   gatewayKind?: string | null;
   alias: string;

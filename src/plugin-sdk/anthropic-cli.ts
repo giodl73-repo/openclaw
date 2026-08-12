@@ -1,5 +1,5 @@
 // Manual facade. Keep loader boundary explicit.
-import { loadBundledPluginPublicSurfaceModuleSync } from "./facade-loader.js";
+import { loadBundledPluginPublicSurfaceModuleSyncCore } from "./facade-loader.js";
 
 type FacadeModule = {
   CLAUDE_CLI_BACKEND_ID: string;
@@ -7,9 +7,11 @@ type FacadeModule = {
 };
 
 function loadFacadeModule(): FacadeModule {
-  return loadBundledPluginPublicSurfaceModuleSync<FacadeModule>({
+  // cli-api.js, not api.js: this facade evaluates at module scope, and the
+  // full barrel costs ~130s per cold jiti worker on source checkouts.
+  return loadBundledPluginPublicSurfaceModuleSyncCore<FacadeModule>({
     dirName: "anthropic",
-    artifactBasename: "api.js",
+    artifactBasename: "cli-api.js",
   });
 }
 /** Anthropic plugin backend id for Claude CLI provider detection. */

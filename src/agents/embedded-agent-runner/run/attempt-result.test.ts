@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { completeEmbeddedAttemptResult } from "./attempt-result.js";
+import { completeEmbeddedAttemptResult, createMcpAttemptCarryover } from "./attempt-result.js";
 
 function completeResult(params?: {
+  latestMcpAppChannelView?: { viewId: string };
   clientToolCallSlots?: Array<{
     toolCallId: string;
     name: string;
@@ -13,7 +14,7 @@ function completeResult(params?: {
     toolName: string;
     meta?: string;
     replaySafe?: boolean;
-    isError?: true;
+    isError?: boolean;
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;
@@ -33,12 +34,15 @@ function completeResult(params?: {
       didSendDeterministicApprovalPrompt: () => false,
       didSendViaMessagingTool: () => false,
       getAcceptedSessionSpawns: () => [],
+      getAssistantTurnCount: () => 0,
       getCompactionCount: () => 0,
       getHeartbeatToolResponse: () => undefined,
       getItemLifecycle: () => undefined,
       getLastAssistantTextMessageIndex: () => undefined,
       getLastCompactionTokensAfter: () => undefined,
       getLastToolError: () => undefined,
+      getLatestMcpAppChannelView: () => params?.latestMcpAppChannelView,
+      getLatestMcpConnectAction: () => undefined,
       getMessagingToolSentMediaUrls: () => [],
       getMessagingToolSentTargets: () => [],
       getMessagingToolSentTexts: () => [],
@@ -52,15 +56,7 @@ function completeResult(params?: {
       toolMetas: params?.toolMetas ?? [],
     } as never,
     state: {
-      aborted: false,
-      externalAbort: false,
-      timedOut: false,
-      idleTimedOut: false,
-      timedOutDuringCompaction: false,
-      timedOutDuringToolExecution: false,
-      timedOutByRunBudget: false,
-      promptError: null,
-      promptErrorSource: null,
+      terminal: { kind: "ok" },
       sessionIdUsed: "session-1",
       messagesSnapshot: [],
       yieldDetected: false,
@@ -82,6 +78,33 @@ function completeResult(params?: {
 }
 
 describe("attempt result projection", () => {
+  it("carries the newest MCP presentation state across retry attempts", () => {
+    const carryover = createMcpAttemptCarryover();
+    const first = {
+      latestMcpAppChannelView: { viewId: "view-first" },
+      latestMcpConnectAction: {
+        serverName: "calendar",
+        authorizationUrl: "https://auth.example/first",
+      },
+    };
+    const retry: Parameters<typeof carryover.apply>[0] = {};
+    const latest = {
+      latestMcpAppChannelView: { viewId: "view-latest" },
+      latestMcpConnectAction: {
+        serverName: "calendar",
+        authorizationUrl: "https://auth.example/latest",
+      },
+    };
+
+    carryover.apply(first);
+    carryover.apply(retry);
+    carryover.apply(latest);
+
+    expect(retry).toEqual(first);
+    expect(latest.latestMcpAppChannelView.viewId).toBe("view-latest");
+    expect(latest.latestMcpConnectAction.authorizationUrl).toBe("https://auth.example/latest");
+  });
+
   it("keeps completed client tool calls in reserved source order", () => {
     expect(
       completeResult({
@@ -102,6 +125,7 @@ describe("attempt result projection", () => {
       completeResult({
         toolMetas: [
           { toolName: "", replaySafe: true },
+          { toolName: "read", isError: false },
           {
             toolName: "exec",
             meta: "done",
@@ -114,6 +138,12 @@ describe("attempt result projection", () => {
         ],
       }).toolMetas,
     ).toEqual([
+      {
+        toolName: "read",
+        meta: undefined,
+        replaySafe: false,
+        isError: false,
+      },
       {
         toolName: "exec",
         meta: "done",
@@ -138,5 +168,13 @@ describe("attempt result projection", () => {
     expect(completeResult({ pendingToolMediaReply: { audioAsVoice: true } }).toolAudioAsVoice).toBe(
       true,
     );
+  });
+
+  it("projects the latest MCP App channel view without result data", () => {
+    expect(
+      completeResult({
+        latestMcpAppChannelView: { viewId: "view-latest" },
+      }).latestMcpAppChannelView,
+    ).toEqual({ viewId: "view-latest" });
   });
 });

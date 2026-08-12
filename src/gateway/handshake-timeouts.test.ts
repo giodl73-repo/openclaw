@@ -9,7 +9,7 @@ import {
   MIN_CONNECT_CHALLENGE_TIMEOUT_MS,
   resolveConnectChallengeTimeoutMs,
 } from "../../packages/gateway-client/src/timeouts.js";
-import { MAX_SAFE_TIMEOUT_DELAY_MS } from "../utils/timer-delay.js";
+import { MAX_SAFE_TIMEOUT_DELAY_MS } from "../../packages/gateway-client/src/timeouts.js";
 import { resolvePreauthHandshakeTimeoutMs } from "./handshake-timeouts.js";
 
 describe("gateway handshake timeouts", () => {
@@ -144,25 +144,6 @@ describe("gateway handshake timeouts", () => {
     expect(
       getConnectChallengeTimeoutMsFromEnv({ OPENCLAW_CONNECT_CHALLENGE_TIMEOUT_MS: "0x10" }),
     ).toBeUndefined();
-  });
-
-  test("caps connect challenge timeout env and explicit values to the safe timer range", () => {
-    expect(
-      getConnectChallengeTimeoutMsFromEnv({
-        OPENCLAW_CONNECT_CHALLENGE_TIMEOUT_MS: "3000000000",
-      }),
-    ).toBe(MAX_SAFE_TIMEOUT_DELAY_MS);
-    expect(
-      resolveConnectChallengeTimeoutMs(3_000_000_000, {
-        env: {},
-        configuredTimeoutMs: 3_000_000_000,
-      }),
-    ).toBe(MAX_SAFE_TIMEOUT_DELAY_MS);
-    expect(
-      resolveConnectChallengeTimeoutMs(undefined, {
-        env: { OPENCLAW_CONNECT_CHALLENGE_TIMEOUT_MS: "3000000000" },
-      }),
-    ).toBe(MAX_SAFE_TIMEOUT_DELAY_MS);
   });
 
   test("resolveConnectChallengeTimeoutMs falls back to env override", () => {

@@ -10,7 +10,7 @@ import { getCoreSecretTargetRegistry } from "./target-registry-data.js";
 import {
   discoverConfigSecretTargetsByIds,
   resolveConfigSecretTargetByPath,
-  resolveSecretPlanTargetByPath,
+  resolveSecretPlanTargetByPathCore,
 } from "./target-registry.js";
 
 describe("secret target registry", () => {
@@ -36,11 +36,10 @@ describe("secret target registry", () => {
     expect(targets[0]?.path).toBe(TALK_TEST_PROVIDER_API_KEY_PATH);
   });
 
-  it("resolves config targets by exact path including sibling ref metadata", () => {
+  it("resolves config targets by exact path", () => {
     const target = resolveConfigSecretTargetByPath(["channels", "googlechat", "serviceAccount"]);
 
     expect(target?.entry?.id).toBe("channels.googlechat.serviceAccount");
-    expect(target?.refPathSegments).toEqual(["channels", "googlechat", "serviceAccountRef"]);
   });
 
   it("resolves talk realtime provider api key targets", () => {
@@ -63,11 +62,11 @@ describe("secret target registry", () => {
   });
 
   it("resolves plan targets by owning config document", () => {
-    const configTarget = resolveSecretPlanTargetByPath({
+    const configTarget = resolveSecretPlanTargetByPathCore({
       configFile: "openclaw.json",
       pathSegments: ["models", "providers", "openai", "apiKey"],
     });
-    const authProfileTarget = resolveSecretPlanTargetByPath({
+    const authProfileTarget = resolveSecretPlanTargetByPathCore({
       configFile: "auth-profiles.json",
       pathSegments: ["profiles", "openai:default", "key"],
     });

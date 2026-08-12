@@ -12,6 +12,7 @@ export type OutboundReplyPayload = {
   mediaUrls?: string[];
   mediaUrl?: string;
   presentation?: InternalReplyPayload["presentation"];
+  presentationTextMode?: InternalReplyPayload["presentationTextMode"];
   /**
    * @deprecated Use presentation. Runtime support remains for legacy producers.
    */
@@ -28,7 +29,7 @@ function readObjectValue(value: unknown): object | undefined {
 }
 
 /** Extract the supported outbound reply fields from loose tool or agent payload objects. */
-export function normalizeOutboundReplyPayload(
+export function normalizeOutboundReplyPayloadCore(
   payload: Record<string, unknown>,
 ): OutboundReplyPayload {
   const text = readStringValue(payload.text);
@@ -41,6 +42,7 @@ export function normalizeOutboundReplyPayload(
   const presentation = readObjectValue(
     payload.presentation,
   ) as OutboundReplyPayload["presentation"];
+  const presentationTextMode = payload.presentationTextMode === "fallback" ? "fallback" : undefined;
   const interactive = readObjectValue(payload.interactive) as OutboundReplyPayload["interactive"];
   const channelData = readObjectValue(payload.channelData) as OutboundReplyPayload["channelData"];
   const sensitiveMedia = payload.sensitiveMedia === true ? true : undefined;
@@ -52,6 +54,7 @@ export function normalizeOutboundReplyPayload(
     mediaUrls,
     mediaUrl,
     presentation,
+    ...(presentationTextMode ? { presentationTextMode } : {}),
     interactive,
     channelData,
     sensitiveMedia,

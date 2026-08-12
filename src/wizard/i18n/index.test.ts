@@ -1,6 +1,6 @@
 // Wizard i18n tests cover locale lookup and fallback behavior through retained translators.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSetupTranslator, t } from "./index.js";
+import { createSetupTranslator, runWithWizardLocalization, t } from "./index.js";
 import { en } from "./locales/en.js";
 import { zh_CN } from "./locales/zh-CN.js";
 import { zh_TW } from "./locales/zh-TW.js";
@@ -20,6 +20,7 @@ function collectLeafKeys(tree: WizardTranslationTree, prefix = "", out: string[]
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("wizard i18n", () => {
@@ -35,10 +36,61 @@ describe("wizard i18n", () => {
     expect(t("wizard.gateway.port")).toBe(expected);
   });
 
+  it.each([
+    ["zh-Hans-SG", "Gateway 端口"],
+    ["zh-Hans-US", "Gateway 端口"],
+    ["zh-Hant-HK", "Gateway 連接埠"],
+    ["zh-Hant-US", "Gateway 連接埠"],
+  ])("preserves the registered explicit locale %s", (locale, expected) => {
+    vi.stubEnv("OPENCLAW_LOCALE", locale);
+    expect(t("wizard.gateway.port")).toBe(expected);
+  });
+
+  it("falls directly to English for an unsupported explicit script", () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-Latn-US");
+    vi.stubEnv("LANG", "zh-CN");
+    expect(t("wizard.gateway.port")).toBe("Gateway port");
+  });
+
   it("uses OPENCLAW_LOCALE before process locale variables", () => {
-    vi.stubEnv("OPENCLAW_LOCALE", "zh-TW");
+    vi.stubEnv("OPENCLAW_LOCALE", "en");
     vi.stubEnv("LC_ALL", "zh-CN");
+    vi.stubEnv("LANG", "zh-TW");
+    expect(t("wizard.gateway.port")).toBe("Gateway port");
+  });
+
+  it("ignores blank locale overrides when a process locale is available", () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "   ");
+    vi.stubEnv("LC_ALL", "");
+    vi.stubEnv("LC_MESSAGES", "zh-CN");
     vi.stubEnv("LANG", "en-US");
+    expect(t("wizard.gateway.port")).toBe("Gateway 端口");
+  });
+
+  it("continues through a blank LC_MESSAGES value to LANG", () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "");
+    vi.stubEnv("LC_ALL", " ");
+    vi.stubEnv("LC_MESSAGES", "\t");
+    vi.stubEnv("LANG", "zh-TW");
+    expect(t("wizard.gateway.port")).toBe("Gateway 連接埠");
+  });
+
+  it("uses English when every locale variable is blank", () => {
+    vi.stubEnv("OPENCLAW_LOCALE", " ");
+    vi.stubEnv("LC_ALL", "");
+    vi.stubEnv("LC_MESSAGES", "\t");
+    vi.stubEnv("LANG", "  ");
+    expect(t("wizard.gateway.port")).toBe("Gateway port");
+  });
+
+  it("uses the Windows runtime locale when POSIX locale variables are absent", () => {
+    vi.stubEnv("LANG", "");
+    vi.stubEnv("LC_ALL", "");
+    vi.stubEnv("LC_MESSAGES", "");
+    vi.stubGlobal("navigator", {
+      language: "zh-Hant-HK",
+      languages: ["zh-Hant-HK"],
+    });
     expect(t("wizard.gateway.port")).toBe("Gateway 連接埠");
   });
 
@@ -54,6 +106,24 @@ describe("wizard i18n", () => {
         { locale: "en" },
       ),
     ).toBe('Endpoint ID "custom" already exists for a different base URL. Using "custom-2".');
+  });
+
+  it("keeps one locale context for an entire async wizard operation", async () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    await runWithWizardLocalization(async () => {
+      expect(t("wizard.gateway.port")).toBe("Gateway 端口");
+      vi.stubEnv("OPENCLAW_LOCALE", "en");
+      await Promise.resolve();
+      expect(t("wizard.gateway.port")).toBe("Gateway 端口");
+    });
+    expect(t("wizard.gateway.port")).toBe("Gateway port");
+  });
+
+  it("captures one context when a setup translator is created", () => {
+    vi.stubEnv("OPENCLAW_LOCALE", "zh-CN");
+    const translator = createSetupTranslator({ keyPrefix: "wizard.gateway" });
+    vi.stubEnv("OPENCLAW_LOCALE", "en");
+    expect(translator("port")).toBe("Gateway 端口");
   });
 
   it("creates scoped setup translators without exporting a generic SDK t helper", () => {

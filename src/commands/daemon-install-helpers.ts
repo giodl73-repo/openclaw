@@ -24,6 +24,7 @@ import { buildServiceEnvironment } from "../daemon/service-env.js";
 import {
   formatManagedServiceEnvKeys,
   hasEnvironmentFileSource,
+  readEnvironmentValueSource,
   readManagedServiceEnvKeysFromEnvironment,
 } from "../daemon/service-managed-env.js";
 import { isNonMinimalServicePathEntry } from "../daemon/service-path-policy.js";
@@ -34,7 +35,7 @@ import {
   normalizeEnvVarKey,
 } from "../infra/host-env-security.js";
 import {
-  loadPluginManifestRegistry,
+  loadPluginManifestRegistryCore,
   type PluginManifestRegistry,
 } from "../plugins/manifest-registry.js";
 import {
@@ -42,6 +43,7 @@ import {
   resolveSecretProviderIntegrationConfig,
 } from "../secrets/provider-integrations.js";
 import { collectPluginConfigAssignments } from "../secrets/runtime-config-collectors-plugins.js";
+import { evaluateGatewayAuthSurfaceStates } from "../secrets/runtime-gateway-auth-surfaces.js";
 import { createResolverContext } from "../secrets/runtime-shared.js";
 import { discoverConfigSecretTargets } from "../secrets/target-registry.js";
 import { createLazyPromise } from "../shared/lazy-runtime.js";
@@ -60,6 +62,8 @@ type GatewayInstallPlan = {
   environmentValueSources?: Record<string, GatewayServiceEnvironmentValueSource | undefined>;
 };
 
+// Gateway ingress secrets must never be newly materialized into supervisor metadata.
+// Existing active file-backed values are retained separately during regeneration.
 const NON_PERSISTED_CONFIG_SECRET_ENV_TARGET_IDS = new Set([
   "gateway.auth.password",
   "gateway.auth.token",
@@ -191,11 +195,13 @@ function collectConfigSecretRefServiceEnvSources(params: {
   if (!params.config || !params.configContainsSecretRef) {
     return { keys: [], environment };
   }
+  const gatewayAuthSurfaceStates = evaluateGatewayAuthSurfaceStates({
+    config: params.config,
+    env: params.env as NodeJS.ProcessEnv,
+    defaults: params.config.secrets?.defaults,
+  });
   for (const target of discoverConfigSecretTargets(params.config)) {
     if (!target.entry.includeInPlan) {
-      continue;
-    }
-    if (NON_PERSISTED_CONFIG_SECRET_ENV_TARGET_IDS.has(target.entry.id)) {
       continue;
     }
     const { ref } = resolveSecretInputRef({
@@ -219,6 +225,14 @@ function collectConfigSecretRefServiceEnvSources(params: {
         `Config SecretRef env ref "${key}" blocked by host-env security policy`,
         "Config SecretRef",
       );
+      continue;
+    }
+    if (NON_PERSISTED_CONFIG_SECRET_ENV_TARGET_IDS.has(target.entry.id)) {
+      const surface =
+        gatewayAuthSurfaceStates[target.entry.id as keyof typeof gatewayAuthSurfaceStates];
+      if (surface?.active) {
+        keys.add(key.toUpperCase());
+      }
       continue;
     }
     keys.add(key.toUpperCase());
@@ -286,7 +300,7 @@ function collectExecSecretRefPassEnvServiceEnvVars(params: {
     }
     const execProvider = isPluginIntegrationSecretProviderConfig(provider)
       ? (() => {
-          manifestRegistry ??= loadPluginManifestRegistry({
+          manifestRegistry ??= loadPluginManifestRegistryCore({
             config: params.config,
             env: params.env,
           });
@@ -500,22 +514,6 @@ function collectPreservedExistingServiceEnvVars(
   return preserved;
 }
 
-function readExistingEnvironmentValueSource(params: {
-  existingEnvironmentValueSources?: Record<
-    string,
-    GatewayServiceEnvironmentValueSource | undefined
-  >;
-  normalizedKey: string;
-}): GatewayServiceEnvironmentValueSource | undefined {
-  for (const [rawKey, source] of Object.entries(params.existingEnvironmentValueSources ?? {})) {
-    const key = normalizeEnvVarKey(rawKey, { portable: true })?.toUpperCase();
-    if (key === params.normalizedKey) {
-      return source;
-    }
-  }
-  return undefined;
-}
-
 function collectExistingEnvironmentFileManagedServiceEnvVars(params: {
   existingEnvironment: Record<string, string | undefined> | undefined;
   existingEnvironmentValueSources?: Record<
@@ -540,10 +538,10 @@ function collectExistingEnvironmentFileManagedServiceEnvVars(params: {
     if (isDangerousHostEnvVarName(key) || isDangerousHostEnvOverrideVarName(key)) {
       continue;
     }
-    const source = readExistingEnvironmentValueSource({
-      existingEnvironmentValueSources: params.existingEnvironmentValueSources,
+    const source = readEnvironmentValueSource(
+      params.existingEnvironmentValueSources,
       normalizedKey,
-    });
+    );
     if (!hasEnvironmentFileSource(source)) {
       continue;
     }
@@ -651,10 +649,7 @@ async function buildGatewayInstallEnvironment(params: {
   const plan = createMutableServiceEnvPlan();
   addServiceEnvPlanEntries(plan, preservedExistingEnvironment, {
     valueSource: ({ normalizedKey }) =>
-      readExistingEnvironmentValueSource({
-        existingEnvironmentValueSources: params.existingEnvironmentValueSources,
-        normalizedKey,
-      }) ?? "inline",
+      readEnvironmentValueSource(params.existingEnvironmentValueSources, normalizedKey) ?? "inline",
   });
   addServiceEnvPlanEntries(plan, stateDirDotEnvEnvironment, {});
   addServiceEnvPlanEntries(plan, configEnvironment, {});
@@ -761,7 +756,6 @@ export async function buildGatewayInstallPlan(params: {
   const { programArguments, workingDirectory } = await resolveGatewayProgramArguments({
     port: params.port,
     dev: devMode,
-    runtime: params.runtime,
     nodePath,
     wrapperPath,
   });
@@ -775,6 +769,7 @@ export async function buildGatewayInstallPlan(params: {
   const serviceEnvironment = buildServiceEnvironment({
     env: serviceInputEnv,
     port: params.port,
+    existingNodeOptions: params.existingEnvironment?.NODE_OPTIONS,
     launchdLabel:
       platform === "darwin"
         ? resolveGatewayLaunchAgentLabel(serviceInputEnv.OPENCLAW_PROFILE)
