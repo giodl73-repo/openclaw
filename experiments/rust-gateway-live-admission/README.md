@@ -48,6 +48,13 @@ settles one distinct request. This proves ordering, inactivity ownership, and
 late-frame fencing for side-effect-free evidence, not cooperative interruption
 of effects or a new public streaming API.
 
+The EVID-022 lane uses the same production registry's existing ordered input
+seam. The Gateway rejects one oversized input before sequence assignment,
+sends two bounded frames as sequences `0` and `1`, and refuses further input
+after terminal settlement. Rust returns the received JSON only as
+side-effect-free evidence. This proves bounded Gateway-to-Rust input transport,
+not terminal semantics, a new public streaming API, or Rust authority.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -62,6 +69,7 @@ corepack pnpm lobster:rust-gateway-cold-restart-continuity
 corepack pnpm lobster:rust-gateway-unclean-restart-fencing
 corepack pnpm lobster:rust-gateway-deadline-cancellation
 corepack pnpm lobster:rust-gateway-stream-idle-timeout
+corepack pnpm lobster:rust-gateway-stream-input
 ```
 
 The first successful Gateway connection can spend several minutes compiling

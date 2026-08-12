@@ -477,6 +477,7 @@ enum ResultMode {
     Delayed(u64),
     AfterCancel,
     StreamUntilIdle,
+    StreamInput,
 }
 
 fn serve_one_invocation(
@@ -552,10 +553,12 @@ fn serve_one_invocation(
                 );
             }
         }
-        let result = json!({ "bins": found });
+        let mut result = json!({ "bins": found });
         let mut cancellation_request_id: Option<String> = None;
         let mut progress_dispositions: Vec<Value> = Vec::new();
         let mut late_progress_disposition: Option<Value> = None;
+        let mut input_sequences: Vec<u64> = Vec::new();
+        let mut input_payloads: Vec<Value> = Vec::new();
         let result_delay_ms = match result_mode {
             ResultMode::Immediate => 0,
             ResultMode::Delayed(delay_ms) => {
@@ -663,6 +666,60 @@ fn serve_one_invocation(
                 )?);
                 0
             }
+            ResultMode::StreamInput => {
+                println!(
+                    "{}",
+                    json!({
+                        "status": "awaiting-input",
+                        "requestId": request_id
+                    })
+                );
+                io::stdout()
+                    .flush()
+                    .map_err(|error| format!("failed to flush input evidence: {error}"))?;
+                while input_payloads.len() < 2 {
+                    let input = read_json_message(&mut session.socket)?;
+                    if input.get("type").and_then(Value::as_str) != Some("event")
+                        || input.get("event").and_then(Value::as_str) != Some("node.invoke.input")
+                    {
+                        continue;
+                    }
+                    let input_request_id = input
+                        .pointer("/payload/id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "node.invoke.input omitted id".to_owned())?;
+                    let input_node_id = input
+                        .pointer("/payload/nodeId")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "node.invoke.input omitted nodeId".to_owned())?;
+                    if input_request_id != request_id || input_node_id != node_id {
+                        continue;
+                    }
+                    let sequence = input
+                        .pointer("/payload/seq")
+                        .and_then(Value::as_u64)
+                        .ok_or_else(|| "node.invoke.input omitted seq".to_owned())?;
+                    let expected_sequence = input_sequences.len() as u64;
+                    if sequence != expected_sequence {
+                        return Err(format!(
+                            "node.invoke.input sequence {sequence} did not match {expected_sequence}"
+                        ));
+                    }
+                    let payload = input
+                        .pointer("/payload/payloadJSON")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "node.invoke.input omitted payloadJSON".to_owned())
+                        .and_then(|raw| {
+                            serde_json::from_str::<Value>(raw).map_err(|error| {
+                                format!("node.invoke.input payload is invalid: {error}")
+                            })
+                        })?;
+                    input_sequences.push(sequence);
+                    input_payloads.push(payload);
+                }
+                result["inputs"] = Value::Array(input_payloads.clone());
+                0
+            }
         };
         let cancellation_expected = matches!(
             result_mode,
@@ -678,12 +735,15 @@ fn serve_one_invocation(
             result_disposition.get("accepted").and_then(Value::as_bool) == Some(true);
         let result_ignored =
             result_disposition.get("ignored").and_then(Value::as_bool) == Some(true);
-        if matches!(result_mode, ResultMode::Immediate) && !result_accepted {
+        if matches!(result_mode, ResultMode::Immediate | ResultMode::StreamInput)
+            && !result_accepted
+        {
             return Err(format!(
                 "gateway rejected current invoke result: {result_disposition}"
             ));
         }
         let stream_expected = matches!(result_mode, ResultMode::StreamUntilIdle);
+        let input_expected = matches!(result_mode, ResultMode::StreamInput);
         let progress_accepted = progress_dispositions.iter().all(|disposition| {
             disposition.get("accepted").and_then(Value::as_bool) == Some(true)
                 && disposition.get("ignored").and_then(Value::as_bool) == Some(false)
@@ -694,7 +754,9 @@ fn serve_one_invocation(
                 disposition.get("accepted").and_then(Value::as_bool) == Some(true)
                     && disposition.get("ignored").and_then(Value::as_bool) == Some(true)
             });
-        let proof_accepted = if stream_expected {
+        let proof_accepted = if input_expected {
+            input_sequences == [0, 1] && result_accepted && !result_ignored
+        } else if stream_expected {
             progress_accepted
                 && late_progress_ignored
                 && result_accepted
@@ -705,7 +767,9 @@ fn serve_one_invocation(
         };
         return Ok((
             json!({
-                "status": if stream_expected {
+                "status": if input_expected {
+                    if proof_accepted { "input-received" } else { "input-rejected" }
+                } else if stream_expected {
                     if proof_accepted { "idle-cancel-observed" } else { "idle-cancel-not-fenced" }
                 } else if cancellation_expected {
                     if proof_accepted { "deadline-cancel-observed" } else { "deadline-cancel-not-fenced" }
@@ -733,6 +797,8 @@ fn serve_one_invocation(
                 "lateProgressIgnored": late_progress_disposition
                     .as_ref()
                     .and_then(|disposition| disposition.get("ignored")),
+                "inputSequences": input_sequences,
+                "inputPayloads": input_payloads,
                 "resultAccepted": result_accepted,
                 "resultIgnored": result_ignored,
                 "resultGatewayCode": result_disposition.get("gatewayCode"),
@@ -850,6 +916,25 @@ fn main() -> ExitCode {
                 })
             })
         }
+        [command, url, path, min_protocol, max_protocol] if command == "serve-one-input" => {
+            let min_protocol = min_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid min protocol: {error}"));
+            let max_protocol = max_protocol
+                .parse::<u64>()
+                .map_err(|error| format!("invalid max protocol: {error}"));
+            min_protocol.and_then(|min_protocol| {
+                max_protocol.and_then(|max_protocol| {
+                    serve_one_invocation(
+                        url,
+                        Path::new(path),
+                        min_protocol,
+                        max_protocol,
+                        ResultMode::StreamInput,
+                    )
+                })
+            })
+        }
         [command, url, path, min_protocol, max_protocol, request_id]
             if command == "send-stale-result" =>
         {
@@ -872,7 +957,7 @@ fn main() -> ExitCode {
             })
         }
         _ => Err(
-            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one|serve-one-after-cancel|serve-one-stream-idle <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
+            "usage: rust-gateway-live-admission identity <identity.json> | connect|serve-one|serve-one-after-cancel|serve-one-stream-idle|serve-one-input <ws-url> <identity.json> <min-protocol> <max-protocol> | serve-one-delayed <ws-url> <identity.json> <min-protocol> <max-protocol> <delay-ms> | send-stale-result <ws-url> <identity.json> <min-protocol> <max-protocol> <request-id>"
                 .to_owned(),
         ),
     };

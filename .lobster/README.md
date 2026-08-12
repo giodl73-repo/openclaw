@@ -198,6 +198,16 @@ pairing-generation change. The slice does not prove effect interruption,
 streaming input, runtime readiness, Rust authority, migration, rollback, or
 TypeScript deletion. Authority remains `none`.
 
+EVID-022 adds the fork-only
+`lobster.rfn.rust-gateway-stream-input.v1` fixture. The TypeScript Gateway
+rejects one oversized input frame without consuming a sequence number, then
+sends two bounded JSON frames to Rust as sequences `0` and `1`. Rust returns
+the observed inputs through the side-effect-free `system.which` proof, and the
+Gateway rejects another input after terminal settlement. The slice does not
+prove terminal emulation, a public operator streaming API, runtime readiness,
+Rust authority, migration, rollback, or TypeScript deletion. Authority remains
+`none`.
+
 Reconstruct from a clean clone:
 
 ```text
