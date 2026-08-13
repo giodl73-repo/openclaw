@@ -63,9 +63,13 @@ export async function resumeRuntimeSelection(receiptPath, expectedSelectionGener
       runtimeId: receipt.selection.runtimeId,
       receiptSha256: receipt.sha256,
       dispatchCounts,
-      artifactSha256: result.artifactSha256,
-      connectionGeneration: result.receipt.connectionGeneration,
-      pairingGeneration: result.receipt.pairingGeneration,
+      ...(receipt.selection.runtimeId === "rust-canary"
+        ? {
+            artifactSha256: result.artifactSha256,
+            connectionGeneration: result.receipt.connectionGeneration,
+            pairingGeneration: result.receipt.pairingGeneration,
+          }
+        : {}),
       effectAuthority: "none",
       productionRuntimeAuthorityProven: false,
       authority: "none",

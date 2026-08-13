@@ -52,17 +52,20 @@ export function selectRuntimeCanary(input) {
   };
 }
 
-function selectionReceiptDigest(selection) {
-  return createHash("sha256")
-    .update(JSON.stringify({ schemaVersion: 1, selection }))
-    .digest("hex");
+function selectionReceiptDigest(selection, transition) {
+  const payload = { schemaVersion: 1, selection };
+  if (transition !== undefined) {
+    payload.transition = transition;
+  }
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
-export function writeRuntimeSelectionReceipt(path, selection) {
+export function writeRuntimeSelectionReceipt(path, selection, transition) {
   const receipt = {
     schemaVersion: 1,
     selection,
-    sha256: selectionReceiptDigest(selection),
+    ...(transition === undefined ? {} : { transition }),
+    sha256: selectionReceiptDigest(selection, transition),
   };
   const temporaryPath = `${path}.${process.pid}.tmp`;
   writeFileSync(temporaryPath, `${JSON.stringify(receipt)}\n`, {
@@ -79,14 +82,17 @@ export function readRuntimeSelectionReceipt(path, expectedSelectionGeneration) {
     receipt.schemaVersion !== 1 ||
     typeof receipt.selection !== "object" ||
     receipt.selection === null ||
-    receipt.sha256 !== selectionReceiptDigest(receipt.selection)
+    receipt.sha256 !== selectionReceiptDigest(receipt.selection, receipt.transition)
   ) {
     throw new RuntimeCanarySelectionError(
       "SELECTION_RECEIPT_INVALID",
       "runtime selection receipt failed integrity validation",
     );
   }
-  if (receipt.selection.selectionGeneration !== expectedSelectionGeneration) {
+  if (
+    expectedSelectionGeneration !== undefined &&
+    receipt.selection.selectionGeneration !== expectedSelectionGeneration
+  ) {
     throw new RuntimeCanarySelectionError(
       "STALE_SELECTION_GENERATION",
       "runtime selection receipt does not match the expected generation",
