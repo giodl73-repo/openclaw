@@ -1,14 +1,15 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { writeFailedTrailer } from "./lib/failed-trailer.mjs";
 import {
-  readRuntimeSelectionReceipt,
-  RuntimeCanarySelectionError,
   selectRuntimeCanary,
   writeRuntimeSelectionReceipt,
 } from "./lib/lobster-runtime-canary-selection.mjs";
+import {
+  resumeRuntimeSelection,
+  runRuntimeSelectionResumeProcess,
+} from "./lib/lobster-runtime-selection-proof.mjs";
 
 const TOOL = "lobster:rust-gateway-durable-selection";
 const FIXTURE = JSON.parse(
@@ -22,112 +23,9 @@ function fail(message) {
   throw new Error(message);
 }
 
-function runArtifactReadinessProof() {
-  const result = spawnSync(
-    process.execPath,
-    [resolve("scripts/lobster-rust-gateway-artifact-readiness.mjs")],
-    {
-      encoding: "utf8",
-      env: process.env,
-    },
-  );
-  process.stdout.write(result.stdout ?? "");
-  process.stderr.write(result.stderr ?? "");
-  if (result.error || result.status !== 0) {
-    fail(result.error?.message ?? `selected Rust proof exited ${result.status ?? 1}`);
-  }
-  const lines = (result.stdout ?? "").trim().split(/\r?\n/u);
-  const proof = JSON.parse(lines.at(-1) ?? "{}");
-  if (
-    proof.fixtureId !== "lobster.rfn.rust-gateway-artifact-readiness.v1" ||
-    !proof.receipt?.boundedProfileReadinessProven ||
-    proof.receipt?.authority !== "none"
-  ) {
-    fail("selected Rust runtime did not return the bounded artifact-readiness proof");
-  }
-  return proof;
-}
-
-async function resumeSelection(receiptPath, expectedSelectionGeneration) {
-  const dispatchCounts = { typescript: 0, rust: 0 };
-  try {
-    const receipt = readRuntimeSelectionReceipt(receiptPath, expectedSelectionGeneration);
-    const dispatchers = {
-      "typescript-baseline": async () => {
-        dispatchCounts.typescript += 1;
-        return { runtimeKind: "typescript" };
-      },
-      "rust-canary": async () => {
-        dispatchCounts.rust += 1;
-        return runArtifactReadinessProof();
-      },
-    };
-    const dispatch = dispatchers[receipt.selection.runtimeId];
-    if (typeof dispatch !== "function") {
-      throw new RuntimeCanarySelectionError(
-        "SELECTED_RUNTIME_UNAVAILABLE",
-        `selected runtime ${receipt.selection.runtimeId} has no dispatcher`,
-      );
-    }
-    const result = await dispatch();
-    console.log(
-      JSON.stringify({
-        processId: process.pid,
-        reloadedSelectionGeneration: receipt.selection.selectionGeneration,
-        runtimeId: receipt.selection.runtimeId,
-        receiptSha256: receipt.sha256,
-        dispatchCounts,
-        artifactSha256: result.artifactSha256,
-        connectionGeneration: result.receipt.connectionGeneration,
-        pairingGeneration: result.receipt.pairingGeneration,
-        effectAuthority: "none",
-        productionRuntimeAuthorityProven: false,
-        authority: "none",
-      }),
-    );
-  } catch (error) {
-    if (!(error instanceof RuntimeCanarySelectionError)) {
-      throw error;
-    }
-    console.log(
-      JSON.stringify({
-        processId: process.pid,
-        code: error.code,
-        rejectedBeforeDispatch: true,
-        dispatchCounts,
-        effectAuthority: "none",
-        productionRuntimeAuthorityProven: false,
-        authority: "none",
-      }),
-    );
-  }
-}
-
-function runResumeProcess(receiptPath, expectedSelectionGeneration) {
-  const result = spawnSync(
-    process.execPath,
-    [
-      resolve("scripts/lobster-rust-gateway-durable-selection.mjs"),
-      "--resume",
-      receiptPath,
-      expectedSelectionGeneration,
-    ],
-    {
-      encoding: "utf8",
-      env: process.env,
-    },
-  );
-  process.stdout.write(result.stdout ?? "");
-  process.stderr.write(result.stderr ?? "");
-  if (result.error || result.status !== 0) {
-    fail(result.error?.message ?? `selection resume exited ${result.status ?? 1}`);
-  }
-  return JSON.parse((result.stdout ?? "").trim().split(/\r?\n/u).at(-1) ?? "{}");
-}
-
 const [mode, receiptPathArg, expectedGenerationArg] = process.argv.slice(2);
 if (mode === "--resume") {
-  await resumeSelection(receiptPathArg, expectedGenerationArg);
+  console.log(JSON.stringify(await resumeRuntimeSelection(receiptPathArg, expectedGenerationArg)));
 } else {
   const workspace = mkdtempSync(join(tmpdir(), "openclaw-rust-durable-selection-"));
   try {
@@ -135,7 +33,11 @@ if (mode === "--resume") {
     const receiptPath = join(workspace, "selection-receipt.json");
     const persisted = writeRuntimeSelectionReceipt(receiptPath, selection);
 
-    const stale = runResumeProcess(receiptPath, FIXTURE.rejected.input.expectedSelectionGeneration);
+    const stale = runRuntimeSelectionResumeProcess(
+      "scripts/lobster-rust-gateway-durable-selection.mjs",
+      receiptPath,
+      FIXTURE.rejected.input.expectedSelectionGeneration,
+    );
     if (
       stale.code !== FIXTURE.rejected.expected.code ||
       !stale.rejectedBeforeDispatch ||
@@ -145,7 +47,8 @@ if (mode === "--resume") {
       fail(`stale selection result mismatch: ${JSON.stringify(stale)}`);
     }
 
-    const accepted = runResumeProcess(
+    const accepted = runRuntimeSelectionResumeProcess(
+      "scripts/lobster-rust-gateway-durable-selection.mjs",
       receiptPath,
       FIXTURE.accepted.input.expectedSelectionGeneration,
     );
