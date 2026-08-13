@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-activation-rollback.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "selectionOwner": "fork-evidence-harness",
+    "effectAuthority": "none",
+    "authority": "none"
+  },
+  "baseline": {
+    "selectionGeneration": "selection-generation-1",
+    "runtimeId": "typescript-baseline"
+  },
+  "activation": {
+    "expected": {
+      "transitionGeneration": "transition-generation-1",
+      "selectionGeneration": "selection-generation-2",
+      "runtimeId": "rust-canary",
+      "typescriptDispatchCount": 0,
+      "rustDispatchCount": 1,
+      "activationTransitionEmbeddedRequired": true
+    }
+  },
+  "rollback": {
+    "rejected": {
+      "code": "STALE_CURRENT_SELECTION",
+      "currentSelectionGeneration": "selection-generation-4",
+      "rejectedBeforeMutation": true,
+      "rejectedBeforeDispatch": true,
+      "typescriptDispatchCount": 0,
+      "rustDispatchCount": 0
+    },
+    "accepted": {
+      "transitionGeneration": "transition-generation-2",
+      "selectionGeneration": "selection-generation-3",
+      "runtimeId": "typescript-baseline",
+      "typescriptDispatchCount": 1,
+      "rustDispatchCount": 0,
+      "selectionWriteSerializedRequired": true,
+      "transitionEmbeddedInSelectionReceiptRequired": true
+    }
+  },
+  "effectAuthority": "none",
+  "productionRuntimeAuthorityProven": false,
+  "authority": "none"
+}

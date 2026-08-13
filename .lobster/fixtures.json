@@ -520,6 +520,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-activation-rollback.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "integrity-bound transition receipts activate Rust in a new selection generation and explicitly roll back to TypeScript in another generation",
+      "structuredFailure": "rollback against a stale current-selection digest is rejected before receipt mutation or either runtime dispatcher is called",
+      "runner": "scripts/lobster-rust-gateway-activation-rollback.mjs",
+      "evidence": ".lobster/rust-gateway-activation-rollback-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }

@@ -1967,7 +1967,8 @@
     "lobster:rust-gateway-artifact-readiness": "node scripts/lobster-rust-gateway-artifact-readiness.mjs",
     "lobster:rust-gateway-single-authority": "node scripts/lobster-rust-gateway-single-authority.mjs",
     "lobster:rust-gateway-durable-selection": "node scripts/lobster-rust-gateway-durable-selection.mjs",
-    "lobster:rust-gateway-corrupt-selection-recovery": "node scripts/lobster-rust-gateway-corrupt-selection-recovery.mjs"
+    "lobster:rust-gateway-corrupt-selection-recovery": "node scripts/lobster-rust-gateway-corrupt-selection-recovery.mjs",
+    "lobster:rust-gateway-activation-rollback": "node scripts/lobster-rust-gateway-activation-rollback.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

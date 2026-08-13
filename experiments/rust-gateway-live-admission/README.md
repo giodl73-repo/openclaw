@@ -103,6 +103,7 @@ corepack pnpm lobster:rust-gateway-artifact-readiness
 corepack pnpm lobster:rust-gateway-single-authority
 corepack pnpm lobster:rust-gateway-durable-selection
 corepack pnpm lobster:rust-gateway-corrupt-selection-recovery
+corepack pnpm lobster:rust-gateway-activation-rollback
 ```
 
 The first successful Gateway connection can spend several minutes compiling
