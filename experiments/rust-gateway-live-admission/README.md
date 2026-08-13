@@ -75,6 +75,15 @@ the bounded side-effect-free evidence profile only. It does not add production
 routing, transfer effect authority, prove a general canary controller, or make
 Rust authoritative.
 
+The EVID-025 lane atomically persists the EVID-024 selection in an
+integrity-bound receipt. Distinct fresh processes reload it: the current
+selection generation invokes only the selected Rust artifact-bound proof, while
+a stale expected generation fails before either TypeScript or Rust dispatch.
+This proves restart-portable selection and stale-generation refusal only for
+the bounded side-effect-free evidence profile. It does not add a production
+selection store, production routing, effect authority, migration, rollback, or
+Rust authority.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -92,6 +101,7 @@ corepack pnpm lobster:rust-gateway-stream-idle-timeout
 corepack pnpm lobster:rust-gateway-stream-input
 corepack pnpm lobster:rust-gateway-artifact-readiness
 corepack pnpm lobster:rust-gateway-single-authority
+corepack pnpm lobster:rust-gateway-durable-selection
 ```
 
 The first successful Gateway connection can spend several minutes compiling

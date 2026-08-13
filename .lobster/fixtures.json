@@ -480,6 +480,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-durable-selection.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "a fresh process reloads an integrity-bound current selection receipt and dispatches only the selected Rust artifact-bound proof",
+      "structuredFailure": "a stale expected selection generation is rejected in a distinct fresh process before either runtime dispatcher is called",
+      "runner": "scripts/lobster-rust-gateway-durable-selection.mjs",
+      "evidence": ".lobster/rust-gateway-durable-selection-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }
