@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-corrupt-selection-recovery.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "selectionOwner": "fork-evidence-harness",
+    "effectAuthority": "none",
+    "authority": "none"
+  },
+  "corrupted": {
+    "input": {
+      "expectedSelectionGeneration": "selection-generation-1",
+      "tamperedRuntimeId": "typescript-baseline"
+    },
+    "expected": {
+      "code": "SELECTION_RECEIPT_INVALID",
+      "rejectedBeforeDispatch": true,
+      "fallbackRuntimeSelected": false,
+      "dispatchCounts": {
+        "typescript": 0,
+        "rust": 0
+      }
+    }
+  },
+  "recovery": {
+    "input": {
+      "selectionGeneration": "selection-generation-2"
+    },
+    "expected": {
+      "selectionGeneration": "selection-generation-2",
+      "runtimeId": "rust-canary",
+      "typescriptDispatchCount": 0,
+      "rustDispatchCount": 1,
+      "explicitOwnerReselectionRequired": true,
+      "atomicRewriteRequired": true,
+      "freshRecoveryWriterRequired": true,
+      "freshRecoveredReaderRequired": true,
+      "effectAuthority": "none",
+      "productionRuntimeAuthorityProven": false,
+      "authority": "none"
+    }
+  }
+}

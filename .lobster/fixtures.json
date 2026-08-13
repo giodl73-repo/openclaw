@@ -500,6 +500,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-corrupt-selection-recovery.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "after explicit owner re-selection and atomic receipt rewrite, a fresh process reloads the new generation and dispatches only the selected Rust artifact-bound proof",
+      "structuredFailure": "a digest-mismatched runtime selection receipt is rejected in a fresh process at zero dispatches without selecting a fallback runtime",
+      "runner": "scripts/lobster-rust-gateway-corrupt-selection-recovery.mjs",
+      "evidence": ".lobster/rust-gateway-corrupt-selection-recovery-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }
