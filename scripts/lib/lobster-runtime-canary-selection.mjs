@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+
 export class RuntimeCanarySelectionError extends Error {
   constructor(code, message) {
     super(message);
@@ -17,7 +20,7 @@ function isEligibleCandidate(candidate, input) {
   );
 }
 
-function selectRuntimeCanary(input) {
+export function selectRuntimeCanary(input) {
   const eligible = input.candidates.filter((candidate) => isEligibleCandidate(candidate, input));
   if (eligible.length === 0) {
     throw new RuntimeCanarySelectionError(
@@ -25,6 +28,7 @@ function selectRuntimeCanary(input) {
       "no runtime is eligible for this deployment unit and selection generation",
     );
   }
+
   if (eligible.length !== 1) {
     throw new RuntimeCanarySelectionError(
       "AMBIGUOUS_RUNTIME_AUTHORITY",
@@ -46,6 +50,49 @@ function selectRuntimeCanary(input) {
     productionRuntimeAuthorityProven: false,
     authority: "none",
   };
+}
+
+function selectionReceiptDigest(selection) {
+  return createHash("sha256")
+    .update(JSON.stringify({ schemaVersion: 1, selection }))
+    .digest("hex");
+}
+
+export function writeRuntimeSelectionReceipt(path, selection) {
+  const receipt = {
+    schemaVersion: 1,
+    selection,
+    sha256: selectionReceiptDigest(selection),
+  };
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(receipt)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  renameSync(temporaryPath, path);
+  return receipt;
+}
+
+export function readRuntimeSelectionReceipt(path, expectedSelectionGeneration) {
+  const receipt = JSON.parse(readFileSync(path, "utf8"));
+  if (
+    receipt.schemaVersion !== 1 ||
+    typeof receipt.selection !== "object" ||
+    receipt.selection === null ||
+    receipt.sha256 !== selectionReceiptDigest(receipt.selection)
+  ) {
+    throw new RuntimeCanarySelectionError(
+      "SELECTION_RECEIPT_INVALID",
+      "runtime selection receipt failed integrity validation",
+    );
+  }
+  if (receipt.selection.selectionGeneration !== expectedSelectionGeneration) {
+    throw new RuntimeCanarySelectionError(
+      "STALE_SELECTION_GENERATION",
+      "runtime selection receipt does not match the expected generation",
+    );
+  }
+  return receipt;
 }
 
 export async function dispatchSelectedRuntime(input, dispatchers) {

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-durable-selection.v1",
+  "owner": {
+    "id": "openclaw-typescript-gateway",
+    "selectionOwner": "fork-evidence-harness",
+    "effectAuthority": "none",
+    "authority": "none"
+  },
+  "accepted": {
+    "input": {
+      "expectedSelectionGeneration": "selection-generation-1"
+    },
+    "expected": {
+      "selectionGeneration": "selection-generation-1",
+      "runtimeId": "rust-canary",
+      "typescriptDispatchCount": 0,
+      "rustDispatchCount": 1,
+      "freshProcessRequired": true,
+      "integrityBoundReceiptRequired": true,
+      "effectAuthority": "none",
+      "productionRuntimeAuthorityProven": false,
+      "authority": "none"
+    }
+  },
+  "rejected": {
+    "input": {
+      "expectedSelectionGeneration": "selection-generation-0"
+    },
+    "expected": {
+      "code": "STALE_SELECTION_GENERATION",
+      "rejectedBeforeDispatch": true,
+      "dispatchCounts": {
+        "typescript": 0,
+        "rust": 0
+      }
+    }
+  }
+}
