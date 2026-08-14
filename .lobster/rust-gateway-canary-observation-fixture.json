@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "lobster.rfn.rust-gateway-canary-observation.v1",
+  "description": "Bounded effect-free Rust observation window with fail-closed dispatch budgets.",
+  "selectionGeneration": "selection-generation-2",
+  "transitionGeneration": "transition-generation-1",
+  "runtimeId": "rust-canary",
+  "budgets": {
+    "maxDispatches": 3,
+    "maxErrors": 0,
+    "maxDurationMs": 1800000
+  },
+  "expected": {
+    "accepted": {
+      "dispatches": 3,
+      "errors": 0,
+      "typescriptDispatchCount": 0,
+      "rustDispatchCount": 3,
+      "distinctProcessCount": 3,
+      "withinDurationBudget": true,
+      "windowStatus": "complete",
+      "effectAuthority": "none",
+      "productionRuntimeAuthorityProven": false,
+      "authority": "none"
+    },
+    "failure": {
+      "code": "CANARY_DISPATCH_BUDGET_EXHAUSTED",
+      "rejectedBeforeDispatch": true,
+      "typescriptDispatchCount": 0,
+      "rustDispatchCount": 0
+    }
+  }
+}

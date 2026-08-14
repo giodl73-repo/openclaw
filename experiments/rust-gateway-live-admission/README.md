@@ -84,6 +84,16 @@ the bounded side-effect-free evidence profile. It does not add a production
 selection store, production routing, effect authority, migration, rollback, or
 Rust authority.
 
+The EVID-028 lane binds the activated EVID-027 Rust selection to a serialized
+observation receipt with fixed dispatch, error, and elapsed-duration budgets.
+Three fresh processes each execute the artifact-bound live Gateway proof, then
+a fourth process is refused before either runtime dispatcher runs because the
+window is complete. This proves bounded, fail-closed observation of the exact
+side-effect-free profile. It does not add a production canary controller,
+production routing, concurrent-dispatch fairness, effects, runtime-state
+migration, or Rust authority. Its writer lock and receipts are scoped to one
+ephemeral proof workspace; lock recovery is not a durable runtime contract.
+
 The integration test owns temporary credentials and state. The executable
 never emits its private key or device token.
 
@@ -104,6 +114,7 @@ corepack pnpm lobster:rust-gateway-single-authority
 corepack pnpm lobster:rust-gateway-durable-selection
 corepack pnpm lobster:rust-gateway-corrupt-selection-recovery
 corepack pnpm lobster:rust-gateway-activation-rollback
+corepack pnpm lobster:rust-gateway-canary-observation
 ```
 
 The first successful Gateway connection can spend several minutes compiling
