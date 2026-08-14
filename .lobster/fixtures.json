@@ -540,6 +540,26 @@
         "typescript": "required",
         "rust": "required"
       }
+    },
+    {
+      "id": "lobster.rfn.rust-gateway-canary-observation.v1",
+      "schemaVersion": 1,
+      "ownerOracle": "openclaw-typescript-gateway",
+      "status": "implemented",
+      "acceptedResult": "three fresh processes consume one integrity-bound observation window through the selected artifact-bound Rust proof within fixed dispatch, error, and duration budgets",
+      "structuredFailure": "a fourth invocation is rejected before either runtime dispatcher runs because the serialized observation window is complete",
+      "runner": "scripts/lobster-rust-gateway-canary-observation.mjs",
+      "evidence": ".lobster/rust-gateway-canary-observation-fixture.json",
+      "compatibility": {
+        "current": "required",
+        "legacy": "explicit",
+        "optionalUnknown": "preserve",
+        "requiredUnknown": "reject"
+      },
+      "runners": {
+        "typescript": "required",
+        "rust": "required"
+      }
     }
   ]
 }
