@@ -21,6 +21,10 @@ const workspaceSourceAliases = [
     replacement: path.resolve(repoRoot, "packages/gateway-client/src/browser.ts"),
   },
   {
+    find: "@openclaw/gateway-client/model/board",
+    replacement: path.resolve(repoRoot, "packages/gateway-client/src/model/board.ts"),
+  },
+  {
     find: "@openclaw/gateway-client/scope-upgrade",
     replacement: path.resolve(repoRoot, "packages/gateway-client/src/scope-upgrade.ts"),
   },

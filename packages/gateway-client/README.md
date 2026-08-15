@@ -40,6 +40,9 @@ client surface.
 - `@openclaw/gateway-client/browser` exports the browser-safe protocol client,
   browser device-auth lifecycle, reconnect policy, and lightweight protocol
   constants. Its module graph does not import Node built-ins or `ws`.
+- `@openclaw/gateway-client/model/board` exports the optional framework-neutral
+  selected-session board model, including snapshot subscriptions, command
+  events, reconnect fencing, mutations, and revision-bound widget view state.
 - `@openclaw/gateway-client/readiness` exports helpers that delay client startup
   until the event loop can process Gateway IO.
 - `@openclaw/gateway-client/timeouts` exports timeout constants and safe timer
@@ -104,6 +107,15 @@ The host is responsible for:
 The shared protocol client still owns frame parsing, request correlation,
 challenge ordering, timeout cleanup, sequence-gap detection, and reconnect
 scheduling.
+
+## Board model
+
+`GatewayBoardModel` projects one session dashboard over any Gateway client with
+`request()` and `addEventListener()` methods. It owns `board.get` refresh,
+`board.changed` reconciliation, reconnect and retired-client fencing, mutation
+snapshots, command events, MCP App view leases, and revision/instance-bound
+view-ticket preservation. Widget catalogs, localization, and rendering remain
+host-owned.
 
 ## Defaults and reconnect behavior
 

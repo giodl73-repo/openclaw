@@ -1,6 +1,6 @@
+import { GatewayBoardModel as GatewayBoardProvider } from "@openclaw/gateway-client/model/board";
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GatewayBoardProvider } from "./gateway-provider.ts";
 import { registerBoardProviderLeaseCases } from "./provider.lease-cases.test-support.ts";
 import {
   acquireBoardProviderForSession,
