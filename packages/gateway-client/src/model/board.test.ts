@@ -1,8 +1,8 @@
 // @vitest-environment node
 import type { EventFrame } from "@openclaw/gateway-protocol";
+import type { BoardSnapshot } from "@openclaw/gateway-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GatewayBoardProvider } from "./gateway-provider.ts";
-import type { BoardProvider } from "./provider.ts";
+import { GatewayBoardModel as GatewayBoardProvider } from "./board.ts";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -11,11 +11,11 @@ afterEach(() => {
 
 describe("gateway board provider lifecycle", () => {
   it("discards mutation responses from a replaced gateway client", async () => {
-    let resolveMutation: ((snapshot: BoardProvider["snapshot$"]["value"]) => void) | undefined;
+    let resolveMutation: ((snapshot: BoardSnapshot) => void) | undefined;
     const oldClient = {
       request: vi.fn(
         () =>
-          new Promise<BoardProvider["snapshot$"]["value"]>((resolve) => {
+          new Promise<BoardSnapshot>((resolve) => {
             resolveMutation = resolve;
           }),
       ) as never,
@@ -59,11 +59,11 @@ describe("gateway board provider lifecycle", () => {
       request: vi.fn(async () => oldSnapshot) as never,
       addEventListener: () => () => {},
     };
-    let resolveNewSnapshot: ((snapshot: BoardProvider["snapshot$"]["value"]) => void) | undefined;
+    let resolveNewSnapshot: ((snapshot: BoardSnapshot) => void) | undefined;
     const newClient = {
       request: vi.fn(
         () =>
-          new Promise<BoardProvider["snapshot$"]["value"]>((resolve) => {
+          new Promise<BoardSnapshot>((resolve) => {
             resolveNewSnapshot = resolve;
           }),
       ) as never,

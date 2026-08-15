@@ -1,10 +1,10 @@
+import { remainingBoardWidgetTicketTtlMs } from "@openclaw/gateway-client/model/board";
 import { html, type TemplateResult } from "lit";
 import type { ApplicationContext } from "../../app/context.ts";
 import { t } from "../../i18n/index.ts";
 import type { BoardWidget } from "../../lib/board/types.ts";
 import type { BoardWidgetFrameUrl } from "../../lib/board/view-types.ts";
 import { BoardWidgetSandboxHost } from "../../lib/board/widget-sandbox-host.ts";
-import { remainingBoardWidgetTicketTtlMs } from "../../lib/board/widget-ticket-lifetime.ts";
 import { resolveGatewayHttpOrigin, resolveSandboxHostUrl } from "../sandbox-host.ts";
 
 // Keep in sync with the identical literal in chat widget-card.ts: a shared

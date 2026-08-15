@@ -1,5 +1,5 @@
 import type { BoardWidget, BoardWidgetAppViewResult } from "@openclaw/gateway-protocol";
-import type { BoardWidgetAppViewState } from "./view-types.ts";
+import type { BoardWidgetAppViewState } from "./board.ts";
 
 type AppViewRequest = () => Promise<BoardWidgetAppViewResult>;
 

@@ -1,17 +1,13 @@
+import type {
+  BoardEventStream,
+  BoardPinMcpAppInput,
+  BoardPinWidgetInput,
+  BoardSnapshotSignal,
+  BoardWidgetAppViewState,
+} from "@openclaw/gateway-client/model/board";
 import type { BoardCommandEvent, BoardOp, BoardSnapshot } from "@openclaw/gateway-protocol";
-import type { BoardEventStream, BoardSnapshotSignal } from "./provider-signals.ts";
-import type { BoardWidgetAppViewState } from "./view-types.ts";
 
-type BoardPinPlacement = {
-  title?: string;
-  name?: string;
-  tabId?: string;
-  size?: "sm" | "md" | "lg" | "xl" | "full";
-  after?: string;
-};
-
-export type BoardPinWidgetInput = BoardPinPlacement & { docId: string };
-export type BoardPinMcpAppInput = BoardPinPlacement & { viewId: string };
+export type { BoardPinMcpAppInput, BoardPinWidgetInput };
 
 export type BoardProvider = {
   readonly sessionKey: string;

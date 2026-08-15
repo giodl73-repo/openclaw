@@ -220,6 +220,10 @@ export const sharedVitestConfig = {
         replacement: path.join(repoRoot, "packages", "gateway-client", "src", "browser.ts"),
       },
       {
+        find: "@openclaw/gateway-client/model/board",
+        replacement: path.join(repoRoot, "packages", "gateway-client", "src", "model", "board.ts"),
+      },
+      {
         find: "@openclaw/gateway-client/readiness",
         replacement: path.join(repoRoot, "packages", "gateway-client", "src", "readiness.ts"),
       },

@@ -1,9 +1,8 @@
+import type { BoardWidgetAppViewState } from "@openclaw/gateway-client/model/board";
 import type { BoardOp } from "@openclaw/gateway-protocol";
 
 export type BoardGrantDecision = "granted" | "rejected";
-export type BoardWidgetAppViewState =
-  | { status: "ready"; viewId: string; expiresAtMs: number }
-  | { status: "stale"; error: string };
+export type { BoardWidgetAppViewState };
 
 export type BoardViewCallbacks = {
   applyOps: (ops: BoardOp[]) => Promise<void>;

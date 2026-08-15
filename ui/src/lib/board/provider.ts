@@ -1,3 +1,14 @@
+import {
+  EventStream,
+  GatewayBoardModel as GatewayBoardProvider,
+  ValueSignal,
+  canvasWidgetNameForDocument,
+  emptyBoardSnapshot,
+  mcpAppWidgetNameForViewId,
+  normalizeBoardWidgetTitle,
+  type BoardEventStream,
+  type BoardSnapshotSignal,
+} from "@openclaw/gateway-client/model/board";
 import type {
   BoardCommand,
   BoardCommandEvent,
@@ -10,24 +21,15 @@ import {
   buildAgentMainSessionKey,
   normalizeSessionKeyForUiComparison,
 } from "../sessions/session-key.ts";
-import { GatewayBoardProvider } from "./gateway-provider.ts";
 import { applyMockBoardOp, normalizeMockBoardSnapshot } from "./mock-ops.ts";
-import { emptyBoardSnapshot, normalizeBoardWidgetTitle } from "./provider-helpers.ts";
-import {
-  EventStream,
-  ValueSignal,
-  type BoardEventStream,
-  type BoardSnapshotSignal,
-} from "./provider-signals.ts";
 import type { BoardPinMcpAppInput, BoardPinWidgetInput, BoardProvider } from "./provider-types.ts";
 import type { BoardWidgetAppViewState } from "./view-types.ts";
-import { canvasWidgetNameForDocument, mcpAppWidgetNameForViewId } from "./widget-names.ts";
 export type { BoardCommandEvent };
 export type { BoardProvider } from "./provider-types.ts";
 export type { BoardViewCallbacks, BoardWidgetAppViewState } from "./view-types.ts";
-export { canvasWidgetNameForDocument, mcpAppWidgetNameForViewId } from "./widget-names.ts";
+export { canvasWidgetNameForDocument, mcpAppWidgetNameForViewId };
 
-type BoardGatewayClient = Pick<GatewayBrowserClient, "request" | "addEventListener">;
+type ControlUiBoardGatewayClient = Pick<GatewayBrowserClient, "request" | "addEventListener">;
 
 function mockSnapshot(sessionKey: string): BoardSnapshot {
   return {
@@ -392,7 +394,7 @@ export function boardProviderForSession(sessionKey: string, available = true): B
 export type BoardProviderLease = {
   provider: BoardProvider;
   update: (
-    client: BoardGatewayClient,
+    client: ControlUiBoardGatewayClient,
     connected: boolean,
     capabilities: BoardProviderCapabilities,
   ) => void;
@@ -401,7 +403,7 @@ export type BoardProviderLease = {
 
 export function acquireBoardProviderForSession(
   sessionKey: string,
-  client: BoardGatewayClient,
+  client: ControlUiBoardGatewayClient,
   connected = true,
   canPinWidgets = true,
   canPinMcpApps = false,
@@ -415,7 +417,20 @@ export function acquireBoardProviderForSession(
   }
   let entry = gatewayProviders.get(key);
   if (!entry) {
-    entry = { provider: new GatewayBoardProvider(key, client, connected), consumers: 0 };
+    entry = {
+      provider: new GatewayBoardProvider(
+        key,
+        client,
+        connected,
+        true,
+        false,
+        true,
+        true,
+        (left, right) =>
+          normalizeSessionKeyForUiComparison(left) === normalizeSessionKeyForUiComparison(right),
+      ),
+      consumers: 0,
+    };
     gatewayProviders.set(key, entry);
   } else {
     entry.provider.attachClient(client, connected);
