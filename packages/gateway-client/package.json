@@ -40,6 +40,11 @@
       "import": "./dist/browser.mjs",
       "default": "./dist/browser.mjs"
     },
+    "./model/board": {
+      "types": "./dist/model/board.d.mts",
+      "import": "./dist/model/board.mjs",
+      "default": "./dist/model/board.mjs"
+    },
     "./readiness": {
       "types": "./dist/readiness.d.mts",
       "import": "./dist/readiness.mjs",
@@ -62,7 +67,7 @@
     }
   },
   "scripts": {
-    "build": "tsdown src/index.ts src/browser.ts src/readiness.ts src/scope-upgrade.ts src/timeouts.ts src/websocket-data.ts --no-config --platform node --format esm --dts --out-dir dist --clean"
+    "build": "tsdown src/index.ts src/browser.ts src/model/board.ts src/readiness.ts src/scope-upgrade.ts src/timeouts.ts src/websocket-data.ts --no-config --platform node --format esm --dts --out-dir dist --clean"
   },
   "dependencies": {
     "@openclaw/gateway-protocol": "workspace:*",

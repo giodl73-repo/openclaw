@@ -1,8 +1,8 @@
 /* @vitest-environment jsdom */
 
+import { recordBoardWidgetTicketReceipt } from "@openclaw/gateway-client/model/board";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoardWidget } from "../../lib/board/types.ts";
-import { recordBoardWidgetTicketReceipt } from "../../lib/board/widget-ticket-lifetime.ts";
 import { BoardWidgetFrameLifecycle } from "./board-widget-frame.ts";
 
 type LifecycleInternals = {

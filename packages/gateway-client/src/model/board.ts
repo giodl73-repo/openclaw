@@ -5,9 +5,8 @@ import type {
   BoardSnapshot,
   BoardWidget,
   BoardWidgetAppViewResult,
+  EventFrame,
 } from "@openclaw/gateway-protocol";
-import type { GatewayBrowserClient } from "../../api/gateway.ts";
-import { normalizeSessionKeyForUiComparison } from "../sessions/session-key.ts";
 import { BoardMcpAppViewCache } from "./mcp-app-view-cache.ts";
 import { emptyBoardSnapshot, normalizeBoardWidgetTitle } from "./provider-helpers.ts";
 import {
@@ -16,17 +15,45 @@ import {
   type BoardEventStream,
   type BoardSnapshotSignal,
 } from "./provider-signals.ts";
-import type { BoardPinMcpAppInput, BoardPinWidgetInput, BoardProvider } from "./provider-types.ts";
-import type { BoardWidgetAppViewState } from "./view-types.ts";
 import { canvasWidgetNameForDocument, mcpAppWidgetNameForViewId } from "./widget-names.ts";
 import {
   copyBoardWidgetTicketReceipt,
   recordBoardWidgetTicketReceipt,
 } from "./widget-ticket-lifetime.ts";
 
-type BoardGatewayClient = Pick<GatewayBrowserClient, "request" | "addEventListener">;
+export {
+  EventStream,
+  ValueSignal,
+  type BoardEventStream,
+  type BoardSnapshotSignal,
+} from "./provider-signals.ts";
+export { emptyBoardSnapshot, normalizeBoardWidgetTitle } from "./provider-helpers.ts";
+export { canvasWidgetNameForDocument, mcpAppWidgetNameForViewId } from "./widget-names.ts";
+export {
+  recordBoardWidgetTicketReceipt,
+  remainingBoardWidgetTicketTtlMs,
+} from "./widget-ticket-lifetime.ts";
 
-export class GatewayBoardProvider implements BoardProvider {
+export type BoardPinPlacement = {
+  title?: string;
+  name?: string;
+  tabId?: string;
+  size?: "sm" | "md" | "lg" | "xl" | "full";
+  after?: string;
+};
+
+export type BoardPinWidgetInput = BoardPinPlacement & { docId: string };
+export type BoardPinMcpAppInput = BoardPinPlacement & { viewId: string };
+export type BoardWidgetAppViewState =
+  | { status: "ready"; viewId: string; expiresAtMs: number }
+  | { status: "stale"; error: string };
+
+export type BoardGatewayClient = {
+  request<T = unknown>(method: string, params?: unknown): Promise<T>;
+  addEventListener(listener: (event: EventFrame) => void): () => void;
+};
+
+export class GatewayBoardModel {
   readonly snapshot$: BoardSnapshotSignal<BoardSnapshot>;
   readonly events: BoardEventStream<BoardCommandEvent>;
   private readonly snapshotSignal: ValueSignal<BoardSnapshot>;
@@ -54,6 +81,8 @@ export class GatewayBoardProvider implements BoardProvider {
     public readonly canPinMcpApps = false,
     public readonly canMutate = true,
     public readonly canGrant = true,
+    private readonly sessionKeysMatch: (left: string, right: string) => boolean = (left, right) =>
+      left === right,
   ) {
     this.snapshotSignal = new ValueSignal(emptyBoardSnapshot(sessionKey));
     this.snapshot$ = this.snapshotSignal;
@@ -256,11 +285,7 @@ export class GatewayBoardProvider implements BoardProvider {
   }
 
   private matchesSession(sessionKey: string | undefined): boolean {
-    return (
-      typeof sessionKey === "string" &&
-      normalizeSessionKeyForUiComparison(sessionKey) ===
-        normalizeSessionKeyForUiComparison(this.sessionKey)
-    );
+    return typeof sessionKey === "string" && this.sessionKeysMatch(sessionKey, this.sessionKey);
   }
 
   private requestRefresh(changedWidget?: string, userRequested = false): Promise<void> {
