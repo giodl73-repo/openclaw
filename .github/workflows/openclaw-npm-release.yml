@@ -653,18 +653,39 @@ jobs:
             cp "$CORE_PACKAGE_TARBALL_DIR"/*.tgz "$ARTIFACT_DIR/"
             cp "$CORE_PACKAGE_TARBALL_DIR/SHA256SUMS" "$ARTIFACT_DIR/core-packages-SHA256SUMS"
           fi
+          npm_install_evidence_args=(
+            --root-tarball "$PACK_PATH"
+            --package-version "$PACKAGE_VERSION"
+            --output-dir "$DEPENDENCY_EVIDENCE_DIR/npm-install"
+          )
+          if [[ -n "$AI_TARBALL_PATH" ]]; then
+            npm_install_evidence_args+=(--dependency-tarball "@openclaw/ai=$AI_TARBALL_PATH")
+          fi
+          if [[ -n "$GATEWAY_PROTOCOL_TARBALL_PATH" ]]; then
+            npm_install_evidence_args+=(--dependency-tarball "@openclaw/gateway-protocol=$GATEWAY_PROTOCOL_TARBALL_PATH")
+          fi
+          if [[ -n "$GATEWAY_CLIENT_TARBALL_PATH" ]]; then
+            npm_install_evidence_args+=(--dependency-tarball "@openclaw/gateway-client=$GATEWAY_CLIENT_TARBALL_PATH")
+          fi
+          node --import tsx scripts/generate-npm-install-release-evidence.mts "${npm_install_evidence_args[@]}"
+          NPM_INSTALL_EVIDENCE_FILE="$DEPENDENCY_EVIDENCE_DIR/npm-install/npm-install-evidence.json"
+          NPM_INSTALL_EVIDENCE_SHA256="$(sha256sum "$NPM_INSTALL_EVIDENCE_FILE" | awk '{print $1}')"
+          DEPENDENCY_EVIDENCE_MANIFEST_SHA256="$(sha256sum "$DEPENDENCY_EVIDENCE_DIR/dependency-evidence-manifest.json" | awk '{print $1}')"
           cp -R "$DEPENDENCY_EVIDENCE_DIR" "$ARTIFACT_DIR/dependency-evidence"
           printf '%s\n' "$RELEASE_TAG" > "$ARTIFACT_DIR/release-tag.txt"
           printf '%s\n' "$RELEASE_SHA" > "$ARTIFACT_DIR/release-sha.txt"
           printf '%s\n' "$RELEASE_NPM_DIST_TAG" > "$ARTIFACT_DIR/release-npm-dist-tag.txt"
-          ARTIFACT_DIR="$ARTIFACT_DIR" RELEASE_TAG="$RELEASE_TAG" RELEASE_SHA="$RELEASE_SHA" RELEASE_NPM_DIST_TAG="$RELEASE_NPM_DIST_TAG" PACKAGE_VERSION="$PACKAGE_VERSION" TARBALL_NAME="$TARBALL_NAME" TARBALL_SHA256="$TARBALL_SHA256" AI_PACKAGE_VERSION="$AI_PACKAGE_VERSION" AI_TARBALL_NAME="$AI_TARBALL_NAME" AI_TARBALL_SHA256="$AI_TARBALL_SHA256" GATEWAY_PROTOCOL_PACKAGE_VERSION="$GATEWAY_PROTOCOL_PACKAGE_VERSION" GATEWAY_PROTOCOL_TARBALL_NAME="$GATEWAY_PROTOCOL_TARBALL_NAME" GATEWAY_PROTOCOL_TARBALL_SHA256="$GATEWAY_PROTOCOL_TARBALL_SHA256" GATEWAY_CLIENT_PACKAGE_VERSION="$GATEWAY_CLIENT_PACKAGE_VERSION" GATEWAY_CLIENT_TARBALL_NAME="$GATEWAY_CLIENT_TARBALL_NAME" GATEWAY_CLIENT_TARBALL_SHA256="$GATEWAY_CLIENT_TARBALL_SHA256" node <<'NODE'
+          ARTIFACT_DIR="$ARTIFACT_DIR" RELEASE_TAG="$RELEASE_TAG" RELEASE_SHA="$RELEASE_SHA" RELEASE_NPM_DIST_TAG="$RELEASE_NPM_DIST_TAG" PACKAGE_VERSION="$PACKAGE_VERSION" TARBALL_NAME="$TARBALL_NAME" TARBALL_SHA256="$TARBALL_SHA256" AI_PACKAGE_VERSION="$AI_PACKAGE_VERSION" AI_TARBALL_NAME="$AI_TARBALL_NAME" AI_TARBALL_SHA256="$AI_TARBALL_SHA256" GATEWAY_PROTOCOL_PACKAGE_VERSION="$GATEWAY_PROTOCOL_PACKAGE_VERSION" GATEWAY_PROTOCOL_TARBALL_NAME="$GATEWAY_PROTOCOL_TARBALL_NAME" GATEWAY_PROTOCOL_TARBALL_SHA256="$GATEWAY_PROTOCOL_TARBALL_SHA256" GATEWAY_CLIENT_PACKAGE_VERSION="$GATEWAY_CLIENT_PACKAGE_VERSION" GATEWAY_CLIENT_TARBALL_NAME="$GATEWAY_CLIENT_TARBALL_NAME" GATEWAY_CLIENT_TARBALL_SHA256="$GATEWAY_CLIENT_TARBALL_SHA256" NPM_INSTALL_EVIDENCE_FILE="$NPM_INSTALL_EVIDENCE_FILE" NPM_INSTALL_EVIDENCE_SHA256="$NPM_INSTALL_EVIDENCE_SHA256" DEPENDENCY_EVIDENCE_MANIFEST_SHA256="$DEPENDENCY_EVIDENCE_MANIFEST_SHA256" node <<'NODE'
           const fs = require("node:fs");
           const path = require("node:path");
           const pluginSdkApi = JSON.parse(
             fs.readFileSync(".artifacts/plugin-sdk-api-release-evidence.json", "utf8"),
           );
+          const npmInstallEvidence = JSON.parse(
+            fs.readFileSync(process.env.NPM_INSTALL_EVIDENCE_FILE, "utf8"),
+          );
           const manifest = {
-            version: 1,
+            version: 2,
             releaseTag: process.env.RELEASE_TAG,
             releaseSha: process.env.RELEASE_SHA,
             npmDistTag: process.env.RELEASE_NPM_DIST_TAG,
@@ -717,6 +738,12 @@ jobs:
               : [],
             dependencyEvidenceDir: "dependency-evidence",
             dependencyEvidenceManifest: "dependency-evidence/dependency-evidence-manifest.json",
+            dependencyEvidenceManifestSha256: process.env.DEPENDENCY_EVIDENCE_MANIFEST_SHA256,
+            npmInstallEvidence: {
+              path: "dependency-evidence/npm-install/npm-install-evidence.json",
+              sha256: process.env.NPM_INSTALL_EVIDENCE_SHA256,
+              packageCount: npmInstallEvidence.packageCount,
+            },
           };
           fs.writeFileSync(
             path.join(process.env.ARTIFACT_DIR, "preflight-manifest.json"),
@@ -744,6 +771,8 @@ jobs:
             verify_args+=("$AI_TARBALL")
           fi
           node --import tsx scripts/openclaw-npm-prepublish-verify.ts "${verify_args[@]}"
+          node scripts/verify-npm-install-release-evidence.mjs \
+            --artifact-dir "$PREFLIGHT_ARTIFACT_DIR"
 
       - name: Upload dependency release evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1304,6 +1333,8 @@ jobs:
             echo "Frozen target without a publishable @openclaw/gateway-client package contains unexpected artifacts." >&2
             exit 1
           fi
+          node trusted-workflow/scripts/verify-npm-install-release-evidence.mjs \
+            --artifact-dir preflight-tarball
           echo "tarball_name=$ARTIFACT_TARBALL_NAME" >> "$GITHUB_OUTPUT"
           echo "tarball_sha256=$ARTIFACT_TARBALL_SHA256" >> "$GITHUB_OUTPUT"
           echo "tarball_path=$ARTIFACT_TARBALL_PATH" >> "$GITHUB_OUTPUT"

@@ -465,6 +465,8 @@ jobs:
             --jq .content | base64 --decode > "${tooling_dir}/lib/plain-gh.mjs"
           gh api "repos/${GITHUB_REPOSITORY}/contents/scripts/plugin-sdk-api-release-evidence.mjs?ref=${WORKFLOW_SHA}" \
             --jq .content | base64 --decode > "${tooling_dir}/plugin-sdk-api-release-evidence.mjs"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/scripts/verify-npm-install-release-evidence.mjs?ref=${WORKFLOW_SHA}" \
+            --jq .content | base64 --decode > "${tooling_dir}/verify-npm-install-release-evidence.mjs"
 
       - name: Checkout release tag
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -492,6 +494,7 @@ jobs:
           PREFLIGHT_WORKFLOW_SHA: ${{ steps.preflight_artifact.outputs.head_sha }}
           PREFLIGHT_WORKFLOW_BRANCH: ${{ steps.preflight_artifact.outputs.head_branch }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          NPM_INSTALL_EVIDENCE_VALIDATOR: ${{ runner.temp }}/release-validation-tooling/verify-npm-install-release-evidence.mjs
         run: |
           set -euo pipefail
           preflight_dir="${RUNNER_TEMP}/openclaw-npm-preflight-manifest"
@@ -563,6 +566,7 @@ jobs:
             echo "Preflight manifest tarball digest mismatch." >&2
             exit 1
           fi
+          node "$NPM_INSTALL_EVIDENCE_VALIDATOR" --artifact-dir "$preflight_dir"
           echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
           echo "tarball_sha256=$tarball_sha256" >> "$GITHUB_OUTPUT"
 
