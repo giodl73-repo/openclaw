@@ -20,6 +20,10 @@ import {
   uiSessionRowMatchesSelectedChat,
   type UiSessionDefaultsHost,
 } from "../../lib/sessions/session-key.ts";
+import {
+  selectedControlModelConversationForRoute,
+  type ChatControlModelConversationState,
+} from "./chat-control-model.ts";
 import type { ChatRunStartupState } from "./chat-run-startup.ts";
 import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
 import { formatConnectError } from "./connect-error.ts";
@@ -114,17 +118,18 @@ type ReconcileOptions = {
   requestUpdate?: boolean;
 };
 
-type ChatAbortRunState = SessionScopeHost & {
-  client: GatewayBrowserClient | null;
-  connected: boolean;
-  sessionKey: string;
-  chatRunId?: string | null;
-  chatRunSessionAbortable?: boolean;
-  lastError?: string | null;
-  chatError?: string | null;
-  /** Reloads history and the authoritative session row. */
-  refreshCurrentChat?: () => Promise<void>;
-};
+type ChatAbortRunState = SessionScopeHost &
+  ChatControlModelConversationState & {
+    client: GatewayBrowserClient | null;
+    connected: boolean;
+    sessionKey: string;
+    chatRunId?: string | null;
+    chatRunSessionAbortable?: boolean;
+    lastError?: string | null;
+    chatError?: string | null;
+    /** Reloads history and the authoritative session row. */
+    refreshCurrentChat?: () => Promise<void>;
+  };
 
 type ChatAbortIntentBase = {
   sourceClient: GatewayBrowserClient;
@@ -364,7 +369,23 @@ async function abortChatRun(state: ChatAbortRunState): Promise<void> {
     return;
   }
   const intent = currentChatAbortIntent(state, client);
-  const result = await requestChatAbort(client, intent);
+  // Session-wide stops and recovered embedded runs stay Gateway-owned: only an
+  // exact chat.abort-eligible run matches the Control Model command contract.
+  const exactRun =
+    intent.runId !== null && intent.sessionAbortable !== true ? intent : null;
+  const conversation = exactRun
+    ? selectedControlModelConversationForRoute(state, exactRun.sessionKey, exactRun.agentId)
+    : null;
+  const result: ChatAbortRequestResult =
+    conversation && exactRun
+      ? await conversation
+          .abort(exactRun.runId)
+          .then(
+            (response) =>
+              ({ ok: true, noActiveRun: readNoActiveRunResponse(response) }) as const,
+          )
+          .catch((error: unknown) => ({ ok: false, error }) as const)
+      : await requestChatAbort(client, intent);
   if (!result.ok) {
     setChatError(state, formatConnectError(result.error));
     return;

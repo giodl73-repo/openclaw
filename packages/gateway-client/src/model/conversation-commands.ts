@@ -2,6 +2,7 @@ import type { reduceSessionProjection } from "../browser.js";
 import type { ConversationInteractionStore } from "./conversation-interactions.js";
 import type {
   ControlModelConversationHost,
+  ControlModelConversationMetadata,
   ControlModelSendInput,
   ControlModelSendResult,
 } from "./conversation-types.js";
@@ -21,6 +22,8 @@ type ConversationCommandControllerOptions = {
   host: ControlModelConversationHost;
   sessionKey: string;
   interactions: ConversationInteractionStore;
+  /** History-owned startup envelope; its session id pins the send to one branch. */
+  historyMetadata(): ControlModelConversationMetadata | null;
   assertCommandReady(command: string): void;
   captureEpoch(command: string): number;
   assertEpoch(epoch: number, command: string): void;
@@ -66,11 +69,13 @@ export class ConversationCommandController {
     let epoch: number | null = null;
     try {
       epoch = this.#options.captureEpoch("chat.send");
+      const historySessionId = this.#options.historyMetadata()?.sessionId;
       const response = await this.#options.host.gateway.request<Record<string, unknown>>(
         "chat.send",
         {
           sessionKey: this.#options.sessionKey,
           ...(this.#options.host.agentId ? { agentId: this.#options.host.agentId } : {}),
+          ...(historySessionId ? { sessionId: historySessionId } : {}),
           message: normalized.message,
           deliver: false,
           idempotencyKey,
@@ -318,6 +323,7 @@ function normalizeSendInput(input: ControlModelSendInput): Record<string, unknow
 function sendOptions(input: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const key of [
+    "sessionId",
     "thinking",
     "fastMode",
     "fastAutoOnSeconds",

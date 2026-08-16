@@ -35,6 +35,8 @@ export class ControlModelCommandError extends Error {
   readonly code: string;
   readonly retryable: boolean;
   readonly retryAfterMs?: number;
+  /** Gateway-supplied failure detail; producers hand over already-frozen data. */
+  readonly details?: DeepReadonly<unknown>;
   readonly command: string;
 
   constructor(options: {
@@ -44,6 +46,7 @@ export class ControlModelCommandError extends Error {
     command: string;
     retryable?: boolean;
     retryAfterMs?: number;
+    details?: DeepReadonly<unknown>;
   }) {
     super(options.message);
     this.name = "ControlModelCommandError";
@@ -51,6 +54,7 @@ export class ControlModelCommandError extends Error {
     this.code = options.code;
     this.retryable = options.retryable === true;
     this.retryAfterMs = options.retryAfterMs;
+    this.details = options.details;
     this.command = options.command;
   }
 }
@@ -180,6 +184,7 @@ export type ControlModelSendInput =
       content?: string;
       attachments?: readonly unknown[];
       idempotencyKey?: string;
+      sessionId?: string;
       thinking?: string;
       fastMode?: boolean | "auto";
       fastAutoOnSeconds?: number;

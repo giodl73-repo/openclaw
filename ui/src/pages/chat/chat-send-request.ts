@@ -1,3 +1,7 @@
+import {
+  ControlModelCommandError,
+  type ControlModelSendInput,
+} from "@openclaw/gateway-client/model";
 import type {
   ChatSendIntent,
   QueueMode,
@@ -6,10 +10,12 @@ import { GatewayRequestError } from "../../api/gateway.ts";
 import type { ChatAttachment, HumanMention } from "../../lib/chat/chat-types.ts";
 import {
   isUiGlobalSessionKey,
+  isUiSelectedGlobalSessionKey,
   normalizeAgentId,
   resolveUiSelectedSessionAgentId,
 } from "../../lib/sessions/session-key.ts";
 import { buildChatApiAttachments } from "./attachment-api.ts";
+import { selectedControlModelConversationForRoute } from "./chat-control-model.ts";
 import { isInitialChatHistoryUnavailable } from "./chat-history-state.ts";
 import { normalizeChatSendAck, type ChatSendAck } from "./chat-send-ack.ts";
 import type { ChatState } from "./chat-state-contract.ts";
@@ -35,25 +41,72 @@ export async function requestChatSend(
   const controlUiReconnectResume = Boolean(
     !params.intent && sessionId && state.reconnectResumeSessionId === sessionId,
   );
-  const payload = await state.client!.request("chat.send", {
-    sessionKey: routing.sessionKey,
-    ...(isUiGlobalSessionKey(routing.sessionKey) && routing.selectedAgentId
-      ? { agentId: routing.selectedAgentId }
-      : {}),
-    ...(sessionId ? { sessionId } : {}),
-    ...(controlUiReconnectResume ? { __controlUiReconnectResume: true } : {}),
-    message: params.message,
-    ...(params.mentions?.length ? { mentions: params.mentions } : {}),
-    ...(params.intent ? { intent: params.intent } : {}),
-    deliver: false,
-    ...(params.replyToId ? { replyToId: params.replyToId } : {}),
-    ...(params.queueMode ? { queueMode: params.queueMode } : {}),
-    ...(params.expectedLeafEntryId !== undefined
-      ? { expectedLeafEntryId: params.expectedLeafEntryId }
-      : {}),
-    idempotencyKey: params.runId,
-    attachments: buildChatApiAttachments(params.attachments),
-  });
+  const attachments = buildChatApiAttachments(params.attachments);
+  // Mentions, typed send intents, steer, and reconnect resume carry Gateway-only
+  // request fields the Control Model send contract does not express.
+  const conversation =
+    !controlUiReconnectResume &&
+    params.queueMode !== "steer" &&
+    !params.intent &&
+    !params.mentions?.length
+      ? selectedControlModelConversationForRoute(
+          state,
+          routing.sessionKey,
+          // Mirror the conversation owner's identity: only globally scoped
+          // routes carry an agent id on the cached Control Model conversation.
+          isUiSelectedGlobalSessionKey(state, routing.sessionKey)
+            ? routing.selectedAgentId
+            : undefined,
+        )
+      : null;
+  let payload: unknown;
+  if (conversation) {
+    const input: ControlModelSendInput = {
+      message: params.message,
+      idempotencyKey: params.runId,
+      ...(sessionId ? { sessionId } : {}),
+      ...(attachments?.length ? { attachments } : {}),
+      ...(params.replyToId ? { replyToId: params.replyToId } : {}),
+      ...(params.queueMode ? { queueMode: params.queueMode } : {}),
+      ...(params.expectedLeafEntryId !== undefined
+        ? { expectedLeafEntryId: params.expectedLeafEntryId }
+        : {}),
+    };
+    try {
+      payload = await conversation.send(input);
+    } catch (error) {
+      if (!(error instanceof ControlModelCommandError)) {
+        throw error;
+      }
+      throw new GatewayRequestError({
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        retryable: error.retryable,
+        ...(error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+      });
+    }
+  } else {
+    payload = await state.client!.request("chat.send", {
+      sessionKey: routing.sessionKey,
+      ...(isUiGlobalSessionKey(routing.sessionKey) && routing.selectedAgentId
+        ? { agentId: routing.selectedAgentId }
+        : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(controlUiReconnectResume ? { __controlUiReconnectResume: true } : {}),
+      message: params.message,
+      ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+      ...(params.intent ? { intent: params.intent } : {}),
+      deliver: false,
+      ...(params.replyToId ? { replyToId: params.replyToId } : {}),
+      ...(params.queueMode ? { queueMode: params.queueMode } : {}),
+      ...(params.expectedLeafEntryId !== undefined
+        ? { expectedLeafEntryId: params.expectedLeafEntryId }
+        : {}),
+      idempotencyKey: params.runId,
+      attachments,
+    });
+  }
   if (controlUiReconnectResume) {
     state.reconnectResumeSessionId = null;
   }

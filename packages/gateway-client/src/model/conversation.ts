@@ -154,6 +154,7 @@ export class ControlModelConversation {
       host,
       sessionKey,
       interactions: this.#interactions,
+      historyMetadata: () => this.#history.metadata,
       assertCommandReady: (command) => this.#assertCommandReady(command),
       captureEpoch: (command) => this.#captureEpoch(command),
       assertEpoch: (epoch, command) => this.#assertEpoch(epoch, command),

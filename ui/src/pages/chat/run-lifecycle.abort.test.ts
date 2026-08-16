@@ -55,6 +55,82 @@ function makeAbortHost(over: Partial<AbortHost> = {}): AbortHost {
 }
 
 describe("handleAbortChat", () => {
+  it("routes an exact connected selected run through the Control Model", async () => {
+    const request = vi.fn();
+    const abort = vi.fn(async () => ({ aborted: true }));
+    const host = makeAbortHost({
+      client: createTestGatewayClient(request),
+      chatRunId: "run-main",
+      controlModelConversation: { abort } as unknown as AbortHost["controlModelConversation"],
+      controlModelConversationSessionKey: "agent:main",
+      controlModelConversationAgentId: null,
+    });
+
+    await handleAbortChat(host, { preserveDraft: true });
+
+    expect(abort).toHaveBeenCalledWith("run-main");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps session-wide aborts on the incumbent Gateway path", async () => {
+    const request = vi.fn(async () => ({ aborted: true }));
+    const abort = vi.fn();
+    const host = makeAbortHost({
+      client: createTestGatewayClient(request),
+      controlModelConversation: { abort } as unknown as AbortHost["controlModelConversation"],
+      controlModelConversationSessionKey: "agent:main",
+      controlModelConversationAgentId: null,
+    });
+
+    await handleAbortChat(host, { preserveDraft: true });
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith("sessions.abort", {
+      key: "agent:main",
+      clearQueued: true,
+    });
+  });
+
+  it("keeps recovered embedded Stop on the session-owned Gateway path", async () => {
+    const request = vi.fn(async () => ({ status: "aborted" }));
+    const abort = vi.fn();
+    const host = makeAbortHost({
+      client: createTestGatewayClient(request),
+      chatRunId: "run-embedded-recovered",
+      chatRunSessionAbortable: true,
+      controlModelConversation: { abort } as unknown as AbortHost["controlModelConversation"],
+      controlModelConversationSessionKey: "agent:main",
+      controlModelConversationAgentId: null,
+    });
+
+    await handleAbortChat(host, { preserveDraft: true });
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith("sessions.abort", {
+      key: "agent:main",
+      runId: "run-embedded-recovered",
+    });
+  });
+
+  it("settles through the authoritative refresh when the model reports nothing to abort", async () => {
+    const abort = vi.fn(async () => ({ ok: true, aborted: false, runIds: [] }));
+    const refreshCurrentChat = vi.fn(async () => {});
+    const host = makeAbortHost({
+      client: createTestGatewayClient(vi.fn()),
+      chatRunId: "run-finished",
+      refreshCurrentChat,
+      controlModelConversation: { abort } as unknown as AbortHost["controlModelConversation"],
+      controlModelConversationSessionKey: "agent:main",
+      controlModelConversationAgentId: null,
+    });
+
+    await handleAbortChat(host, { preserveDraft: true });
+
+    expect(abort).toHaveBeenCalledWith("run-finished");
+    expect(refreshCurrentChat).toHaveBeenCalledTimes(1);
+    expect(host.chatRunId).toBe("run-finished");
+  });
+
   it("dispatches sessions.abort when only descendant work remains", async () => {
     const request = vi.fn(async () => ({ status: "aborted" }));
     const host = makeAbortHost({

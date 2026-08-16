@@ -182,6 +182,9 @@ export function normalizeGatewayError(error: unknown, command: string): ControlM
       category === "retryable" ||
       category === "disconnected",
     ...(retryAfterMs !== null && retryAfterMs >= 0 ? { retryAfterMs } : {}),
+    // Callers fence on Gateway reasons such as active-leaf-changed; freeze the
+    // payload here so the shared error never leaks a mutable wire object.
+    ...(source?.details !== undefined ? { details: cloneAndFreeze(source.details) } : {}),
   });
 }
 

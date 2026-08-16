@@ -13,6 +13,7 @@ import type {
 import type { ControlUiFollowUpMode } from "../../lib/chat/follow-up-mode.ts";
 import type { SessionCapability, SessionRefreshTarget } from "../../lib/sessions/index.ts";
 import type { ChatCommandHost } from "./chat-commands.ts";
+import type { ChatControlModelConversationState } from "./chat-control-model.ts";
 import type { ChatRunStartupState } from "./chat-run-startup.ts";
 import type { ChatSendTimingEntry } from "./chat-send-ack.ts";
 import type { ChatInputHistoryState } from "./input-history.ts";
@@ -33,7 +34,8 @@ export type ChatComposerRecoveryOwner = {
 export type ChatHost = ChatInputHistoryState &
   ChatScrollHost &
   ToolStreamHost &
-  ChatCommandHost & {
+  ChatCommandHost &
+  ChatControlModelConversationState & {
     sessions: SessionCapability;
     chatSubmissions: ApplicationChatSubmissions;
     /** Initial placement owns admission even while transport loss hides its content. */
