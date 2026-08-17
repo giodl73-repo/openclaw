@@ -1,8 +1,8 @@
+/* oxlint-disable max-lines -- TODO: split this chat pane rendering boundary. */
 import { html, nothing } from "lit";
 import { GATEWAY_SERVER_CAPS } from "../../../../packages/gateway-protocol/src/index.js";
 import { findInlineApproval } from "../../app/approval-presentation.ts";
 import { hasOperatorAdminAccess, hasOperatorWriteAccess } from "../../app/operator-access.ts";
-import { cancelQuestionPrompt, submitQuestionPrompt } from "../../app/question-prompt.ts";
 import { readPresenceEntries, resolveCurrentSelfUser } from "../../app/user-profile.ts";
 import { hasSessionPresenceViewers } from "../../components/viewer-facepile.ts";
 import { t } from "../../i18n/index.ts";
@@ -20,6 +20,11 @@ import {
   resolveChatPaneObserverRunId,
 } from "../../lib/observer-digest.ts";
 import { buildAgentMainSessionKey } from "../../lib/sessions/session-key.ts";
+import {
+  controlModelChatInteractionProps,
+  questionPromptsForRoute,
+} from "./chat-control-model-interactions.ts";
+import { controlModelAgentIdForRoute } from "./chat-control-model.ts";
 import { clearChatHistory } from "./chat-history.ts";
 import { resolveChatMessageAccess } from "./chat-message-access.ts";
 import { createChatModelSetupBanner, requiresChatModelSetup } from "./chat-model-setup.ts";
@@ -313,14 +318,20 @@ export class ChatPane extends ChatPaneBrowserAnnotationRender {
       // Unconditional: catalog chats never render the rail (sessionRailReady is
       // forced false), and a hide/show from any surface must reach the gateway.
       onObserverVisibilityChange: this.setSessionObserverVisibility,
-      gatewayQuestionPrompts: catalogKey || sessionParticipationBlocked ? [] : this.questionPrompts,
+      gatewayQuestionPrompts:
+        catalogKey || sessionParticipationBlocked
+          ? []
+          : questionPromptsForRoute(this.questionPrompts, state.sessionKey, currentAgentId),
+      ...controlModelChatInteractionProps(
+        state,
+        this.questionPromptState,
+        state.sessionKey,
+        controlModelAgentIdForRoute(state, state.sessionKey),
+      ),
       onGatewayQuestionChange: () => {
         this.questionPrompts = [...this.questionPrompts];
         this.requestUpdate();
       },
-      onGatewayQuestionSubmit: (id, answers) =>
-        submitQuestionPrompt(this.questionPromptState, id, answers),
-      onGatewayQuestionSkip: (id) => cancelQuestionPrompt(this.questionPromptState, id),
       messages: catalogKey ? this.catalogMessages : state.chatMessages,
       historyPagination:
         catalogKey || state.chatHistoryPagination?.hasMore || this.loadingOlder

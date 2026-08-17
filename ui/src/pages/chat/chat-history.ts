@@ -50,6 +50,7 @@ import {
 } from "../../lib/sessions/session-key.ts";
 import { normalizeLowercaseStringOrEmpty } from "../../lib/string-coerce.ts";
 import { replaceChatAttachmentsFromEditor } from "./attachment-payload-store.ts";
+import { controlModelAgentIdForRoute } from "./chat-control-model.ts";
 import type { ChatHistoryPagination } from "./chat-history-pagination.ts";
 import {
   isRetryableStartupUnavailable,
@@ -771,6 +772,22 @@ async function retryPendingSessionMessageSubscriptionReleases(
   );
 }
 
+async function retireLegacySessionMessageSubscription(
+  state: ChatSessionMessageSubscriptionState,
+): Promise<boolean> {
+  const requests = getChatHistoryPaneRequests(state);
+  requests.subscriptionGeneration += 1;
+  if (state.chatSessionMessageSubscription) {
+    requests.pendingSubscriptionReleases.add(state.chatSessionMessageSubscription);
+  }
+  state.chatSessionMessageSubscriptionRequestedKey = null;
+  state.chatSessionMessageSubscription = null;
+  await retryPendingSessionMessageSubscriptionReleases(state);
+  return getChatHistoryPaneRequests(state).pendingSubscriptionReleases.size === 0;
+}
+
+const controlModelLoads = new WeakMap<object, Promise<ControlModel | undefined>>();
+
 async function ensureControlModel(state: ChatState): Promise<ControlModel | undefined> {
   if (state.controlModel) {
     return state.controlModel;
@@ -778,18 +795,41 @@ async function ensureControlModel(state: ChatState): Promise<ControlModel | unde
   if (!state.loadControlModel) {
     return undefined;
   }
-  let model: ControlModel;
-  try {
-    model = await state.loadControlModel();
-  } catch (error) {
-    console.error("[chat] Control Model load failed; using Gateway fallback:", error);
-    return undefined;
+  const existing = controlModelLoads.get(state);
+  if (existing) {
+    return existing;
   }
-  if (!state.controlModel) {
-    state.controlModel = model;
-    state.requestUpdate?.();
-  }
-  return state.controlModel;
+  const loading = (async () => {
+    let model: ControlModel;
+    try {
+      model = await state.loadControlModel!();
+    } catch (error) {
+      console.error("[chat] Control Model load failed; using Gateway fallback:", error);
+      return undefined;
+    }
+    if (!state.controlModel) {
+      if (
+        (state.chatSessionMessageSubscription ||
+          getChatHistoryPaneRequests(state).pendingSubscriptionReleases.size > 0) &&
+        state.sessions?.subscribeMessages &&
+        state.sessions.unsubscribeMessages &&
+        !(await retireLegacySessionMessageSubscription(
+          state as ChatSessionMessageSubscriptionState,
+        ))
+      ) {
+        return undefined;
+      }
+      state.controlModel = model;
+      state.requestUpdate?.();
+    }
+    return state.controlModel;
+  })().finally(() => {
+    if (controlModelLoads.get(state) === loading) {
+      controlModelLoads.delete(state);
+    }
+  });
+  controlModelLoads.set(state, loading);
+  return loading;
 }
 
 export function disposeSelectedSessionMessageSubscription(state: ChatState): void {
@@ -850,6 +890,7 @@ export async function syncSelectedSessionMessageSubscription(
     await ensureControlModel(state);
   }
   if (state.controlModel) {
+    await retireLegacySessionMessageSubscription(state);
     return;
   }
   const client = state.client;
@@ -1669,15 +1710,13 @@ function controlModelConversationForState(state: ChatState): ControlModelConvers
   if (!model || !state.sessionKey.trim()) {
     return null;
   }
-  const agentId = isUiSelectedGlobalSessionKey(state, state.sessionKey)
-    ? resolveUiSelectedSessionAgentId(state)
-    : undefined;
+  const agentId = controlModelAgentIdForRoute(state, state.sessionKey);
   if (
     state.controlModelConversation &&
     state.controlModelConversationSessionKey === state.sessionKey &&
     (state.controlModelConversationAgentId ?? null) === (agentId ?? null)
   ) {
-    return state.controlModelConversation;
+    return model.conversation(state.sessionKey, agentId ? { agentId } : {});
   }
   if (state.controlModelConversation) {
     const previousKey = state.controlModelConversationSessionKey;
@@ -1824,7 +1863,11 @@ export async function loadOlderChatHistoryPage(
       return undefined;
     }
     await conversation.loadMoreHistory();
-    return controlModelHistoryResult(state, conversation.getSnapshot());
+    const result = controlModelHistoryResult(state, conversation.getSnapshot());
+    return {
+      ...result,
+      messages: visibleChatHistoryMessages(result.messages),
+    };
   }
   const ownership = beginChatHistoryRequest(
     state,

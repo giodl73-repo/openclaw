@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- TODO: split this session roster orchestration boundary. */
 import type {
   ControlModelCatalog,
   ControlModelSessionCatalogSnapshot,
@@ -47,6 +48,8 @@ type FilteredSessionList = {
   queued: SessionRefreshOptions | null;
 };
 
+const CONTROL_MODEL_MAX_SESSION_PAGE_SIZE = 1_000;
+
 export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
   let inFlight: Promise<void> | null = null;
   let queuedExplicitRefresh: SessionRefreshOptions | null = null;
@@ -76,6 +79,12 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
     controlModelUnavailable = false;
     stopControlModel = loaded.subscribe(() => {
       if (!controlModelAdapter || controlModelSyncing) {
+        return;
+      }
+      if (
+        (lastListOptions.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) >
+        CONTROL_MODEL_MAX_SESSION_PAGE_SIZE
+      ) {
         return;
       }
       const catalog = loaded.getSnapshot().sessionCatalog;
@@ -251,6 +260,12 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       if (!controlModelAdapter || controlModelSyncing) {
         return;
       }
+      if (
+        (lastListOptions.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) >
+        CONTROL_MODEL_MAX_SESSION_PAGE_SIZE
+      ) {
+        return;
+      }
       const catalog = initialControlModel.getSnapshot().sessionCatalog;
       if (catalog.status !== "loading") {
         applyControlModelSnapshot(catalog);
@@ -360,9 +375,11 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
   };
 
   const load = async (options: SessionRefreshOptions) => {
+    const requestedLimit = options.limit ?? DEFAULT_SESSION_LIST_QUERY.limit;
     if (
       (controlModel || host.controlModelLoader) &&
-      (!options.archivedFilter || options.archivedFilter === "active")
+      (!options.archivedFilter || options.archivedFilter === "active") &&
+      requestedLimit <= CONTROL_MODEL_MAX_SESSION_PAGE_SIZE
     ) {
       try {
         if (await ensureControlModel()) {
@@ -383,7 +400,6 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
     // enrichment must inherit the UI default instead of publishing fallback ids.
     requestOptions.includeDerivedTitles ??= true;
     const durableListOptions: SessionListOptions = { ...requestOptions };
-    // Pagination is request-local; replacements retain filters but restart at page one.
     delete durableListOptions.offset;
     if (!backgroundHydrate) {
       lastListOptions = durableListOptions;
@@ -410,7 +426,6 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
           ? appendSessionResults(currentState.result, result)
           : reconcileRosterPresentationMetadata(result, currentState.result);
       if (append && nextResult && !backgroundHydrate) {
-        // Canonical event refreshes must retain all previously appended visible pages.
         lastListOptions = {
           ...durableListOptions,
           limit: Math.max(
@@ -665,6 +680,8 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       const modelAvailable = controlModel || (host.controlModelLoader && !controlModelUnavailable);
       const primaryUsesControlModel =
         modelAvailable &&
+        (lastListOptions.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) <=
+          CONTROL_MODEL_MAX_SESSION_PAGE_SIZE &&
         (!lastListOptions.archivedFilter || lastListOptions.archivedFilter === "active");
       if (primaryUsesControlModel) {
         if (options.filtered === false) {
@@ -690,6 +707,7 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       }
     },
     reset() {
+      controlModelUnavailable = false;
       eventRefreshCoordinator.reset();
       inFlight = null;
       queuedExplicitRefresh = null;

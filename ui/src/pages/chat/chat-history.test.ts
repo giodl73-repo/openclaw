@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
 import {
   loadChatHistory,
+  loadOlderChatHistoryPage,
   rewindChatHistory,
   syncSelectedSessionMessageSubscription,
   switchChatHistoryBranch,
@@ -81,6 +82,62 @@ function activeHistory(
 }
 
 describe("syncSelectedSessionMessageSubscription", () => {
+  it("releases the legacy observer when Control Model loading recovers", async () => {
+    const previous = { key: "agent:main:previous", agentId: null };
+    const unsubscribeMessages = vi.fn(async () => undefined);
+    const subscribeMessages = vi.fn();
+    const model = {} as ControlModel;
+    const state = createState({ messages: [] }) as TestState & {
+      chatSessionMessageSubscriptionRequestedKey: string | null;
+      chatSessionMessageSubscription: typeof previous | null;
+    };
+    state.chatSessionMessageSubscriptionRequestedKey = previous.key;
+    state.chatSessionMessageSubscription = previous;
+    state.loadControlModel = vi.fn(async () => model);
+    state.sessions = {
+      setModelOverride: vi.fn(),
+      subscribeMessages,
+      unsubscribeMessages,
+    };
+
+    await syncSelectedSessionMessageSubscription(state as never);
+
+    expect(state.controlModel).toBe(model);
+    expect(unsubscribeMessages).toHaveBeenCalledWith(previous);
+    expect(subscribeMessages).not.toHaveBeenCalled();
+    expect(state.chatSessionMessageSubscriptionRequestedKey).toBeNull();
+    expect(state.chatSessionMessageSubscription).toBeNull();
+  });
+
+  it("does not promote the Control Model until legacy observer retirement succeeds", async () => {
+    const previous = { key: "agent:main:previous", agentId: null };
+    const unsubscribeMessages = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("release failed"))
+      .mockResolvedValue(undefined);
+    const model = {} as ControlModel;
+    const state = createState({ messages: [] }) as TestState & {
+      chatSessionMessageSubscriptionRequestedKey: string | null;
+      chatSessionMessageSubscription: typeof previous | null;
+    };
+    state.chatSessionMessageSubscriptionRequestedKey = previous.key;
+    state.chatSessionMessageSubscription = previous;
+    state.loadControlModel = vi.fn(async () => model);
+    state.sessions = {
+      setModelOverride: vi.fn(),
+      subscribeMessages: vi.fn(async (key: string) => ({ key, agentId: null })),
+      unsubscribeMessages,
+    };
+
+    await syncSelectedSessionMessageSubscription(state as never);
+    expect(state.controlModel).toBeUndefined();
+
+    await syncSelectedSessionMessageSubscription(state as never);
+    await syncSelectedSessionMessageSubscription(state as never);
+    expect(state.controlModel).toBe(model);
+    expect(unsubscribeMessages).toHaveBeenCalledWith(previous);
+  });
+
   it("starts the new subscription before the previous unsubscribe settles", async () => {
     let resolveUnsubscribe: () => void = () => undefined;
     const unsubscribeMessages = vi.fn(
@@ -632,7 +689,7 @@ describe("canonical history snapshot projection", () => {
     releaseSecondRefresh();
     await Promise.all([explicit, concurrent]);
 
-    expect(model.conversation).toHaveBeenCalledOnce();
+    expect(model.conversation).toHaveBeenCalledTimes(2);
     expect(refreshHistory).toHaveBeenCalledTimes(2);
     // oxlint-disable-next-line unbound-method -- Vitest inspects the mock without invoking it.
     expect(state.client?.request).not.toHaveBeenCalledWith("chat.history", expect.anything());
@@ -640,6 +697,37 @@ describe("canonical history snapshot projection", () => {
       expect.objectContaining({ content: "second authoritative" }),
     ]);
     expect(state.currentSessionId).toBe("session-one");
+  });
+
+  it("filters hidden transcript rows from older Control Model history", async () => {
+    const hidden = message("assistant", "NO_REPLY", { id: "hidden-reply", seq: 1 });
+    const visible = message("assistant", "older visible", { id: "visible-reply", seq: 2 });
+    const state = createState({ messages: [] });
+    const snapshot = {
+      metadata: null,
+      activeRun: null,
+      messages: [{ raw: hidden }, { raw: visible }],
+      history: {
+        window: "older",
+        nextOffset: null,
+        hasMore: false,
+        totalMessages: 2,
+        completeSnapshot: true,
+      },
+    } as unknown as ControlModelConversationSnapshot;
+    const conversation = {
+      getSnapshot: () => snapshot,
+      refreshHistory: vi.fn(),
+      loadMoreHistory: vi.fn(async () => undefined),
+    };
+    state.controlModel = {
+      conversation: vi.fn(() => conversation),
+      releaseConversation: vi.fn(async () => undefined),
+    } as unknown as ControlModel;
+
+    await expect(loadOlderChatHistoryPage(state, 1)).resolves.toMatchObject({
+      messages: [visible],
+    });
   });
 
   function message(role: "assistant" | "user", text: string, metadata?: Record<string, unknown>) {
