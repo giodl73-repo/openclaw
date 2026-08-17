@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { getGatewaySessionMessageSubscriptionCoordinator } from "../session-subscriptions.js";
 import { collectMessageUiArtifacts } from "./artifact-projection.js";
 import {
   activatedConversation,
@@ -108,6 +109,60 @@ describe("Control Model conversations", () => {
     ).toBeLessThanOrEqual(64);
   });
 
+  it("accepts acyclic startup metadata with shared references", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    const shared = { model: "test" };
+    harness.queue("chat.startup", {
+      messages: [],
+      defaults: shared,
+      metadata: { shared },
+      completeSnapshot: true,
+    });
+    const model = createControlModel({
+      gateway: harness.gateway,
+      autoRefreshSessionCatalog: false,
+      autoLoadConversationHistory: false,
+    });
+    model.start();
+    const conversation = model.conversation("agent:main:one");
+
+    await conversation.refreshHistory(undefined, "chat.startup");
+
+    expect(conversation.getSnapshot().partialReasons).not.toContain("startup-metadata-malformed");
+    expect(conversation.getSnapshot().metadata).toMatchObject({
+      defaults: { model: "test" },
+      metadata: { shared: { model: "test" } },
+    });
+    model.dispose();
+  });
+
+  it("counts repeated shared metadata against the retention bound", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    const shared = { model: "x".repeat(100) };
+    harness.queue("chat.startup", {
+      messages: [],
+      defaults: shared,
+      metadata: { shared },
+      completeSnapshot: true,
+    });
+    const model = createControlModel({
+      gateway: harness.gateway,
+      autoRefreshSessionCatalog: false,
+      autoLoadConversationHistory: false,
+      bounds: { maxConversationStartupMetadataBytes: 160 },
+    });
+    model.start();
+    const conversation = model.conversation("agent:main:one");
+
+    await conversation.refreshHistory(undefined, "chat.startup");
+
+    expect(
+      new TextEncoder().encode(JSON.stringify(conversation.getSnapshot().metadata)).byteLength,
+    ).toBeLessThanOrEqual(160);
+    expect(conversation.getSnapshot().partialReasons).toContain("startup-metadata-truncated");
+    model.dispose();
+  });
+
   it("refreshes returned metadata with ordinary history snapshots", async () => {
     const harness = createHarness({ status: "connected", epoch: 1 });
     harness.queue("chat.startup", {
@@ -168,6 +223,77 @@ describe("Control Model conversations", () => {
       expect(harness.callsFor("sessions.messages.unsubscribe")).toHaveLength(1),
     );
     expect(model.conversation("agent:main:one")).not.toBe(conversation);
+    model.dispose();
+  });
+
+  it("releases the final observer when a connected model is disposed", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    const model = createControlModel({ gateway: harness.gateway });
+    model.start();
+    model.conversation("agent:main:one");
+
+    await vi.waitFor(() => expect(harness.callsFor("sessions.messages.subscribe")).toHaveLength(2));
+    model.dispose();
+
+    await vi.waitFor(() =>
+      expect(harness.callsFor("sessions.messages.unsubscribe")).toHaveLength(1),
+    );
+  });
+
+  it("shares one replacement coordinator when multiple models reconnect", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    const firstModel = createControlModel({ gateway: harness.gateway });
+    const secondModel = createControlModel({ gateway: harness.gateway });
+    firstModel.start();
+    secondModel.start();
+    const firstConversation = firstModel.conversation("agent:main:first");
+    const secondConversation = secondModel.conversation("agent:main:second");
+
+    await vi.waitFor(() => expect(harness.callsFor("sessions.messages.subscribe")).toHaveLength(4));
+    harness.setConnection({ status: "connected", epoch: 2 });
+
+    await vi.waitFor(() => expect(harness.callsFor("sessions.messages.subscribe")).toHaveLength(8));
+    expect(firstConversation.getSnapshot().status).not.toBe("error");
+    expect(secondConversation.getSnapshot().status).not.toBe("error");
+    firstModel.dispose();
+    secondModel.dispose();
+  });
+
+  it("shares observer refcounts with other owners of the same Gateway client", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    const coordinator = getGatewaySessionMessageSubscriptionCoordinator(
+      harness.subscriptionClient,
+      { keysEquivalent: harness.sessionMessageKeysEquivalent },
+    );
+    const external = await coordinator.acquire("agent:main:one");
+    const model = createControlModel({ gateway: harness.gateway });
+    model.start();
+    model.conversation("agent:main:one");
+
+    await vi.waitFor(() => expect(harness.callsFor("sessions.messages.subscribe")).toHaveLength(2));
+    model.dispose();
+    await flush();
+    expect(harness.callsFor("sessions.messages.unsubscribe")).toHaveLength(0);
+
+    await coordinator.release(external);
+    expect(harness.callsFor("sessions.messages.unsubscribe")).toHaveLength(1);
+  });
+
+  it("allows later owners to configure the model's shared key matcher", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    const model = createControlModel({ gateway: harness.gateway });
+    model.start();
+    model.conversation("agent:main:one");
+    await vi.waitFor(() => expect(harness.callsFor("sessions.messages.subscribe")).toHaveLength(2));
+
+    const coordinator = getGatewaySessionMessageSubscriptionCoordinator(
+      harness.subscriptionClient,
+      { keysEquivalent: harness.sessionMessageKeysEquivalent },
+    );
+    const external = await coordinator.acquire("agent:main:one");
+    expect(harness.callsFor("sessions.messages.subscribe")).toHaveLength(2);
+
+    await coordinator.release(external);
     model.dispose();
   });
 
@@ -285,6 +411,48 @@ describe("Control Model conversations", () => {
       truncatedBefore: true,
       truncatedAfter: false,
     });
+    model.dispose();
+  });
+
+  it("queues older history behind an active newest-history refresh", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    let resolveTail: (value: unknown) => void = () => undefined;
+    harness.setHistory(
+      0,
+      new Promise((resolve) => {
+        resolveTail = resolve;
+      }),
+    );
+    harness.setHistory(2, {
+      messages: [message(1), message(2)],
+      hasMore: false,
+      totalMessages: 4,
+    });
+    const model = createControlModel({
+      gateway: harness.gateway,
+      autoLoadConversationHistory: false,
+    });
+    model.start();
+    const conversation = model.conversation("agent:main:one");
+
+    const refresh = conversation.refreshHistory();
+    const older = conversation.loadMoreHistory();
+    const concurrentOlder = conversation.loadMoreHistory();
+    resolveTail({
+      messages: [message(3), message(4)],
+      hasMore: true,
+      nextOffset: 2,
+      totalMessages: 4,
+    });
+    await Promise.all([refresh, older, concurrentOlder]);
+
+    expect(harness.callsFor("chat.history").map((call) => call.params.offset ?? 0)).toEqual([0, 2]);
+    expect(messageIds(conversation.getSnapshot())).toEqual([
+      "message-1",
+      "message-2",
+      "message-3",
+      "message-4",
+    ]);
     model.dispose();
   });
 
@@ -552,6 +720,31 @@ describe("Control Model conversations", () => {
     harness.emit({
       event: "agent",
       payload: {
+        runId: "constructor",
+        stream: "tool",
+        data: { phase: "start", name: "ignored", toolCallId: "prototype-key" },
+      },
+    });
+    harness.emit({
+      event: "session.approval",
+      payload: {
+        runId: "constructor",
+        approval: { id: "prototype-approval", status: "pending" },
+      },
+    });
+    harness.emit({
+      event: "question.requested",
+      payload: {
+        runId: "constructor",
+        question: { id: "prototype-question", status: "pending" },
+      },
+    });
+    expect(conversation.getSnapshot().tools).toHaveLength(1);
+    expect(conversation.getSnapshot().approvals).toEqual([]);
+    expect(conversation.getSnapshot().questions).toEqual([]);
+    harness.emit({
+      event: "agent",
+      payload: {
         sessionKey: "agent:main:one",
         runId: "early-run",
         stream: "tool",
@@ -611,6 +804,73 @@ describe("Control Model conversations", () => {
         expect.objectContaining({ toolCallId: "tool-3", status: "cancelled" }),
       ]),
     );
+    model.dispose();
+  });
+
+  it("accepts canonical-key events and artifacts for an equivalent route alias", async () => {
+    const harness = createHarness(
+      { status: "connected", epoch: 1 },
+      {
+        sessionMessageKeysEquivalent: (left, right) =>
+          left === right ||
+          (left === "global" && right === "agent:main:main") ||
+          (right === "global" && left === "agent:main:main"),
+        history: {
+          messages: [
+            {
+              ...message(2),
+              role: "toolResult",
+              details: {
+                uiArtifacts: [
+                  uiArtifact(1, {
+                    source: { sessionKey: "global" },
+                  }),
+                ],
+              },
+            },
+          ],
+          completeSnapshot: true,
+        },
+      },
+    );
+    harness.queue("sessions.messages.subscribe", { key: "global" });
+    harness.queue("sessions.messages.subscribe", { key: "global" });
+    const model = createControlModel({ gateway: harness.gateway });
+    model.start();
+    const conversation = model.conversation("agent:main:main", { agentId: "main" });
+
+    await vi.waitFor(() => expect(conversation.getSnapshot().history.status).toBe("ready"));
+    harness.emit({
+      event: "chat",
+      payload: { sessionKey: "global", runId: "alias-run", state: "delta" },
+    });
+    harness.emit({
+      event: "session.approval",
+      payload: {
+        sessionKey: "global",
+        approval: { id: "alias-approval", status: "pending", sessionKey: "global" },
+      },
+    });
+    harness.emit({
+      event: "question.requested",
+      payload: {
+        sessionKey: "global",
+        question: { id: "alias-question", status: "pending", sessionKey: "global" },
+      },
+    });
+
+    expect(conversation.getSnapshot().activeRun?.runId).toBe("alias-run");
+    expect(conversation.getSnapshot().approvals).toContainEqual(
+      expect.objectContaining({ id: "alias-approval" }),
+    );
+    expect(conversation.getSnapshot().questions).toContainEqual(
+      expect.objectContaining({ id: "alias-question", sessionKey: "agent:main:main" }),
+    );
+    expect(conversation.getSnapshot().artifacts[0]).toMatchObject({
+      id: "artifact-calendar",
+      state: "ready",
+      source: { sessionKey: "agent:main:main" },
+    });
     model.dispose();
   });
 
@@ -844,7 +1104,7 @@ describe("Control Model conversations", () => {
     model.dispose();
   });
 
-  it("materializes only the selected deferred view and rejects stale revisions", async () => {
+  it("materializes only the selected view and retires its data across epochs", async () => {
     const artifact = uiArtifact(4, {
       views: [
         {
@@ -918,6 +1178,15 @@ describe("Control Model conversations", () => {
     ).rejects.toMatchObject({ code: "STALE_ARTIFACT_REVISION" });
     expect(harness.callsFor("artifact.materialize")).toHaveLength(1);
 
+    harness.setConnection({ status: "disconnected", epoch: 1 });
+    await vi.waitFor(() =>
+      expect(conversation.getSnapshot().artifacts[0]?.views[1]).toMatchObject({
+        id: "list",
+        availability: "deferred",
+      }),
+    );
+    expect(conversation.getSnapshot().artifacts[0]?.views[1]).not.toHaveProperty("data");
+
     harness.setHistory(0, {
       messages: [
         {
@@ -930,13 +1199,41 @@ describe("Control Model conversations", () => {
     });
     harness.setConnection({ status: "connected", epoch: 2 });
     await vi.waitFor(() => expect(harness.callsFor("chat.history")).toHaveLength(2));
-    await vi.waitFor(() =>
-      expect(conversation.getSnapshot().artifacts[0]?.views[1]).toMatchObject({
+    expect(conversation.getSnapshot().artifacts[0]?.views[1]).toMatchObject({
+      id: "list",
+      availability: "deferred",
+    });
+    expect(conversation.getSnapshot().artifacts[0]?.views[1]).not.toHaveProperty("data");
+    expect(harness.callsFor("artifact.materialize")).toHaveLength(1);
+
+    harness.queue("artifact.materialize", {
+      artifactId: "artifact-calendar",
+      artifactRevision: 4,
+      view: {
         id: "list",
         availability: "inline",
+        templateUri: "clawpilot://widgets/list",
+        dataVersion: 1,
+        data: { rows: [{ id: "two" }] },
+      },
+    });
+    await expect(
+      conversation.materializeView({
+        artifactId: "artifact-calendar",
+        artifactRevision: 4,
+        viewId: "list",
       }),
-    );
-    expect(harness.callsFor("artifact.materialize")).toHaveLength(1);
+    ).resolves.toMatchObject({
+      id: "list",
+      availability: "inline",
+      data: { rows: [{ id: "two" }] },
+    });
+    expect(harness.callsFor("artifact.materialize")).toHaveLength(2);
+    expect(conversation.getSnapshot().artifacts[0]?.views[1]).toMatchObject({
+      id: "list",
+      availability: "inline",
+      data: { rows: [{ id: "two" }] },
+    });
     model.dispose();
   });
 

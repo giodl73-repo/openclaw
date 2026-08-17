@@ -233,6 +233,7 @@ export type ControlModelConversationHost = Readonly<{
   agentId?: string;
   getConnectionSnapshot(): ControlModelConnectionSnapshot;
   isRunning(): boolean;
+  sessionMessageKeysEquivalent(left: string, right: string): boolean;
   getMessageSubscriptionCoordinator(): GatewaySessionMessageSubscriptionCoordinator;
   onConversationReleased(conversation: ControlModelConversation): Promise<void>;
   now(): number;
@@ -268,16 +269,20 @@ function stableStringify(value: unknown, seen = new WeakSet<object>()): string {
     return "[cycle]";
   }
   seen.add(value);
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item, seen)).join(",")}]`;
-  }
-  return `{${Object.keys(value as Record<string, unknown>)
-    .toSorted()
-    .map(
-      (key) =>
-        `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key], seen)}`,
-    )
-    .join(",")}}`;
+  const serialized = Array.isArray(value)
+    ? `[${value.map((item) => stableStringify(item, seen)).join(",")}]`
+    : `{${Object.keys(value as Record<string, unknown>)
+        .toSorted()
+        .map(
+          (key) =>
+            `${JSON.stringify(key)}:${stableStringify(
+              (value as Record<string, unknown>)[key],
+              seen,
+            )}`,
+        )
+        .join(",")}}`;
+  seen.delete(value);
+  return serialized;
 }
 function hash(value: string): string {
   let result = 2166136261;
@@ -467,12 +472,13 @@ function isFiniteJsonValue(value: unknown, seen = new WeakSet<object>(), depth =
     return false;
   }
   seen.add(value);
-  if (Array.isArray(value)) {
-    return value.every((entry) => isFiniteJsonValue(entry, seen, depth + 1));
-  }
-  return Object.values(value as Record<string, unknown>).every((entry) =>
-    isFiniteJsonValue(entry, seen, depth + 1),
-  );
+  const valid = Array.isArray(value)
+    ? value.every((entry) => isFiniteJsonValue(entry, seen, depth + 1))
+    : Object.values(value as Record<string, unknown>).every((entry) =>
+        isFiniteJsonValue(entry, seen, depth + 1),
+      );
+  seen.delete(value);
+  return valid;
 }
 
 function readStartupMetadata(
@@ -687,6 +693,7 @@ export class ControlModelConversation {
     }
     this.#projection = { ...this.#projection, runs: {} };
     this.#tools.clear();
+    this.#materializedViews.clear();
     this.#liveArtifacts.clear();
     this.#status = this.#projection.entries.length > 0 ? "stale" : "loading";
     this.#partialReasons.add("reconnect-awaiting-authoritative-history");
@@ -821,6 +828,7 @@ export class ControlModelConversation {
     this.#activationEpoch = null;
     this.#activation = null;
     this.#releaseLeases();
+    this.#materializedViews.clear();
     this.#status = "stale";
     this.#partialReasons.add("disconnected");
     this.#publish();
@@ -850,20 +858,23 @@ export class ControlModelConversation {
 
   async loadMoreHistory(options?: ControlModelRequestOptions): Promise<void> {
     this.#assertCommandReady("chat.history");
+    while (this.#historyLoop) {
+      const activeLoop = this.#historyLoop;
+      const activeOffset = this.#historyOffsetRequested;
+      await activeLoop;
+      if (activeOffset > 0) {
+        return;
+      }
+      if (!this.#historyHasMore || this.#historyNextOffset === null) {
+        return;
+      }
+    }
     if (!this.#historyHasMore || this.#historyNextOffset === null) {
       throw localError(
         "conflict",
         "chat.history",
         "No older history is available",
         "NO_MORE_HISTORY",
-      );
-    }
-    if (this.#historyLoop) {
-      throw localError(
-        "conflict",
-        "chat.history",
-        "A history operation is already in progress",
-        "HISTORY_BUSY",
       );
     }
     this.#historyRequested = true;
@@ -1678,12 +1689,12 @@ export class ControlModelConversation {
     }
     const key = this.#eventSessionKey(payload);
     if (key) {
-      return key === this.#sessionKey;
+      return this.#host.sessionMessageKeysEquivalent(key, this.#sessionKey);
     }
     const data = record(payload.data);
     const runId = text(payload.runId) ?? text(data?.runId);
     if (event === "agent") {
-      return Boolean(runId && this.#projection.runs[runId]);
+      return Boolean(runId && Object.hasOwn(this.#projection.runs, runId));
     }
     if (
       event === "question.resolved" &&
@@ -1692,7 +1703,7 @@ export class ControlModelConversation {
     ) {
       return true;
     }
-    return Boolean(runId && this.#projection.runs[runId]);
+    return Boolean(runId && Object.hasOwn(this.#projection.runs, runId));
   }
 
   #handleChat(payload: Record<string, unknown>): void {
@@ -1728,7 +1739,7 @@ export class ControlModelConversation {
     if (!runId) {
       return;
     }
-    if (!this.#eventSessionKey(payload) && !this.#projection.runs[runId]) {
+    if (!this.#eventSessionKey(payload) && !Object.hasOwn(this.#projection.runs, runId)) {
       return;
     }
     const toolCallId =
@@ -1855,6 +1866,7 @@ export class ControlModelConversation {
         data,
         {
           sessionKey: this.#sessionKey,
+          sessionKeysEquivalent: this.#host.sessionMessageKeysEquivalent,
           toolCallId,
           ...(next.name ? { toolName: next.name } : {}),
           live: true,
@@ -1894,7 +1906,7 @@ export class ControlModelConversation {
       return;
     }
     const sessionKey = text(approval.sessionKey) ?? text(approval.sourceSessionKey);
-    if (sessionKey && sessionKey !== this.#sessionKey) {
+    if (sessionKey && !this.#host.sessionMessageKeysEquivalent(sessionKey, this.#sessionKey)) {
       return;
     }
     this.#approvals.set(id, { ...approval });
@@ -1916,7 +1928,7 @@ export class ControlModelConversation {
       return;
     }
     const sessionKey = text(question.sessionKey);
-    if (sessionKey && sessionKey !== this.#sessionKey) {
+    if (sessionKey && !this.#host.sessionMessageKeysEquivalent(sessionKey, this.#sessionKey)) {
       return;
     }
     this.#questions.set(id, { ...question, sessionKey: this.#sessionKey });
@@ -2092,6 +2104,7 @@ export class ControlModelConversation {
           entry.message,
           {
             sessionKey: this.#sessionKey,
+            sessionKeysEquivalent: this.#host.sessionMessageKeysEquivalent,
             ...(entry.identity?.id ? { messageId: entry.identity.id } : {}),
             ...(entry.identity?.sequence !== null && entry.identity?.sequence !== undefined
               ? { messageSequence: entry.identity.sequence }

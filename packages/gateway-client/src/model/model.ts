@@ -107,6 +107,12 @@ class ControlModelImpl implements ControlModel {
   readonly #onBackgroundError?: (error: unknown) => void;
   #unsubscribeConnection: (() => void) | null = null;
   #unsubscribeEvents: (() => void) | null = null;
+  #messageSubscriptionCoordinator: ReturnType<
+    typeof getGatewaySessionMessageSubscriptionCoordinator
+  > | null = null;
+  #messageSubscriptionClient:
+    | Parameters<typeof getGatewaySessionMessageSubscriptionCoordinator>[0]
+    | null = null;
   #lastConnection: ControlModelConnectionSnapshot;
   #running = false;
   #disposed = false;
@@ -233,7 +239,6 @@ class ControlModelImpl implements ControlModel {
     this.#unsubscribeEvents?.();
     this.#unsubscribeConnection = null;
     this.#unsubscribeEvents = null;
-    resetGatewaySessionMessageSubscriptionCoordinator(this.#gateway);
     for (const conversation of this.#conversations.values()) {
       conversation.dispose();
     }
@@ -289,8 +294,9 @@ class ControlModelImpl implements ControlModel {
       autoLoadHistory: this.#autoLoadConversationHistory,
       getConnectionSnapshot: () => this.#gateway.getConnectionSnapshot(),
       isRunning: () => this.#running && !this.#disposed,
-      getMessageSubscriptionCoordinator: () =>
-        getGatewaySessionMessageSubscriptionCoordinator(this.#gateway),
+      sessionMessageKeysEquivalent: (left, right) =>
+        left === right || this.#gateway.sessionMessageKeysEquivalent?.(left, right) === true,
+      getMessageSubscriptionCoordinator: () => this.#getMessageSubscriptionCoordinator(),
       onConversationReleased: async (conversation) => {
         for (const [id, value] of this.#conversations) {
           if (value === conversation) {
@@ -340,13 +346,17 @@ class ControlModelImpl implements ControlModel {
     const previous = this.#lastConnection;
     this.#lastConnection = connection;
     if (connection.epoch !== previous.epoch || connection.status !== "connected") {
-      resetGatewaySessionMessageSubscriptionCoordinator(this.#gateway);
+      if (this.#messageSubscriptionCoordinator) {
+        resetGatewaySessionMessageSubscriptionCoordinator(
+          this.#messageSubscriptionClient ?? this.#gateway,
+          this.#messageSubscriptionCoordinator,
+        );
+        this.#messageSubscriptionCoordinator = null;
+        this.#messageSubscriptionClient = null;
+      }
       for (const conversation of this.#conversations.values()) {
         if (connection.status === "connected") {
-          conversation.onConnection(
-            connection,
-            getGatewaySessionMessageSubscriptionCoordinator(this.#gateway),
-          );
+          conversation.onConnection(connection, this.#getMessageSubscriptionCoordinator());
         } else {
           conversation.onDisconnected(connection);
         }
@@ -355,6 +365,18 @@ class ControlModelImpl implements ControlModel {
     if (connection.status === "connected") {
       this.#startConversations();
     }
+  }
+
+  #getMessageSubscriptionCoordinator() {
+    if (!this.#messageSubscriptionCoordinator) {
+      this.#messageSubscriptionClient =
+        this.#gateway.getSessionMessageSubscriptionClient?.() ?? this.#gateway;
+      this.#messageSubscriptionCoordinator = getGatewaySessionMessageSubscriptionCoordinator(
+        this.#messageSubscriptionClient,
+        { keysEquivalent: this.#gateway.sessionMessageKeysEquivalent },
+      );
+    }
+    return this.#messageSubscriptionCoordinator;
   }
 
   #startConversations(): void {
