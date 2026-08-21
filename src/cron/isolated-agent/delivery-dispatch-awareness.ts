@@ -6,7 +6,6 @@ import { resolveSessionWorkStartError } from "../../config/sessions/lifecycle.js
 import {
   canonicalizeMainSessionAlias,
   resolveAgentMainSessionKey,
-  resolveMainSessionKey,
 } from "../../config/sessions/main-session.js";
 import { resolveMirroredTranscriptText } from "../../config/sessions/transcript-mirror.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -16,6 +15,7 @@ import type {
   SourceDeliveryOutcome,
   SourceDeliveryVisibleDelivery,
 } from "../../infra/outbound/source-delivery-plan.js";
+import { withSystemEventOwner } from "../../infra/system-event-ownership.js";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { parseThreadSessionSuffix } from "../../routing/session-key.js";
 import { beginSessionWorkAdmission } from "../../sessions/session-lifecycle-admission.js";
@@ -74,7 +74,7 @@ export function resolveCronAwarenessMainSessionKey(params: {
   agentId: string;
 }): string {
   return params.cfg.session?.scope === "global"
-    ? resolveMainSessionKey(params.cfg)
+    ? "global"
     : resolveAgentMainSessionKey({ cfg: params.cfg, agentId: params.agentId });
 }
 
@@ -178,20 +178,25 @@ export async function queueCronAwarenessSystemEvent(params: {
       agentId: params.agentId,
     });
     if (params.queueMainSession) {
-      enqueueSystemEvent(params.text, {
-        sessionKey: mainSessionKey,
-        contextKey: params.deliveryIdempotencyKey,
-      });
+      enqueueSystemEvent(
+        params.text,
+        withSystemEventOwner(
+          { sessionKey: mainSessionKey, contextKey: params.deliveryIdempotencyKey },
+          params.agentId,
+        ),
+      );
     }
     const targetSessionKey = params.targetSessionKey;
     const shouldQueueTargetSession =
       targetSessionKey &&
       (!isSameSessionKey(targetSessionKey, mainSessionKey) || !params.queueMainSession);
     if (shouldQueueTargetSession) {
-      enqueueSystemEvent(params.targetText ?? formatTargetCronDeliveryAwarenessText(params.text), {
-        sessionKey: targetSessionKey,
-        contextKey: params.deliveryIdempotencyKey,
-      });
+      const text = params.targetText ?? formatTargetCronDeliveryAwarenessText(params.text);
+      const options = withSystemEventOwner(
+        { sessionKey: targetSessionKey, contextKey: params.deliveryIdempotencyKey },
+        params.agentId,
+      );
+      enqueueSystemEvent(text, options);
     }
   } catch (err) {
     await logCronDeliveryWarn(
@@ -458,11 +463,13 @@ export async function queueCronMessageToolDeliveryAwareness(params: {
   job: CronJob;
   agentId: string;
   agentSessionKey: string;
+  deferredTargetSessionKey?: string;
   runStartedAt: number;
   resolvedDelivery: DeliveryTargetResolution;
   sourceDeliveryOutcome: SourceDeliveryOutcome;
-}): Promise<void> {
+}): Promise<(() => Promise<void>) | undefined> {
   const seen = new Set<string>();
+  const deferredAwareness: Array<() => Promise<void>> = [];
   for (const delivery of params.sourceDeliveryOutcome.visibleDeliveries) {
     const target = resolveCronMessageToolAwarenessTarget({
       delivery,
@@ -495,7 +502,7 @@ export async function queueCronMessageToolDeliveryAwareness(params: {
       runStartedAt: params.runStartedAt,
       delivery: target,
     });
-    await queueCronAwarenessSystemEvent({
+    const awarenessParams = {
       cfg: params.cfg,
       jobId: params.job.id,
       agentId: params.agentId,
@@ -503,8 +510,23 @@ export async function queueCronMessageToolDeliveryAwareness(params: {
       queueMainSession: false,
       targetSessionKey,
       text: target.text,
-    });
+    };
+    if (isSameSessionKey(targetSessionKey, params.deferredTargetSessionKey)) {
+      // A current-session completion owns this target durably. Keep awareness
+      // unavailable until that commit fails so reply admission cannot race it.
+      deferredAwareness.push(() => queueCronAwarenessSystemEvent(awarenessParams));
+      continue;
+    }
+    await queueCronAwarenessSystemEvent(awarenessParams);
   }
+  if (deferredAwareness.length === 0) {
+    return undefined;
+  }
+  return async () => {
+    for (const queue of deferredAwareness) {
+      await queue();
+    }
+  };
 }
 
 async function appendDirectCronDeliveryTranscriptMirror(params: {
