@@ -5,6 +5,12 @@ import { registerPolicyCli } from "./src/cli.js";
 import { registerPolicyDoctorChecks } from "./src/doctor/register.js";
 import { createPolicyReadinessCriterion } from "./src/readiness.js";
 
+export {
+  buildPolicySettingsConstraints,
+  type PolicySettingsConstraint,
+  type PolicySettingsConstraintsReport,
+} from "./src/settings-constraints.js";
+
 export default definePluginEntry({
   id: "policy",
   name: "Policy",

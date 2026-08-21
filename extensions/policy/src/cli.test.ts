@@ -128,7 +128,51 @@ describe("policy commands", () => {
       ok: true,
       attestation,
       evidence,
+      settingsConstraints: {
+        version: 1,
+        mode: "active-policy-constraints",
+        settings: {},
+      },
       findings: [],
+    });
+  });
+
+  it("reports active policy settings constraints in policy check JSON output", async () => {
+    await fs.writeFile(
+      join(workspaceDir, "policy.jsonc"),
+      JSON.stringify({
+        gateway: {
+          exposure: { allowNonLoopbackBind: false },
+          auth: { requireAuth: true },
+          controlUi: { allowInsecure: false },
+        },
+      }),
+      "utf-8",
+    );
+
+    const { exitCode, parsed } = await runPolicyCheckJson();
+
+    expect(exitCode).toBe(0);
+    expect(parsed.settingsConstraints).toMatchObject({
+      version: 1,
+      mode: "active-policy-constraints",
+      settings: {
+        "gateway.bind": {
+          state: "readOnly",
+          allowedValues: ["loopback"],
+          source: "oc://policy.jsonc/gateway/exposure/allowNonLoopbackBind",
+        },
+        "gateway.auth.mode": {
+          state: "enabled",
+          deniedValues: ["none"],
+          source: "oc://policy.jsonc/gateway/auth/requireAuth",
+        },
+        "gateway.controlUi.insecureAuth": {
+          state: "readOnly",
+          allowedValues: [false],
+          deniedValues: [true],
+        },
+      },
     });
   });
 

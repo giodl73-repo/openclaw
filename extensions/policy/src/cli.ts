@@ -20,6 +20,10 @@ import {
   type PolicyConformanceReport,
 } from "./policy-conformance.js";
 import { createPolicyAttestation } from "./policy-state.js";
+import {
+  buildPolicySettingsConstraints,
+  type PolicySettingsConstraintsReport,
+} from "./settings-constraints.js";
 
 type PolicyCommandRuntime = {
   writeStdout(value: string): void;
@@ -49,6 +53,7 @@ type PolicyCheckReport = {
   readonly ok: boolean;
   readonly attestation?: ReturnType<typeof createPolicyAttestation>;
   readonly evidence: unknown;
+  readonly settingsConstraints: PolicySettingsConstraintsReport;
   readonly checksRun: number;
   readonly checksSkipped: number;
   readonly findings: readonly Record<string, unknown>[];
@@ -192,6 +197,7 @@ async function buildPolicyCheckReport(
     return {
       ok: visibleFindings.length === 0,
       evidence: { channels: [] },
+      settingsConstraints: buildPolicySettingsConstraints(undefined),
       checksRun: 1,
       checksSkipped: POLICY_CHECK_IDS.length,
       findings: visibleFindings.map(toJsonFinding),
@@ -236,6 +242,10 @@ async function buildPolicyCheckReport(
     ok,
     attestation,
     evidence: evaluation.evidence,
+    settingsConstraints: buildPolicySettingsConstraints(
+      evaluation.policy?.value,
+      evaluation.policyPath,
+    ),
     checksRun: POLICY_CHECK_IDS.length,
     checksSkipped: 0,
     findings: jsonFindings,
@@ -302,6 +312,7 @@ function writePolicyCheckReport(
         ok: report.ok,
         attestation: report.attestation,
         evidence: report.evidence,
+        settingsConstraints: report.settingsConstraints,
         checksRun: report.checksRun,
         checksSkipped: report.checksSkipped,
         findings: report.findings,
@@ -362,6 +373,7 @@ function writePolicyWatchReport(
         ok: report.ok,
         expectedAttestationHash: report.expectedAttestationHash,
         attestation: report.attestation,
+        settingsConstraints: report.settingsConstraints,
         findings: report.findings,
       }) + "\n",
     );
