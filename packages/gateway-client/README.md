@@ -222,10 +222,13 @@ provides epoch-stamped frames for conversation projection.
 result and publishes a deeply frozen snapshot. The optional query carries the
 Gateway filters, pagination cursor, and response metadata (`defaults`, creators,
 counts, and next offset), so an adopter does not need a second canonical list
-request or a fixed-limit adapter. Live `sessions.changed` events schedule a
-canonical refresh; they do not mutate rows directly. Control Model exports the
-same bounded refresh coordinator used by Control UI, so both surfaces preserve
-one trailing refresh after an in-flight request succeeds or fails.
+request or a fixed-limit adapter. `snapshot.sessionList` derives a smaller
+read-only session summary for product shells that need stable identity, title,
+status, model/provider, and navigation metadata without parsing raw Gateway
+rows. Live `sessions.changed` events schedule a canonical refresh; they do not
+mutate rows directly. Control Model exports the same bounded refresh
+coordinator used by Control UI, so both surfaces preserve one trailing refresh
+after an in-flight request succeeds or fails.
 
 Subscriber notifications run in a coalesced microtask. A slow or throwing
 subscriber cannot block the Gateway event callback or prevent other subscribers

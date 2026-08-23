@@ -44,6 +44,10 @@ describe("Control Model shared conformance fixtures", () => {
       const snapshot = model.getSnapshot().sessionCatalog;
       expect(snapshot.sessions.map((session) => session.key)).toEqual(fixture.expected.sessionKeys);
       expect(snapshot.error?.code ?? null).toBe(fixture.expected.errorCode);
+      expect(model.getSnapshot().sessionList.sessions.map((session) => session.key)).toEqual(
+        fixture.expected.sessionKeys,
+      );
+      expect(model.getSnapshot().sessionList.error?.code ?? null).toBe(fixture.expected.errorCode);
       model.dispose();
     });
   }

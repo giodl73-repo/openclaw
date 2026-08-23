@@ -31,6 +31,8 @@ export type {
   ControlModelRequestOptions,
   ControlModelSessionCatalogQuery,
   ControlModelSessionCatalogSnapshot,
+  ControlModelSessionListSnapshot,
+  ControlModelSessionSummary,
   ControlModelSnapshot,
   ControlModelSubscriber,
 } from "./catalog.js";
