@@ -10,9 +10,17 @@ import {
 } from "./index.js";
 
 type SessionListResult = {
+  ts?: number;
+  path?: string;
+  count?: number;
   sessions: Array<Record<string, unknown>>;
   totalCount?: number;
+  limitApplied?: number;
+  offset?: number;
+  nextOffset?: number | null;
   hasMore?: boolean;
+  creators?: Array<Record<string, unknown>>;
+  defaults?: unknown;
 };
 
 function deferred<T>() {
@@ -46,14 +54,6 @@ function createGatewayHarness(
     params: Record<string, unknown>;
     options: ControlModelRequestOptions | undefined;
   }> = [];
-  const request = vi.fn(
-    (method: string, params: Record<string, unknown>, options?: ControlModelRequestOptions) => {
-      requestCalls.push({ method, params, options });
-      const pending = deferred<SessionListResult>();
-      requests.push(pending);
-      return pending.promise;
-    },
-  );
   const gateway: ControlModelGatewayBinding = {
     getConnectionSnapshot: () => connection,
     subscribeConnection(listener) {
@@ -65,11 +65,19 @@ function createGatewayHarness(
       eventListeners.add(listener);
       return () => eventListeners.delete(listener);
     },
-    request,
+    request<T>(
+      method: string,
+      params: Record<string, unknown>,
+      options?: ControlModelRequestOptions,
+    ) {
+      requestCalls.push({ method, params, options });
+      const pending = deferred<SessionListResult>();
+      requests.push(pending);
+      return pending.promise as Promise<T>;
+    },
   };
   return {
     gateway,
-    request,
     requests,
     requestCalls,
     subscribeInvalidations,
@@ -144,7 +152,11 @@ describe("Control Model session catalog", () => {
     });
 
     const snapshot = model.getSnapshot();
-    expect(harness.request).toHaveBeenCalledWith("sessions.list", { limit: 1 }, undefined);
+    expect(harness.requestCalls[0]).toEqual({
+      method: "sessions.list",
+      params: { limit: 1 },
+      options: undefined,
+    });
     expect(snapshot.sessionCatalog).toMatchObject({
       status: "ready",
       totalCount: 2,
@@ -155,6 +167,106 @@ describe("Control Model session catalog", () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.sessionCatalog.sessions)).toBe(true);
     expect(Object.isFrozen(snapshot.sessionCatalog.sessions[0]?.worktree)).toBe(true);
+  });
+
+  it("publishes a stable read-only session list projection", async () => {
+    const harness = createGatewayHarness();
+    const model = createControlModel({
+      gateway: harness.gateway,
+      bounds: { maxSessions: 2 },
+      now: () => 77,
+    });
+    model.start();
+    harness.requests[0]?.resolve({
+      sessions: [
+        {
+          key: "agent:main:one",
+          sessionId: "session-one",
+          kind: "direct",
+          displayName: "  Primary session  ",
+          agentId: "  main  ",
+          boardFace: "chat",
+          isMain: true,
+          archived: false,
+          pinned: true,
+          unread: true,
+          status: "running",
+          updatedAt: 100,
+          createdAt: 50,
+          model: "gpt-5.6-luna",
+          modelProvider: "openai",
+          worktree: { id: "repo-one", branch: "feature", repoRoot: "C:\\repo" },
+          execCwd: "C:\\repo",
+        },
+        {
+          key: "agent:main:two",
+          kind: "group",
+          derivedTitle: "Derived title",
+          lastActivityAt: 25,
+          status: "unexpected",
+          worktree: { id: "repo-two", branch: "main", repoRoot: "C:\\repo-two" },
+        },
+      ],
+      totalCount: 2,
+      hasMore: false,
+    });
+
+    await vi.waitFor(() => {
+      expect(model.getSnapshot().sessionList.status).toBe("ready");
+    });
+
+    const list = model.getSnapshot().sessionList;
+    expect(list).toMatchObject({
+      status: "ready",
+      totalCount: 2,
+      hasMore: false,
+      refreshedAt: 77,
+      error: null,
+    });
+    expect(list.sessions).toEqual([
+      {
+        key: "agent:main:one",
+        sessionId: "session-one",
+        title: "Primary session",
+        kind: "direct",
+        agentId: "main",
+        boardFace: "chat",
+        isMain: true,
+        archived: false,
+        pinned: true,
+        unread: true,
+        runStatus: "running",
+        updatedAt: 100,
+        createdAt: 50,
+        model: "gpt-5.6-luna",
+        modelProvider: "openai",
+        worktree: { id: "repo-one", branch: "feature" },
+      },
+      {
+        key: "agent:main:two",
+        sessionId: null,
+        title: "Derived title",
+        kind: "group",
+        agentId: null,
+        boardFace: null,
+        isMain: false,
+        archived: false,
+        pinned: false,
+        unread: false,
+        runStatus: "idle",
+        updatedAt: 25,
+        createdAt: null,
+        model: null,
+        modelProvider: null,
+        worktree: { id: "repo-two", branch: "main" },
+      },
+    ]);
+    expect(Object.isFrozen(list)).toBe(true);
+    expect(Object.isFrozen(list.sessions)).toBe(true);
+    expect(Object.isFrozen(list.sessions[0])).toBe(true);
+    expect(Object.isFrozen(list.sessions[0]?.worktree)).toBe(true);
+    expect(list.sessions[0]).not.toHaveProperty("execCwd");
+    expect(list.sessions[0]?.worktree).not.toHaveProperty("repoRoot");
   });
 
   it("coalesces invalidations and never publishes a retired-epoch result", async () => {

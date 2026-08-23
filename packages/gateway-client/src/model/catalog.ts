@@ -1,7 +1,15 @@
 import type { SessionRow } from "@openclaw/gateway-protocol";
 import { CONTROL_MODEL_DEFAULT_BOUNDS } from "./defaults.js";
 import { createSessionEventRefreshCoordinator } from "./session-event-refresh.js";
+import {
+  createControlModelSessionListSnapshot,
+  type ControlModelSessionListSnapshot,
+} from "./session-list.js";
 export { createSessionEventRefreshCoordinator } from "./session-event-refresh.js";
+export type {
+  ControlModelSessionListSnapshot,
+  ControlModelSessionSummary,
+} from "./session-list.js";
 
 export type DeepReadonly<T> = T extends (...args: infer _Args) => infer _Result
   ? T
@@ -104,6 +112,7 @@ export type ControlModelSnapshot = Readonly<{
   lifecycle: "idle" | "running" | "disposed";
   connection: ControlModelConnectionSnapshot;
   sessionCatalog: ControlModelSessionCatalogSnapshot;
+  sessionList: ControlModelSessionListSnapshot;
 }>;
 
 export type ControlModelSubscriber = () => void | Promise<void>;
@@ -303,11 +312,13 @@ function emptyCatalog(
 }
 
 function initialSnapshot(connection: ControlModelConnectionSnapshot): ControlModelSnapshot {
+  const sessionCatalog = emptyCatalog();
   return Object.freeze({
     revision: 0,
     lifecycle: "idle",
     connection: freezeConnection(connection),
-    sessionCatalog: emptyCatalog(),
+    sessionCatalog,
+    sessionList: createControlModelSessionListSnapshot(sessionCatalog),
   });
 }
 
@@ -610,9 +621,18 @@ export class ControlModelCatalogImpl implements ControlModelCatalog {
     }
   }
 
-  #publish(next: Omit<ControlModelSnapshot, "revision"> & { revision?: number }): void {
-    const { revision: _ignored, ...rest } = next;
-    this.#snapshot = Object.freeze({ ...rest, revision: this.#snapshot.revision + 1 });
+  #publish(
+    next: Omit<ControlModelSnapshot, "revision" | "sessionList"> & {
+      revision?: number;
+      sessionList?: ControlModelSessionListSnapshot;
+    },
+  ): void {
+    const { revision: _ignoredRevision, sessionList: _ignoredSessionList, ...rest } = next;
+    this.#snapshot = Object.freeze({
+      ...rest,
+      sessionList: createControlModelSessionListSnapshot(rest.sessionCatalog),
+      revision: this.#snapshot.revision + 1,
+    });
     this.#scheduleNotification();
   }
 
