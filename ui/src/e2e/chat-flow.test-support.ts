@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
+import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import type { Page } from "playwright";
 import { expect } from "vitest";
 import { SESSION_DRAG_MIME } from "../lib/sessions/drag.ts";
@@ -51,12 +52,23 @@ export function createChatFlowE2eSuite() {
   });
 }
 
-export function requireRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Expected object value");
-  }
-  return value as Record<string, unknown>;
+export async function buildLocalWebchatAudioMessage(source: string) {
+  const { buildWebchatAssistantMessageFromReplyPayloads } =
+    await import("../../../src/gateway/server-methods/chat-webchat-media.ts");
+  const audioPath = new URL(source).pathname;
+  const localRoot = path.dirname(audioPath);
+  await mkdir(localRoot, { recursive: true });
+  await writeFile(audioPath, Buffer.from([0xff, 0xfb, 0x90, 0x00]));
+  return expectDefined(
+    await buildWebchatAssistantMessageFromReplyPayloads(
+      [{ mediaUrl: source, trustedLocalMedia: true }],
+      { localRoots: [localRoot] },
+    ),
+    "Gateway-produced WebChat audio message",
+  );
 }
+
+export const requireRecord = createRequireRecord("record", "expected-object-value");
 
 export function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) {

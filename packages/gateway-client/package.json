@@ -45,6 +45,11 @@
       "import": "./dist/readiness.mjs",
       "default": "./dist/readiness.mjs"
     },
+    "./scope-upgrade": {
+      "types": "./dist/scope-upgrade.d.mts",
+      "import": "./dist/scope-upgrade.mjs",
+      "default": "./dist/scope-upgrade.mjs"
+    },
     "./timeouts": {
       "types": "./dist/timeouts.d.mts",
       "import": "./dist/timeouts.mjs",
@@ -54,15 +59,28 @@
       "types": "./dist/websocket-data.d.mts",
       "import": "./dist/websocket-data.mjs",
       "default": "./dist/websocket-data.mjs"
+    },
+    "./model": {
+      "types": "./dist/model/index.d.mts",
+      "import": "./dist/model/index.mjs",
+      "default": "./dist/model/index.mjs"
+    },
+    "./model/session-event-refresh": {
+      "types": "./dist/model/session-event-refresh.d.mts",
+      "import": "./dist/model/session-event-refresh.mjs",
+      "default": "./dist/model/session-event-refresh.mjs"
     }
   },
   "scripts": {
-    "build": "tsdown src/index.ts src/browser.ts src/readiness.ts src/timeouts.ts src/websocket-data.ts --no-config --platform node --format esm --dts --out-dir dist --clean"
+    "build": "tsdown src/index.ts src/browser.ts src/readiness.ts src/scope-upgrade.ts src/timeouts.ts src/websocket-data.ts src/model/index.ts src/model/session-event-refresh.ts --no-config --platform node --format esm --dts --out-dir dist --clean"
   },
   "dependencies": {
     "@openclaw/gateway-protocol": "workspace:*",
-    "ipaddr.js": "2.4.0",
-    "ws": "8.21.1"
+    "ipaddr.js": "2.5.0",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@openclaw/normalization-core": "workspace:*"
   },
   "engines": {
     "node": ">=22.19.0"

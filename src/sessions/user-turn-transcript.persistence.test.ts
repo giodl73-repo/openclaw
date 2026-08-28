@@ -12,6 +12,7 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { runAgentHarnessBeforeMessageWriteHook } from "../agents/harness/hook-helpers.js";
 import { formatSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
 import { loadTranscriptEvents } from "../config/sessions/session-accessor.js";
+import { createUserTurnTranscriptRecorder } from "./user-turn-transcript.js";
 import { persistUserTurnTranscript } from "./user-turn-transcript.test-support.js";
 
 describe("persistUserTurnTranscript", () => {
@@ -310,6 +311,8 @@ describe("persistUserTurnTranscript", () => {
       input: {
         text: "secret prompt",
         idempotencyKey: "chat-run-1:user",
+        replyToId: "transcript-reply-1",
+        replyToPreview: { text: "Original reply", senderLabel: "Molty" },
         senderIsOwner: true,
         provenance,
         sender: { id: "user-42", name: "Ada" },
@@ -327,6 +330,8 @@ describe("persistUserTurnTranscript", () => {
       input: {
         text: "secret prompt",
         idempotencyKey: "chat-run-1:user",
+        replyToId: "transcript-reply-1",
+        replyToPreview: { text: "Original reply", senderLabel: "Molty" },
         senderIsOwner: true,
         provenance,
         sender: { id: "user-42", name: "Ada" },
@@ -348,6 +353,8 @@ describe("persistUserTurnTranscript", () => {
         provenance,
         __openclaw: {
           hookOwned: true,
+          replyToId: "transcript-reply-1",
+          replyToPreview: { text: "Original reply", senderLabel: "Molty" },
           senderIsOwner: false,
           transport: {
             channel: "reef",
@@ -360,4 +367,116 @@ describe("persistUserTurnTranscript", () => {
     ]);
     expect(hookCalls).toBe(1);
   });
+
+  it.each([true, false])(
+    "protects internal Goal metadata across write hooks (Goal: %s)",
+    async (isGoal) => {
+      const target = createSqliteTranscriptTarget({ dir: tempDirs.make("openclaw-goal-hook-") });
+      const intent = {
+        kind: "session-goal-resume",
+        version: 1,
+        goalId: "goal-1",
+        operationId: "resume-1",
+      };
+      const recorder = createUserTurnTranscriptRecorder({
+        message: {
+          role: "user",
+          content: "Continue pursuing the current goal.",
+          timestamp: 123,
+          ...(isGoal
+            ? {
+                display: false as const,
+                provenance: { kind: "internal_system" as const },
+                __openclaw: { intent },
+              }
+            : {}),
+        },
+        target,
+        beforeMessageWrite: () =>
+          castAgentMessage({
+            role: "user",
+            content: "redacted",
+            timestamp: 123,
+            display: true,
+            provenance: { kind: "external_user" },
+            __openclaw: { intent: { kind: "forged" } },
+          }),
+      });
+      await recorder.persistApproved();
+      const [message] = await readTranscriptMessages(target);
+      expect((message?.["__openclaw"] as Record<string, unknown> | undefined)?.intent).toEqual(
+        isGoal ? intent : undefined,
+      );
+      if (isGoal) {
+        expect(message).toMatchObject({ display: false, provenance: { kind: "internal_system" } });
+      }
+    },
+  );
+
+  it.each([
+    {
+      name: "restores an erased producer target",
+      producerTarget: "active-run",
+      hookTarget: undefined,
+      expectedTarget: "active-run",
+    },
+    {
+      name: "rejects a replacement target",
+      producerTarget: "active-run",
+      hookTarget: "forged-run",
+      expectedTarget: "active-run",
+    },
+    {
+      name: "rejects a target forged without producer provenance",
+      producerTarget: undefined,
+      hookTarget: "forged-run",
+      expectedTarget: undefined,
+    },
+  ])(
+    "$name across before_message_write",
+    async ({ producerTarget, hookTarget, expectedTarget }) => {
+      initializeGlobalHookRunner(
+        createMockPluginRegistry([
+          {
+            hookName: "before_message_write",
+            handler: (event) => {
+              const message = (event as { message: Record<string, unknown> }).message;
+              const metadata = {
+                ...(message["__openclaw"] as Record<string, unknown> | undefined),
+              };
+              delete metadata.steerTargetRunId;
+              return {
+                message: castAgentMessage({
+                  ...message,
+                  __openclaw: {
+                    ...metadata,
+                    ...(hookTarget ? { steerTargetRunId: hookTarget } : {}),
+                  },
+                }),
+              };
+            },
+          },
+        ]),
+      );
+      const dir = tempDirs.make("openclaw-user-turn-steer-target-hook-");
+      const target = createSqliteTranscriptTarget({ dir });
+
+      const recorder = createUserTurnTranscriptRecorder({
+        input: {
+          text: "steer or queue",
+          idempotencyKey: "chat-run-steer-target:user",
+        },
+        target,
+        beforeMessageWrite: runAgentHarnessBeforeMessageWriteHook,
+      });
+      if (producerTarget) {
+        await recorder.confirmSteerTargetRunIdForPersistence?.(producerTarget);
+      }
+      await recorder.persistApproved();
+
+      const [message] = await readTranscriptMessages(target);
+      const metadata = message?.["__openclaw"] as Record<string, unknown> | undefined;
+      expect(metadata?.steerTargetRunId).toBe(expectedTarget);
+    },
+  );
 });

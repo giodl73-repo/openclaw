@@ -2,6 +2,10 @@ import type { WorkerLiveEvent } from "../../packages/gateway-protocol/src/schema
 import { redactAgentDiagnosticPayload } from "../agents/diagnostic-redaction.js";
 import type { AgentMessage } from "../agents/runtime/index.js";
 import type { AgentSessionEvent } from "../agents/sessions/agent-session.js";
+import {
+  resolveAssistantMessagePhase,
+  type AssistantPhase,
+} from "../shared/chat-message-content.js";
 import { truncateUtf8Prefix } from "../utils/utf8-truncate.js";
 
 const MAX_LIVE_EVENT_BYTES = 32 * 1024;
@@ -33,7 +37,7 @@ function boundLiveValue(value: unknown): unknown {
       return null;
     }
     if (Buffer.byteLength(serialized, "utf8") <= MAX_LIVE_PREVIEW_BYTES) {
-      return structuredClone(value);
+      return value;
     }
     return { truncated: true, preview: truncateLiveText(serialized) };
   } catch {
@@ -48,7 +52,7 @@ function redactLiveText(value: string): string {
 
 function boundLiveEvent(event: WorkerLiveEvent): WorkerLiveEvent {
   if (liveEventBytes(event) <= MAX_LIVE_EVENT_BYTES) {
-    return structuredClone(event);
+    return event;
   }
   let bounded: WorkerLiveEvent;
   if (event.kind === "assistant") {
@@ -104,53 +108,25 @@ function boundLiveEvent(event: WorkerLiveEvent): WorkerLiveEvent {
   return bounded;
 }
 
-function coalescePendingLiveEvent(pending: WorkerLiveEvent[], event: WorkerLiveEvent): boolean {
-  const index = pending.length - 1;
-  const previous = pending[index];
-  if (!previous) {
-    return false;
-  }
-  if (previous.kind === "assistant" && event.kind === "assistant") {
-    pending[index] = boundLiveEvent({
-      kind: "assistant",
-      payload: { ...event.payload, delta: event.payload.text, replace: true },
-    });
-    return true;
-  }
-  if (previous.kind === "thinking" && event.kind === "thinking") {
-    if (event.payload.text === "" && event.payload.delta === "") {
-      return false;
-    }
-    pending[index] = boundLiveEvent({
-      kind: "thinking",
-      payload: {
-        text: event.payload.text,
-        delta: `${previous.payload.delta}${event.payload.delta}`,
-      },
-    });
-    return true;
-  }
-  if (
-    previous.kind === "tool" &&
-    previous.payload.phase === "update" &&
-    event.kind === "tool" &&
-    event.payload.phase === "update" &&
-    previous.payload.toolCallId === event.payload.toolCallId
-  ) {
-    pending[index] = boundLiveEvent(event);
-    return true;
-  }
-  return false;
-}
-
-function readAssistantText(message: AgentMessage): string {
+function readAssistantSnapshot(message: AgentMessage): { text: string; phase?: AssistantPhase } {
   if (message.role !== "assistant") {
-    return "";
+    return { text: "" };
   }
-  return message.content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("");
+  // A late commentary signature applies to its block, not unphased siblings.
+  const blocks = message.content.flatMap((part) =>
+    part.type === "text"
+      ? [{ text: part.text, phase: resolveAssistantMessagePhase({ ...message, content: [part] }) }]
+      : [],
+  );
+  const firstPhase = blocks[0]?.phase;
+  const phase = blocks.every((block) => block.phase === firstPhase) ? firstPhase : undefined;
+  return {
+    text: blocks
+      .filter((block) => phase === "commentary" || block.phase !== "commentary")
+      .map((block) => block.text)
+      .join(""),
+    phase,
+  };
 }
 
 function readAssistantThinking(message: AgentMessage): string {
@@ -164,63 +140,21 @@ function readAssistantThinking(message: AgentMessage): string {
 }
 
 type WorkerLiveClient = {
-  emit: (event: WorkerLiveEvent) => Promise<void>;
+  enqueuePreview: (event: WorkerLiveEvent) => boolean;
+  emitTerminal: (event: WorkerLiveEvent) => Promise<void>;
 };
 
 type WorkerLiveRuntime = {
   handleSessionEvent: (event: AgentSessionEvent) => void;
   enqueueRunFailure: (failure: { aborted: boolean; error: Error }) => void;
-  flush: () => Promise<void>;
   emitTerminal: () => Promise<void>;
 };
 
 export function createWorkerLiveRuntime(client: WorkerLiveClient): WorkerLiveRuntime {
-  const pendingLiveEvents: WorkerLiveEvent[] = [];
-  let liveDrain: Promise<void> | undefined;
-  let liveDegraded = false;
-  const startLiveDrain = () => {
-    if (liveDrain || liveDegraded || pendingLiveEvents.length === 0) {
-      return;
-    }
-    liveDrain = (async () => {
-      while (true) {
-        const event = pendingLiveEvents.shift();
-        if (!event) {
-          return;
-        }
-        await client.emit(event);
-      }
-    })()
-      .catch(() => {
-        // Live events are preview-only; transcript commits and inference stay authoritative.
-        liveDegraded = true;
-        pendingLiveEvents.length = 0;
-      })
-      .finally(() => {
-        liveDrain = undefined;
-        startLiveDrain();
-      });
-  };
+  let previewEnabled = true;
   const enqueueLive = (event: WorkerLiveEvent) => {
-    if (liveDegraded) {
-      return;
-    }
-    try {
-      const bounded = boundLiveEvent(event);
-      if (!coalescePendingLiveEvent(pendingLiveEvents, bounded)) {
-        pendingLiveEvents.push(bounded);
-      }
-      startLiveDrain();
-    } catch {
-      liveDegraded = true;
-      pendingLiveEvents.length = 0;
-    }
-  };
-  const flush = async () => {
-    let drain = liveDrain;
-    while (drain) {
-      await drain;
-      drain = liveDrain;
+    if (previewEnabled) {
+      previewEnabled = client.enqueuePreview(boundLiveEvent(event));
     }
   };
   const startedAt = Date.now();
@@ -229,24 +163,51 @@ export function createWorkerLiveRuntime(client: WorkerLiveClient): WorkerLiveRun
   // gateway never sees an end/error before the authoritative transcript commit.
   let terminalLiveEvent: WorkerLiveEvent | undefined;
   let streamedText = "";
+  let streamedPhase: AssistantPhase | undefined;
+  let assistantMessageIndex = 0;
   let streamedThinking = "";
+  const emitAssistantSnapshot = (message: AgentMessage) => {
+    const { text, phase } = readAssistantSnapshot(message);
+    if (text === streamedText && phase === streamedPhase) {
+      return;
+    }
+    // Commentary never contributed to the answer, even if a final repeats its prefix.
+    const previousText =
+      streamedPhase === "commentary" && phase !== "commentary" ? "" : streamedText;
+    const replace = !text.startsWith(previousText);
+    enqueueLive({
+      kind: "assistant",
+      payload: {
+        text,
+        delta: replace ? text : text.slice(previousText.length),
+        ...(replace ? { replace: true as const } : {}),
+        ...(phase ? { phase } : {}),
+        // Provider signatures can arrive only at text_end. Message lifecycle,
+        // not those late ids, owns this cumulative snapshot's stable scope.
+        itemId: `assistant-${assistantMessageIndex}`,
+      },
+    });
+    streamedText = text;
+    streamedPhase = phase;
+  };
   const handleSessionEvent = (event: AgentSessionEvent) => {
     if (event.type === "agent_start") {
       enqueueLive({ kind: "lifecycle", payload: { phase: "start", startedAt } });
       return;
     }
     if (event.type === "message_start" && event.message.role === "assistant") {
+      assistantMessageIndex += 1;
       streamedText = "";
+      streamedPhase = undefined;
       streamedThinking = "";
       return;
     }
     if (event.type === "message_update") {
-      if (event.assistantMessageEvent.type === "text_delta") {
-        streamedText = readAssistantText(event.message);
-        enqueueLive({
-          kind: "assistant",
-          payload: { text: streamedText, delta: event.assistantMessageEvent.delta },
-        });
+      if (
+        event.assistantMessageEvent.type === "text_delta" ||
+        event.assistantMessageEvent.type === "text_end"
+      ) {
+        emitAssistantSnapshot(event.message);
       } else if (event.assistantMessageEvent.type === "thinking_delta") {
         streamedThinking = readAssistantThinking(event.message);
         enqueueLive({
@@ -257,13 +218,7 @@ export function createWorkerLiveRuntime(client: WorkerLiveClient): WorkerLiveRun
       return;
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
-      const finalText = readAssistantText(event.message);
-      if (finalText !== streamedText) {
-        enqueueLive({
-          kind: "assistant",
-          payload: { text: finalText, delta: finalText, replace: true },
-        });
-      }
+      emitAssistantSnapshot(event.message);
       const finalThinking = readAssistantThinking(event.message);
       if (finalThinking !== streamedThinking) {
         enqueueLive({
@@ -356,7 +311,7 @@ export function createWorkerLiveRuntime(client: WorkerLiveClient): WorkerLiveRun
     if (!terminalLiveEvent) {
       return;
     }
-    await client.emit(boundLiveEvent(terminalLiveEvent));
+    await client.emitTerminal(boundLiveEvent(terminalLiveEvent));
   };
-  return { handleSessionEvent, enqueueRunFailure, flush, emitTerminal };
+  return { handleSessionEvent, enqueueRunFailure, emitTerminal };
 }

@@ -1,10 +1,10 @@
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 // Control UI chat module implements message extract behavior.
 import { stripInternalRuntimeContext } from "../../../../src/agents/internal-runtime-context.js";
 import { stripInboundMetadata } from "../../../../src/auto-reply/reply/strip-inbound-meta.js";
 import { readPersistedMediaFacts } from "../../../../src/media/media-facts.js";
 import { stripEnvelope } from "../../../../src/shared/chat-envelope.js";
 import { extractAssistantPhaseText } from "../../../../src/shared/chat-message-content.js";
-import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 import { stripThinkingTags } from "../strip-thinking-tags.ts";
 
 const textCache = new WeakMap<object, string | null>();
@@ -91,7 +91,7 @@ export function extractThinkingCached(message: unknown): string | null {
   return value;
 }
 
-export function extractRawText(message: unknown): string | null {
+function extractRawText(message: unknown): string | null {
   if (message == null) {
     return null;
   }
@@ -125,6 +125,10 @@ export function readTranscriptMediaEntries(message: unknown): Array<{
   path: string;
   mediaType: string | undefined;
   fileName: string | undefined;
+  sizeBytes?: number;
+  durationMs?: number;
+  width?: number;
+  height?: number;
 }> {
   if (!message || typeof message !== "object") {
     return [];
@@ -132,7 +136,17 @@ export function readTranscriptMediaEntries(message: unknown): Array<{
   return (readPersistedMediaFacts(message) ?? []).flatMap((fact) => {
     const path = fact.path ?? fact.url;
     return path
-      ? [{ path, mediaType: fact.contentType ?? fact.kind, fileName: fact.fileName }]
+      ? [
+          {
+            path,
+            mediaType: fact.contentType ?? fact.kind,
+            fileName: fact.fileName,
+            ...(fact.sizeBytes !== undefined ? { sizeBytes: fact.sizeBytes } : {}),
+            ...(fact.durationMs !== undefined ? { durationMs: fact.durationMs } : {}),
+            ...(fact.width !== undefined ? { width: fact.width } : {}),
+            ...(fact.height !== undefined ? { height: fact.height } : {}),
+          },
+        ]
       : [];
   });
 }

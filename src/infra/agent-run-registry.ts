@@ -1,6 +1,7 @@
 // Owns process-local agent run context, ownership, and projection state.
 import { randomUUID } from "node:crypto";
 import type { VerboseLevel } from "../auto-reply/thinking.js";
+import { normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { clearAgentRunUsage, resetAgentRunUsageForTest } from "./agent-run-usage.js";
 
@@ -20,8 +21,13 @@ type AgentRunContext = {
   /** Whether control UI clients should receive chat/agent updates for this run. */
   isControlUiVisible?: boolean;
   projectSessionActive?: boolean;
+  /** Whether hidden events may reach exact sessions.messages subscribers.
+   * Internal maintenance sharing a foreground key disables this to prevent selected-chat leaks. */
+  projectSessionMessages?: boolean;
   /** Whether lifecycle events may update the shared session row. */
   projectSessionLifecycle?: boolean;
+  /** Sticky diagnostic provenance only; never authorization for recovery work. */
+  mainSessionRestartRecovery?: true;
   /** Active cadence state by job; admission permits one invocation per job. */
   cronRunsByJobId?: Map<string, { pacingEnabled: boolean; nextCheckMs?: number }>;
   /** Timestamp when this context was first registered (for TTL-based cleanup). */
@@ -41,8 +47,6 @@ export type AgentRunDelegatedAuthority = Readonly<{
 type AgentRunContextOwnership = {
   lifecycleGeneration: string;
   claimIds: Set<string>;
-  /** Detached task ids exist only for the exact execution claims that own them. */
-  taskRunIds?: Map<string, string>;
   /** Live execution claims are lifecycle-owned and must not be expired by the projection sweeper. */
   sweepProtectedClaimIds: Set<string>;
   preserveAfterRelease: boolean;
@@ -192,6 +196,12 @@ export function registerAgentRunContext(
   if (context.projectSessionLifecycle !== undefined) {
     existing.projectSessionLifecycle = context.projectSessionLifecycle;
   }
+  if (context.projectSessionMessages !== undefined) {
+    existing.projectSessionMessages = context.projectSessionMessages;
+  }
+  if (context.mainSessionRestartRecovery === true) {
+    existing.mainSessionRestartRecovery = true;
+  }
   if (context.cronRunsByJobId !== undefined) {
     existing.cronRunsByJobId ??= new Map();
     for (const [jobId, cronRun] of context.cronRunsByJobId) {
@@ -304,31 +314,6 @@ export function claimAgentRunContext(
 /** Returns the currently registered context for a run, if it has not been cleared or swept. */
 export function getAgentRunContext(runId: string): AgentRunContext | undefined {
   return getAgentRunRegistryState().contexts.get(runId);
-}
-
-export function bindAgentRunTaskRunId(runId: string, claimId: string, taskRunId: string): boolean {
-  const normalizedTaskRunId = taskRunId.trim();
-  const ownership = getAgentRunRegistryState().owners.get(runId);
-  if (!normalizedTaskRunId || !ownership?.claimIds.has(claimId)) {
-    return false;
-  }
-  ownership.taskRunIds ??= new Map();
-  ownership.taskRunIds.set(claimId, normalizedTaskRunId);
-  return true;
-}
-
-export function getAgentRunTaskRunId(runId: string): string | undefined {
-  const ownership = getAgentRunRegistryState().owners.get(runId);
-  if (!ownership?.taskRunIds) {
-    return undefined;
-  }
-  const taskRunIds = new Set<string>();
-  for (const [claimId, taskRunId] of ownership.taskRunIds) {
-    if (ownership.claimIds.has(claimId)) {
-      taskRunIds.add(taskRunId);
-    }
-  }
-  return taskRunIds.size === 1 ? taskRunIds.values().next().value : undefined;
 }
 
 /** Holds an existing run context only while its current execution awaits lane admission. */
@@ -542,9 +527,9 @@ export function listAgentRunsForSession(params: {
   const state = getAgentRunRegistryState();
   const runs: Array<{ runId: string; lifecycleGeneration: string }> = [];
   for (const [runId, context] of state.contexts) {
-    const matches = context.sessionId
-      ? context.sessionId === params.sessionId
-      : context.sessionKey === params.sessionKey;
+    const matches =
+      context.sessionKey === params.sessionKey &&
+      (!context.sessionId || context.sessionId === params.sessionId);
     if (matches && context.lifecycleGeneration === state.lifecycleGeneration) {
       runs.push({ runId, lifecycleGeneration: context.lifecycleGeneration });
     }
@@ -559,12 +544,20 @@ export function listAgentRunsForSession(params: {
 export type ProjectedAgentRunIndex = {
   sessionKeys: ReadonlySet<string>;
   sessionIds: ReadonlySet<string>;
+  ownerlessSessionKeys: ReadonlySet<string>;
+  ownerlessSessionIds: ReadonlySet<string>;
 };
+
+function projectedRunIdentity(agentId: string, value: string): string {
+  return `${normalizeAgentId(agentId)}\0${value}`;
+}
 
 export function buildProjectedAgentRunIndex(): ProjectedAgentRunIndex {
   const state = getAgentRunRegistryState();
   const sessionKeys = new Set<string>();
   const sessionIds = new Set<string>();
+  const ownerlessSessionKeys = new Set<string>();
+  const ownerlessSessionIds = new Set<string>();
   for (const context of state.contexts.values()) {
     if (
       context.projectSessionActive !== true ||
@@ -572,25 +565,48 @@ export function buildProjectedAgentRunIndex(): ProjectedAgentRunIndex {
     ) {
       continue;
     }
-    if (context.sessionKey !== undefined) {
-      sessionKeys.add(context.sessionKey);
+    const agentId = context.agentId ?? parseAgentSessionKey(context.sessionKey)?.agentId;
+    if (context.sessionKey !== undefined && agentId) {
+      sessionKeys.add(projectedRunIdentity(agentId, context.sessionKey));
+    } else if (context.sessionKey !== undefined) {
+      ownerlessSessionKeys.add(context.sessionKey);
     }
-    if (context.sessionId !== undefined) {
-      sessionIds.add(context.sessionId);
+    if (context.sessionId !== undefined && agentId) {
+      sessionIds.add(projectedRunIdentity(agentId, context.sessionId));
+    } else if (context.sessionId !== undefined) {
+      ownerlessSessionIds.add(context.sessionId);
     }
   }
-  return { sessionKeys, sessionIds };
+  return { sessionKeys, sessionIds, ownerlessSessionKeys, ownerlessSessionIds };
 }
 
 export function hasProjectedAgentRunForSession(params: {
   sessionKeys: readonly string[];
   sessionId?: string;
+  agentId?: string;
+  defaultAgentId?: string;
   index?: ProjectedAgentRunIndex;
 }): boolean {
   const index = params.index ?? buildProjectedAgentRunIndex();
+  const agentId =
+    params.agentId ??
+    params.sessionKeys.flatMap((key) => parseAgentSessionKey(key)?.agentId ?? [])[0] ??
+    params.defaultAgentId;
+  if (!agentId) {
+    return false;
+  }
+  const mayAdoptOwnerless =
+    params.defaultAgentId !== undefined &&
+    normalizeAgentId(agentId) === normalizeAgentId(params.defaultAgentId);
   return (
-    params.sessionKeys.some((sessionKey) => index.sessionKeys.has(sessionKey)) ||
-    (params.sessionId !== undefined && index.sessionIds.has(params.sessionId))
+    params.sessionKeys.some((sessionKey) =>
+      index.sessionKeys.has(projectedRunIdentity(agentId, sessionKey)),
+    ) ||
+    (mayAdoptOwnerless &&
+      params.sessionKeys.some((sessionKey) => index.ownerlessSessionKeys.has(sessionKey))) ||
+    (params.sessionId !== undefined &&
+      (index.sessionIds.has(projectedRunIdentity(agentId, params.sessionId)) ||
+        (mayAdoptOwnerless && index.ownerlessSessionIds.has(params.sessionId))))
   );
 }
 
@@ -662,7 +678,6 @@ export function releaseAgentRunContext(runId: string, claimId: string | undefine
   }
   owners.sweepProtectedClaimIds.delete(claimId);
   const versionBeforeRelease = readAgentRunIndexVersion();
-  owners.taskRunIds?.delete(claimId);
   owners.clearListeners?.delete(claimId);
   if (owners.exclusiveClaimId === claimId) {
     owners.exclusiveClaimId = undefined;

@@ -5,7 +5,10 @@
  */
 import fs from "node:fs";
 import os from "node:os";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
+import {
+  hasNonEmptyString,
+  normalizeOptionalLowercaseString,
+} from "@openclaw/normalization-core/string-coerce";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import {
   hasBundledChannelPersistedAuthState,
@@ -13,7 +16,6 @@ import {
 } from "../channels/plugins/persisted-auth-state.js";
 import { resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { hasNonEmptyString } from "../infra/outbound/channel-target.js";
 import type { PluginDiscoveryResult } from "../plugins/discovery.js";
 import { listOfficialExternalChannelEnvVars } from "../plugins/official-external-plugin-catalog.js";
 import { isRecord } from "../utils.js";
@@ -83,22 +85,11 @@ function hasPersistedChannelState(env: NodeJS.ProcessEnv): boolean {
   return fs.existsSync(resolveStateDir(env, os.homedir));
 }
 
-let persistedAuthStateChannelIds: readonly string[] | null = null;
-
 function listPersistedAuthStateChannelIds(options: ChannelPresenceOptions): readonly string[] {
-  const override = options.persistedAuthStateProbe?.listChannelIds();
-  if (override) {
-    return override;
-  }
-  if (options.discovery) {
-    return listBundledChannelIdsWithPersistedAuthState(options.discovery);
-  }
-  if (persistedAuthStateChannelIds) {
-    return persistedAuthStateChannelIds;
-  }
-  // Bundled plugin metadata is process-stable; cache the static persisted-auth id list.
-  persistedAuthStateChannelIds = listBundledChannelIdsWithPersistedAuthState();
-  return persistedAuthStateChannelIds;
+  return (
+    options.persistedAuthStateProbe?.listChannelIds() ??
+    listBundledChannelIdsWithPersistedAuthState(options.discovery)
+  );
 }
 
 function hasPersistedAuthState(params: {

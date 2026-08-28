@@ -5,7 +5,7 @@ import { requestHeartbeat } from "../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import {
   isGatewayRestartDraining,
-  runWithGatewayIndependentRootWorkAdmission,
+  runWithGatewayIndependentRootWorkContinuation,
 } from "../process/gateway-work-admission.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.shared.js";
@@ -200,7 +200,7 @@ async function runTaskDeliveryWithIndependentAdmission(
   ensureTaskRegistryReady();
   let admitted = false;
   try {
-    return await runWithGatewayIndependentRootWorkAdmission(async () => {
+    return await runWithGatewayIndependentRootWorkContinuation(async () => {
       admitted = true;
       return await deliver();
     });
@@ -273,7 +273,6 @@ async function maybeDeliverTaskTerminalUpdateUnderAdmission(
     const shouldDeliverParentReviewDirect = canDeliverParentReviewTaskToThreadOrigin(latest);
     const canDeliverDirect =
       canDeliverTaskToRequesterOrigin(latest) || shouldDeliverParentReviewDirect;
-    const directEventText = formatTaskTerminalMessage(latest);
     const sessionEventText = formatTaskTerminalMessage(
       latest,
       shouldRouteParentReview ? { surface: "parent_session" } : undefined,
@@ -302,19 +301,30 @@ async function maybeDeliverTaskTerminalUpdateUnderAdmission(
       }
     }
     try {
-      const { sendMessage } = await loadTaskRegistryDeliveryRuntime();
+      const { sendMessage, resolveTaskControlUiSessionUrl } =
+        await loadTaskRegistryDeliveryRuntime();
       const beforeSend = tasks.get(taskId);
       if (!beforeSend || !shouldAutoDeliverTaskTerminalUpdate(beforeSend)) {
         return beforeSend ? cloneTaskRecord(beforeSend) : null;
       }
       const requesterAgentId = parseAgentSessionKey(ownerSessionKey)?.agentId;
+      const inspectUrl = latest.childSessionKey
+        ? resolveTaskControlUiSessionUrl?.({
+            sessionKey: latest.childSessionKey,
+            fallbackAgentId:
+              parseAgentSessionKey(latest.childSessionKey)?.agentId ?? requesterAgentId,
+          })
+        : undefined;
+      const directEventText = shouldDeliverParentReviewDirect
+        ? sessionEventText
+        : formatTaskTerminalMessage(latest);
       const idempotencyKey = resolveTaskTerminalIdempotencyKey(latest);
-      await sendMessage({
+      const sendResult = await sendMessage({
         channel: owner.requesterOrigin?.channel,
         to: owner.requesterOrigin?.to ?? "",
         accountId: owner.requesterOrigin?.accountId,
         threadId: owner.requesterOrigin?.threadId,
-        content: shouldDeliverParentReviewDirect ? sessionEventText : directEventText,
+        content: inspectUrl ? `${directEventText}\nInspect: ${inspectUrl}` : directEventText,
         agentId: requesterAgentId,
         idempotencyKey,
         mirror: {
@@ -326,6 +336,23 @@ async function maybeDeliverTaskTerminalUpdateUnderAdmission(
       const afterSend = tasks.get(taskId);
       if (!afterSend || !shouldAutoDeliverTaskTerminalUpdate(afterSend)) {
         return afterSend ? cloneTaskRecord(afterSend) : null;
+      }
+      if (sendResult.deliveryStatus === "suppressed") {
+        if (sendResult.suppressionReason === "adapter_returned_no_identity") {
+          taskRegistryLog.warn("Background task update delivery was not confirmed", {
+            taskId,
+            ownerKey: ownerSessionKey,
+            requesterOrigin: owner.requesterOrigin,
+            suppressionReason: sendResult.suppressionReason,
+          });
+          return updateTask(taskId, {
+            deliveryStatus: "failed",
+            lastEventAt: Date.now(),
+          });
+        }
+        throw new Error(
+          `background task update suppressed: ${sendResult.suppressionReason ?? "unknown reason"}`,
+        );
       }
       if (afterSend.terminalOutcome === "blocked") {
         queueBlockedTaskFollowup(afterSend);
@@ -420,7 +447,7 @@ async function maybeDeliverTaskStateChangeUpdateUnderAdmission(
       latestEvent,
       owner,
     });
-    await sendMessage({
+    const sendResult = await sendMessage({
       channel: owner.requesterOrigin?.channel,
       to: owner.requesterOrigin?.to ?? "",
       accountId: owner.requesterOrigin?.accountId,
@@ -434,6 +461,19 @@ async function maybeDeliverTaskStateChangeUpdateUnderAdmission(
         idempotencyKey,
       },
     });
+    if (sendResult.deliveryStatus === "suppressed") {
+      if (sendResult.suppressionReason !== "adapter_returned_no_identity") {
+        throw new Error(
+          `background task state change suppressed: ${sendResult.suppressionReason ?? "unknown reason"}`,
+        );
+      }
+      taskRegistryLog.warn("Background task state change delivery was not confirmed", {
+        taskId,
+        ownerKey: current.ownerKey,
+        requesterOrigin: owner.requesterOrigin,
+        suppressionReason: sendResult.suppressionReason,
+      });
+    }
     upsertTaskDeliveryState({
       taskId,
       requesterOrigin: deliveryState?.requesterOrigin,

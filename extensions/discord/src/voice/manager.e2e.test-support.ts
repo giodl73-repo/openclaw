@@ -1,5 +1,6 @@
 import type {
   RealtimeVoiceBridgeEvent,
+  RealtimeVoiceBridgeCreateRequest,
   RealtimeVoiceResponseOutcome,
 } from "openclaw/plugin-sdk/realtime-voice";
 import { vi } from "vitest";
@@ -28,6 +29,7 @@ export type TestRealtimeSessionEntry = {
     state: { status: string };
     stop: ReturnType<typeof vi.fn>;
   };
+  playbackQueue: Promise<void>;
   processingQueue: Promise<void>;
   realtime?: {
     beginSpeakerTurn: (
@@ -43,12 +45,14 @@ export type TestRealtimeSessionEntry = {
 };
 
 export type TestRealtimeBridgeParams = {
+  agentId?: string;
   audioSink: { sendAudio: (audio: Buffer) => void };
   autoRespondToAudio?: boolean;
   cfg?: unknown;
   instructions?: string;
   interruptResponseOnInputAudio?: boolean;
   onEvent?: (event: RealtimeVoiceBridgeEvent) => void;
+  onClose?: RealtimeVoiceBridgeCreateRequest["onClose"];
   onReady?: () => void;
   onResponseDone?: (outcome: RealtimeVoiceResponseOutcome) => void;
   onToolCall?: (

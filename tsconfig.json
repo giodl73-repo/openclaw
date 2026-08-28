@@ -35,11 +35,16 @@
       "@openclaw/ai/validation": ["./packages/ai/src/validation.ts"],
       "@openclaw/ai/internal/anthropic": ["./packages/ai/src/internal/anthropic.ts"],
       "@openclaw/ai/internal/openai": ["./packages/ai/src/internal/openai.ts"],
+      "@openclaw/ai/internal/openai-responses-payload-policy": [
+        "./packages/ai/src/internal/openai-responses-payload-policy.ts"
+      ],
       "@openclaw/ai/internal/retry-after": ["./packages/ai/src/internal/retry-after.ts"],
       "@openclaw/ai/internal/runtime": ["./packages/ai/src/internal/runtime.ts"],
       "@openclaw/ai/internal/shared": ["./packages/ai/src/internal/shared.ts"],
       "@openclaw/agent-core": ["./packages/agent-core/src/index.ts"],
       "@openclaw/agent-core/*": ["./packages/agent-core/src/*"],
+      "@openclaw/gateway-client/model": ["./packages/gateway-client/src/model/index.ts"],
+      "@openclaw/gateway-client/model/*": ["./packages/gateway-client/src/model/*"],
       "@openclaw/llm-core": ["./packages/llm-core/src/index.ts"],
       "@openclaw/llm-core/diagnostics": ["./packages/llm-core/src/utils/diagnostics.ts"],
       "@openclaw/llm-core/event-stream": ["./packages/llm-core/src/utils/event-stream.ts"],
@@ -70,6 +75,9 @@
       "@openclaw/model-catalog-core/*": ["./packages/model-catalog-core/src/*"],
       "@openclaw/gateway-client": ["./packages/gateway-client/src/index.ts"],
       "@openclaw/gateway-client/browser": ["./packages/gateway-client/src/browser.ts"],
+      "@openclaw/gateway-client/scope-upgrade": [
+        "./packages/gateway-client/src/scope-upgrade.ts"
+      ],
       "@openclaw/gateway-client/websocket-data": [
         "./packages/gateway-client/src/websocket-data.ts"
       ],
@@ -158,8 +166,17 @@
         "./packages/normalization-core/src/error-coercion.ts"
       ],
       "@openclaw/normalization-core/expect": ["./packages/normalization-core/src/expect.ts"],
+      "@openclaw/normalization-core/json-coercion": [
+        "./packages/normalization-core/src/json-coercion.ts"
+      ],
       "@openclaw/normalization-core/json-schema": [
         "./packages/normalization-core/src/json-schema.ts"
+      ],
+      "@openclaw/normalization-core/markdown-plain-text": [
+        "./packages/normalization-core/src/markdown-plain-text.ts"
+      ],
+      "@openclaw/normalization-core/mountinfo-path": [
+        "./packages/normalization-core/src/mountinfo-path.ts"
       ],
       "@openclaw/normalization-core/number-coercion": [
         "./packages/normalization-core/src/number-coercion.ts"
@@ -178,6 +195,9 @@
       ],
       "@openclaw/normalization-core/stable-node-path": [
         "./packages/normalization-core/src/stable-node-path.ts"
+      ],
+      "@openclaw/normalization-core/stable-stringify": [
+        "./packages/normalization-core/src/stable-stringify.ts"
       ],
       "@openclaw/normalization-core/string-coerce": [
         "./packages/normalization-core/src/string-coerce.ts"

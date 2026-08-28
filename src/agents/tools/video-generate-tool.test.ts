@@ -6,13 +6,11 @@ import { parseReplyDirectives } from "../../auto-reply/reply/reply-directives.js
 import type { OpenClawConfig } from "../../config/config.js";
 import * as mediaStore from "../../media/store.js";
 import * as webMedia from "../../media/web-media.js";
-import {
-  getCurrentPluginMetadataSnapshot,
-  setCurrentPluginMetadataSnapshot,
-} from "../../plugins/current-plugin-metadata-snapshot.js";
-import { clearCurrentPluginMetadataSnapshot } from "../../plugins/current-plugin-metadata-state.js";
+import { getCurrentPluginMetadataSnapshot } from "../../plugins/current-plugin-metadata-snapshot.js";
+import { setCurrentPluginMetadataSnapshot } from "../../plugins/current-plugin-metadata.test-support.js";
 import { resolveInstalledPluginIndexPolicyHash } from "../../plugins/installed-plugin-index-policy.js";
 import type { PluginManifestRecord } from "../../plugins/manifest-registry.js";
+import { clearPluginMetadataLifecycleCaches } from "../../plugins/plugin-metadata-lifecycle.js";
 import type { PluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.types.js";
 import * as videoGenerationRuntime from "../../video-generation/runtime.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
@@ -363,7 +361,7 @@ describe("createVideoGenerateTool", () => {
   });
 
   afterEach(() => {
-    clearCurrentPluginMetadataSnapshot();
+    clearPluginMetadataLifecycleCaches();
     vi.unstubAllEnvs();
   });
 
@@ -420,24 +418,6 @@ describe("createVideoGenerateTool", () => {
   });
 
   it("hides reference-audio params when the configured video provider does not declare audio inputs", () => {
-    const properties = toolParameterProperties(
-      createVideoGenerateTool({
-        config: asConfig({
-          agents: {
-            defaults: {
-              videoGenerationModel: { primary: "openai/sora-2" },
-            },
-          },
-        }),
-      }),
-    );
-
-    expect(properties.audioRef).toBeUndefined();
-    expect(properties.audioRefs).toBeUndefined();
-    expect(properties.audioRoles).toBeUndefined();
-  });
-
-  it("hides reference-audio params for known video provider aliases without audio input support", () => {
     const properties = toolParameterProperties(
       createVideoGenerateTool({
         config: asConfig({
@@ -760,6 +740,68 @@ describe("createVideoGenerateTool", () => {
     expect(resultDetails(overrideResult).timeoutMs).toBe(12_345);
   });
 
+  it("runs explicit deployment refs and preserves timeout-only video defaults", async () => {
+    const provider = {
+      id: "video-plugin",
+      models: [],
+      capabilities: {},
+      isConfigured: () => true,
+      generateVideo: vi.fn(async () => ({
+        videos: [{ buffer: Buffer.from("video"), mimeType: "video/mp4" }],
+      })),
+    };
+    vi.spyOn(videoGenerationRuntime, "listRuntimeVideoGenerationProviders").mockReturnValue([
+      provider,
+    ]);
+    const generateSpy = mockSavedVideoResult("deployment.mp4");
+    const tool = expectVideoGenerateTool(
+      createVideoGenerateTool({
+        config: asConfig({
+          agents: { defaults: { videoGenerationModel: { timeoutMs: 180_000 } } },
+        }),
+        preparedModelRuntime: {
+          mediaCapabilityProviders: { videoGenerationProviders: [provider] },
+        } as never,
+      }),
+    );
+
+    const result = await tool.execute("call-explicit-deployment", {
+      prompt: "friendly lobster surfing",
+      model: "video-plugin/deployment",
+    });
+
+    expect(firstMockCallArg(generateSpy)).toMatchObject({
+      modelOverride: "video-plugin/deployment",
+      timeoutMs: 180_000,
+    });
+    expect(resultDetails(result).timeoutMs).toBe(180_000);
+  });
+
+  it("rejects oversized inline reference images before video generation", async () => {
+    mockVideoPluginProvider({ imageToVideo: { enabled: true, maxInputImages: 1 } });
+    const generateSpy = mockSavedVideoResult();
+    const tool = expectVideoGenerateTool(
+      createVideoGenerateTool({
+        config: asConfig({
+          agents: {
+            defaults: {
+              mediaMaxMb: 8 / (1024 * 1024),
+              videoGenerationModel: { primary: "video-plugin/vid-v1" },
+            },
+          },
+        }),
+      }),
+    );
+
+    await expect(
+      tool.execute("call-oversized-inline-reference", {
+        prompt: "friendly lobster surfing",
+        image: `data:image/png;base64,${Buffer.alloc(9).toString("base64")}`,
+      }),
+    ).rejects.toThrow("Invalid data URL: payload exceeds size limit.");
+    expect(generateSpy).not.toHaveBeenCalled();
+  });
+
   it("uses the video media cap when mediaMaxMb is not configured", async () => {
     vi.spyOn(videoGenerationRuntime, "generateVideo").mockResolvedValue({
       provider: "qwen",
@@ -893,7 +935,6 @@ describe("createVideoGenerateTool", () => {
     expect(immediate.mediaUrls ?? []).toEqual([]);
     expect(immediate.replyToId).toBeUndefined();
     expect(immediate.audioAsVoice).toBeUndefined();
-    expect(immediate.reaction).toBeUndefined();
     expect(attachments[0]?.url).toBe(signedUrl);
     expect(attachments[0]?.mimeType).toBe("video/mp4\nMEDIA:/tmp/mime-private.png\u2028\u202e");
     expect((details.media as { mediaUrls: string[] }).mediaUrls).toEqual([signedUrl]);
@@ -921,7 +962,6 @@ describe("createVideoGenerateTool", () => {
     expect(delivered.mediaUrls).toEqual([signedUrl]);
     expect(delivered.replyToId).toBeUndefined();
     expect(delivered.audioAsVoice).toBeUndefined();
-    expect(delivered.reaction).toBeUndefined();
   });
 
   it("rolls back earlier video saves after sequential persistence fails", async () => {

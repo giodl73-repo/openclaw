@@ -5,6 +5,7 @@
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { createCodexNativeWebSearchWrapper } from "../../../llm/providers/stream-wrappers/openai.js";
 import type { AssistantMessage } from "../../../llm/types.js";
+import { getAgentScopedMediaLocalRoots } from "../../../media/local-roots.js";
 import type { ProviderRuntimePluginHandle } from "../../../plugins/provider-hook-runtime.js";
 import { resolveProviderTextTransforms } from "../../../plugins/provider-runtime.js";
 import type { AgentRunAttemptFailureSource } from "../../agent-run-terminal-outcome.js";
@@ -92,6 +93,7 @@ type StreamSettleResult = {
   lastAssistant: EmbeddedRunAttemptResult["lastAssistant"];
   currentAttemptAssistant: EmbeddedRunAttemptResult["currentAttemptAssistant"];
   currentAttemptCompletedAssistant: EmbeddedRunAttemptResult["currentAttemptCompletedAssistant"];
+  successfulNestedToolNames: string[];
   attemptUsage: EmbeddedRunAttemptResult["attemptUsage"];
   cacheBreak: PromptCacheBreak | null;
   lastCallUsage: NormalizedUsage | undefined;
@@ -426,6 +428,15 @@ export async function settleEmbeddedAttemptStream(input: {
     lastAssistant,
     currentAttemptAssistant,
     currentAttemptCompletedAssistant,
+    successfulNestedToolNames: [
+      ...new Set(
+        input.toolSearchTargetTranscriptProjections
+          // Receipt evidence admits only projections explicitly recorded as successful.
+          .filter((projection) => Object.is(projection.isError, false))
+          .map((projection) => projection.toolName.trim())
+          .filter(Boolean),
+      ),
+    ],
     attemptUsage,
     cacheBreak,
     lastCallUsage,
@@ -441,6 +452,7 @@ export async function prepareEmbeddedAttemptTransport(input: {
   session: AgentSession;
   settingsManager: SettingsManager;
   providerThinkingLevel: ProviderThinkLevel | undefined;
+  onCurrentTurnImageFailure?: (count: number) => void;
   sessionAgentId: string;
   workspaceDir: string;
   workspaceOnly: boolean;
@@ -509,6 +521,10 @@ export async function prepareEmbeddedAttemptTransport(input: {
             context,
             workspaceDir: input.workspaceDir,
             workspaceOnly: input.workspaceOnly,
+            localRoots: input.workspaceOnly
+              ? undefined
+              : getAgentScopedMediaLocalRoots(attempt.config ?? {}, input.sessionAgentId),
+            onCurrentTurnImageFailure: input.onCurrentTurnImageFailure,
             sandbox:
               input.sandbox?.enabled && input.sandbox.fsBridge
                 ? { root: input.sandbox.workspaceDir, bridge: input.sandbox.fsBridge }
@@ -619,6 +635,7 @@ export async function prepareEmbeddedAttemptTransport(input: {
         `(${attempt.provider}/${attempt.modelId})`,
     );
   }
+  session.agent.transport = effectiveAgentTransport;
   return {
     effectiveAgentTransport,
     effectiveExtraParams,

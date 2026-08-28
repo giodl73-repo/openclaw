@@ -7,8 +7,18 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { OpenClawConfig } from "../config/config.js";
 import { createDiagnosticLogRecordCapture } from "../logging/test-helpers/diagnostic-log-capture.js";
 import type { AuthProfileStore } from "./auth-profiles.js";
+import type { FailoverReason } from "./failover/signal.js";
 import type { SessionSuspensionParams } from "./session-suspension.js";
 import { makeModelFallbackCfg } from "./test-helpers/model-fallback-config-fixture.js";
+
+function routingProvenance(
+  requestedProvider: string,
+  requestedModel: string,
+  stage: "initial" | "fallback",
+  fallbackReason: FailoverReason | undefined,
+) {
+  return { requestedProvider, requestedModel, stage, fallbackReason };
+}
 
 // Mock auth-profile submodules before importing model-fallback so the module
 // captures probe-specific auth behavior instead of real profile stores.
@@ -39,7 +49,6 @@ const sessionSuspensionMocks = vi.hoisted(() => ({
       onDeferred?.({
         cfg: {},
         sessionId: "test-session",
-        laneId: "main",
         reason: "quota_exhausted",
         failedProvider: "openai",
         failedModel: "gpt-4.1-mini",
@@ -99,7 +108,8 @@ const emptyPluginMetadataSnapshot = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../plugins/current-plugin-metadata-snapshot.js", () => ({
+vi.mock("../plugins/current-plugin-metadata-snapshot.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../plugins/current-plugin-metadata-snapshot.js")>()),
   getCurrentPluginMetadataSnapshot: () => emptyPluginMetadataSnapshot,
 }));
 
@@ -177,12 +187,13 @@ function expectPrimarySkippedForReason(
     (...args: unknown[]): unknown;
     mock: { calls: unknown[][] };
   },
-  reason: string,
+  reason: FailoverReason,
 ) {
   expect(result.result).toBe("ok");
   expect(run).toHaveBeenCalledTimes(1);
   expect(run).toHaveBeenCalledWith("anthropic", "claude-haiku-3-5", {
     isFinalFallbackAttempt: true,
+    modelRoutingProvenance: routingProvenance("openai", "gpt-4.1-mini", "fallback", reason),
   });
   expect(result.attempts[0]?.reason).toBe(reason);
 }
@@ -200,6 +211,7 @@ function expectPrimaryProbeSuccess(
   expect(run).toHaveBeenCalledWith("openai", "gpt-4.1-mini", {
     allowTransientCooldownProbe: true,
     isFinalFallbackAttempt: false,
+    modelRoutingProvenance: routingProvenance("openai", "gpt-4.1-mini", "initial", undefined),
   });
 }
 
@@ -255,10 +267,12 @@ async function expectProbeFailureFallsBack({
   expect(run).toHaveBeenNthCalledWith(1, "openai", "gpt-4.1-mini", {
     allowTransientCooldownProbe: true,
     isFinalFallbackAttempt: false,
+    modelRoutingProvenance: routingProvenance("openai", "gpt-4.1-mini", "initial", undefined),
   });
   expect(run).toHaveBeenNthCalledWith(2, "anthropic", "claude-haiku-3-5", {
     allowTransientCooldownProbe: true,
     isFinalFallbackAttempt: false,
+    modelRoutingProvenance: routingProvenance("openai", "gpt-4.1-mini", "fallback", reason),
   });
 }
 
@@ -313,7 +327,7 @@ describe("runWithModelFallback – probe logic", () => {
     reason: "rate_limit" | "billing",
   ) {
     expect(decision).toEqual({
-      type: "suspend_lanes",
+      type: "suspend_session",
       reason,
       leaderCandidate: OPENAI_PROBE_CANDIDATE,
     });
@@ -533,9 +547,11 @@ describe("runWithModelFallback – probe logic", () => {
     expect(fallbackRun).toHaveBeenNthCalledWith(1, "openai", "gpt-4.1-mini", {
       allowTransientCooldownProbe: true,
       isFinalFallbackAttempt: false,
+      modelRoutingProvenance: routingProvenance("openai", "gpt-4.1-mini", "initial", undefined),
     });
     expect(fallbackRun).toHaveBeenNthCalledWith(2, "anthropic", "claude-haiku-3-5", {
       isFinalFallbackAttempt: false,
+      modelRoutingProvenance: routingProvenance("openai", "gpt-4.1-mini", "fallback", "rate_limit"),
     });
 
     const decisionPayloads = logCapture.records
@@ -697,12 +713,30 @@ describe("runWithModelFallback – probe logic", () => {
     expect(run).toHaveBeenNthCalledWith(1, "google", "gemini-3-flash-preview", {
       allowTransientCooldownProbe: true,
       isFinalFallbackAttempt: false,
+      modelRoutingProvenance: routingProvenance(
+        "google",
+        "gemini-3-flash-preview",
+        "initial",
+        undefined,
+      ),
     });
     expect(run).toHaveBeenNthCalledWith(2, "anthropic", "claude-haiku-3-5", {
       isFinalFallbackAttempt: false,
+      modelRoutingProvenance: routingProvenance(
+        "google",
+        "gemini-3-flash-preview",
+        "fallback",
+        "rate_limit",
+      ),
     });
     expect(run).toHaveBeenNthCalledWith(3, "deepseek", "deepseek-chat", {
       isFinalFallbackAttempt: true,
+      modelRoutingProvenance: routingProvenance(
+        "google",
+        "gemini-3-flash-preview",
+        "fallback",
+        "rate_limit",
+      ),
     });
   });
 
@@ -786,6 +820,7 @@ describe("runWithModelFallback – probe logic", () => {
     expect(run).toHaveBeenCalledWith("openai", "gpt-4.1-mini", {
       allowTransientCooldownProbe: true,
       isFinalFallbackAttempt: true,
+      modelRoutingProvenance: routingProvenance("openai", "gpt-4.1-mini", "initial", undefined),
     });
   });
 
@@ -837,7 +872,7 @@ describe("runWithModelFallback – probe logic", () => {
     );
   });
 
-  it("does not lock lane when fallback candidates remain after suspend_lanes decision", async () => {
+  it("does not suspend the session when fallback candidates remain", async () => {
     const cfg = makeCfg({
       agents: {
         defaults: {
@@ -870,7 +905,7 @@ describe("runWithModelFallback – probe logic", () => {
     expect(sessionSuspensionMocks.suspendSession).not.toHaveBeenCalled();
   });
 
-  it("defers embedded lane suspension only while another candidate remains", async () => {
+  it("defers embedded session suspension only while another candidate remains", async () => {
     const cfg = makeCfg({
       agents: {
         defaults: {
@@ -964,7 +999,7 @@ describe("runWithModelFallback – probe logic", () => {
       return [];
     });
 
-    // Throttle primary probe so billing goes to suspend_lanes
+    // Throttle primary probe so billing records terminal session suspension.
     probeThrottleInternals.lastProbeAttempt.set("openai", NOW - 10_000);
 
     const run = vi.fn().mockResolvedValue("should-not-run");
@@ -981,21 +1016,16 @@ describe("runWithModelFallback – probe logic", () => {
 
     expect(sessionSuspensionMocks.suspendSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        laneId: undefined,
         failedProvider: "anthropic",
       }),
     );
     expect(sessionSuspensionMocks.suspendSession).not.toHaveBeenCalledWith(
       expect.objectContaining({ failedProvider: "openai" }),
     );
-    expect(
-      sessionSuspensionMocks.suspendSession.mock.calls.every(
-        ([params]) => params.laneId === undefined,
-      ),
-    ).toBe(true);
+    expect(sessionSuspensionMocks.suspendSession.mock.calls[0]?.[0]).not.toHaveProperty("laneId");
   });
 
-  it("restores a deferred embedded lane when later candidates cannot run", async () => {
+  it("records the final candidate when later candidates cannot run", async () => {
     const cfg = makeCfg({
       agents: {
         defaults: {
@@ -1029,9 +1059,11 @@ describe("runWithModelFallback – probe logic", () => {
     expect(run).toHaveBeenCalledOnce();
     expect(sessionSuspensionMocks.suspendSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        laneId: "main",
         failedProvider: "anthropic",
       }),
+    );
+    expect(sessionSuspensionMocks.suspendSession.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "laneId",
     );
   });
 
@@ -1065,9 +1097,11 @@ describe("runWithModelFallback – probe logic", () => {
     expect(run).toHaveBeenCalledOnce();
     expect(sessionSuspensionMocks.suspendSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        laneId: "main",
         failedProvider: "openai",
       }),
+    );
+    expect(sessionSuspensionMocks.suspendSession.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "laneId",
     );
   });
 });

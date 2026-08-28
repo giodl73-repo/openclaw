@@ -9,7 +9,7 @@ import {
 import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OPENAI_API_BASE_URL, OPENAI_CODEX_RESPONSES_BASE_URL } from "./base-url.js";
-import { OPENAI_CODEX_DEFAULT_MODEL, OPENAI_DEFAULT_MODEL } from "./default-models.js";
+import { OPENAI_DEFAULT_MODEL } from "./default-models.js";
 import { buildOpenAIProvider } from "./openai-provider.js";
 import manifest from "./openclaw.plugin.json" with { type: "json" };
 import { resolveModelRoutes } from "./provider-policy-api.js";
@@ -459,8 +459,6 @@ describe("buildOpenAIProvider", () => {
         cost: { input: 0.2, output: 1.25, cacheRead: 0.02, cacheWrite: 0 },
       },
     ]);
-    expect(OPENAI_DEFAULT_MODEL).toBe("openai/gpt-5.6-sol");
-    expect(OPENAI_CODEX_DEFAULT_MODEL).toBe("openai/gpt-5.6-sol");
   });
 
   it("scopes the OpenAI API-key catalog to the OpenAI provider id", async () => {
@@ -473,6 +471,7 @@ describe("buildOpenAIProvider", () => {
 
     try {
       const result = await provider.catalog?.run({
+        providerIds: ["openai"],
         resolveProviderAuth: () => ({
           mode: "api_key",
           apiKey: "sk-openai",
@@ -498,6 +497,40 @@ describe("buildOpenAIProvider", () => {
       fetchSpy.mockRestore();
     }
   });
+
+  it.each(["azure-openai", "azure-openai-responses"])(
+    "does not resolve OpenAI credentials or fetch for %s-only catalog scope",
+    async (providerId) => {
+      const provider = buildOpenAIProvider();
+      const resolveProviderAuth = vi.fn(() => ({
+        mode: "api_key" as const,
+        apiKey: "sk-openai",
+        source: "profile" as const,
+      }));
+      const resolveProviderApiKey = vi.fn(() => ({ apiKey: "sk-openai" }));
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json({ data: [{ id: "gpt-5.5", object: "model" }] }));
+
+      try {
+        await expect(
+          provider.catalog?.run({
+            providerIds: [providerId],
+            resolveProviderAuth,
+            resolveProviderApiKey,
+            config: {},
+            env: {},
+          }),
+        ).resolves.toBeNull();
+        expect(resolveProviderAuth).not.toHaveBeenCalled();
+        expect(resolveProviderApiKey).not.toHaveBeenCalled();
+        expect(mocks.resolveApiKeyForProvider).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    },
+  );
 
   it("falls back to direct API-key catalog discovery when OAuth resolution fails", async () => {
     mocks.resolveApiKeyForProvider.mockRejectedValue(new Error("expired oauth profile"));
@@ -1768,6 +1801,74 @@ describe("buildOpenAIProvider", () => {
     ).toEqual({ effort: "high", transport: "sse" });
   });
 
+  it("delegates an unlisted first-party model to its explicitly selected Codex runtime", () => {
+    const provider = buildOpenAIProvider();
+    const model = provider.resolveDynamicModel?.({
+      provider: "openai",
+      modelId: "gpt-future",
+      modelRegistry: { find: () => null },
+      agentRuntimeId: "codex",
+    } as never);
+
+    expect(model).toMatchObject({
+      provider: "openai",
+      id: "gpt-future",
+      api: "openai-chatgpt-responses",
+      baseUrl: "https://chatgpt.com/backend-api/codex",
+      compat: { supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"] },
+    });
+    expect(
+      provider
+        .resolveThinkingProfile?.({
+          provider: "openai",
+          modelId: "gpt-future",
+          agentRuntime: "codex",
+          api: model?.api,
+          compat: model?.compat,
+        } as never)
+        ?.levels.map((level) => level.id),
+    ).toContain("max");
+    expect(
+      provider
+        .resolveThinkingProfile?.({
+          provider: "openai",
+          modelId: "gpt-future",
+          agentRuntime: "codex",
+        } as never)
+        ?.levels.map((level) => level.id),
+    ).toEqual(expect.arrayContaining(["xhigh", "max"]));
+  });
+
+  it("does not invent an unlisted model for authored Platform credentials", () => {
+    const provider = buildOpenAIProvider();
+
+    expect(
+      provider.resolveDynamicModel?.({
+        provider: "openai",
+        modelId: "gpt-future",
+        modelRegistry: { find: () => null },
+        agentRuntimeId: "codex",
+        authProfileId: "openai:platform",
+        authProfileMode: "api_key",
+        providerConfig: {
+          auth: "api-key",
+          api: "openai-responses",
+          baseUrl: "https://api.openai.com/v1",
+        },
+      } as never),
+    ).toBeUndefined();
+    expect(
+      provider
+        .resolveThinkingProfile?.({
+          provider: "openai",
+          modelId: "gpt-future",
+          agentRuntime: "codex",
+          api: "openai-responses",
+        } as never)
+        ?.levels.map((level) => level.id),
+    ).not.toContain("max");
+  });
+
   it("restores gpt-5.3-codex-spark only through ChatGPT/Codex OAuth routing", () => {
     const provider = buildOpenAIProvider();
 
@@ -1931,33 +2032,12 @@ describe("buildOpenAIProvider", () => {
     });
   });
 
-  it.each([
-    {
-      id: "gpt-5.6",
-      cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
-      thinkingLevelMap: { off: "none", xhigh: "xhigh", max: "max" },
-    },
-    {
-      id: "gpt-5.6-sol",
-      cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
-      thinkingLevelMap: { off: "none", xhigh: "xhigh", max: "max" },
-    },
-    {
-      id: "gpt-5.6-terra",
-      cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
-      thinkingLevelMap: { off: "none", xhigh: "xhigh", max: "max" },
-    },
-    {
-      id: "gpt-5.6-luna",
-      cost: { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 },
-      thinkingLevelMap: { off: "none", xhigh: "xhigh", max: "max" },
-    },
-  ])("resolves $id locally with direct API metadata", ({ id, cost, thinkingLevelMap }) => {
+  it("synthesizes the gpt-5.6 alias from the nearest direct API template", () => {
     const provider = buildOpenAIProvider();
 
     const model = provider.resolveDynamicModel?.({
       provider: "openai",
-      modelId: id,
+      modelId: "gpt-5.6",
       modelRegistry: {
         find: (_provider: string, templateId: string) =>
           templateId === "gpt-5.5"
@@ -1979,15 +2059,15 @@ describe("buildOpenAIProvider", () => {
     } as never);
 
     expectFields(model, {
-      id,
+      id: "gpt-5.6",
       provider: "openai",
       api: "openai-responses",
       baseUrl: "https://api.openai.com/v1",
       contextWindow: 1_050_000,
       contextTokens: 272_000,
       maxTokens: 128_000,
-      cost,
-      thinkingLevelMap,
+      cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
+      thinkingLevelMap: { off: "none", xhigh: "xhigh", max: "max" },
     });
   });
 
@@ -2707,15 +2787,6 @@ describe("buildOpenAIProvider", () => {
         extraParams: explicit,
       } as never),
     ).toBe(explicit);
-  });
-
-  it("shares OpenAI responses wrapper composition across provider variants", () => {
-    const provider = buildOpenAIProvider();
-    const codexProvider = buildOpenAIProvider();
-
-    expect(provider.wrapStreamFn).toBe(codexProvider.wrapStreamFn);
-    expect(provider.buildReplayPolicy).toBe(codexProvider.buildReplayPolicy);
-    expect(provider.resolveTransportTurnState).toBe(codexProvider.resolveTransportTurnState);
   });
 
   it("owns Azure OpenAI reasoning compatibility without forcing OpenAI transport defaults", () => {

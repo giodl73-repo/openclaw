@@ -292,6 +292,7 @@ describe("embedded attempt phase lifecycle state", () => {
     expect(result.lastAssistant).toBe(modelAssistant);
     expect(result.currentAttemptAssistant).toBe(modelAssistant);
     expect(result.currentAttemptCompletedAssistant).toEqual(modelAssistant);
+    expect(result.successfulNestedToolNames).toEqual([]);
     expect(result.messagesSnapshot).toHaveLength(5);
     expect(result.messagesSnapshot.at(-2)).toMatchObject({
       role: "assistant",
@@ -537,6 +538,52 @@ describe("embedded attempt phase lifecycle state", () => {
     await completeEmbeddedAttemptAfterTurn({
       attempt: {
         operation: "settled-tool-finalization",
+        runId: "run-1",
+        sessionId: "session-1",
+        sessionFile: "/tmp/session.jsonl",
+      } as never,
+      activeSession: {} as never,
+      sessionManager: { appendCustomEntry: vi.fn() } as never,
+      withOwnedTranscriptWrite: async (operation) => await operation(),
+      state: {
+        promptError: null,
+        yieldAborted: false,
+        sessionIdUsed: "session-1",
+        messagesSnapshot: [],
+        prePromptMessageCount: 0,
+        contextEngineAfterTurnCheckpoint: null,
+        compactionOccurredThisAttempt: false,
+      },
+      readLifecycleState: () => ({
+        aborted: false,
+        timedOut: false,
+        idleTimedOut: false,
+        timedOutDuringCompaction: false,
+      }),
+      runtime: {
+        effectiveWorkspace: "/tmp/workspace",
+        agentDir: "/tmp/agent",
+        sessionAgentId: "main",
+        resolveActiveContextEnginePluginId: () => undefined,
+        shouldRecordCompletedBootstrapTurn: false,
+        cacheTrace: null,
+        anthropicPayloadLogger: null,
+        hookAgentId: "main",
+        diagnosticTrace: { traceId: "trace-1", spanId: "span-1" } as never,
+        skillWorkshopAvailable: false,
+        hookRunner: null,
+        promptStartedAt: Date.now(),
+      },
+    });
+
+    expect(hoisted.runAgentEndSideEffects).not.toHaveBeenCalled();
+  });
+
+  it("skips agent_end side effects for a detached run", async () => {
+    await completeEmbeddedAttemptAfterTurn({
+      attempt: {
+        sessionPersistence: "detached",
+        sessionKey: "agent:main:telegram:group:1",
         runId: "run-1",
         sessionId: "session-1",
         sessionFile: "/tmp/session.jsonl",

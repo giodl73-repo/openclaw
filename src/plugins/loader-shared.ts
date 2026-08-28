@@ -12,6 +12,7 @@ import {
   resolveMemoryDreamingConfig,
   resolveMemoryDreamingPluginConfig,
 } from "../memory-host-sdk/dreaming.js";
+import { recordPluginCandidateInstallOwner } from "./candidate-install-owner.js";
 import {
   resolveEffectiveEnableState,
   type NormalizedPluginsConfig,
@@ -28,13 +29,17 @@ import {
 import { collectPluginManifestCompatCodes } from "./installed-plugin-index-record-builder.js";
 import { createPluginRecord } from "./loader-records.js";
 import type { PluginLoadOptions, PluginRuntimeSubagentMode } from "./loader-types.js";
+import {
+  isPluginManifestInstallOwnerAmbiguous,
+  resolvePluginManifestInstallOwner,
+} from "./manifest-install-owner.js";
 import type { PluginManifestRecord, PluginManifestRegistry } from "./manifest-registry.js";
 import type { PluginDiagnostic } from "./manifest-types.js";
 import type { PluginRecord, PluginRegistry } from "./registry.js";
 import {
   captureActivePluginRegistrySnapshot,
   commitStagedPluginRegistry,
-  restoreActivePluginRegistrySnapshot,
+  rollbackStagedPluginRegistry,
   stageActivePluginRegistry,
 } from "./runtime.js";
 import { validateJsonSchemaValue } from "./schema-validator.js";
@@ -154,17 +159,27 @@ export function matchesScopedPluginOrDreamingSidecar(params: {
 export function createPluginCandidatesFromManifestRegistry(
   manifestRegistry: PluginManifestRegistry,
 ): PluginCandidate[] {
-  return manifestRegistry.plugins.map((record) => ({
-    idHint: record.id,
-    rootDir: record.rootDir,
-    source: record.source,
-    ...(record.setupSource !== undefined ? { setupSource: record.setupSource } : {}),
-    origin: record.origin,
-    ...(record.workspaceDir !== undefined ? { workspaceDir: record.workspaceDir } : {}),
-    ...(record.format !== undefined ? { format: record.format } : {}),
-    ...(record.bundleFormat !== undefined ? { bundleFormat: record.bundleFormat } : {}),
-    ...(record.packageManifest !== undefined ? { packageManifest: record.packageManifest } : {}),
-  }));
+  return manifestRegistry.plugins.map((record) => {
+    const installOwner = resolvePluginManifestInstallOwner(record);
+    return recordPluginCandidateInstallOwner(
+      {
+        idHint: record.id,
+        effectivePluginId: record.id,
+        rootDir: record.rootDir,
+        source: record.source,
+        ...(record.setupSource !== undefined ? { setupSource: record.setupSource } : {}),
+        origin: record.origin,
+        ...(record.workspaceDir !== undefined ? { workspaceDir: record.workspaceDir } : {}),
+        ...(record.format !== undefined ? { format: record.format } : {}),
+        ...(record.bundleFormat !== undefined ? { bundleFormat: record.bundleFormat } : {}),
+        ...(record.packageManifest !== undefined
+          ? { packageManifest: record.packageManifest }
+          : {}),
+      },
+      installOwner,
+      isPluginManifestInstallOwnerAmbiguous(record),
+    );
+  });
 }
 
 class PluginLoadFailureError extends Error {
@@ -187,12 +202,13 @@ export function validatePluginConfig(params: {
   schema?: Record<string, unknown>;
   cacheKey?: string;
   value?: unknown;
+  sourceValue?: unknown;
 }): Result<Record<string, unknown> | undefined, string[]> {
   const { schema, value } = params;
   if (!schema) {
     return ok(value as Record<string, unknown> | undefined);
   }
-  if (isEmptyPluginConfigJsonSchema(schema)) {
+  if (params.sourceValue === undefined && isEmptyPluginConfigJsonSchema(schema)) {
     if (
       value === undefined ||
       (value &&
@@ -211,6 +227,7 @@ export function validatePluginConfig(params: {
     schema,
     cacheKey: params.cacheKey ?? JSON.stringify(schema),
     value: value ?? {},
+    sourceValue: params.sourceValue,
     applyDefaults: true,
   });
   return result.ok
@@ -319,6 +336,8 @@ export function applyPluginManifestRecordDetails(
   record.kind = manifestRecord.kind;
   record.configUiHints = manifestRecord.configUiHints;
   record.configJsonSchema = manifestRecord.configSchema;
+  // Manifest ownership survives rollback of executable registrations.
+  record.commandAliases = manifestRecord.commandAliases;
 }
 
 export function applyManifestSnapshotMetadata(
@@ -359,7 +378,7 @@ export function activatePluginRegistry(
     activateContextEngineRegistrations(registry);
     commitStagedPluginRegistry(activeSnapshot.activeRegistry, registry);
   } catch (error) {
-    restoreActivePluginRegistrySnapshot(activeSnapshot);
+    rollbackStagedPluginRegistry(activeSnapshot);
     if (previousHookRegistry) {
       initializeGlobalHookRunner(previousHookRegistry);
     } else {

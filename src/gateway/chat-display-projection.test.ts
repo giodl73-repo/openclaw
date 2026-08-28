@@ -1,5 +1,7 @@
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createNoisyPngBuffer } from "../../test/helpers/image-fixtures.js";
+import { getMediaDir } from "../media/store.js";
 import {
   projectChatDisplayMessages,
   sanitizeChatHistoryMessages,
@@ -20,8 +22,82 @@ function projectHistoryTransports(message: Record<string, unknown>) {
   return [websocket, sse];
 }
 
+describe("managed document chat history", () => {
+  it("keeps the attachment envelope while stripping URL capabilities", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        {
+          type: "attachment",
+          attachment: {
+            artifactId: "artifact_managed_media_11111111-1111-4111-8111-111111111111",
+            kind: "document",
+            label: "report.csv",
+            mimeType: "text/csv",
+            sizeBytes: 12,
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/11111111-1111-4111-8111-111111111111/full?mediaTicket=secret",
+          },
+        },
+      ],
+    };
+
+    expect(sanitizeChatHistoryMessages([message])).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "attachment",
+            attachment: {
+              artifactId: "artifact_managed_media_11111111-1111-4111-8111-111111111111",
+              kind: "document",
+              label: "report.csv",
+              mimeType: "text/csv",
+              sizeBytes: 12,
+              url: "/api/chat/media/outgoing/agent%3Amain%3Amain/11111111-1111-4111-8111-111111111111/full",
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("sanitizes attachment capabilities after another field already changed", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        {
+          type: "attachment",
+          thinkingSignature: "private-reasoning-signature",
+          attachment: {
+            kind: "document",
+            label: "report.csv",
+            path: "/tmp/private-report.csv",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/id/full?mediaTicket=secret",
+          },
+        },
+      ],
+    };
+
+    expect(sanitizeChatHistoryMessages([message])).toEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "attachment",
+            attachment: {
+              kind: "document",
+              label: "report.csv",
+              url: "/api/chat/media/outgoing/agent%3Amain%3Amain/id/full",
+            },
+          },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("oversized multimodal chat history", () => {
-  it("projects one mixed-media message through every history boundary", async () => {
+  it("keeps legacy image, audio, and video transcript blocks through every history boundary", async () => {
     const inlineImage = Buffer.from("inline image").toString("base64");
     const inlineAudio = Buffer.from("inline audio").toString("base64");
     const inlineVideo = Buffer.from("inline video").toString("base64");
@@ -87,6 +163,12 @@ describe("oversized multimodal chat history", () => {
         role: "user",
         content: expected[0]?.content,
       });
+      expect((messages[0] as { content?: unknown[] }).content).toEqual([
+        expect.objectContaining({ type: "text" }),
+        expect.objectContaining({ type: "image", mimeType: "image/png" }),
+        expect.objectContaining({ type: "audio", mimeType: "audio/wav" }),
+        expect.objectContaining({ type: "video", mimeType: "video/mp4" }),
+      ]);
       const serialized = JSON.stringify(messages);
       for (const secret of [
         inlineImage,
@@ -335,14 +417,15 @@ describe("oversized multimodal chat history", () => {
   });
 });
 
-describe("private transcript metadata projection", () => {
-  it("keeps visible text while omitting oversized upstream prompt metadata", () => {
+describe("transcript metadata projection", () => {
+  it("keeps display metadata while omitting oversized upstream prompt metadata", () => {
     const message = {
       role: "user",
       content: "Keep this visible user message.",
       __openclaw: {
         id: "message-1",
         mirrorIdentity: "turn-1:prompt",
+        replyToId: "message-0",
         upstreamUserText: "private decorated prompt ".repeat(12_000),
       },
     };
@@ -354,6 +437,7 @@ describe("private transcript metadata projection", () => {
           __openclaw: {
             id: "message-1",
             mirrorIdentity: "turn-1:prompt",
+            replyToId: "message-0",
           },
         },
       ]);
@@ -361,6 +445,206 @@ describe("private transcript metadata projection", () => {
         CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES,
       );
     }
+  });
+
+  it("records a display-cap marker on every history transport when text is truncated", () => {
+    const message = { role: "assistant", content: "x".repeat(9_000), timestamp: 1 };
+    for (const messages of projectHistoryTransports(message)) {
+      const projected = messages[0] as Record<string, unknown>;
+      expect(JSON.stringify(projected.content)).toContain("...(truncated)...");
+      // Structured fact, so consumers fetch the full row via chat.message.get
+      // instead of sniffing the in-band sentinel.
+      expect(projected["__openclaw"]).toEqual({ truncated: true, reason: "display-cap" });
+    }
+  });
+
+  it("marks display-cap truncation inside content blocks and keeps existing metadata", () => {
+    const [projected] = sanitizeChatHistoryMessages(
+      [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "block text ".repeat(20) }],
+          __openclaw: { id: "message-9", senderId: "assistant-1" },
+        },
+      ],
+      16,
+    ) as Record<string, unknown>[];
+    expect(projected?.["__openclaw"]).toEqual({
+      id: "message-9",
+      senderId: "assistant-1",
+      truncated: true,
+      reason: "display-cap",
+    });
+  });
+
+  it("leaves untruncated messages without a truncation marker", () => {
+    const [projected] = sanitizeChatHistoryMessages(
+      [{ role: "assistant", content: "short", timestamp: 1 }],
+      16,
+    ) as Record<string, unknown>[];
+    expect(projected?.["__openclaw"]).toBeUndefined();
+  });
+
+  it("marks display-cap truncation of a tool-result diff on both tool-result shapes", () => {
+    const longDiff = "+line\n".repeat(40);
+    const [blockShaped, messageShaped] = sanitizeChatHistoryMessages(
+      [
+        {
+          role: "assistant",
+          content: [
+            { type: "toolResult", toolName: "edit", details: { changed: true, diff: longDiff } },
+          ],
+        },
+        { role: "toolResult", toolName: "edit", details: { changed: true, diff: longDiff } },
+      ],
+      32,
+    ) as Record<string, unknown>[];
+    for (const projected of [blockShaped, messageShaped]) {
+      expect(JSON.stringify(projected)).toContain("...(truncated)...");
+      expect(projected?.["__openclaw"]).toMatchObject({ truncated: true, reason: "display-cap" });
+    }
+  });
+
+  it("leaves a tool-result diff within the cap unmarked", () => {
+    const [projected] = sanitizeChatHistoryMessages(
+      [{ role: "toolResult", toolName: "edit", details: { changed: true, diff: "+ok" } }],
+      32,
+    ) as Record<string, unknown>[];
+    expect(projected?.["__openclaw"]).toBeUndefined();
+  });
+
+  it("does not overwrite an upstream oversized reason with display-cap", () => {
+    const [projected] = sanitizeChatHistoryMessages(
+      [
+        {
+          role: "assistant",
+          content: "still long enough to cap ".repeat(4),
+          __openclaw: { truncated: true, reason: "oversized" },
+        },
+      ],
+      16,
+    ) as Record<string, unknown>[];
+    expect(projected?.["__openclaw"]).toEqual({ truncated: true, reason: "oversized" });
+  });
+});
+
+describe("managed inbound media fact projection", () => {
+  const inboundMediaId = "photo---11111111-2222-3333-4444-555555555555.png";
+  const managedInboundPath = path.join(getMediaDir(), "inbound", inboundMediaId);
+
+  function projectedOpenClawMeta(message: Record<string, unknown>) {
+    const projected = sanitizeChatHistoryMessages([message]);
+    return (projected[0] as Record<string, unknown> | undefined)?.["__openclaw"];
+  }
+
+  it("rewrites a configured-store managed inbound path to a canonical media URI", () => {
+    const message = {
+      role: "user",
+      content: "first message with an image",
+      __openclaw: {
+        media: [{ path: managedInboundPath, contentType: "image/png" }],
+      },
+    };
+    expect(projectedOpenClawMeta(message)).toEqual({
+      media: [
+        {
+          path: `media://inbound/${inboundMediaId}`,
+          contentType: "image/png",
+        },
+      ],
+    });
+  });
+
+  it("redacts a lookalike path that contains media/inbound but is outside the store", () => {
+    // A path like /tmp/media/inbound/<existing-id> is NOT inside the configured store;
+    // it must not be promoted to an authenticated media capability.
+    const lookalike = path.join("/tmp", "media", "inbound", inboundMediaId);
+    const message = {
+      role: "user",
+      content: "lookalike inbound path",
+      __openclaw: {
+        media: [{ path: lookalike, contentType: "image/png" }],
+      },
+    };
+    expect(projectedOpenClawMeta(message)).toEqual({
+      media: [{ contentType: "image/png" }],
+    });
+  });
+
+  it("redacts host paths that are not inside the managed inbound store", () => {
+    const message = {
+      role: "user",
+      content: "private local image",
+      __openclaw: {
+        media: [
+          { path: "/tmp/private-image.png", contentType: "image/png" },
+          {
+            path: path.join(getMediaDir(), "outbound", "credentials.png"),
+            contentType: "image/png",
+          },
+        ],
+      },
+    };
+    expect(projectedOpenClawMeta(message)).toEqual({
+      media: [{ contentType: "image/png" }, { contentType: "image/png" }],
+    });
+  });
+
+  it("rejects traversal-shaped inbound paths and redacts them", () => {
+    const message = {
+      role: "user",
+      content: "traversal attempt",
+      __openclaw: {
+        media: [
+          {
+            path: path.join(getMediaDir(), "inbound", "..", "..", "etc", "passwd"),
+            contentType: "image/png",
+          },
+        ],
+      },
+    };
+    expect(projectedOpenClawMeta(message)).toEqual({
+      media: [{ contentType: "image/png" }],
+    });
+  });
+
+  it("redacts malformed percent-encoded inbound ids instead of throwing", () => {
+    // A stray `%` makes decodeURIComponent throw inside parseInboundMediaUri;
+    // the sanitizer must redact rather than propagate the failure into history projection.
+    const message = {
+      role: "user",
+      content: "malformed percent escape",
+      __openclaw: {
+        media: [{ path: path.join(getMediaDir(), "inbound", "%"), contentType: "image/png" }],
+      },
+    };
+    expect(() => sanitizeChatHistoryMessages([message])).not.toThrow();
+    expect(projectedOpenClawMeta(message)).toEqual({
+      media: [{ contentType: "image/png" }],
+    });
+  });
+
+  it("preserves an already-canonical media inbound URI without regression", () => {
+    const message = {
+      role: "user",
+      content: "canonical inbound image",
+      __openclaw: {
+        media: [
+          {
+            path: `media://inbound/${inboundMediaId}`,
+            contentType: "image/png",
+          },
+        ],
+      },
+    };
+    expect(projectedOpenClawMeta(message)).toEqual({
+      media: [
+        {
+          path: `media://inbound/${inboundMediaId}`,
+          contentType: "image/png",
+        },
+      ],
+    });
   });
 });
 
@@ -592,6 +876,38 @@ describe("chat display message-tool projection", () => {
 });
 
 describe("chat display tool-result detail projection", () => {
+  it.each([
+    [
+      { targetId: "tab-1", url: "https://example.com", title: "Example", extra: "drop" },
+      { targetId: "tab-1", url: "https://example.com", title: "Example" },
+    ],
+    [
+      {
+        targetId: "x".repeat(127) + "😀",
+        url: "u".repeat(2047) + "😀",
+        title: "t".repeat(511) + "😀",
+      },
+      { targetId: "x".repeat(127), url: "u".repeat(2047), title: "t".repeat(511) },
+    ],
+    [{ targetId: "tab-1", url: 42, title: [] }, { targetId: "tab-1" }],
+    [null, undefined],
+    [[], undefined],
+    ["tab-1", undefined],
+    [{}, undefined],
+    [{ targetId: 1 }, undefined],
+    [{ targetId: "  " }, undefined],
+  ])("projects only bounded browser tab descriptor fields (%j)", (browserTab, expected) => {
+    const result = { type: "toolResult", toolName: "browser", details: { browserTab } };
+    const [standalone, nested] = sanitizeChatHistoryMessages([
+      { role: "toolResult", ...result },
+      { role: "assistant", content: [result] },
+    ]) as Array<Record<string, unknown>>;
+    const block = (nested?.content as Array<Record<string, unknown>> | undefined)?.[0];
+    for (const projected of [standalone, block]) {
+      expect(projected?.details).toEqual(expected ? { browserTab: expected } : undefined);
+    }
+  });
+
   it("omits opaque provider replay state from display history", () => {
     const [message] = sanitizeChatHistoryMessages([
       {

@@ -46,6 +46,7 @@ export const publicPluginSdkSubpaths = publicPluginSdkEntrypoints;
 const nonProductionPluginSdkSubpathSet = new Set([
   "agent-runtime-test-contracts",
   "channel-contract-testing",
+  "channel-ingress-test-runtime",
   "channel-target-testing",
   "channel-test-helpers",
   "plugin-test-api",
@@ -60,7 +61,6 @@ const nonProductionPluginSdkSubpathSet = new Set([
   "qa-runtime",
   "reply-payload-testing",
   "sqlite-runtime-testing",
-  "ssrf-runtime-internal",
   "test-env",
   "test-fixtures",
   "test-live",
@@ -110,6 +110,12 @@ export const deprecatedBarrelPluginSdkEntrypoints = pluginSdkSubpaths.filter((en
   deprecatedBarrelPluginSdkSubpathList.includes(entry),
 );
 
+/** Supported SDK facades backed by bundled plugins until generic contracts replace them. */
+export const supportedBundledFacadeSdkEntrypoints = ["discord", "telegram-account"] as const;
+
+/** Plugin-owned surfaces intentionally public and documented for third-party plugins. */
+export const publicPluginOwnedSdkEntrypoints = ["memory-core-host-engine-foundation"] as const;
+
 /**
  * Build tsdown entry source paths for plugin SDK entrypoints.
  * @internal Shared repository-script contract.
@@ -154,7 +160,7 @@ export function buildPluginSdkPackageExports() {
 }
 
 /**
- * List public plugin SDK dist artifacts expected in package output.
+ * List all packaged plugin SDK dist artifacts, including production-private runtime JS.
  * @internal Shared repository-script contract.
  */
 export function listPluginSdkDistArtifacts() {

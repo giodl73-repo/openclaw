@@ -12,14 +12,12 @@ import {
   buildWriteDiffLines,
   computeLineDiff,
   countTextLines,
-  diffStat,
   joinDiffSections,
-  MAX_DIFF_RENDER_LINES,
   parseDiffDetailsString,
   type DiffLine,
   type DiffStat,
 } from "./tool-call-diff.ts";
-import { parsePatchView } from "./tool-call-patch.ts";
+import { parsePatchView, type PatchFileOperation } from "./tool-call-patch.ts";
 
 export type ToolCallKind = "command" | "read" | "edit" | "write" | "search" | "fetch" | "generic";
 
@@ -40,6 +38,8 @@ export type ToolCallView = {
   /** Inline diff rows for edit/write calls. */
   diff?: DiffLine[];
   stat?: DiffStat;
+  /** Producer-recorded operations for patch rows. */
+  fileOperations?: PatchFileOperation[];
 };
 
 const COMMAND_TOOL_NAMES = new Set(["bash", "exec", "shell", "run_command", "run_terminal_cmd"]);
@@ -141,17 +141,10 @@ function readDetailsDiff(details: unknown): ResolvedEditDiff | null {
   if (!lines) {
     return null;
   }
-  const stat = { added: 0, removed: 0 };
-  for (const match of diffText.matchAll(/^([+-])\s*\d+/gm)) {
-    if (match[1] === "+") {
-      stat.added += 1;
-    } else {
-      stat.removed += 1;
-    }
-  }
-  const truncated =
-    /^\s*\.\.\.\(truncated\)\.\.\.\s*$/m.test(diffText) || lines.length > MAX_DIFF_RENDER_LINES + 1;
-  return { lines, ...(truncated ? {} : { stat }) };
+  return {
+    lines: lines.lines,
+    ...(lines.kind === "complete" ? { stat: lines.stat } : {}),
+  };
 }
 
 function resolveEditDiff(source: ToolCallViewSource): ResolvedEditDiff | null {
@@ -168,25 +161,14 @@ function resolveEditDiff(source: ToolCallViewSource): ResolvedEditDiff | null {
     return truncated ? { lines: [{ kind: "skip", text: "" }] } : null;
   }
   const sections = pairs.map((pair) => computeLineDiff(pair.oldText, pair.newText));
-  const sectionTruncated = sections.some((section) => section.at(-1)?.kind === "skip");
-  const lines = joinDiffSections(sections, { truncated });
-  if (lines.length === 0) {
+  const result = joinDiffSections(sections, { truncated });
+  if (result.lines.length === 0) {
     return null;
   }
-  const stat =
-    truncated || sectionTruncated
-      ? undefined
-      : sections.reduce(
-          (sum, section) => {
-            const sectionStat = diffStat(section);
-            return {
-              added: sum.added + sectionStat.added,
-              removed: sum.removed + sectionStat.removed,
-            };
-          },
-          { added: 0, removed: 0 },
-        );
-  return { lines, ...(stat ? { stat } : {}) };
+  return {
+    lines: result.lines,
+    ...(result.kind === "complete" ? { stat: result.stat } : {}),
+  };
 }
 
 function resolveInsertionDiff(
@@ -201,7 +183,7 @@ function resolveInsertionDiff(
   if (!insertText) {
     return null;
   }
-  const lines = computeLineDiff("", insertText);
+  const lines = computeLineDiff("", insertText).lines;
   // The text is known, but its surrounding file context is not. Omit an exact
   // stat rather than implying this preview represents the final placement.
   return lines.length > 0 ? { lines } : null;
@@ -220,6 +202,7 @@ function resolvePatchView(args: Record<string, unknown> | null): ToolCallView | 
     return {
       kind: "edit",
       target: `${patch.paths.length} files`,
+      fileOperations: patch.fileOperations,
       diff: patch.lines,
       stat: patch.stat,
     };
@@ -232,6 +215,7 @@ function resolvePatchView(args: Record<string, unknown> | null): ToolCallView | 
       kind: "edit",
       target: commonDir ? `${from.base} → ${to.base}` : `${patch.move.from} → ${patch.move.to}`,
       targetDetail: commonDir,
+      fileOperations: patch.fileOperations,
       diff: patch.lines,
       stat: patch.stat,
     };
@@ -241,6 +225,7 @@ function resolvePatchView(args: Record<string, unknown> | null): ToolCallView | 
     kind: "edit",
     target: pathParts?.base,
     targetDetail: pathParts?.dir,
+    fileOperations: patch.fileOperations,
     diff: patch.lines,
     stat: patch.stat,
   };
@@ -273,6 +258,16 @@ export function resolveToolCallTargetPaths(name: string, args?: unknown): string
   }
   const path = resolvePathArg(record);
   return path ? [path] : [];
+}
+
+export function resolveToolCallFileOperations(
+  name: string,
+  args?: unknown,
+): PatchFileOperation[] | undefined {
+  if (!PATCH_TOOL_NAMES.has(normalizeKey(name))) {
+    return undefined;
+  }
+  return resolvePatchData(asRecord(args))?.fileOperations;
 }
 
 export function resolveToolCallKind(name: string, args?: unknown): ToolCallKind {

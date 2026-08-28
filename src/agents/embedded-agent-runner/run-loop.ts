@@ -32,7 +32,8 @@ import { prepareAndDispatchEmbeddedRunAttempt } from "./run/attempt-dispatch-pre
 import { normalizeEmbeddedRunAttempt } from "./run/attempt-normalization.js";
 import { forgetPromptBuildDrainCacheForRun } from "./run/attempt-prompt-helpers.js";
 import { recoverEmbeddedRunAttempt } from "./run/attempt-recovery.js";
-import { createMcpAttemptCarryover } from "./run/attempt-result.js";
+import { createAttemptCarryover } from "./run/attempt-result.js";
+import { activateCodeModeReconciliation } from "./run/code-mode-reconciliation.js";
 import { hasCodexAppServerRecoveryRetryBudget } from "./run/codex-app-server-recovery.js";
 import { createEmbeddedRunCompactionRuntime } from "./run/compaction-runtime.js";
 import { createEmbeddedRunContextRecoveryState } from "./run/context-recovery-state.js";
@@ -57,7 +58,10 @@ import { handleRetryLimitExhaustion } from "./run/retry-limit.js";
 import { prepareEmbeddedRunRuntime } from "./run/runtime-preparation.js";
 import { createEmbeddedRunSessionPromptState } from "./run/session-prompt-state.js";
 import { prepareTerminalWithSettledTurnFinalization } from "./run/settled-turn-finalization.js";
-import { resolveEmbeddedRunTerminal } from "./run/terminal-resolution.js";
+import {
+  createTerminalToolPresentationTracker,
+  resolveEmbeddedRunTerminal,
+} from "./run/terminal-resolution.js";
 import { createEmbeddedRunTerminalRetryState } from "./run/terminal-retry-state.js";
 import { resolveEmbeddedRunTerminalTimeout } from "./run/terminal-timeout.js";
 import { createAgentTurnTaintState } from "./run/turn-taint-state.js";
@@ -216,22 +220,11 @@ export async function runPreparedEmbeddedLoop(
   });
   let postCompactionAbortController: AbortController | undefined;
   let postCompactionAbortError: PostCompactionLoopPersistedError | undefined;
-  const attemptTerminalToolPresentation = {
-    ordinal: -1,
-    value: undefined as string | undefined,
-  };
-  let nextToolOutcomeOrdinal = 0;
-  const allocateToolOutcomeOrdinal = (): number => nextToolOutcomeOrdinal++;
-  const readAttemptTerminalToolPresentation = (): string | undefined =>
-    attemptTerminalToolPresentation.value;
-  const turnTaintState = createAgentTurnTaintState();
+  // Presentation survives retry attempts, but a newer tool result must clear stale text.
+  const terminalToolPresentation = createTerminalToolPresentationTracker();
+  const turnTaintState = createAgentTurnTaintState(params.initialTurnTainted === true);
   const observeToolOutcome = (observation: ToolOutcomeObservation): void => {
-    const observationOrdinal =
-      observation.toolCallOrdinal ?? attemptTerminalToolPresentation.ordinal + 1;
-    if (observationOrdinal >= attemptTerminalToolPresentation.ordinal) {
-      attemptTerminalToolPresentation.ordinal = observationOrdinal;
-      attemptTerminalToolPresentation.value = observation.terminalPresentation;
-    }
+    terminalToolPresentation.observe(observation);
     turnTaintState.observe(observation);
     if (observation.presentationOnly) {
       return;
@@ -318,7 +311,7 @@ export async function runPreparedEmbeddedLoop(
     });
     let authRetryPending = false;
     let accumulatedReplayState = createEmbeddedRunReplayState();
-    const mcpAttemptCarryover = createMcpAttemptCarryover();
+    const attemptCarryover = createAttemptCarryover();
     while (true) {
       refreshPreparedRuntimeSnapshot();
       if (isRunRetryBudgetExhausted(runRetryBudget)) {
@@ -345,8 +338,7 @@ export async function runPreparedEmbeddedLoop(
           agentMeta: buildErrorAgentMeta({
             sessionId: sessionPromptState.sessionId,
             sessionFile: sessionPromptState.sessionFile,
-            provider,
-            model: model.id,
+            ...(attemptCarryover.modelAttempt ?? { provider, model: model.id }),
             ...outerContextTokenMeta,
             usageAccumulator,
             lastRunPromptUsage,
@@ -364,34 +356,45 @@ export async function runPreparedEmbeddedLoop(
         runLoopIterations: runRetryBudget.attemptsCounted,
         maxRunLoopIterations: runRetryBudget.maxAttempts,
       });
-      const dispatch = await prepareAndDispatchEmbeddedRunAttempt({
-        runInput: admittedRunInput,
-        preparedRuntime,
-        contextEngine,
-        sessionPromptState,
-        terminalRetryState,
-        replayState: accumulatedReplayState,
-        provider,
-        modelId,
-        startupStagesEmitted,
-        bootstrapPromptWarningSignaturesSeen,
-        resolveRuntimeFallbackReason,
-        observeToolOutcome,
-        isTurnTainted: turnTaintState.isTainted,
-        allocateToolOutcomeOrdinal,
-        getPostCompactionAbortError: () => postCompactionAbortError,
-        setPostCompactionAbortController: (controller) => {
-          postCompactionAbortController = controller;
-        },
-        clearPostCompactionAbortController: (controller) => {
-          if (postCompactionAbortController === controller) {
-            postCompactionAbortController = undefined;
-          }
-        },
-      });
+      let dispatch: Awaited<ReturnType<typeof prepareAndDispatchEmbeddedRunAttempt>>;
+      try {
+        dispatch = await prepareAndDispatchEmbeddedRunAttempt({
+          runInput: admittedRunInput,
+          preparedRuntime,
+          contextEngine,
+          sessionPromptState,
+          terminalRetryState,
+          replayState: accumulatedReplayState,
+          provider,
+          modelId,
+          startupStagesEmitted,
+          bootstrapPromptWarningSignaturesSeen,
+          resolveRuntimeFallbackReason,
+          observeToolOutcome,
+          isTurnTainted: turnTaintState.isTainted,
+          allocateToolOutcomeOrdinal: terminalToolPresentation.allocateOrdinal,
+          getPostCompactionAbortError: () => postCompactionAbortError,
+          setPostCompactionAbortController: (controller) => {
+            postCompactionAbortController = controller;
+          },
+          clearPostCompactionAbortController: (controller) => {
+            if (postCompactionAbortController === controller) {
+              postCompactionAbortController = undefined;
+            }
+          },
+        });
+      } catch (error) {
+        const retryTrace = await failoverRetryController.recoverThrownHarnessAuthFailure(error);
+        if (!retryTrace) {
+          throw error;
+        }
+        traceAttempts.push(retryTrace);
+        lastRetryFailoverReason = retryTrace.reason;
+        continue;
+      }
       startupStagesEmitted = dispatch.startupStagesEmitted;
       const { dispatchedAttempt, runtimePlan } = dispatch;
-      mcpAttemptCarryover.apply(dispatchedAttempt.rawAttempt);
+      attemptCarryover.apply(dispatchedAttempt.rawAttempt);
       const normalizedAttempt = await normalizeEmbeddedRunAttempt({
         runInput: admittedRunInput,
         preparedRuntime,
@@ -519,8 +522,18 @@ export async function runPreparedEmbeddedLoop(
       if (assistantFailureOutcome.action === "retry") {
         continue;
       }
+      if (
+        activateCodeModeReconciliation({
+          attempt,
+          hostOwnsToolSurface: !pluginHarnessOwnsTransport,
+          retryState: terminalRetryState,
+          activateInternalPrompt: sessionPromptState.activateInternalPrompt,
+        })
+      ) {
+        continue;
+      }
       let assistantProfileFailureReason = assistantFailureOutcome.assistantProfileFailureReason;
-      const terminalToolPresentation = readAttemptTerminalToolPresentation();
+      const terminalToolPresentationText = terminalToolPresentation.read();
       const finalizedTerminal = await prepareTerminalWithSettledTurnFinalization({
         initial: {
           attempt,
@@ -550,7 +563,7 @@ export async function runPreparedEmbeddedLoop(
           harness: agentHarness,
           modelApi: effectiveModel.api,
           executionContract,
-          hasTerminalToolPresentation: Boolean(terminalToolPresentation),
+          hasTerminalToolPresentation: Boolean(terminalToolPresentationText),
           noteLaneTaskProgress: input.laneController.noteLaneTaskProgress,
         },
       });
@@ -575,33 +588,21 @@ export async function runPreparedEmbeddedLoop(
         reportedModelRef,
         finalAssistantVisibleText,
         finalAssistantRawText,
-        payloads,
         payloadsWithToolMedia,
-        timedOutDuringPrompt,
         recoveredFinalAssistantPayloadsAfterPromptTimeout,
-        hasSuccessfulFinalAssistantAfterPromptTimeout,
-        hasPartialAssistantTextAfterPromptTimeout,
         attemptToolSummary,
         failureSignal,
+        terminalToolFailure,
       } = terminalPrepared;
 
       const terminalTimeoutResult = resolveEmbeddedRunTerminalTimeout({
-        timedOutDuringPrompt,
-        hasSuccessfulFinalAssistantAfterPromptTimeout,
+        terminalPrepared,
         shouldSurfaceCodexCompletionTimeout: recovery.shouldSurfaceCodexCompletionTimeout,
         attempt: terminalAttempt,
-        hasPartialAssistantTextAfterPromptTimeout,
-        payloads,
-        payloadsWithToolMedia,
         terminalState: resolvedTerminalState,
         resolveReplayInvalid: resolveReplayInvalidForAttempt,
         setTerminalLifecycleMeta,
         startedAtMs: started,
-        agentMeta,
-        finalAssistantVisibleText,
-        finalAssistantRawText,
-        attemptToolSummary,
-        failureSignal,
       });
       if (terminalTimeoutResult) {
         return terminalTimeoutResult;
@@ -628,6 +629,7 @@ export async function runPreparedEmbeddedLoop(
         agentMeta,
         attemptToolSummary,
         failureSignal,
+        terminalToolFailure,
         maxReasoningOnlyRetryAttempts,
         maxEmptyResponseRetryAttempts,
         attemptCompactionCount: terminalAttemptCompactionCount,
@@ -638,7 +640,7 @@ export async function runPreparedEmbeddedLoop(
           sessionPromptState.suppressNextUserMessagePersistence = value;
         },
         armPostCompactionGuard: () => postCompactionGuard.armPostCompaction(),
-        readTerminalToolPresentation: () => terminalToolPresentation,
+        readTerminalToolPresentation: () => terminalToolPresentationText,
         resolveReplayInvalid: resolveReplayInvalidForAttempt,
         setTerminalLifecycleMeta,
         maybeMarkAuthProfileFailure: failoverRetryController.maybeMarkAuthProfileFailure,

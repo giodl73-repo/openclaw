@@ -15,6 +15,7 @@ import type { SessionEntry } from "../config/sessions.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
 import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withStateDirEnv } from "../test-helpers/state-dir-env.js";
 import * as usageFormat from "../utils/usage-format.js";
 import * as titleReader from "./session-transcript-title-reader.js";
@@ -55,8 +56,8 @@ describe("listSessionsFromStore resolver cache", () => {
     const rowCount = 30;
     const rowContext = buildSessionListRowMetadataContext({ now });
     const thinkingSpy = vi
-      .spyOn(thinking, "listThinkingLevelOptions")
-      .mockReturnValue([{ id: "off", label: "Off" }]);
+      .spyOn(thinking, "resolveThinkingProfile")
+      .mockReturnValue({ levels: [{ id: "off", label: "Off", rank: 0 }], defaultLevel: "off" });
     const costSpy = vi.spyOn(usageFormat, "resolveModelCostConfig").mockReturnValue({
       input: 1,
       output: 1,
@@ -210,8 +211,8 @@ describe("listSessionsFromStore resolver cache", () => {
         return originalPrepare(sql);
       });
       try {
-        // Cross the production 500-key chunk boundary without materializing
-        // tens of thousands of rows just to prove the same batching behavior.
+        // Composite and legacy identities share the production 500-key chunks.
+        // Cross two boundaries without materializing tens of thousands of rows.
         const aboveBatchChunkSize = Array.from({ length: 501 }, (_, index) => ({
           sessionKey: `agent:default:webchat:dm:missing-${index}`,
           entry: {
@@ -223,7 +224,7 @@ describe("listSessionsFromStore resolver cache", () => {
         expect(chunkedBatch.size).toBe(aboveBatchChunkSize.length);
         expect(chunkedBatch.get(aboveBatchChunkSize[0]!.entry)).toBeUndefined();
         expect(chunkedBatch.get(aboveBatchChunkSize.at(-1)!.entry)).toBeUndefined();
-        expect(acpSelects).toBe(2);
+        expect(acpSelects).toBe(3);
 
         acpSelects = 0;
         const result = listSessionsFromStore({
@@ -245,7 +246,18 @@ describe("listSessionsFromStore resolver cache", () => {
     });
   });
 
-  test("batches transcript title hydration once instead of O(rows)", async () => {
+  test.each([
+    { name: "ordinary", count: 30, owned: 0, limit: 30, rows: 30, enriched: 30, sharedTail: 29 },
+    {
+      name: "retained owner-first",
+      count: 480,
+      owned: 240,
+      limit: 240,
+      rows: 300,
+      enriched: 160,
+      sharedTail: 99,
+    },
+  ])("batches $name transcript hydration without starving shared rows", async (scenario) => {
     await withStateDirEnv("openclaw-perf-title-batch-", async () => {
       resetPluginRuntimeStateForTest();
       setActivePluginRegistry(createEmptyPluginRegistry());
@@ -256,10 +268,17 @@ describe("listSessionsFromStore resolver cache", () => {
       setRuntimeConfigSnapshot(cfg);
       const storePath = "/tmp/sessions.json";
       const store: Record<string, SessionEntry> = {};
-      for (let index = 0; index < 30; index += 1) {
+      const ownerId = scenario.owned ? ensureProfileForEmail("owner@example.com").id : undefined;
+      for (let index = 0; index < scenario.count; index += 1) {
         const sessionId = `title-batch-${index}`;
         const sessionKey = `agent:main:${sessionId}`;
-        const entry = { sessionId, updatedAt: 1_000 - index } satisfies SessionEntry;
+        const entry: SessionEntry = {
+          sessionId,
+          updatedAt: 1_000 - index,
+          ...(ownerId && index >= scenario.count - scenario.owned
+            ? { createdVia: "operator", createdActor: { type: "human", id: ownerId } }
+            : {}),
+        };
         store[sessionKey] = entry;
       }
 
@@ -277,20 +296,21 @@ describe("listSessionsFromStore resolver cache", () => {
           storePath,
           store,
           lightweightListRows: true,
-          opts: { includeDerivedTitles: true, includeLastMessage: true, limit: 30 },
+          ownerFirstActorId: ownerId,
+          opts: { includeDerivedTitles: true, includeLastMessage: true, limit: scenario.limit },
         });
 
-        expect(result.sessions).toHaveLength(30);
+        expect(result.sessions).toHaveLength(scenario.rows);
         expect(titleBatchSpy).toHaveBeenCalledOnce();
-        expect(titleBatchSpy.mock.calls[0]?.[0]).toHaveLength(30);
+        expect(titleBatchSpy.mock.calls[0]?.[0]).toHaveLength(scenario.enriched);
         const sessionsByKey = new Map(result.sessions.map((session) => [session.key, session]));
         expect(sessionsByKey.get("agent:main:title-batch-0")).toMatchObject({
           derivedTitle: "title 0",
           lastMessagePreview: "last 0",
         });
-        expect(sessionsByKey.get("agent:main:title-batch-29")).toMatchObject({
-          derivedTitle: "title 29",
-          lastMessagePreview: "last 29",
+        expect(sessionsByKey.get(`agent:main:title-batch-${scenario.sharedTail}`)).toMatchObject({
+          derivedTitle: `title ${scenario.sharedTail}`,
+          lastMessagePreview: `last ${scenario.sharedTail}`,
         });
 
         titleBatchSpy.mockClear();
@@ -299,7 +319,8 @@ describe("listSessionsFromStore resolver cache", () => {
           storePath,
           store,
           lightweightListRows: true,
-          opts: { includeDerivedTitles: false, includeLastMessage: false, limit: 30 },
+          ownerFirstActorId: ownerId,
+          opts: { includeDerivedTitles: false, includeLastMessage: false, limit: scenario.limit },
         });
         expect(titleBatchSpy).toHaveBeenCalledOnce();
         expect(titleBatchSpy).toHaveBeenCalledWith([]);

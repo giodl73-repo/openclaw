@@ -6,9 +6,12 @@ import type { AgentRunTerminalReceipt } from "../../agent-run-terminal-receipt.j
 import type { AuthProfileStore } from "../../auth-profiles.js";
 import type { PreparedProviderFailoverOwner } from "../../failover/provider-patterns.js";
 import type { NormalizedUsage, UsageLike } from "../../usage.js";
+import { hasMessagingToolDeliveryEvidence } from "../delivery-evidence.js";
 import { resolveEmbeddedRunFailureSignal } from "../failure-signal.js";
+import { resolveEmbeddedRunTerminalToolFailure } from "../terminal-tool-failure.js";
 import type { EmbeddedAgentMeta, EmbeddedAgentRunResult } from "../types.js";
 import type { UsageAccumulator } from "../usage-accumulator.js";
+import type { EmbeddedRunAttemptWithReceiptEvidence } from "./attempt-result.js";
 import type { EmbeddedRunContextRecoveryState } from "./context-recovery-state.js";
 import {
   buildUsageAgentMetaFields,
@@ -25,11 +28,10 @@ import {
   type EmbeddedRunTerminalState,
 } from "./terminal-outcome.js";
 import { mergeAttemptToolMediaPayloads } from "./tool-media-payloads.js";
-import type { EmbeddedRunAttemptResult } from "./types.js";
 
 export function prepareEmbeddedRunTerminal(input: {
   runParams: RunEmbeddedAgentParams;
-  attempt: EmbeddedRunAttemptResult;
+  attempt: EmbeddedRunAttemptWithReceiptEvidence;
   currentAttemptCompletedAssistant?: AssistantMessage;
   provider: string;
   providerOwner?: PreparedProviderFailoverOwner;
@@ -58,6 +60,7 @@ export function prepareEmbeddedRunTerminal(input: {
   hasPartialAssistantTextAfterPromptTimeout: boolean;
   attemptToolSummary: ReturnType<typeof buildTraceToolSummary>;
   failureSignal: ReturnType<typeof resolveEmbeddedRunFailureSignal>;
+  terminalToolFailure: ReturnType<typeof resolveEmbeddedRunTerminalToolFailure>;
 } {
   const { runParams, attempt } = input;
   const { timedOutDuringCompaction, timedOutDuringToolExecution } = projectAgentRunAttemptTerminal(
@@ -75,13 +78,12 @@ export function prepareEmbeddedRunTerminal(input: {
     latestUsage: terminalAssistant?.usage as UsageLike | undefined,
     lastRunPromptUsage: input.lastRunPromptUsage,
   });
-  const resolvedModelRef = resolveReportedModelRef({
+  const reportedModelRef = resolveReportedModelRef({
     provider: input.provider,
     model: input.model,
     assistant: terminalAssistant,
   });
-  const responseModel = terminalAssistant?.responseModel?.trim() || resolvedModelRef.model;
-  const reportedModelRef = { ...resolvedModelRef, model: responseModel };
+  const responseModel = terminalAssistant?.responseModel?.trim() || reportedModelRef.model;
   const finalAssistantStopReason = (terminalAssistant?.stopReason ?? "").trim().toLowerCase();
   const terminalAssistantCanOwnFinalText =
     finalAssistantStopReason !== "error" && finalAssistantStopReason !== "aborted";
@@ -97,13 +99,23 @@ export function prepareEmbeddedRunTerminal(input: {
   // Attempt normalization already folded every attempt (terminal included)
   // into the accumulator, so read it directly instead of re-adding the attempt.
   const runAssistantTurns = input.usageAccumulator.assistantTurns;
+  const contextTokens = attempt.contextTokens ?? input.outerContextTokenMeta.contextTokens;
   const agentMeta: EmbeddedAgentMeta = {
     sessionId: input.sessionIdUsed,
     sessionFile: input.sessionFileUsed,
     provider: reportedModelRef.provider,
     model: reportedModelRef.model,
-    contextTokens: attempt.contextTokens ?? input.outerContextTokenMeta.contextTokens,
+    contextTokens,
+    ...(contextTokens !== undefined
+      ? {
+          contextTokensSource:
+            attempt.contextTokens !== undefined
+              ? (attempt.contextTokensSource ?? "resolved")
+              : "resolved",
+        }
+      : {}),
     agentHarnessId: attempt.agentHarnessId,
+    credentialSource: attempt.modelAttempt?.credentialSource,
     usage: usageMeta.usage,
     lastCallUsage: usageMeta.lastCallUsage,
     promptTokens: usageMeta.promptTokens,
@@ -143,6 +155,14 @@ export function prepareEmbeddedRunTerminal(input: {
         .filter(Boolean),
     ),
   ];
+  const missingNestedToolNames = [
+    ...new Set(
+      (attempt.successfulNestedToolNames ?? []).map((name) => name.trim()).filter(Boolean),
+    ),
+  ]
+    .filter((name) => !successfulToolNames.includes(name))
+    .toSorted();
+  successfulToolNames.push(...missingNestedToolNames);
   Object.assign(agentMeta, {
     terminalReceipt: {
       runId: runParams.runId,
@@ -155,7 +175,10 @@ export function prepareEmbeddedRunTerminal(input: {
         responseModel,
       },
       successfulToolNames,
-      rerouted: responseModel !== input.model,
+      rerouted:
+        reportedModelRef.provider !== input.provider ||
+        reportedModelRef.model !== input.model ||
+        responseModel !== input.model,
     } satisfies Omit<AgentRunTerminalReceipt, "terminalDisposition">,
   });
   // A yielded attempt ends before message_end. Its aborted tool-call assistant,
@@ -194,6 +217,10 @@ export function prepareEmbeddedRunTerminal(input: {
     agentId: runParams.agentId,
     runId: runParams.runId,
     runAborted: isEmbeddedRunTerminalInterrupted(input.terminalState.outcome),
+    deferAssistantTimeoutError:
+      timedOutDuringPrompt &&
+      (!hasMessagingToolDeliveryEvidence(attempt) ||
+        attempt.codexAppServerFailure?.kind === "turn_completion_idle_timeout"),
     didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
     heartbeatToolResponse: attempt.heartbeatToolResponse,
   });
@@ -252,6 +279,11 @@ export function prepareEmbeddedRunTerminal(input: {
     trigger: runParams.trigger,
     lastToolError: attempt.lastToolError,
   });
+  const terminalToolFailure = resolveEmbeddedRunTerminalToolFailure({
+    trigger: runParams.trigger,
+    codeModeEngaged: attempt.codeModeEngaged,
+    lastToolError: attempt.lastToolError,
+  });
   return {
     agentMeta,
     reportedModelRef,
@@ -265,6 +297,7 @@ export function prepareEmbeddedRunTerminal(input: {
     hasPartialAssistantTextAfterPromptTimeout,
     attemptToolSummary,
     failureSignal,
+    terminalToolFailure,
   };
 }
 

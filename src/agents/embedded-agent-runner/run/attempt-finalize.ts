@@ -3,13 +3,13 @@
  * It may assume stream execution and transcript writes are settled.
  */
 
+import { parseStrictPositiveInteger } from "@openclaw/normalization-core/number-coercion";
 import { readActiveTranscriptEntryAnchor } from "../../../config/sessions/session-accessor.js";
 import { OPENCLAW_EMBEDDED_CONTEXT_ENGINE_HOST } from "../../../context-engine/host-compat.js";
 import type { ContextEngine } from "../../../context-engine/types.js";
 import { freezeDiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import { isFastTestRuntimeEnv } from "../../../infra/env.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
-import { parseStrictPositiveInteger } from "../../../infra/parse-finite-number.js";
 import type { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { buildTrajectoryArtifacts } from "../../../trajectory/metadata.js";
 import { projectAgentRunAttemptTerminal } from "../../agent-run-terminal-outcome.js";
@@ -20,7 +20,7 @@ import type { createCacheTrace } from "../../cache-trace.js";
 import { countActiveToolExecutions } from "../../embedded-agent-subscribe.handlers.tools.js";
 import { isSignalTimeoutReason } from "../../failover-error.js";
 import { runAgentEndSideEffects } from "../../harness/agent-end-side-effects.js";
-import { runAgentCleanupStep } from "../../run-cleanup-timeout.js";
+import { finalizeHarnessContextEngineTurn } from "../../harness/context-engine-lifecycle.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import type { AgentSession, SessionManager } from "../../sessions/index.js";
 import type { NormalizedUsage } from "../../usage.js";
@@ -28,10 +28,7 @@ import { runContextEngineMaintenance } from "../context-engine-maintenance.js";
 import { log } from "../logger.js";
 import { markActiveEmbeddedRunAbandoned, type EmbeddedAgentQueueHandle } from "../runs.js";
 import { buildEmbeddedAgentEndContext } from "./agent-end-context.js";
-import {
-  finalizeAttemptContextEngineTurn,
-  type buildContextEnginePromptCacheInfo,
-} from "./attempt-context-engine-helpers.js";
+import type { buildContextEnginePromptCacheInfo } from "./attempt-context-engine-helpers.js";
 import { buildAfterTurnRuntimeContextFromUsage } from "./attempt-prompt-helpers.js";
 import { shouldPersistCompletedBootstrapTurn } from "./attempt-thread-helpers.js";
 import {
@@ -39,6 +36,7 @@ import {
   resolveTerminalAssistantTexts,
 } from "./attempt-trajectory-status.js";
 import { shouldFlagCompactionTimeout } from "./compaction-timeout.js";
+import type { EmbeddedAttemptDeferredLifecycleOwner } from "./deferred-lifecycle-owner.js";
 import { resolveFinalAssistantVisibleText } from "./helpers.js";
 import {
   isEmbeddedRunTerminalInterrupted,
@@ -57,6 +55,7 @@ type FinalizeEmbeddedAttemptParams = {
   emptyAssistantReplyIsSilent: boolean;
   hasTerminalOutput: boolean;
   silentExpected?: boolean;
+  deferredLifecycleOwner?: EmbeddedAttemptDeferredLifecycleOwner;
 };
 
 /** Classifies the completed attempt and records its terminal trajectory artifacts. */
@@ -159,7 +158,7 @@ export function finalizeEmbeddedAttempt(
       lastToolError: result.lastToolError,
     }),
   );
-  trajectoryRecorder.recordEvent("session.ended", {
+  const sessionEndData = {
     status: terminal.status,
     aborted: terminalState.aborted,
     externalAbort: terminalState.externalAbort,
@@ -171,7 +170,12 @@ export function finalizeEmbeddedAttempt(
     promptError,
     terminalError: terminal.terminalError,
     stopReason,
-  });
+  };
+  if (params.deferredLifecycleOwner) {
+    params.deferredLifecycleOwner.recordSessionEnd(sessionEndData);
+  } else {
+    trajectoryRecorder.recordEvent("session.ended", sessionEndData);
+  }
 
   return result;
 }
@@ -253,7 +257,7 @@ export async function completeEmbeddedAttemptAfterTurn(
       sessionManager?: SessionManager;
       withSessionManagerRewriteLock: WithOwnedTranscriptWrite;
     }) => {
-      await finalizeAttemptContextEngineTurn({
+      await finalizeHarnessContextEngineTurn({
         contextEngine: activeContextEngine,
         promptError: Boolean(state.promptError),
         aborted: lifecycleState.aborted,
@@ -280,6 +284,7 @@ export async function completeEmbeddedAttemptAfterTurn(
             withSessionManagerRewriteLock: transcript.withSessionManagerRewriteLock,
             config: attempt.config,
             agentId: runtime.sessionAgentId,
+            contextEngineAgentId: attempt.contextEngineAgentId,
           }),
         sessionManager: transcript.sessionManager,
         config: attempt.config,
@@ -369,8 +374,11 @@ export async function completeEmbeddedAttemptAfterTurn(
   });
   runtime.anthropicPayloadLogger?.recordUsage(state.messagesSnapshot, state.promptError);
 
+  // A detached run (such as skill experience review) writes no transcript or session record.
+  // Firing agent_end would expose maintenance as a normal turn and schedule successor work.
   if (
     attempt.operation !== "settled-tool-finalization" &&
+    attempt.sessionPersistence !== "detached" &&
     !state.beforeAgentFinalizeRevisionReason
   ) {
     const lifecycleForAgentEnd = input.readLifecycleState();
@@ -391,6 +399,7 @@ export async function completeEmbeddedAttemptAfterTurn(
       ctx: buildEmbeddedAgentEndContext({
         run: attempt,
         agentId: runtime.hookAgentId,
+        agentDir: runtime.agentDir,
         trace: freezeDiagnosticTraceContext(runtime.diagnosticTrace),
         skillWorkshopAvailable: runtime.skillWorkshopAvailable,
         compacted: state.compactionOccurredThisAttempt,
@@ -619,45 +628,6 @@ export function createEmbeddedAttemptRunAbort(input: {
       });
     }
   };
-}
-
-/**
- * Flushes attempt trajectory recorders during cleanup.
- */
-
-/** Minimal recorder surface needed to flush trajectory data during run cleanup. */
-type EmbeddedAttemptTrajectoryRecorder = {
-  describeFlushState: () => string | undefined;
-  flush: () => Promise<void>;
-};
-
-/**
- * Flushes attempt trajectory data through the shared cleanup timeout wrapper so
- * stuck recorder writes warn with run/session context instead of blocking run
- * teardown indefinitely.
- */
-export async function flushEmbeddedAttemptTrajectoryRecorder(params: {
-  runId: string;
-  sessionId: string;
-  trajectoryRecorder: EmbeddedAttemptTrajectoryRecorder | null;
-  log: {
-    warn: (message: string) => void;
-  };
-  env?: NodeJS.ProcessEnv;
-  timeoutMs?: number;
-}): Promise<void> {
-  await runAgentCleanupStep({
-    runId: params.runId,
-    sessionId: params.sessionId,
-    step: "openclaw-trajectory-flush",
-    log: params.log,
-    env: params.env,
-    timeoutMs: params.timeoutMs,
-    getTimeoutDetails: () => params.trajectoryRecorder?.describeFlushState(),
-    cleanup: async () => {
-      await params.trajectoryRecorder?.flush();
-    },
-  });
 }
 
 /**

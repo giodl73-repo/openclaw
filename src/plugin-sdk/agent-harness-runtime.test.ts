@@ -2,7 +2,9 @@
  * Tests agent harness runtime helpers and task dispatch behavior.
  */
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { getReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
 import {
+  agentHarnessStructuredInput,
   attachModelProviderRequestTransport,
   buildAgentHarnessUserInputAnswers,
   classifyAgentHarnessTerminalOutcome,
@@ -149,6 +151,18 @@ describe("classifyAgentHarnessTerminalOutcome", () => {
 });
 
 describe("agent harness runtime SDK facade", () => {
+  it("exposes structured input through one frozen named runtime surface", () => {
+    expect(Object.isFrozen(agentHarnessStructuredInput)).toBe(true);
+    expect(Object.keys(agentHarnessStructuredInput).toSorted()).toEqual([
+      "compileForm",
+      "compileQuestions",
+      "compileUrl",
+      "isRecord",
+      "run",
+      "snapshot",
+    ]);
+  });
+
   it("keeps legacy harness implementations source-compatible while requiring capabilities in V2", () => {
     const legacyHarness = {
       id: "legacy-test",
@@ -210,9 +224,32 @@ describe("agent harness runtime SDK facade", () => {
       NonNullable<AgentHarnessSupportContext["modelProvider"]>["runtimePolicy"]
     >().toEqualTypeOf<ProviderModelRouteRuntimePolicy | undefined>();
   });
+
+  it("exports the V2 isolated-completion authorization contract through the harness", () => {
+    type IsolatedCompletionV2 = NonNullable<AgentHarnessV2["runIsolatedCompletionV2"]>;
+
+    expectTypeOf<Parameters<IsolatedCompletionV2>[0]["authorization"]["owner"]>().toEqualTypeOf<
+      "host" | "harness"
+    >();
+    expectTypeOf<Awaited<ReturnType<IsolatedCompletionV2>>["assistant"]>().not.toBeNever();
+  });
 });
 
 describe("agent harness user input helpers", () => {
+  it("authorizes host-owned text-only harness updates without altering their visible payload", async () => {
+    const onBlockReply = vi.fn();
+
+    await deliverAgentHarnessUserInputPrompt({ onBlockReply }, [], {
+      intro: "Which environment should I use?",
+    });
+
+    const payload = onBlockReply.mock.calls[0]?.[0];
+    expect(payload).toEqual({ text: "Which environment should I use?", presentation: undefined });
+    expect(getReplyPayloadMetadata(payload)).toMatchObject({
+      deliverDespiteSourceReplySuppression: true,
+    });
+  });
+
   it("formats prompts and delivers through blocking replies first", async () => {
     const onBlockReply = vi.fn();
 
@@ -268,6 +305,42 @@ describe("agent harness user input helpers", () => {
         repo: { answers: ["openclaw"] },
       },
     });
+  });
+
+  it("normalizes every selected option in a multi-select answer", () => {
+    expect(
+      buildAgentHarnessUserInputAnswers(
+        [
+          {
+            id: "checks",
+            header: "Checks",
+            question: "Which checks should run?",
+            multiSelect: true,
+            isOther: true,
+            options: [{ label: "Unit" }, { label: "Lint" }, { label: "Deploy preview" }],
+          },
+        ],
+        "1, Deploy preview",
+      ),
+    ).toEqual({ answers: { checks: { answers: ["Unit", "Deploy preview"] } } });
+  });
+
+  it("keeps a comma-containing option label as one multi-select answer", () => {
+    expect(
+      buildAgentHarnessUserInputAnswers(
+        [
+          {
+            id: "region",
+            header: "Region",
+            question: "Which region should deploy?",
+            multiSelect: true,
+            isOther: true,
+            options: [{ label: "Frankfurt, Germany" }, { label: "Dublin, Ireland" }],
+          },
+        ],
+        "Frankfurt, Germany",
+      ),
+    ).toEqual({ answers: { region: { answers: ["Frankfurt, Germany"] } } });
   });
 
   it("supports runtime-specific text formatting", () => {

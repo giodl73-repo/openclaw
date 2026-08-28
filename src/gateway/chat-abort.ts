@@ -7,10 +7,10 @@ import {
   resolveExpiresAtMsFromDurationMs,
 } from "@openclaw/normalization-core/number-coercion";
 import type { OperationalRunInstanceRef } from "../agents/admitted-run-context.js";
-import { resolveDefaultAgentId } from "../agents/agent-scope-config.js";
 import { createAgentRunRestartAbortError } from "../agents/run-termination.js";
 import { readToolValidationErrorSummary } from "../agents/tool-error-summary.js";
 import { isAbortRequestText } from "../auto-reply/reply/abort-primitives.js";
+import { tryResolveLegacyCompatibilityAgentId } from "../config/legacy.default-agent-owner.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   emitAgentEvent,
@@ -22,14 +22,15 @@ import {
   type AgentRunDelegatedAuthority,
 } from "../infra/agent-run-registry.js";
 import { jsonUtf8Bytes } from "../infra/json-utf8-bytes.js";
-import { parseAgentSessionKey } from "../routing/session-key.js";
 import { notifyChatAbortControllerRemoved } from "./chat-abort-lifecycle-internal.js";
+import { resolveChatRunOwnerAgentId } from "./chat-run-owner.js";
 import { projectLiveAssistantBufferedText } from "./live-chat-projector.js";
 import {
   createChatAbortMarker,
   type ChatRunPlanSnapshot,
   type ChatRunState,
 } from "./server-chat-state.js";
+import { resolveRequestedSessionAgentId } from "./session-request-agent.js";
 import {
   resolveSessionSubscriptionKey,
   resolveSessionSubscriptionKeys,
@@ -48,6 +49,8 @@ export type ChatAbortControllerEntry = {
   agentRunDelegatedAuthority?: AgentRunDelegatedAuthority;
   agentId?: string;
   startedAtMs: number;
+  /** False until lane admission reaches the execution boundary. */
+  executionStarted?: boolean;
   expiresAtMs: number;
   ownerConnId?: string;
   ownerDeviceId?: string;
@@ -100,19 +103,49 @@ export type RestartRecoveryCandidate = {
   observedAt?: number;
 };
 
-type InFlightRunSnapshot = {
+export type InFlightRunSnapshot = {
   runId: string;
   text: string;
   startedAt?: number;
+  /**
+   * True when the in-flight run is owned by the embedded-run registry and can
+   * only be cancelled through the session-owned abort path (sessions.abort),
+   * never through run-specific chat.abort. Control UI uses this to keep Stop
+   * routing session-scoped for recovered embedded runs.
+   */
+  sessionAbortable?: boolean;
   plan?: ChatRunPlanSnapshot;
   events?: AgentEventPayload[];
 };
+
+export function projectInFlightRunSnapshot(params: {
+  chatRunState: Pick<ChatRunState, "resolveBuffer" | "runs">;
+  runId: string;
+  startedAtMs?: number;
+  sessionAbortable?: boolean;
+}): InFlightRunSnapshot {
+  const run = params.chatRunState.runs.get(params.runId);
+  const projected = projectLiveAssistantBufferedText(
+    params.chatRunState.resolveBuffer(params.runId).text,
+    { suppressLeadFragments: true },
+  );
+  const plan = run?.planSnapshot;
+  const events = run?.progressSnapshot?.events;
+  return {
+    runId: params.runId,
+    text: projected.suppress ? "" : projected.text,
+    ...(params.startedAtMs === undefined ? {} : { startedAt: params.startedAtMs }),
+    ...(params.sessionAbortable ? { sessionAbortable: true } : {}),
+    ...(plan ? { plan } : {}),
+    ...(events?.length ? { events } : {}),
+  };
+}
 
 type RegisteredChatAbortController = {
   controller: AbortController;
   registered: boolean;
   entry?: ChatAbortControllerEntry;
-  markExecutionStarted: () => void;
+  markExecutionStarted: () => boolean;
   bindAgentRunDelegatedAuthority: (authority: AgentRunDelegatedAuthority) => void;
   cleanup: (opts?: { force?: boolean }) => void;
 };
@@ -216,21 +249,26 @@ export function registerChatAbortController(params: {
   let executionStarted = false;
   const markExecutionStarted = () => {
     if (executionStarted) {
-      return;
+      return false;
     }
     const entry = params.chatAbortControllers.get(params.runId);
-    if (entry?.controller !== controller || controller.signal.aborted || entry.kind !== "agent") {
-      return;
+    if (entry?.controller !== controller || controller.signal.aborted) {
+      return false;
+    }
+    executionStarted = true;
+    entry.executionStarted = true;
+    if (entry.kind !== "agent") {
+      return true;
     }
     const now = Date.now();
-    executionStarted = true;
     if (!isFutureDateTimestampMs(entry.expiresAtMs, { nowMs: now })) {
-      return;
+      return true;
     }
     entry.expiresAtMs = resolveAgentRunExpiresAtMs({
       now,
       timeoutMs: params.timeoutMs,
     });
+    return true;
   };
   const cleanup = (opts?: { force?: boolean }) => {
     const entry = params.chatAbortControllers.get(params.runId);
@@ -293,6 +331,7 @@ export function registerChatAbortController(params: {
     operationalRunInstance: params.operationalRunInstance,
     agentId: normalizeActiveAgentId(params.agentId),
     startedAtMs: now,
+    executionStarted: false,
     expiresAtMs:
       explicitExpiresAtMs ??
       resolveChatRunExpiresAtMs({ now: rawNow, timeoutMs: params.timeoutMs }),
@@ -411,20 +450,11 @@ export function resolveInFlightRunSnapshot(params: {
   // only at completion — so there is nothing to show mid-run, but the client
   // should still adopt the run and show a `streaming` status (not idle) and
   // render the result cleanly when it lands.
-  const run = params.chatRunState.runs.get(best.runId);
-  const projected = projectLiveAssistantBufferedText(
-    params.chatRunState.resolveBuffer(best.runId).text,
-    { suppressLeadFragments: true },
-  );
-  const plan = run?.planSnapshot;
-  const events = run?.progressSnapshot?.events;
-  return {
+  return projectInFlightRunSnapshot({
+    chatRunState: params.chatRunState,
     runId: best.runId,
-    text: projected.suppress ? "" : projected.text,
-    startedAt: best.startedAtMs,
-    ...(plan ? { plan } : {}),
-    ...(events?.length ? { events } : {}),
-  };
+    startedAtMs: best.startedAtMs,
+  });
 }
 
 export function boundInFlightRunSnapshotForChatHistory(params: {
@@ -446,6 +476,7 @@ export function boundInFlightRunSnapshotForChatHistory(params: {
   let bounded: InFlightRunSnapshot = {
     runId: params.snapshot.runId,
     text: "",
+    ...(params.snapshot.sessionAbortable ? { sessionAbortable: true } : {}),
     ...(params.snapshot.events ? { events: [] } : {}),
     ...(params.snapshot.plan ? { plan: { steps: [] } } : {}),
   };
@@ -504,22 +535,6 @@ export type ChatAbortOps = {
   onRunAborted?: (runId: string) => void;
 };
 
-type TrackedChatRunAbortOps = {
-  chatAbortControllers: ChatAbortOps["chatAbortControllers"];
-  chatRunState: ChatAbortOps["chatRunState"];
-  removeChatRun: ChatAbortOps["removeChatRun"];
-  agentRunSeq: ChatAbortOps["agentRunSeq"];
-  broadcast: ChatAbortOps["broadcast"];
-  nodeSendToSession: ChatAbortOps["nodeSendToSession"];
-};
-
-export function abortTrackedChatRunById(
-  ops: TrackedChatRunAbortOps,
-  params: Parameters<typeof abortChatRunById>[1],
-) {
-  return abortChatRunById(ops, params);
-}
-
 function resolveChatAbortDeliverySessionKeys(
   ops: ChatAbortOps,
   sessionKey: string,
@@ -553,12 +568,13 @@ function broadcastChatAborted(
 ) {
   const { runId, sessionKey, stopReason, partialText } = params;
   const errorMessage = readToolValidationErrorSummary(params.errorMessage);
+  const explicitAgentId = normalizeActiveAgentId(params.agentId);
   const defaultGlobalAgentId =
-    sessionKey === "global" ? normalizeActiveAgentId(resolveDefaultGlobalAgentId(ops)) : undefined;
+    sessionKey === "global" && !explicitAgentId
+      ? normalizeActiveAgentId(resolveDefaultGlobalAgentId(ops))
+      : undefined;
   const payloadAgentId =
-    sessionKey === "global"
-      ? (normalizeActiveAgentId(params.agentId) ?? defaultGlobalAgentId)
-      : normalizeActiveAgentId(params.agentId);
+    sessionKey === "global" ? (explicitAgentId ?? defaultGlobalAgentId) : explicitAgentId;
   const payload = {
     runId,
     sessionKey,
@@ -584,7 +600,11 @@ function broadcastChatAborted(
 
 function resolveDefaultGlobalAgentId(ops: ChatAbortOps): string | undefined {
   const cfg = ops.getRuntimeConfig?.();
-  return cfg ? resolveDefaultAgentId(cfg) : undefined;
+  if (!cfg) {
+    return undefined;
+  }
+  const resolved = resolveRequestedSessionAgentId(cfg, "global");
+  return resolved.ok ? resolved.agentId : undefined;
 }
 
 export function isChatAbortControllerEntryAbortable(entry: ChatAbortControllerEntry): boolean {
@@ -734,18 +754,24 @@ export function abortChatRunsForProvider(
 ): { runIds: string[] } {
   const providerId = normalizeProviderIdForActiveRun(params.providerId);
   const agentId = normalizeActiveAgentId(params.agentId);
-  const defaultAgentId = resolveDefaultAgentId(params.cfg);
   if (!providerId) {
     return { runIds: [] };
   }
+  const compatibilityOwnerAgentId = agentId && tryResolveLegacyCompatibilityAgentId(params.cfg);
   const matches = [...ops.chatAbortControllers.entries()].filter(([, entry]) => {
-    const entryAgentId = normalizeActiveAgentId(
-      entry.agentId ?? parseAgentSessionKey(entry.sessionKey)?.agentId ?? defaultAgentId,
-    );
+    if (
+      normalizeProviderIdForActiveRun(entry.authProviderId) !== providerId &&
+      normalizeProviderIdForActiveRun(entry.providerId) !== providerId
+    ) {
+      return false;
+    }
     return (
-      (!agentId || entryAgentId === agentId) &&
-      (normalizeProviderIdForActiveRun(entry.authProviderId) === providerId ||
-        normalizeProviderIdForActiveRun(entry.providerId) === providerId)
+      !agentId ||
+      resolveChatRunOwnerAgentId({
+        agentId: entry.agentId,
+        sessionKey: entry.sessionKey,
+        defaultAgentId: compatibilityOwnerAgentId,
+      }) === agentId
     );
   });
   const runIds: string[] = [];

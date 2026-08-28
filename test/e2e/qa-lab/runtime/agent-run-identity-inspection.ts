@@ -5,6 +5,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { WebSocket, type ClientOptions } from "ws";
 import {
   QA_EVIDENCE_FILENAME,
   type QaEvidenceSummaryJson,
@@ -37,6 +39,7 @@ const IDENTITY_FIELDS = [
   "Applicable grants",
   "Assurance",
 ] as const;
+const FRAME_TIMEOUT_MS = 20_000;
 
 type ProducerOptions = {
   artifactBase: string;
@@ -49,6 +52,34 @@ type ProofResult = {
   durationMs: number;
   status: QaScriptEvidenceStatus;
 };
+
+async function assertUntrustedProxyHeadersRejected(
+  url: string,
+  headers: Record<string, string>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const socket = new WebSocket(url, { headers } satisfies ClientOptions);
+    const timeout = setTimeout(() => {
+      socket.terminate();
+      reject(new Error("timed out waiting for spoofed proxy-header rejection"));
+    }, FRAME_TIMEOUT_MS);
+    socket.once("open", () => {
+      clearTimeout(timeout);
+      socket.terminate();
+      reject(new Error("Gateway accepted proxy-shaped headers from an untrusted peer"));
+    });
+    socket.once("unexpected-response", (_request, response) => {
+      clearTimeout(timeout);
+      response.resume();
+      if (response.statusCode === 403) {
+        resolve();
+      } else {
+        reject(new Error(`spoofed proxy headers returned HTTP ${response.statusCode}`));
+      }
+    });
+    socket.once("error", () => undefined);
+  });
+}
 
 async function updateExecutionIdentityConfig(
   configPath: string,
@@ -121,8 +152,15 @@ function assertTextProjection(text: string) {
 
 function assertJsonProjection(result: AuditRunInspectResult, runId: string) {
   const context = requireIdentityContext(result);
-  if (result.run.runId !== runId || result.coverage.state !== context.coverageState) {
-    throw new Error(`audit JSON projection did not preserve exact-run coverage: ${runId}`);
+  if (result.run.runId !== runId) {
+    throw new Error(`audit JSON projection selected the wrong run: ${runId}`);
+  }
+  if (
+    result.coverage.state !== "unknown" ||
+    !result.coverage.missingEvidence.includes("decision.display_provenance") ||
+    !result.decisionDisplays.some((receipt) => receipt.provenance.state === "unverified")
+  ) {
+    throw new Error(`audit JSON projection overstated generic decision coverage: ${runId}`);
   }
   if (
     context.ingress.kind !== "local-cli" ||
@@ -131,8 +169,9 @@ function assertJsonProjection(result: AuditRunInspectResult, runId: string) {
   ) {
     throw new Error("local agent run did not retain authoritative local-CLI ingress");
   }
-  const admission = result.decisions.find(
-    (receipt) => receipt.action.family === "run" && receipt.action.operation === "admission",
+  const admission = result.decisionDisplays.find(
+    (receipt) =>
+      receipt.provenance.state === "verified" && receipt.provenance.producer === "run-admission",
   );
   if (
     !admission ||
@@ -140,6 +179,29 @@ function assertJsonProjection(result: AuditRunInspectResult, runId: string) {
     admission.decision.reasonCode !== "run_admission_identity_not_evaluated"
   ) {
     throw new Error("audit JSON projection omitted the truthful admission receipt");
+  }
+}
+
+function assertProfilelessGatewayIdentityProjection(result: AuditRunInspectResult) {
+  const context = requireIdentityContext(result);
+  if (
+    context.ingress.kind !== "gateway-client" ||
+    context.ingress.state !== "present" ||
+    context.ingress.boundary !== "gateway.ws.authenticated-connect"
+  ) {
+    throw new Error("Gateway run did not retain its authenticated connection ingress");
+  }
+  if (
+    context.invoker.state !== "absent" ||
+    context.coverageState !== "unattributed" ||
+    context.representedSubject !== undefined
+  ) {
+    throw new Error(
+      `Gateway identity projection fabricated or lost a subject: ${JSON.stringify(context)}`,
+    );
+  }
+  if (context.assurance.some((item) => item.kind === "durable-profile")) {
+    throw new Error("profileless Gateway run fabricated durable profile assurance");
   }
 }
 
@@ -198,6 +260,42 @@ function inspectExecutionIdentityStorage(gateway: Awaited<ReturnType<typeof star
   }
 }
 
+function inspectPersistedSessionCreator(
+  gateway: Awaited<ReturnType<typeof startQaGatewayChild>>,
+  sessionKey: string,
+) {
+  const stateDir = gateway.runtimeEnv.OPENCLAW_STATE_DIR;
+  const agentId = sessionKey.split(":")[1];
+  if (!stateDir || !agentId) {
+    throw new Error("QA Gateway did not expose the session creator database owner");
+  }
+  const database = new DatabaseSync(
+    path.join(stateDir, "agents", agentId, "agent", "openclaw-agent.sqlite"),
+    { readOnly: true },
+  );
+  try {
+    const row = database
+      .prepare(
+        "SELECT created_actor_type, created_actor_id, entry_json FROM session_nodes WHERE session_key = ?",
+      )
+      .get(sessionKey) as
+      | { created_actor_id: string | null; created_actor_type: string | null; entry_json: string }
+      | undefined;
+    if (!row) {
+      throw new Error(`persisted session creator row is missing: ${sessionKey}`);
+    }
+    const entry = parseJson(row.entry_json, `persisted session ${sessionKey}`);
+    const actor = isRecord(entry) && isRecord(entry.createdActor) ? entry.createdActor : undefined;
+    return {
+      id: row.created_actor_id,
+      labelPersisted: actor ? Object.hasOwn(actor, "label") : false,
+      type: row.created_actor_type,
+    };
+  } finally {
+    database.close();
+  }
+}
+
 async function runLocalTurn(
   gateway: Awaited<ReturnType<typeof startQaGatewayChild>>,
   message: string,
@@ -243,6 +341,17 @@ function findRunExecutions(
     }>;
   } finally {
     database.close();
+  }
+}
+
+function assertPersistedContextBytes(
+  gateway: Awaited<ReturnType<typeof startQaGatewayChild>>,
+  runId: string,
+  expectedContext: string,
+): void {
+  const rows = findRunExecutions(gateway, runId);
+  if (rows.length !== 1 || rows[0]?.context_json !== expectedContext) {
+    throw new Error(`RPC context bytes differ from persisted bytes: ${runId}`);
   }
 }
 
@@ -300,20 +409,30 @@ async function runProof(options: ProducerOptions): Promise<string> {
       providerMode: "mock-openai",
       transportBaseUrl: "http://127.0.0.1",
       controlUiEnabled: false,
+      mutateConfig: (cfg) => ({
+        ...cfg,
+        gateway: {
+          ...cfg.gateway,
+          auth: { ...cfg.gateway?.auth, allowTailscale: true },
+        },
+      }),
     });
-    await runLocalTurn(gateway, "Reply exactly: IDENTITY-DISABLED-FRESH");
+    await gateway.restartAfterStateMutation(async () => {
+      await runLocalTurn(gateway!, "Reply exactly: IDENTITY-DISABLED-FRESH");
+    });
     if (inspectExecutionIdentityStorage(gateway).tablePresent) {
       throw new Error("fresh-install default unexpectedly created execution identity storage");
     }
-    await gateway.restartAfterStateMutation(async () => {});
-    await runLocalTurn(gateway, "Reply exactly: IDENTITY-DISABLED-UPGRADE");
+    await gateway.restartAfterStateMutation(async () => {
+      await runLocalTurn(gateway!, "Reply exactly: IDENTITY-DISABLED-UPGRADE");
+    });
     if (inspectExecutionIdentityStorage(gateway).tablePresent) {
       throw new Error("existing-install restart unexpectedly created execution identity storage");
     }
     await gateway.restartAfterStateMutation(async ({ configPath }) => {
       await updateExecutionIdentityConfig(configPath, { executionIdentity: true });
+      await runLocalTurn(gateway!, "Reply exactly: IDENTITY-INSPECTION-OK");
     });
-    await runLocalTurn(gateway, "Reply exactly: IDENTITY-INSPECTION-OK");
     const runId = findLocalRunId(gateway);
     const beforeText = await gateway.runCli(["audit", "--run", runId, "--explain"]);
     assertTextProjection(beforeText);
@@ -323,10 +442,82 @@ async function runProof(options: ProducerOptions): Promise<string> {
     ) as AuditRunInspectResult;
     assertJsonProjection(before, runId);
     const beforeContext = normalizedContextJson(before);
+    assertPersistedContextBytes(gateway, runId, beforeContext);
+
+    const profilelessSessionKey = `agent:qa:i1-profileless-${randomUUID()}`;
+    const profilelessStarted = (await gateway.call("agent", {
+      sessionKey: profilelessSessionKey,
+      message: "Reply exactly: I1-PROFILELESS",
+      deliver: false,
+      idempotencyKey: randomUUID(),
+    })) as { runId?: unknown; status?: unknown };
+    if (profilelessStarted.status !== "accepted" || typeof profilelessStarted.runId !== "string") {
+      throw new Error(
+        `profileless Gateway run did not start: ${JSON.stringify(profilelessStarted)}`,
+      );
+    }
+    const profilelessTerminal = (await gateway.call("agent.wait", {
+      runId: profilelessStarted.runId,
+      timeoutMs: 60_000,
+    })) as { status?: unknown };
+    if (profilelessTerminal.status !== "ok") {
+      throw new Error(
+        `profileless Gateway run did not finish: ${JSON.stringify(profilelessTerminal)}`,
+      );
+    }
+    const profilelessRunId = profilelessStarted.runId;
+
+    await assertUntrustedProxyHeadersRejected(gateway.wsUrl, {
+      "tailscale-user-login": "operator@example.com",
+      "tailscale-user-name": "Operator",
+      "x-forwarded-for": "100.64.0.11",
+      "x-forwarded-host": "gateway.qa.test",
+      "x-forwarded-proto": "https",
+    });
+
+    const profilelessText = await gateway.runCli(["audit", "--run", profilelessRunId, "--explain"]);
+    assertTextProjection(profilelessText);
+    if (
+      !profilelessText.includes("Invoker [absent]") ||
+      !profilelessText.includes("Represented subject [absent]") ||
+      profilelessText.includes("Operator")
+    ) {
+      throw new Error("profileless text inspection fabricated an operator subject");
+    }
+    const profilelessBefore = parseJson(
+      await gateway.runCli(["audit", "--run", profilelessRunId, "--explain", "--json"]),
+      "profileless Gateway inspection",
+    ) as AuditRunInspectResult;
+    assertProfilelessGatewayIdentityProjection(profilelessBefore);
+    const profilelessContext = normalizedContextJson(profilelessBefore);
+    assertPersistedContextBytes(gateway, profilelessRunId, profilelessContext);
+
+    const listed = (await gateway.call("sessions.list", {})) as {
+      sessions?: Array<{
+        key?: string;
+        createdActor?: { id?: string; label?: string; type?: string };
+      }>;
+    };
+    const profilelessSession = listed.sessions?.find(
+      (session) => session.key === profilelessSessionKey,
+    );
+    if (profilelessSession?.createdActor !== undefined) {
+      throw new Error("profileless Gateway session fabricated a human creator");
+    }
+    const profilelessCreator = inspectPersistedSessionCreator(gateway, profilelessSessionKey);
+    if (
+      profilelessCreator.type !== null ||
+      profilelessCreator.id !== null ||
+      profilelessCreator.labelPersisted
+    ) {
+      throw new Error("profileless Gateway session persisted a fabricated creator");
+    }
 
     const repeatedRunId = `identity-repeated-${randomUUID()}`;
+    let repeatedRows: ReturnType<typeof findRunExecutions> = [];
+    const repeatedBeforeRestart = new Map<string, string>();
     await runRepeatedIngressTurns(gateway, options.repoRoot, repeatedRunId);
-    const repeatedRows = findRunExecutions(gateway, repeatedRunId);
+    repeatedRows = findRunExecutions(gateway, repeatedRunId);
     if (
       repeatedRows.length !== 2 ||
       new Set(repeatedRows.map((row) => row.execution_id)).size !== 2 ||
@@ -350,7 +541,6 @@ async function runProof(options: ProducerOptions): Promise<string> {
     if (discovery.identity.state !== "ambiguous" || discovery.identity.candidates.length !== 2) {
       throw new Error("repeated same-session run was not reported as two ambiguous executions");
     }
-    const repeatedBeforeRestart = new Map<string, string>();
     for (const row of repeatedRows) {
       const text = await gateway.runCli(["audit", "--execution", row.execution_id, "--explain"]);
       assertTextProjection(text);
@@ -389,6 +579,14 @@ async function runProof(options: ProducerOptions): Promise<string> {
     if (afterContext !== beforeContext) {
       throw new Error("normalized execution identity context bytes changed across Gateway restart");
     }
+    const profilelessAfter = parseJson(
+      await gateway.runCli(["audit", "--run", profilelessRunId, "--explain", "--json"]),
+      `post-restart Gateway run ${profilelessRunId}`,
+    ) as AuditRunInspectResult;
+    assertProfilelessGatewayIdentityProjection(profilelessAfter);
+    if (normalizedContextJson(profilelessAfter) !== profilelessContext) {
+      throw new Error(`Gateway execution changed across restart: ${profilelessRunId}`);
+    }
     for (const [executionId, expectedContext] of repeatedBeforeRestart) {
       const afterExact = parseJson(
         await gateway.runCli(["audit", "--execution", executionId, "--explain", "--json"]),
@@ -404,8 +602,8 @@ async function runProof(options: ProducerOptions): Promise<string> {
         enabled: false,
         executionIdentity: true,
       });
+      await runLocalTurn(gateway!, "Reply exactly: IDENTITY-DISABLED-GLOBAL");
     });
-    await runLocalTurn(gateway, "Reply exactly: IDENTITY-DISABLED-GLOBAL");
     if (inspectExecutionIdentityStorage(gateway).rowCount !== retainedBeforeGlobalDisable) {
       throw new Error("global audit disable unexpectedly retained a new execution context");
     }
@@ -424,13 +622,20 @@ async function runProof(options: ProducerOptions): Promise<string> {
       `${JSON.stringify(
         {
           runId,
+          gatewayRuns: {
+            profileless: {
+              runId: profilelessRunId,
+              contextSha256: sha256(profilelessContext),
+            },
+            spoofedProxyHeadersRejected: true,
+          },
           repeatedRunId,
           repeatedExecutions: repeatedRows.map((row) => ({
             executionId: row.execution_id,
             contextId: row.context_id,
           })),
           coverage: before.coverage,
-          decision: before.decisions[0]?.decision,
+          decision: before.decisionDisplays[0]?.decision,
           contextSha256: sha256(beforeContext),
           byteEquivalentAfterRestart: true,
           byteEquivalentPersistedReadback: true,
@@ -450,7 +655,8 @@ async function runProof(options: ProducerOptions): Promise<string> {
       )}\n`,
       "utf8",
     );
-    return `local run=${runId}; repeated run=${repeatedRunId} executions=${repeatedRows.map((row) => row.execution_id).join(",")}; Gateway pid=${gateway.pid ?? "unknown"}; text+JSON exact selection passed before/after replacement; normalized context sha256=${sha256(beforeContext)}`;
+    const repeatedDetails = `repeated run=${repeatedRunId} executions=${repeatedRows.map((row) => row.execution_id).join(",")}; exact selection passed`;
+    return `local run=${runId}; profileless Gateway run=${profilelessRunId}; spoofed proxy headers rejected; ${repeatedDetails}; Gateway pid=${gateway.pid ?? "unknown"}; text+JSON and persisted bytes passed before/after replacement; normalized context sha256=${sha256(beforeContext)}`;
   } finally {
     await gateway?.stop().catch(() => undefined);
     await mock.stop();

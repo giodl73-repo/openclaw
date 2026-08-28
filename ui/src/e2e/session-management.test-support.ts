@@ -1,11 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import type { Locator, Page } from "playwright";
 import { expect } from "vitest";
 import {
   controlUiSessionPath,
   controlUiSessionUrl,
   installMockGateway,
+  startControlUiE2eServer,
   waitForConfirmModal,
   type MockGatewayControls,
   type MockGatewayRequest,
@@ -23,9 +25,10 @@ export const uiProofArtifactDir = path.join(
   "thread-management",
 );
 
-export function createSessionManagementE2eSuite() {
+export function createSessionManagementE2eSuite(source = false) {
   return createControlUiE2eSuite({
     name: "Control UI session management mocked Gateway E2E",
+    ...(source ? { startServer: () => startControlUiE2eServer(undefined, { source: true }) } : {}),
     unavailableMessage: (executablePath) =>
       `Playwright Chromium is not installed or cannot start at ${executablePath}. Run \`pnpm --dir ui exec playwright install --with-deps chromium\`, or set OPENCLAW_UI_E2E_ALLOW_MISSING_CHROMIUM=1 only when intentionally skipping this lane.`,
   });
@@ -37,11 +40,13 @@ export function sessionRow(
   updatedAt: number,
   options: {
     archived?: boolean;
+    sessionId?: string;
     category?: string;
     pinned?: boolean;
     pinnedAt?: number;
     hasActiveRun?: boolean;
     unread?: boolean;
+    markedUnreadAt?: number;
     status?: string;
     spawnedBy?: string;
     startedAt?: number;
@@ -57,6 +62,7 @@ export function sessionRow(
     displayName: label,
     hasActiveRun: false,
     key,
+    sessionId: `session:${key}`,
     kind: "direct",
     label,
     model: "gpt-5.5",
@@ -95,12 +101,7 @@ export function sessionsListResponse(
   };
 }
 
-export function requireRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Expected object value");
-  }
-  return value as Record<string, unknown>;
-}
+export const requireRecord = createRequireRecord("record", "expected-object-value");
 
 export async function waitForPatch(
   gateway: MockGatewayControls,
@@ -185,7 +186,11 @@ export async function openSessionMenuSubmenu(page: Page, name: string): Promise<
   expect(index).toBeGreaterThanOrEqual(0);
   await expect
     .poll(() =>
-      page.locator("openclaw-session-menu > wa-dropdown > wa-dropdown-item:focus").count(),
+      page
+        .locator(
+          ":is(openclaw-session-menu, openclaw-chat-header-session-menu) > wa-dropdown > wa-dropdown-item:focus",
+        )
+        .count(),
     )
     .toBe(1);
   await page.keyboard.press("Home");

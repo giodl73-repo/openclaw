@@ -1,6 +1,7 @@
 // Main auto-reply pipeline: prepares context, runs commands, and dispatches agents.
 import fs from "node:fs/promises";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { isImplicitAcpWorkspaceCandidate } from "../../agents/agent-scope-config.js";
 import {
   hasLegacyAutoFallbackWithoutOrigin,
   resolveAutoFallbackPrimaryProbe,
@@ -10,13 +11,18 @@ import {
   resolveSessionAgentId,
   resolveAgentSkillsFilter,
 } from "../../agents/agent-scope.js";
+import { resolveConversationCapabilityProfile } from "../../agents/conversation-capability-profile.js";
+import { projectConversationToolNames } from "../../agents/conversation-tool-policy-pipeline.js";
 import type { ModelCatalogSnapshot } from "../../agents/model-catalog.types.js";
 import { resolveModelRefFromString } from "../../agents/model-selection.js";
 import { publishedModelCatalogOwnerMatchesAgent } from "../../agents/prepared-model-catalog-owner.js";
+import { resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
+import { resolveEffectiveToolFsRootExpansionAllowed } from "../../agents/tool-fs-policy.js";
 import { DEFAULT_AGENT_WORKSPACE_DIR, ensureAgentWorkspace } from "../../agents/workspace.js";
 import { resolveChannelModelOverride } from "../../channels/model-overrides.js";
 import { type OpenClawConfig, getRuntimeConfig } from "../../config/config.js";
+import { resolveGroupSessionKey } from "../../config/sessions/group.js";
 import { isSessionWorkStartInvalidatedError } from "../../config/sessions/lifecycle.js";
 import { logVerbose } from "../../globals.js";
 import { measureDiagnosticsTimelineSpan } from "../../infra/diagnostics-timeline.js";
@@ -25,13 +31,14 @@ import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { ApplyMediaUnderstandingResult } from "../../media-understanding/apply.js";
 import type { ExtractedFileImage } from "../../media-understanding/extracted-file-images.js";
-import { hasStagedMediaFacts } from "../../media/media-facts.js";
+import { hasStagedMediaFacts, normalizeMediaFacts } from "../../media/media-facts.js";
 import { defaultRuntime } from "../../runtime.js";
 import {
   isModelSelectionLocked,
   ModelSelectionLockedError,
 } from "../../sessions/model-overrides.js";
 import { ensureSessionDiffBaseline } from "../../sessions/session-diff-baseline.js";
+import { resolveStoredModelOverride } from "../../sessions/stored-model-overrides.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import {
   sessionDeliveryChannel,
@@ -45,6 +52,7 @@ import type { RuntimeMsgContext as MsgContext } from "../templating.js";
 import { normalizeThinkLevel, normalizeVerboseLevel } from "../thinking.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import { resolveDefaultModel } from "./directive-handling.defaults.js";
+import { resolveActiveExplicitSteerSessionKey } from "./explicit-steer-routing.js";
 import { clearInlineDirectives } from "./get-reply-directives-utils.js";
 import { resolveReplyDirectives } from "./get-reply-directives.js";
 import {
@@ -71,6 +79,7 @@ import {
 } from "./inbound-media.js";
 import { emitPreAgentMessageHooks } from "./message-preprocess-hooks.js";
 import { createFastTestModelSelectionState, createModelSelectionState } from "./model-selection.js";
+import { resolveOriginMessageProvider } from "./origin-routing.js";
 import {
   PENDING_FINAL_DELIVERY_CLEAR_PATCH,
   sanitizePendingFinalDeliveryText,
@@ -78,13 +87,11 @@ import {
 import { getPreparedReplyDispatchRuntime } from "./prepared-reply-dispatch-context.js";
 import { attachProgressNarratorToReplyOptions } from "./progress-narrator.js";
 import { createReplyTimingTracker } from "./reply-timing-tracker.js";
+import { resolveRuntimePolicySessionKey } from "./runtime-policy-session-key.js";
 import { initSessionState, resolveReplySessionPreprocessingState } from "./session.js";
 import { mergeSkillFilters } from "./skill-filter.js";
 import { stageRemoteInboundMediaIfNeeded } from "./stage-remote-inbound-media.js";
-import {
-  isStaleHeartbeatAutoFallbackOverride,
-  resolveStoredModelOverride,
-} from "./stored-model-override.js";
+import { isStaleHeartbeatAutoFallbackOverride } from "./stored-model-override.js";
 import { createTypingController } from "./typing.js";
 
 type ResetCommandAction = "new" | "reset";
@@ -103,10 +110,6 @@ function classifyHeartbeatPendingFinalDelivery(text: string, ackMaxChars: number
     shouldClear: stripped.shouldSkip,
     replayText: stripped.didStrip && stripped.text ? stripped.text : text,
   };
-}
-
-function resolveHeartbeatAckMaxChars(_cfg: OpenClawConfig, _agentId: string): number {
-  return DEFAULT_HEARTBEAT_ACK_MAX_CHARS;
 }
 
 const sessionResetModelRuntimeLoader = createLazyImportLoader(
@@ -162,6 +165,7 @@ async function applyMediaUnderstandingIfNeeded(params: {
   workspaceDir?: string;
   activeModel: { provider: string; model: string };
   processingMode?: "audio-only";
+  selfServeLocalPaths?: boolean;
 }): Promise<ApplyMediaUnderstandingResult | undefined> {
   if (!hasInboundMediaForUnderstanding(params.ctx)) {
     return undefined;
@@ -181,6 +185,89 @@ async function applyMediaUnderstandingIfNeeded(params: {
 function hasExplicitAudioUnderstandingConfig(cfg: OpenClawConfig): boolean {
   const audio = cfg.tools?.media?.audio;
   return audio !== undefined && audio.enabled !== false;
+}
+
+function canSelfServeLocalPaths(params: {
+  ctx: MsgContext;
+  cfg: OpenClawConfig;
+  agentId: string;
+  agentDir?: string;
+  sessionKey?: string;
+  workspaceDir: string;
+  provider: string;
+  model: string;
+  opts?: GetReplyOptions;
+  senderIsOwner: boolean;
+  spawnedBy?: string;
+  stagedPathsAvailable: boolean;
+}): boolean {
+  if (params.opts?.disableTools === true) {
+    return false;
+  }
+  const policySessionKey = resolveRuntimePolicySessionKey({
+    cfg: params.cfg,
+    ctx: params.ctx,
+    sessionKey: params.sessionKey,
+  });
+  const sandboxed = resolveSandboxRuntimeStatus({
+    cfg: params.cfg,
+    sessionKey: policySessionKey,
+  }).sandboxed;
+  if (
+    (sandboxed && !params.stagedPathsAvailable) ||
+    (!sandboxed &&
+      !resolveEffectiveToolFsRootExpansionAllowed({ cfg: params.cfg, agentId: params.agentId }))
+  ) {
+    return false;
+  }
+  const capabilityProfile = resolveConversationCapabilityProfile({
+    config: params.cfg,
+    sessionKey: policySessionKey,
+    runSessionKey: policySessionKey === params.sessionKey ? undefined : params.sessionKey,
+    agentId: params.agentId,
+    agentDir: params.agentDir,
+    agentAccountId: params.ctx.AccountId,
+    messageProvider: resolveOriginMessageProvider({
+      originatingChannel: params.ctx.OriginatingChannel,
+      provider: params.ctx.Provider ?? params.ctx.Surface,
+    }),
+    chatType: params.ctx.ChatType,
+    conversationToolPolicy: params.ctx.ConversationToolPolicy,
+    groupId: resolveGroupSessionKey(params.ctx)?.id,
+    groupChannel:
+      normalizeOptionalString(params.ctx.GroupChannel) ??
+      normalizeOptionalString(params.ctx.GroupSubject),
+    groupSpace: normalizeOptionalString(params.ctx.GroupSpace),
+    memberRoleIds: params.ctx.MemberRoleIds,
+    spawnedBy: params.spawnedBy,
+    senderId: normalizeOptionalString(params.ctx.SenderId),
+    senderName: normalizeOptionalString(params.ctx.SenderName),
+    senderUsername: normalizeOptionalString(params.ctx.SenderUsername),
+    senderE164: normalizeOptionalString(params.ctx.SenderE164),
+    senderIsOwner: params.senderIsOwner,
+    modelProvider: params.provider,
+    modelId: params.model,
+    workspaceDir: params.workspaceDir,
+    runtimeToolAllowlist: params.opts?.toolsAllow,
+    inheritRuntimeToolAllowlist: true,
+    inputProvenance: params.ctx.InputProvenance,
+  });
+  return (
+    projectConversationToolNames({
+      capabilityProfile,
+      toolNames: ["read"],
+      warn: () => {},
+    }).length === 1
+  );
+}
+
+function collectStagedAttachmentPaths(ctx: MsgContext): ReadonlyMap<number, string> {
+  return new Map(
+    normalizeMediaFacts(ctx.media).flatMap((fact, index) => {
+      const mediaPath = normalizeOptionalString(fact.path);
+      return mediaPath ? [[index, mediaPath] as const] : [];
+    }),
+  );
 }
 
 function withExtractedFileImages(
@@ -252,6 +339,16 @@ export async function getReplyFromConfig(
   const finalized = resolverTiming.measureSync("reply.finalize_context", () =>
     finalizeInboundContext(ctx),
   );
+  // Resolve legacy text-slash source lanes before any session-scoped work.
+  // The explicit steer command itself still flows through normal command and
+  // prepared-reply handling; this only gives that path the active owner's key.
+  const explicitSteerTargetSessionKey = resolverTiming.measureSync(
+    "reply.resolve_explicit_steer_target",
+    () => resolveActiveExplicitSteerSessionKey({ cfg, ctx: finalized }),
+  );
+  if (explicitSteerTargetSessionKey) {
+    finalized.CommandTargetSessionKey = explicitSteerTargetSessionKey;
+  }
   const initialAgentScope = resolverTiming.measureSync("reply.resolve_agent_scope", () => {
     const targetSessionKey = resolveCommandTurnTargetSessionKey(finalized);
     const resolvedAgentSessionKey = targetSessionKey || finalized.SessionKey;
@@ -318,6 +415,7 @@ export async function getReplyFromConfig(
     | RuntimeInternalGetReplyOptions
     | undefined;
   let extractedFileImages: ExtractedFileImage[] | undefined;
+  let enableLocalPathSelfServe: ApplyMediaUnderstandingResult["enableLocalPathSelfServe"];
   const agentCfg = cfg.agents?.defaults;
   const agentEntry = resolveAgentConfig(cfg, agentId);
   const configuredThinkingDefault =
@@ -344,6 +442,8 @@ export async function getReplyFromConfig(
       "";
     const heartbeatRef = heartbeatRaw
       ? resolveModelRefFromString({
+          cfg,
+          agentId,
           raw: heartbeatRaw,
           defaultProvider,
           aliasIndex,
@@ -413,6 +513,23 @@ export async function getReplyFromConfig(
     logResolverTiming("completed", "native_slash_command_fast_path");
     return nativeSlashCommandFastReply.reply;
   }
+  const optsWithCommandQueueOverride = nativeSlashCommandFastReply.queueModeOverride
+    ? { ...optsWithSkillFilter, queueModeOverride: nativeSlashCommandFastReply.queueModeOverride }
+    : optsWithSkillFilter;
+
+  const acpWorkspaceProvisioningInput = isImplicitAcpWorkspaceCandidate(cfg, agentId)
+    ? await traceGetReplyPhase("reply.resolve_acp_workspace_provisioning", async () => {
+        // Implicit ACP agents need the live session's ACP meta (per-session cwd
+        // from /acp spawn --cwd or /acp cwd) before workspace scaffolding runs.
+        const state = resolveReplySessionPreprocessingState({ ctx: finalized, cfg });
+        return {
+          cfg,
+          agentId,
+          sessionKey: state.sessionKey,
+          ...(state.sessionEntry ? { sessionEntry: state.sessionEntry } : {}),
+        };
+      })
+    : { cfg, agentId, ...(agentSessionKey ? { sessionKey: agentSessionKey } : {}) };
 
   const workspace = await traceGetReplyPhase("reply.ensure_workspace", async () =>
     useFastTestBootstrap
@@ -421,6 +538,9 @@ export async function getReplyFromConfig(
           dir: workspaceDirRaw,
           ensureBootstrapFiles: !agentCfg?.skipBootstrap && !isFastTestEnv,
           skipOptionalBootstrapFiles: agentCfg?.skipOptionalBootstrapFiles,
+          provisioning: await (
+            await import("../../agents/acp-workspace-provisioning.js")
+          ).resolveAcpAgentWorkspaceProvisioningForTurn(acpWorkspaceProvisioningInput),
         }),
   );
   const workspaceDir = workspace.dir;
@@ -467,12 +587,16 @@ export async function getReplyFromConfig(
           agentDir,
           workspaceDir,
           activeModel: { provider, model },
+          // Cache and classify now; the final provider and owner policy are
+          // resolved later, immediately before the embedded turn starts.
+          selfServeLocalPaths: false,
           ...(shouldApplyLockedAudio ? { processingMode: "audio-only" as const } : {}),
         }),
       );
       if (mediaResult?.extractedFileImages.length) {
         extractedFileImages = mediaResult.extractedFileImages;
       }
+      enableLocalPathSelfServe = mediaResult?.enableLocalPathSelfServe;
     }
   }
   if (linkUnderstandingRequested && !utilityModelSelectionLocked) {
@@ -510,6 +634,7 @@ export async function getReplyFromConfig(
               : {}),
             pinExpectedExistingSession:
               internalOptsWithSkillFilter?.pinExpectedExistingSession === true,
+            newlyCreatedSessionId: internalOptsWithSkillFilter?.newlyCreatedSessionId,
             requestedSessionId: internalOptsWithSkillFilter?.requestedSessionId,
             resumeRequestedSession: internalOptsWithSkillFilter?.resumeRequestedSession,
             signal: internalOptsWithSkillFilter?.abortSignal,
@@ -540,6 +665,9 @@ export async function getReplyFromConfig(
       sessionState.sessionEntryHandle.replaceCurrent(baselineEntry);
       sessionState.sessionStore[sessionState.sessionKey] = baselineEntry;
     } catch (error) {
+      if (isSessionWorkStartInvalidatedError(error)) {
+        throw error;
+      }
       logVerbose(
         `session diff baseline capture failed; continuing without attribution filtering: ${formatErrorMessage(error)}`,
       );
@@ -575,8 +703,8 @@ export async function getReplyFromConfig(
   // Utility-model narration is turn-local decoration. Initialize the durable
   // session first, then keep it completely outside model-locked native runs.
   const optsWithSessionSkillOverrides = sessionEntry.toolOverrides?.skills
-    ? { ...optsWithSkillFilter, skillOverrides: sessionEntry.toolOverrides.skills }
-    : optsWithSkillFilter;
+    ? { ...optsWithCommandQueueOverride, skillOverrides: sessionEntry.toolOverrides.skills }
+    : optsWithCommandQueueOverride;
   const resolvedOpts = attachProgressNarratorToReplyOptions({
     cfg,
     agentId,
@@ -601,7 +729,7 @@ export async function getReplyFromConfig(
     if (opts?.isHeartbeat) {
       const heartbeatPending = classifyHeartbeatPendingFinalDelivery(
         text,
-        resolveHeartbeatAckMaxChars(cfg, agentId),
+        DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
       );
       if (heartbeatPending.shouldClear) {
         Object.assign(sessionEntry, PENDING_FINAL_DELIVERY_CLEAR_PATCH);
@@ -687,6 +815,8 @@ export async function getReplyFromConfig(
   const resolvedChannelModelOverride =
     channelModelOverride && !hasResolvedHeartbeatModelOverride && !sessionModelSelectionLocked
       ? resolveModelRefFromString({
+          cfg,
+          agentId,
           raw: channelModelOverride.model,
           defaultProvider,
           aliasIndex,
@@ -745,13 +875,13 @@ export async function getReplyFromConfig(
         primaryModel,
       })
     : undefined;
-  const hasEffectiveSessionModelOverride =
-    hasSessionModelOverride &&
+  const hasEffectiveStoredModelOverride =
+    Boolean(storedModelOverride || hasSessionModelOverride) &&
     !staleHeartbeatAutoFallbackOverride &&
     !staleLegacyAutoFallbackWithoutOrigin;
   if (
     !hasResolvedHeartbeatModelOverride &&
-    !hasEffectiveSessionModelOverride &&
+    !hasEffectiveStoredModelOverride &&
     resolvedChannelModelOverride
   ) {
     provider = resolvedChannelModelOverride.ref.provider;
@@ -776,6 +906,25 @@ export async function getReplyFromConfig(
       triggerBodyNormalized,
       commandAuthorized,
     });
+    if (
+      enableLocalPathSelfServe &&
+      canSelfServeLocalPaths({
+        ctx: sessionCtx,
+        cfg,
+        agentId,
+        agentDir,
+        sessionKey,
+        workspaceDir,
+        provider: autoFallbackPrimaryProbe?.provider ?? provider,
+        model: autoFallbackPrimaryProbe?.model ?? model,
+        opts: resolvedOpts,
+        senderIsOwner: fastCommand.senderIsOwner,
+        spawnedBy: normalizeOptionalString(sessionEntry.spawnedBy),
+        stagedPathsAvailable: false,
+      })
+    ) {
+      enableLocalPathSelfServe([finalized, sessionCtx]);
+    }
     logResolverTiming("milestone", "before_fast_directive_prepared_reply");
     const fastReplyResult = await traceGetReplyPhase("reply.run_prepared_reply", () =>
       runPreparedReply({
@@ -995,6 +1144,9 @@ export async function getReplyFromConfig(
   await maybeEmitMissingResetHooks();
   directives = inlineActionResult.directives;
   cleanedBody = inlineActionResult.cleanedBody;
+  const explicitSkillSelections = inlineActionResult.explicitSkillSelections;
+  const queueModeOverride = inlineActionResult.queueModeOverride;
+  const preparedReplyOpts = withExtractedFileImages(resolvedOpts, extractedFileImages);
   abortedLastRun = inlineActionResult.abortedLastRun ?? abortedLastRun;
   const runAutoFallbackPrimaryProbe = directives.hasModelDirective
     ? undefined
@@ -1072,6 +1224,9 @@ export async function getReplyFromConfig(
     }
   }
 
+  let stagedAttachmentPaths = hasStagedMediaFacts(finalized.media)
+    ? collectStagedAttachmentPaths(finalized)
+    : new Map<number, string>();
   // Already-staged facts or SDK projections must remain a single-stage contract.
   if (
     !useFastTestBootstrap &&
@@ -1081,7 +1236,7 @@ export async function getReplyFromConfig(
     hasInboundMedia(ctx)
   ) {
     const { stageSandboxMedia } = await loadStageSandboxMediaRuntime();
-    await traceGetReplyPhase("reply.stage_media", () =>
+    const stageResult = await traceGetReplyPhase("reply.stage_media", () =>
       stageSandboxMedia({
         ctx,
         sessionCtx,
@@ -1089,6 +1244,30 @@ export async function getReplyFromConfig(
         sessionKey,
         workspaceDir,
       }),
+    );
+    stagedAttachmentPaths = stageResult.staged;
+  }
+
+  if (
+    enableLocalPathSelfServe &&
+    canSelfServeLocalPaths({
+      ctx: sessionCtx,
+      cfg,
+      agentId,
+      agentDir,
+      sessionKey,
+      workspaceDir,
+      provider: runProvider,
+      model: runModel,
+      opts: resolvedOpts,
+      senderIsOwner: command.senderIsOwner,
+      spawnedBy: normalizeOptionalString(sessionEntry.spawnedBy),
+      stagedPathsAvailable: stagedAttachmentPaths.size > 0,
+    })
+  ) {
+    enableLocalPathSelfServe(
+      [finalized, sessionCtx],
+      stagedAttachmentPaths.size > 0 ? stagedAttachmentPaths : undefined,
     );
   }
 
@@ -1131,7 +1310,7 @@ export async function getReplyFromConfig(
       perMessageQueueMode,
       perMessageQueueOptions,
       typing,
-      opts: withExtractedFileImages(resolvedOpts, extractedFileImages),
+      opts: queueModeOverride ? { ...preparedReplyOpts, queueModeOverride } : preparedReplyOpts,
       defaultModel,
       timeoutMs,
       isNewSession,
@@ -1144,6 +1323,7 @@ export async function getReplyFromConfig(
       storePath,
       workspaceDir,
       abortedLastRun,
+      explicitSkillSelections,
       autoFallbackPrimaryProbe: runAutoFallbackPrimaryProbe,
     }),
   );

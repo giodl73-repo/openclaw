@@ -1,9 +1,10 @@
 import type { WorkerLiveEventParams } from "../../../packages/gateway-protocol/src/schema/worker-admission.js";
+import { isDefinitiveRunLifecycle } from "../../agents/agent-run-terminal-outcome.js";
 import {
   capLiveExecResult,
   sanitizeToolArgs,
   sanitizeToolResult,
-} from "../../agents/embedded-agent-subscribe.tools.js";
+} from "../../agents/embedded-agent-tool-results.js";
 import { normalizeToolPolicyName } from "../../agents/tool-policy.js";
 import { createTrajectoryRuntimeRecorder } from "../../trajectory/runtime.js";
 
@@ -40,9 +41,7 @@ export function prepareWorkerLiveEventData(
 export function isDefinitiveWorkerTerminalEvent(event: WorkerLiveEventParams["event"]): boolean {
   return (
     event.kind === "lifecycle" &&
-    (event.payload.phase === "end" ||
-      (event.payload.phase === "error" &&
-        (event.payload.aborted === true || event.payload.fallbackExhaustedFailure === true)))
+    isDefinitiveRunLifecycle({ phase: event.payload.phase, data: event.payload })
   );
 }
 
