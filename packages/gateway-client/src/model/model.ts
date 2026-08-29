@@ -342,7 +342,9 @@ class ControlModelImpl implements ControlModel {
     this.#unsubscribeConnection = null;
     this.#unsubscribeSessionCatalogInvalidations = null;
     this.#unsubscribeEvents = null;
-    for (const conversation of this.#conversations.values()) conversation.dispose();
+    for (const conversation of this.#conversations.values()) {
+      conversation.dispose();
+    }
     this.#conversations.clear();
     this.#refreshRequested = false;
     this.#eventRefreshCoordinator.dispose();
@@ -476,9 +478,11 @@ class ControlModelImpl implements ControlModel {
     );
     if (epochChanged || connection.status !== "connected") {
       for (const conversation of this.#conversations.values()) {
-        if (connection.status === "connected")
+        if (connection.status === "connected") {
           conversation.onConnection(connection, this.#gateway.getMessageSubscriptionCoordinator());
-        else conversation.onDisconnected(connection);
+        } else {
+          conversation.onDisconnected(connection);
+        }
       }
     }
     if (
@@ -496,13 +500,14 @@ class ControlModelImpl implements ControlModel {
   conversation(sessionKey: string): ControlModelConversation {
     this.#assertActive();
     const key = sessionKey.trim();
-    if (!key)
+    if (!key) {
       throw new ControlModelCommandError({
         category: "invalid-input",
         code: "EMPTY_SESSION_KEY",
         message: "Session key is required",
         command: "conversation",
       });
+    }
     const existing = this.#conversations.get(key);
     if (existing) {
       existing.startIfNeeded();
@@ -511,10 +516,14 @@ class ControlModelImpl implements ControlModel {
     while (true) {
       const inactive = [...this.#conversations.values()]
         .filter((conversation) => conversation.isEvictable)
-        .sort((left, right) => left.lastUsed - right.lastUsed);
-      if (inactive.length < this.#maxInactiveConversations) break;
+        .toSorted((left, right) => left.lastUsed - right.lastUsed);
+      if (inactive.length < this.#maxInactiveConversations) {
+        break;
+      }
       const candidate = inactive[0];
-      if (!candidate) break;
+      if (!candidate) {
+        break;
+      }
       candidate.dispose();
       this.#conversations.delete(candidate.sessionKey);
     }
@@ -526,7 +535,9 @@ class ControlModelImpl implements ControlModel {
       isRunning: () => this.#snapshot.lifecycle === "running",
       getMessageSubscriptionCoordinator: () => this.#gateway.getMessageSubscriptionCoordinator(),
       onConversationReleased: async (conversation) => {
-        if (this.#conversations.get(conversation.sessionKey) !== conversation) return;
+        if (this.#conversations.get(conversation.sessionKey) !== conversation) {
+          return;
+        }
         conversation.dispose();
         this.#conversations.delete(conversation.sessionKey);
       },
@@ -544,27 +555,38 @@ class ControlModelImpl implements ControlModel {
   async releaseConversation(sessionKey: string): Promise<void> {
     this.#assertActive();
     const key = sessionKey.trim();
-    if (!key)
+    if (!key) {
       throw new ControlModelCommandError({
         category: "invalid-input",
         code: "EMPTY_SESSION_KEY",
         message: "Session key is required",
         command: "releaseConversation",
       });
+    }
     const conversation = this.#conversations.get(key);
-    if (!conversation) return;
+    if (!conversation) {
+      return;
+    }
     await conversation.release();
   }
 
   #startConversations(): void {
-    for (const conversation of this.#conversations.values()) conversation.startIfNeeded();
+    for (const conversation of this.#conversations.values()) {
+      conversation.startIfNeeded();
+    }
   }
 
   #handleEvent(frame: ControlModelGatewayEventFrame): void {
-    if (this.#snapshot.lifecycle !== "running") return;
+    if (this.#snapshot.lifecycle !== "running") {
+      return;
+    }
     const connection = this.#gateway.getConnectionSnapshot();
-    if (connection.status !== "connected" || frame.connectionEpoch !== connection.epoch) return;
-    for (const conversation of this.#conversations.values()) conversation.handleEvent(frame);
+    if (connection.status !== "connected" || frame.connectionEpoch !== connection.epoch) {
+      return;
+    }
+    for (const conversation of this.#conversations.values()) {
+      conversation.handleEvent(frame);
+    }
   }
 
   #isCurrentEpoch(epoch: number): boolean {
@@ -574,6 +596,10 @@ class ControlModelImpl implements ControlModel {
       connection.status === "connected" &&
       connection.epoch === epoch
     );
+  }
+
+  #isDisposed(): boolean {
+    return this.#snapshot.lifecycle === "disposed";
   }
 
   #publish(next: Omit<ControlModelSnapshot, "revision"> & { revision?: number }): void {
@@ -586,13 +612,13 @@ class ControlModelImpl implements ControlModel {
   }
 
   #scheduleNotification(): void {
-    if (this.#notificationScheduled || this.#snapshot.lifecycle === "disposed") {
+    if (this.#notificationScheduled || this.#isDisposed()) {
       return;
     }
     this.#notificationScheduled = true;
     queueMicrotask(() => {
       this.#notificationScheduled = false;
-      if (this.#snapshot.lifecycle === "disposed") {
+      if (this.#isDisposed()) {
         return;
       }
       for (const subscriber of Array.from(this.#subscribers)) {

@@ -301,9 +301,7 @@ const model = createControlModel({
       sessionCatalogInvalidations.subscribe(listener),
     subscribeEvents: (listener) => {
       const connectionEpoch = connectionSnapshot.epoch;
-      return gateway.subscribeEvents((frame) =>
-        listener({ ...frame, connectionEpoch }),
-      );
+      return gateway.subscribeEvents((frame) => listener({ ...frame, connectionEpoch }));
     },
     getMessageSubscriptionCoordinator: () =>
       getGatewaySessionMessageSubscriptionCoordinator(gateway, {
@@ -370,5 +368,6 @@ subscribeEvents(listener) => () => void
 
 Each frame contains `event`, `payload`, and the source `connectionEpoch`, with
 optional `seq` and explicit `gap`. The host owns connection epochs; the model
-rejects frames from retired epochs and resets the shared Gateway Client message
-subscription coordinator when a connection is replaced.
+rejects frames from retired epochs and releases only its own leases. The host
+retires and replaces the shared Gateway Client message subscription coordinator
+when a connection is replaced.

@@ -55,7 +55,15 @@ function createGatewayHarness(
       return pending.promise;
     },
   );
-  let coordinator: GatewaySessionMessageSubscriptionCoordinator;
+  const gatewayRequest: ControlModelGatewayBinding["request"] = <T>(
+    method: string,
+    params: Record<string, unknown>,
+    options?: ControlModelRequestOptions,
+  ) => {
+    // SAFETY: this harness only services the session catalog's session.list request.
+    return request(method, params, options) as Promise<T>;
+  };
+  const coordinator = new GatewaySessionMessageSubscriptionCoordinator({ request: gatewayRequest });
   const gateway: ControlModelGatewayBinding = {
     getConnectionSnapshot: () => connection,
     subscribeConnection(listener) {
@@ -70,16 +78,8 @@ function createGatewayHarness(
     getMessageSubscriptionCoordinator() {
       return coordinator;
     },
-    request<T>(
-      method: string,
-      params: Record<string, unknown>,
-      options?: ControlModelRequestOptions,
-    ) {
-      // SAFETY: this harness only services the session catalog's session.list request.
-      return request(method, params, options) as Promise<T>;
-    },
+    request: gatewayRequest,
   };
-  coordinator = new GatewaySessionMessageSubscriptionCoordinator(gateway);
   return {
     gateway,
     request,
@@ -105,8 +105,9 @@ function createGatewayHarness(
       seq?: number;
       gap?: boolean;
     }) {
-      for (const listener of eventListeners)
-        listener({ connectionEpoch: connection.epoch, ...frame });
+      for (const listener of eventListeners) {
+        listener({ type: "event", connectionEpoch: connection.epoch, ...frame });
+      }
     },
   };
 }
