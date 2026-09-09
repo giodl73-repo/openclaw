@@ -12,6 +12,7 @@ import {
   resolveFsObservationMode,
   resolveFsObservationIntervalMs,
 } from "../../infra/fs-observation-mode.js";
+import { resolveRealpathOrAbsolute } from "../../infra/boundary-path.js";
 import { admitObservationRoot } from "../../infra/fs-observation-root.js";
 import { readObservationSnapshot } from "../../infra/fs-observation-snapshot.js";
 import { isPathInside } from "../../infra/path-guards.js";
@@ -496,17 +497,22 @@ function subscribeWorkspaceToPath(
 function disposeWorkspaceWatchState(
   watcherKey: string,
   watchTargets: readonly WatchTarget[] = workspaceWatchTargets.get(watcherKey) ?? [],
-): void {
+): Promise<void> {
   disposeRemoteSkillsWatcher(watcherKey);
-  for (const watchTarget of watchTargets) {
-    unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
-  }
+  const teardowns = watchTargets.map((watchTarget) =>
+    unsubscribeWorkspaceFromPath(watcherKey, watchTarget),
+  );
   workspaceWatchTargets.delete(watcherKey);
   workspaceWatchOwners.delete(watcherKey);
   workspaceWatchTargetCache.delete(watcherKey);
   workspaceWatchLastEnsuredAt.delete(watcherKey);
   // Reacquisition invalidates after an unwatched interval. Disposal itself does
   // not change skills, including for other subscriptions sharing this workspace.
+  return Promise.all(teardowns).then(() => undefined);
+}
+
+function disposeWorkspaceWatchStateDetached(watcherKey: string): void {
+  void disposeWorkspaceWatchState(watcherKey);
 }
 
 export function ensureSkillsWatcher(params: {
@@ -547,15 +553,15 @@ export function ensureSkillsWatcher(params: {
   const now = Date.now();
   const watchEnabled = params.config?.skills?.load?.watch !== false;
   if (!watchEnabled) {
-    disposeWorkspaceWatchState(watcherKey);
-    evictWorkspaceWatchStates(now, disposeWorkspaceWatchState);
+    disposeWorkspaceWatchStateDetached(watcherKey);
+    evictWorkspaceWatchStates(now, disposeWorkspaceWatchStateDetached);
     return;
   }
 
   // Map order breaks equal-clock ties and promotes reuse without adding a generation.
   workspaceWatchLastEnsuredAt.delete(watcherKey);
   workspaceWatchLastEnsuredAt.set(watcherKey, now);
-  evictWorkspaceWatchStates(now, disposeWorkspaceWatchState);
+  evictWorkspaceWatchStates(now, disposeWorkspaceWatchStateDetached);
   if (!isCurrent()) {
     return;
   }
@@ -625,7 +631,7 @@ export function ensureSkillsWatcher(params: {
     const nextTargetKeys = new Set(watchTargets.map((target) => target.path));
     for (const watchTarget of previousTargets) {
       if (!nextTargetKeys.has(watchTarget.path)) {
-        unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
+        void unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
       }
     }
     // A replacement notification can synchronously dispose or re-ensure this owner.
@@ -701,6 +707,17 @@ export function reconcileSkillsWatcherCoverage(
     owner.unavailable = true;
   }
   return covered;
+}
+
+/** Releases Gateway-owned skill watchers before an agent workspace is removed. */
+export async function closeSkillsWatchersForWorkspace(workspaceDir: string): Promise<void> {
+  const canonicalWorkspaceDir = resolveRealpathOrAbsolute(workspaceDir);
+  const watcherKeys = Array.from(workspaceWatchOwners)
+    .filter(
+      ([, owner]) => resolveRealpathOrAbsolute(owner.workspaceDir) === canonicalWorkspaceDir,
+    )
+    .map(([watcherKey]) => watcherKey);
+  await Promise.all(watcherKeys.map((watcherKey) => disposeWorkspaceWatchState(watcherKey)));
 }
 
 export async function closeSkillsWatchers(resetState = false): Promise<void> {

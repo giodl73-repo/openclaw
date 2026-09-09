@@ -276,6 +276,10 @@ export const clawsMonitorHandlers = {
           "Gateway cleanup state changed before drainage was acknowledged; retry Claw removal.",
         );
       }
+      if (input.phase === "drain") {
+        await closeSkillsWatchersForWorkspace(journal.workspaceDir);
+        assertCurrent();
+      }
       respond(true, { drained: true }, undefined);
     } catch (error) {
       respond(

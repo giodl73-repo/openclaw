@@ -57,14 +57,17 @@ export type PendingSkillsWatchChange = {
   change: SkillsWatchChange | "initial-scan" | "unavailable";
 };
 
-export function unsubscribeWorkspaceFromPath(workspaceDir: string, watchTarget: WatchTarget): void {
+export async function unsubscribeWorkspaceFromPath(
+  workspaceDir: string,
+  watchTarget: WatchTarget,
+): Promise<void> {
   const state = pathWatchers.get(watchTarget.path);
   if (!state) {
     return;
   }
   state.subscribers.delete(workspaceDir);
   if (state.subscribers.size === 0) {
-    void state.close().then(
+    await state.close().then(
       () => {
         if (state.subscribers.size === 0 && pathWatchers.get(watchTarget.path) === state) {
           pathWatchers.delete(watchTarget.path);

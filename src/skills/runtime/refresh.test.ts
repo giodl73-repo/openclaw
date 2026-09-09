@@ -149,3 +149,18 @@ it("invalidates discovery when observation cannot provide path detail", async ()
   await vi.advanceTimersByTimeAsync(250);
   expect(getSkillsSourceVersion(workspaceDir)).toBeGreaterThan(version);
 });
+
+it("closes only the deleted workspace skill watchers", async () => {
+  const otherWorkspaceDir = await fixture.createFixtureDirectory("other-workspace");
+  await fixture.createFixtureDirectory("other-workspace/skills");
+  refresh.ensureSkillsWatcher({ workspaceDir: fixture.workspaceDir });
+  refresh.ensureSkillsWatcher({ workspaceDir: otherWorkspaceDir });
+  await observer.readyAll();
+  const deletedWorkspaceWatch = observer.forRoot(path.join(fixture.workspaceDir, "skills"));
+  const otherWorkspaceWatch = observer.forRoot(path.join(otherWorkspaceDir, "skills"));
+
+  await refresh.closeSkillsWatchersForWorkspace(fixture.workspaceDir);
+
+  expect(deletedWorkspaceWatch.close).toHaveBeenCalledOnce();
+  expect(otherWorkspaceWatch.close).not.toHaveBeenCalled();
+});
