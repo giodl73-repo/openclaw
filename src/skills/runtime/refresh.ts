@@ -647,6 +647,7 @@ function unsubscribeWorkspaceFromPath(
     pathWatchers.delete(watchTarget.path);
     return teardownSkillsPathWatcher(state);
   }
+  return undefined;
 }
 
 function disposeWorkspaceWatchState(
