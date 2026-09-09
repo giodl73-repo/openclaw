@@ -176,6 +176,8 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   "reply-history": 6,
   "provider-auth": 19,
   "telegram-account": 3,
+  // +1: read-only SecretRef guard retained for published Firecrawl consumers.
+  "extension-shared": 1,
 } satisfies Record<string, number>);
 
 export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env) {
