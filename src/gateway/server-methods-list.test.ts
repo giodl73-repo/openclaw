@@ -214,6 +214,7 @@ describe("listGatewayMethods", () => {
       ...pluginDiscoveryMethods,
       "tasks.history",
       "environments.prepare",
+      "ready",
     ]);
   });
 

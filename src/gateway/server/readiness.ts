@@ -282,10 +282,7 @@ export function createReadinessChecker(
     const startupPending = startup.status === "starting";
     const gatewayDraining = startup.status === "draining";
     const lifecycleConditions = [
-      buildStartupCondition(
-        startupPending,
-        startupPending ? startup.pendingReason : undefined,
-      ),
+      buildStartupCondition(startupPending, startupPending ? startup.pendingReason : undefined),
       buildAcceptingWorkCondition(gatewayDraining),
     ];
     if (startup.status === "starting") {
@@ -325,7 +322,15 @@ export function createReadinessChecker(
     }
     if (deps.getStateDatabaseFailure?.()) {
       return withEventLoopHealth(
-        { ready: false, failing: ["state-database"], uptimeMs },
+        {
+          ready: false,
+          failing: ["state-database"],
+          uptimeMs,
+          conditions: [
+            ...lifecycleConditions,
+            buildChannelCondition({ checked: true, failing: ["state-database"] }),
+          ],
+        },
         deps.getEventLoopHealth,
       );
     }

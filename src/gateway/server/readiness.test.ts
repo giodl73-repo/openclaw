@@ -271,7 +271,9 @@ describe("createReadinessChecker", () => {
       const { readiness } = createReadinessHarness({
         getStartupPending: () => true,
       });
-      expect(readiness()).toEqual(failingSnapshot(["startup-sidecars"]));
+      expect(readiness()).toEqual(
+        failingSnapshot(["startup-sidecars"], FIVE_MIN_MS, "startup-sidecars"),
+      );
     });
   });
 
@@ -294,7 +296,9 @@ describe("createReadinessChecker", () => {
         getStartupPending: () => startupPending,
         cacheTtlMs: 1_000,
       });
-      expect(readiness()).toEqual(failingSnapshot(["startup-sidecars"]));
+      expect(readiness()).toEqual(
+        failingSnapshot(["startup-sidecars"], FIVE_MIN_MS, "startup-sidecars"),
+      );
       expect(manager.getRuntimeSnapshot).not.toHaveBeenCalled();
 
       startupPending = false;
