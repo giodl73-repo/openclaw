@@ -64,7 +64,7 @@ async function resolveStatusGatewayReadiness(params: {
   if (!params.gatewayReachable) {
     return undefined;
   }
-  const { callGateway } = await loadGatewayCallModule();
+  const { callGateway } = await gatewayCallModuleLoader.load();
   return await callGateway<CanonicalReadinessResult>({
     method: "ready",
     params: {},

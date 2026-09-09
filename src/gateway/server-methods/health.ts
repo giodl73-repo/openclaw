@@ -1,7 +1,7 @@
+import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 // Health gateway methods return cached or refreshed status summaries while
 // detecting stale channel runtime state against live gateway snapshots.
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
-import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
 import type { CanonicalReadinessResult } from "../../readiness/conditions.js";
 import { getStatusSummary } from "../../status/summary.js";
@@ -148,12 +148,13 @@ function mergeCachedHealthRuntimeState(params: {
 /** Gateway handlers for health snapshots and status summaries. */
 export const healthHandlers: GatewayRequestHandlers = {
   ready: async ({ respond, context }) => {
-    if (!context.getReadiness) {
+    const getReadiness = context.getReadiness;
+    if (!getReadiness) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "readiness unavailable"));
       return;
     }
     await respondUnavailableOnThrow(respond, async () => {
-      respond(true, await context.getReadiness(), undefined);
+      respond(true, await getReadiness(), undefined);
     });
   },
   health: async ({ respond, context, params, client }) => {

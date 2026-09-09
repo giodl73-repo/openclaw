@@ -100,17 +100,50 @@ describe("createPluginReadinessResolver", () => {
     expect(check).toHaveBeenCalledTimes(1);
   });
 
-  it("does not overlap a hung criterion across config and registry replacement", async () => {
-    const check = vi.fn(() => new Promise<never>(() => {}));
-    const first = registration(check);
-    const replacement = registration(check);
-    const resolve = createPluginReadinessResolver({ timeoutMs: 5, cacheTtlMs: 0 });
+  it("does not reuse a retired callback that ignores abort and succeeds late", async () => {
+    let resolveRetired:
+      | ((value: { status: "True"; reason: string; message: string }) => void)
+      | undefined;
+    let retiredSignal: AbortSignal | undefined;
+    const retired = registration(
+      ({ signal }) =>
+        new Promise((resolve) => {
+          retiredSignal = signal;
+          resolveRetired = resolve;
+        }),
+    );
+    const replacementCheck = vi.fn(() => ({
+      status: "False" as const,
+      reason: "ReplacementUnavailable",
+      message: "Replacement is unavailable.",
+    }));
+    const replacement = registration(replacementCheck);
+    const resolve = createPluginReadinessResolver({ timeoutMs: 1_000, cacheTtlMs: 0 });
 
-    await resolve({ registry: { readinessCriteria: [first] }, config: {} });
-    const result = await resolve({ registry: { readinessCriteria: [replacement] }, config: {} });
+    const retiredResult = resolve({
+      registry: { readinessCriteria: [retired] },
+      config: {},
+    });
+    await vi.waitFor(() => expect(resolveRetired).toBeTypeOf("function"));
+    const replacementResult = await resolve({
+      registry: { readinessCriteria: [replacement] },
+      config: {},
+    });
+    resolveRetired?.({
+      status: "True",
+      reason: "RetiredReady",
+      message: "Retired runtime is ready.",
+    });
 
-    expect(result.conditions[0]).toMatchObject({ reason: "CriterionTimedOut" });
-    expect(check).toHaveBeenCalledTimes(1);
+    await expect(retiredResult).resolves.toMatchObject({
+      conditions: [expect.objectContaining({ reason: "RetiredReady" })],
+    });
+    expect(retiredSignal?.aborted).toBe(true);
+    expect(replacementResult.conditions[0]).toMatchObject({
+      status: "False",
+      reason: "ReplacementUnavailable",
+    });
+    expect(replacementCheck).toHaveBeenCalledTimes(1);
   });
 
   it("retries after the timed-out callback settles and the cache expires", async () => {
@@ -188,6 +221,27 @@ describe("createPluginReadinessResolver", () => {
 
     expect(condition).toMatchObject({ status: "False", reason: "StorageUnavailable" });
     expect(condition?.message).not.toContain("super-secret-value-that-must-not-escape");
+  });
+
+  it("rejects secret-shaped provider reasons before projection", async () => {
+    const secretReason = "sk-testsecret1234567890abcd";
+    const criterion = registration(() => ({
+      status: "False",
+      reason: secretReason,
+      message: "Storage is unavailable.",
+    }));
+    const resolve = createPluginReadinessResolver({ cacheTtlMs: 0 });
+
+    const result = await resolve({
+      registry: { readinessCriteria: [criterion] },
+      config: {},
+    });
+
+    expect(result.conditions[0]).toMatchObject({
+      status: "Unknown",
+      reason: "CriterionInvalidResult",
+    });
+    expect(JSON.stringify(result)).not.toContain(secretReason);
   });
 
   it("reconciles provider-declared subjects and rejects unresolved references", async () => {
