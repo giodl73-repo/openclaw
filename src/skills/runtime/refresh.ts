@@ -600,10 +600,10 @@ function subscribeWorkspaceToPath(workspaceDir: string, watchTarget: WatchTarget
   pathWatchers.set(watchTarget.path, state);
 }
 
-function unsubscribeWorkspaceFromPath(
+async function unsubscribeWorkspaceFromPath(
   workspaceDir: string,
   watchTarget: WatchTarget,
-): Promise<void> | undefined {
+): Promise<void> {
   const state = pathWatchers.get(watchTarget.path);
   if (!state) {
     return;
@@ -611,9 +611,8 @@ function unsubscribeWorkspaceFromPath(
   state.subscribers.delete(workspaceDir);
   if (state.subscribers.size === 0) {
     pathWatchers.delete(watchTarget.path);
-    return teardownSkillsPathWatcher(state);
+    await teardownSkillsPathWatcher(state);
   }
-  return undefined;
 }
 
 function disposeWorkspaceWatchState(
@@ -622,13 +621,9 @@ function disposeWorkspaceWatchState(
 ): Promise<void> {
   const workspaceDir = workspaceWatchOwnerDirs.get(watcherKey) ?? watcherKey;
   const hadWatchTargets = watchTargets.length > 0;
-  const teardowns: Promise<void>[] = [];
-  for (const watchTarget of watchTargets) {
-    const teardown = unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
-    if (teardown) {
-      teardowns.push(teardown);
-    }
-  }
+  const teardowns = watchTargets.map((watchTarget) =>
+    unsubscribeWorkspaceFromPath(watcherKey, watchTarget),
+  );
   workspaceWatchTargets.delete(watcherKey);
   workspaceWatchOwnerDirs.delete(watcherKey);
   workspaceWatchTargetCache.delete(watcherKey);
@@ -714,7 +709,7 @@ export function ensureSkillsWatcher(params: {
   const nextTargetKeys = new Set(watchTargets.map((target) => target.path));
   for (const watchTarget of previousTargets) {
     if (!nextTargetKeys.has(watchTarget.path)) {
-      unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
+      void unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
     }
   }
   for (const watchTarget of watchTargets) {
