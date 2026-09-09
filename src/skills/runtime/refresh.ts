@@ -634,26 +634,33 @@ function subscribeWorkspaceToPath(workspaceDir: string, watchTarget: WatchTarget
   pathWatchers.set(watchTarget.path, state);
 }
 
-function unsubscribeWorkspaceFromPath(workspaceDir: string, watchTarget: WatchTarget): void {
+function unsubscribeWorkspaceFromPath(
+  workspaceDir: string,
+  watchTarget: WatchTarget,
+): Promise<void> | undefined {
   const state = pathWatchers.get(watchTarget.path);
   if (!state) {
     return;
   }
   state.subscribers.delete(workspaceDir);
   if (state.subscribers.size === 0) {
-    void teardownSkillsPathWatcher(state);
     pathWatchers.delete(watchTarget.path);
+    return teardownSkillsPathWatcher(state);
   }
 }
 
 function disposeWorkspaceWatchState(
   watcherKey: string,
   watchTargets: readonly WatchTarget[] = workspaceWatchTargets.get(watcherKey) ?? [],
-): void {
+): Promise<void> {
   const workspaceDir = workspaceWatchOwnerDirs.get(watcherKey) ?? watcherKey;
   const hadWatchTargets = watchTargets.length > 0;
+  const teardowns: Promise<void>[] = [];
   for (const watchTarget of watchTargets) {
-    unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
+    const teardown = unsubscribeWorkspaceFromPath(watcherKey, watchTarget);
+    if (teardown) {
+      teardowns.push(teardown);
+    }
   }
   workspaceWatchTargets.delete(watcherKey);
   workspaceWatchOwnerDirs.delete(watcherKey);
@@ -665,13 +672,14 @@ function disposeWorkspaceWatchState(
     bumpSkillsSnapshotVersion({ workspaceDir, reason: "watch-targets" });
   }
   clearSkillsSnapshotVersionForWorkspace(workspaceDir);
+  return Promise.all(teardowns).then(() => undefined);
 }
 
 function evictIdleWorkspaceWatchStates(now: number): void {
   const cutoff = now - SKILLS_WORKSPACE_WATCH_IDLE_TTL_MS;
   for (const [workspaceDir, lastEnsuredAt] of workspaceWatchLastEnsuredAt) {
     if (lastEnsuredAt < cutoff) {
-      disposeWorkspaceWatchState(workspaceDir);
+      void disposeWorkspaceWatchState(workspaceDir);
     }
   }
 }
@@ -698,7 +706,7 @@ export function ensureSkillsWatcher(params: {
   const previousTargets = workspaceWatchTargets.get(watcherKey) ?? [];
 
   if (!watchEnabled) {
-    disposeWorkspaceWatchState(watcherKey, previousTargets);
+    void disposeWorkspaceWatchState(watcherKey, previousTargets);
     evictIdleWorkspaceWatchStates(now);
     return;
   }
@@ -757,6 +765,15 @@ export function ensureSkillsWatcher(params: {
     });
   }
   evictIdleWorkspaceWatchStates(now);
+}
+
+/** Releases Gateway-owned skill watchers before an agent workspace is removed. */
+export async function closeSkillsWatchersForWorkspace(workspaceDir: string): Promise<void> {
+  const canonicalWorkspaceDir = resolveRealpathOrAbsolute(workspaceDir);
+  const watcherKeys = Array.from(workspaceWatchOwnerDirs)
+    .filter(([, ownerDir]) => resolveRealpathOrAbsolute(ownerDir) === canonicalWorkspaceDir)
+    .map(([watcherKey]) => watcherKey);
+  await Promise.all(watcherKeys.map((watcherKey) => disposeWorkspaceWatchState(watcherKey)));
 }
 
 export async function closeSkillsWatchers(resetState = false): Promise<void> {
