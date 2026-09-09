@@ -8,11 +8,11 @@ import {
 } from "@openclaw/fs-safe/watch";
 import { getAgentWorkspaceAccess } from "../../agents/workspace-access.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveRealpathOrAbsolute } from "../../infra/boundary-path.js";
 import {
   resolveFsObservationMode,
   resolveFsObservationIntervalMs,
 } from "../../infra/fs-observation-mode.js";
-import { resolveRealpathOrAbsolute } from "../../infra/boundary-path.js";
 import { admitObservationRoot } from "../../infra/fs-observation-root.js";
 import { readObservationSnapshot } from "../../infra/fs-observation-snapshot.js";
 import { isPathInside } from "../../infra/path-guards.js";
@@ -713,9 +713,7 @@ export function reconcileSkillsWatcherCoverage(
 export async function closeSkillsWatchersForWorkspace(workspaceDir: string): Promise<void> {
   const canonicalWorkspaceDir = resolveRealpathOrAbsolute(workspaceDir);
   const watcherKeys = Array.from(workspaceWatchOwners)
-    .filter(
-      ([, owner]) => resolveRealpathOrAbsolute(owner.workspaceDir) === canonicalWorkspaceDir,
-    )
+    .filter(([, owner]) => resolveRealpathOrAbsolute(owner.workspaceDir) === canonicalWorkspaceDir)
     .map(([watcherKey]) => watcherKey);
   await Promise.all(watcherKeys.map((watcherKey) => disposeWorkspaceWatchState(watcherKey)));
 }
@@ -746,3 +744,5 @@ export async function closeSkillsWatchers(resetState = false): Promise<void> {
   }
   watchersClosing = false;
 }
+
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

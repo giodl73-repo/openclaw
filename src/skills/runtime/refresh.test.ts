@@ -158,9 +158,22 @@ it("closes only the deleted workspace skill watchers", async () => {
   await observer.readyAll();
   const deletedWorkspaceWatch = observer.forRoot(path.join(fixture.workspaceDir, "skills"));
   const otherWorkspaceWatch = observer.forRoot(path.join(otherWorkspaceDir, "skills"));
+  let releaseClose: (() => void) | undefined;
+  const closeBarrier = new Promise<void>((resolve) => {
+    releaseClose = resolve;
+  });
+  deletedWorkspaceWatch.holdClose(closeBarrier);
+  let settled = false;
 
-  await refresh.closeSkillsWatchersForWorkspace(fixture.workspaceDir);
+  const close = refresh.closeSkillsWatchersForWorkspace(fixture.workspaceDir).then(() => {
+    settled = true;
+  });
+  await Promise.resolve();
 
   expect(deletedWorkspaceWatch.close).toHaveBeenCalledOnce();
   expect(otherWorkspaceWatch.close).not.toHaveBeenCalled();
+  expect(settled).toBe(false);
+  releaseClose?.();
+  await close;
+  expect(settled).toBe(true);
 });
