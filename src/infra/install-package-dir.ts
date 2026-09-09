@@ -44,7 +44,10 @@ export function hasPackageRuntimeDependencies(manifest: {
   );
 }
 
-async function sanitizeManifestForNpmInstall(targetDir: string): Promise<() => Promise<void>> {
+async function sanitizeManifestForNpmInstall(
+  targetDir: string,
+  omitOpenClawHostDependency: boolean,
+): Promise<() => Promise<void>> {
   const manifestPath = path.join(targetDir, "package.json");
   const parsed = await tryReadJson<unknown>(manifestPath);
   if (!isObjectRecord(parsed)) {
@@ -59,16 +62,18 @@ async function sanitizeManifestForNpmInstall(targetDir: string): Promise<() => P
     changed = true;
   }
 
-  for (const key of ["dependencies", "peerDependencies", "peerDependenciesMeta"] as const) {
-    const dependencies = manifest[key];
-    if (!isObjectRecord(dependencies) || !Object.hasOwn(dependencies, "openclaw")) {
-      continue;
+  if (omitOpenClawHostDependency) {
+    for (const key of ["dependencies", "peerDependencies", "peerDependenciesMeta"] as const) {
+      const dependencies = manifest[key];
+      if (!isObjectRecord(dependencies) || !Object.hasOwn(dependencies, "openclaw")) {
+        continue;
+      }
+      delete dependencies.openclaw;
+      if (Object.keys(dependencies).length === 0) {
+        delete manifest[key];
+      }
+      changed = true;
     }
-    delete dependencies.openclaw;
-    if (Object.keys(dependencies).length === 0) {
-      delete manifest[key];
-    }
-    changed = true;
   }
 
   if (changed) {
@@ -253,6 +258,7 @@ export async function installPackageDir<
   logger?: { info?: (message: string) => void; warn?: (message: string) => void };
   copyErrorPrefix: string;
   hasDeps: boolean;
+  omitOpenClawHostDependency?: boolean;
   sourceHardlinks?: InstallSourceHardlinks;
   depsLogMessage: string;
   afterCopy?: (installedDir: string) => void | Promise<void>;
@@ -467,7 +473,10 @@ export async function installPackageDir<
 
   if (params.hasDeps) {
     try {
-      const restoreManifest = await sanitizeManifestForNpmInstall(stageDir);
+      const restoreManifest = await sanitizeManifestForNpmInstall(
+        stageDir,
+        params.omitOpenClawHostDependency === true,
+      );
       let npmFailure: string | undefined;
       try {
         const hiddenProjectNpmConfig = await hideProjectNpmConfigForInstall(stageDir);

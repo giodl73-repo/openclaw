@@ -18,7 +18,6 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
-- **Plugin installation:** avoid resolving published development dependencies or a nested OpenClaw host package while installing isolated plugin runtime dependencies, while preserving the original plugin manifest for later host-link audit and repair.
 - **Breaking — Node runtime:** require Node 24.16.0 or newer on 24.x, or Node 26.1.0 or newer; Node 26 is recommended. Upgrade Node before OpenClaw to prevent SQLite text truncation: Node 22, Node 25, and earlier 24.x/26.x builds are no longer supported. Node-based CLI/Gateway installs on macOS 11–13.4 or official Linux ARMv7 provisioning need a supported host; see [Node requirements](https://docs.openclaw.ai/install/node). (#140672)
 - **Breaking — execution-policy SDK:** move the retired exec-mode and comparator helpers from `infra-runtime` to `execPolicy` on `openclaw/plugin-sdk/agent-harness-runtime`; use `resolveExecModePolicy` and select the returned fields needed by the caller. See [runtime utility migration](https://docs.openclaw.ai/plugins/sdk-runtime/config-and-utilities).
 - **Breaking — approval SDK:** import approval account-resolution helpers from `approval-native-runtime`, adapt session filtering to the full `matchesApprovalRequestFilters` contract, and replace the retired generic forwarding evaluator with native channel route gates and shared predicates rather than assuming a drop-in alias. See [SDK migration](https://docs.openclaw.ai/plugins/sdk-migration).

@@ -743,6 +743,7 @@ describe("installPackageDir", () => {
       timeoutMs: 1_000,
       copyErrorPrefix: "failed to copy plugin",
       hasDeps: true,
+      omitOpenClawHostDependency: true,
       depsLogMessage: "Installing deps…",
     });
 
@@ -927,6 +928,7 @@ describe("installPackageDir", () => {
       timeoutMs: 1_000,
       copyErrorPrefix: "failed to copy plugin",
       hasDeps: true,
+      omitOpenClawHostDependency: true,
       depsLogMessage: "Installing deps…",
     });
 
