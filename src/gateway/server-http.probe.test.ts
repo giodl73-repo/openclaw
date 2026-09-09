@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
 // Server HTTP probe tests cover readiness, health, disabled compat routes, and
 // auth handling through the in-memory HTTP harness.
 import fs from "node:fs/promises";

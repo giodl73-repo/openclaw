@@ -5,7 +5,7 @@ import type {
   PluginRegistry,
 } from "../plugins/registry-types.js";
 import type { ReadinessCondition, ReadinessContribution } from "./conditions.js";
-import { READINESS_REASON_PATTERN, sanitizeProviderReadinessMessage } from "./sanitize.js";
+import { sanitizeProviderReadinessMessage, sanitizeProviderReadinessReason } from "./sanitize.js";
 import {
   CORE_READINESS_SUBJECT_REFS,
   createPluginReadinessSubjectCollection,
@@ -75,26 +75,15 @@ async function evaluateRegistration(params: {
         timeout.unref?.();
       }),
     ]);
-    if (
-      !result ||
-      !["True", "False", "Unknown"].includes(result.status) ||
-      typeof result.reason !== "string" ||
-      !READINESS_REASON_PATTERN.test(result.reason) ||
-      typeof result.message !== "string" ||
-      !sanitizeProviderReadinessMessage(result.message)
-    ) {
-      return {
-        condition: unavailableCondition(
-          registration,
-          "CriterionInvalidResult",
-          `Readiness criterion ${registration.id} returned an invalid result.`,
-          params.subjectCollection.defaultRef,
-        ),
-        subjects: defaultSubjects(params.subjectCollection),
-      };
-    }
-    const message = sanitizeProviderReadinessMessage(result.message);
-    if (!message) {
+    const reason =
+      typeof result?.reason === "string"
+        ? sanitizeProviderReadinessReason(result.reason)
+        : undefined;
+    const message =
+      typeof result?.message === "string"
+        ? sanitizeProviderReadinessMessage(result.message)
+        : undefined;
+    if (!result || !["True", "False", "Unknown"].includes(result.status) || !reason || !message) {
       return {
         condition: unavailableCondition(
           registration,
@@ -130,7 +119,7 @@ async function evaluateRegistration(params: {
         ...(observedAtMs !== undefined ? { observedAtMs } : {}),
         status: result.status,
         requirement: "advisory",
-        reason: result.reason,
+        reason,
         message,
       },
       subjects: params.subjectCollection.subjects,
@@ -186,6 +175,7 @@ export function createPluginReadinessResolver(options?: {
       }
       activeControllers.clear();
       cache = new WeakMap();
+      pendingByCriterionId.clear();
       activeRegistry = params.registry;
       activeConfig = params.config;
     }

@@ -220,6 +220,7 @@ describe("listGatewayMethods", () => {
       "models.authRefresh",
       "models.authLogin",
       "models.authSetApiKey",
+      "ready",
     ]);
   });
 
