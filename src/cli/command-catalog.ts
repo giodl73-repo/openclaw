@@ -1,5 +1,5 @@
 // Declarative CLI command catalog for startup policy and fast-path routing.
-import { getCommandPositionalsWithRootOptions, hasFlag } from "./argv.js";
+import { hasFlag } from "./argv.js";
 import type { CommandEffectProfile } from "./catalog-metadata.js";
 
 export type CliCommandPluginLoadPolicy =
@@ -338,7 +338,7 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
       id: "config-unset",
       effectProfile: {
         risk: "medium",
-        confirmationRequired: true,
+        confirmationRequired: false,
         effectMode: "mutating",
       },
     },

@@ -42,7 +42,7 @@ async function loadInspectedCommandGroup(
   if (await registerCoreCliByName(program, createProgramContext(), root, argv)) {
     return;
   }
-  await registerSubCliByName(program, root, argv);
+  await registerSubCliByName(program, root, argv, { purpose: "inspection" });
 }
 
 export function registerCommandsCli(program: Command): void {

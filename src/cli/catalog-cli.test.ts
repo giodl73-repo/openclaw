@@ -8,6 +8,7 @@ const loadPluginCliDescriptorEntriesMock = vi.hoisted(() =>
     async () => [],
   ),
 );
+const registerPluginCliCommandsFromValidatedConfigMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../plugins/cli-registry-loader.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../plugins/cli-registry-loader.js")>();
@@ -16,6 +17,10 @@ vi.mock("../plugins/cli-registry-loader.js", async (importOriginal) => {
     loadPluginCliDescriptorEntries: loadPluginCliDescriptorEntriesMock,
   };
 });
+
+vi.mock("../plugins/cli.js", () => ({
+  registerPluginCliCommandsFromValidatedConfig: registerPluginCliCommandsFromValidatedConfigMock,
+}));
 
 function createProgram(): Command {
   const program = new Command();
@@ -47,6 +52,7 @@ describe("tools commands cli", () => {
   afterEach(() => {
     loadPluginCliDescriptorEntriesMock.mockReset();
     loadPluginCliDescriptorEntriesMock.mockResolvedValue([]);
+    registerPluginCliCommandsFromValidatedConfigMock.mockReset();
     loggingState.forceConsoleToStderr = false;
     loggingState.earlyConsoleRoutingRestore = null;
   });
@@ -112,10 +118,30 @@ describe("tools commands cli", () => {
         "--json",
       ]);
     });
+
     const parsed = JSON.parse(output) as { found: boolean; runtimeCommands: unknown[] };
 
     expect(parsed.found).toBe(true);
     expect(parsed.runtimeCommands).toHaveLength(1);
+  });
+
+  it.each([
+    ["bare nodes", ["nodes"]],
+    ["plugin-owned node path", ["nodes", "canvas"]],
+  ])("inspects %s without activating plugin registrars", async (_label, commandPath) => {
+    await captureStdout(async () => {
+      await createProgram().parseAsync([
+        "node",
+        "openclaw",
+        "tools",
+        "commands",
+        "inspect",
+        ...commandPath,
+        "--json",
+      ]);
+    });
+
+    expect(registerPluginCliCommandsFromValidatedConfigMock).not.toHaveBeenCalled();
   });
 
   it("loads a lazy core command group before inspection", async () => {

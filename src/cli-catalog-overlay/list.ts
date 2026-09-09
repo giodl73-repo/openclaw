@@ -5,7 +5,7 @@ import {
 } from "../cli/catalog-metadata.js";
 import { cliCommandCatalog, type CliCommandCatalogEntry } from "../cli/command-catalog.js";
 import { getCoreCliCommandDescriptors } from "../cli/program/core-command-descriptors.js";
-import { getSubCliEntries } from "../cli/program/subcli-descriptors.js";
+import { getSubCliEntriesCore } from "../cli/program/subcli-descriptors.js";
 import { buildNodeCommandCatalog, type CliCatalogNodeCommand } from "./node-commands.js";
 import type { CliCatalogPluginCommand } from "./plugin-commands.js";
 import type { CliCatalogRuntimeCommand } from "./runtime-commands.js";
@@ -125,7 +125,7 @@ function buildDescriptors(): readonly CliCatalogListDescriptor[] {
   const core = getCoreCliCommandDescriptors()
     .filter((descriptor) => descriptor.hidden !== true)
     .map((descriptor) => mapDescriptor(descriptor, "core"));
-  const subcli = getSubCliEntries()
+  const subcli = getSubCliEntriesCore()
     .filter((descriptor) => descriptor.hidden !== true)
     .map((descriptor) => mapDescriptor(descriptor, "subcli"));
   return [...core, ...subcli];
@@ -254,11 +254,35 @@ export function renderCatalogListMarkdown(
     `- Supplied node commands: ${list.counts.nodeCommands}`,
     `- Node command scope: ${list.cli.nodeCommandScope}`,
     "",
+    "## CLI descriptors",
+    "",
+    "| Command | Source | Subcommands | Description |",
+    "| --- | --- | --- | --- |",
+  ];
+  for (const descriptor of list.cli.descriptors) {
+    lines.push(
+      `| ${markdownCodeCell(descriptor.name)} | ${markdownCodeCell(descriptor.source)} | ${descriptor.hasSubcommands ? "yes" : "no"} | ${markdownTableCell(descriptor.description)} |`,
+    );
+  }
+  lines.push(
+    "",
+    "## Command routes",
+    "",
+    "| Command path | Exact | Route | Policy keys |",
+    "| --- | --- | --- | --- |",
+  );
+  for (const route of list.cli.commandRoutes) {
+    lines.push(
+      `| ${markdownCodeCell(route.commandPath.join(" "))} | ${route.exact ? "yes" : "no"} | ${route.routeId ? markdownCodeCell(route.routeId) : "None"} | ${route.policyKeys.length > 0 ? route.policyKeys.map(markdownCodeCell).join(", ") : "None"} |`,
+    );
+  }
+  lines.push(
+    "",
     "## Routed operations",
     "",
     "| Operation | Risk | Effect mode | Confirmation | Command paths |",
     "| --- | --- | --- | --- | --- |",
-  ];
+  );
   for (const operation of list.cli.routedOperations) {
     const paths = operation.commandPaths.map((path) => markdownCodeCell(path.join(" "))).join(", ");
     lines.push(
