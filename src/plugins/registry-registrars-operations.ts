@@ -18,6 +18,7 @@ import {
   NODE_SYSTEM_RUN_COMMANDS,
   NODE_WORKER_PRIVATE_COMMANDS,
 } from "../infra/node-commands.js";
+import { MAX_READINESS_REASON_LENGTH } from "../readiness/limits.js";
 import { isReservedCommandName, registerPluginCommandInRegistry } from "./command-registration.js";
 import type { WidgetPresenter } from "./plugin-registration.types.js";
 import type { PluginRegistryState } from "./registry-state.js";
@@ -335,14 +336,18 @@ export function createOperationRegistrars(state: PluginRegistryState) {
     pluginConfig?: Record<string, unknown>,
   ) => {
     const localId = criterion.id.trim().toLowerCase();
-    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(localId) || record.id.length > 64) {
+    const id = `plugin.${record.id}.${localId}`;
+    if (
+      !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(localId) ||
+      record.id.length > 64 ||
+      id.length > MAX_READINESS_REASON_LENGTH
+    ) {
       reportRegistrationError(
         record,
-        `readiness criterion and plugin ids must be 1-64 lowercase letters, numbers, dots, dashes, or underscores: ${criterion.id}`,
+        `readiness criterion and plugin ids must be 1-64 lowercase letters, numbers, dots, dashes, or underscores, and the full criterion id must not exceed ${MAX_READINESS_REASON_LENGTH} characters: ${criterion.id}`,
       );
       return;
     }
-    const id = `plugin.${record.id}.${localId}`;
     const existing = registry.readinessCriteria.find((entry) => entry.id === id);
     if (existing) {
       reportRegistrationError(record, `readiness criterion already registered: ${id}`);

@@ -158,6 +158,19 @@ describe("SnapshotSchema", () => {
             ],
           },
           ready: true,
+          failing: [],
+          suppressed: ["ambient-dev-channel"],
+          uptimeMs: 5_000,
+          eventLoop: {
+            degraded: false,
+            degradedSinceMs: null,
+            reasons: [],
+            intervalMs: 1_000,
+            delayP99Ms: 2,
+            delayMaxMs: 3,
+            utilization: 0.1,
+            cpuCoreRatio: 0.2,
+          },
           conditions: [
             {
               type: "GatewayResponding",

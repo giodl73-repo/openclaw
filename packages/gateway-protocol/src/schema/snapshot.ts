@@ -114,6 +114,23 @@ const ReadinessSubjectSchema = closedObject({
   parentRef: Type.Optional(ReadinessRefSchema),
 });
 
+const GatewayEventLoopHealthSchema = closedObject({
+  degraded: Type.Boolean(),
+  degradedSinceMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+  reasons: Type.Array(
+    Type.Union([
+      Type.Literal("event_loop_delay"),
+      Type.Literal("event_loop_utilization"),
+      Type.Literal("cpu"),
+    ]),
+  ),
+  intervalMs: Type.Number({ minimum: 0 }),
+  delayP99Ms: Type.Number({ minimum: 0 }),
+  delayMaxMs: Type.Number({ minimum: 0 }),
+  utilization: Type.Number({ minimum: 0 }),
+  cpuCoreRatio: Type.Number({ minimum: 0 }),
+});
+
 const CanonicalReadinessResultSchema = closedObject({
   contractVersion: Type.Literal(1),
   evaluatedAtMs: Type.Integer({ minimum: 0 }),
@@ -125,6 +142,10 @@ const CanonicalReadinessResultSchema = closedObject({
   conditions: Type.Array(CanonicalReadinessConditionSchema, { maxItems: 256 }),
   failures: Type.Array(ReadinessReasonSchema, { maxItems: 256 }),
   advisories: Type.Array(ReadinessReasonSchema, { maxItems: 256 }),
+  failing: Type.Optional(Type.Array(Type.String(), { maxItems: 256 })),
+  suppressed: Type.Optional(Type.Array(Type.String(), { maxItems: 256 })),
+  uptimeMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  eventLoop: Type.Optional(GatewayEventLoopHealthSchema),
 });
 
 const LegacyReadinessResultSchema = closedObject({
@@ -143,24 +164,7 @@ const HealthSnapshotSchema = closedObject({
   readiness: Type.Optional(
     Type.Union([CanonicalReadinessResultSchema, LegacyReadinessResultSchema]),
   ),
-  eventLoop: Type.Optional(
-    closedObject({
-      degraded: Type.Boolean(),
-      degradedSinceMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
-      reasons: Type.Array(
-        Type.Union([
-          Type.Literal("event_loop_delay"),
-          Type.Literal("event_loop_utilization"),
-          Type.Literal("cpu"),
-        ]),
-      ),
-      intervalMs: Type.Number({ minimum: 0 }),
-      delayP99Ms: Type.Number({ minimum: 0 }),
-      delayMaxMs: Type.Number({ minimum: 0 }),
-      utilization: Type.Number({ minimum: 0 }),
-      cpuCoreRatio: Type.Number({ minimum: 0 }),
-    }),
-  ),
+  eventLoop: Type.Optional(GatewayEventLoopHealthSchema),
   plugins: Type.Optional(
     closedObject({
       loaded: Type.Array(Type.String()),

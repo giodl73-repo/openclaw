@@ -77,5 +77,27 @@ describe("plugin readiness registration", () => {
     expect(pluginRegistry.registry.diagnostics).toContainEqual(
       expect.objectContaining({ level: "error", pluginId: "storage" }),
     );
+
+    const longPluginId = "p".repeat(64);
+    const longRecord = createPluginRecord({
+      id: longPluginId,
+      name: "Long plugin",
+      source: "/plugins/long/index.js",
+      origin: "global",
+      enabled: true,
+      configSchema: false,
+    });
+    pluginRegistry
+      .createApi(longRecord, { config: {} as OpenClawConfig })
+      .registerReadinessCriterion({
+        id: "x".repeat(64),
+        description: "Invalid oversized namespaced criterion.",
+        check: () => ({ status: "True", reason: "Ready", message: "Ready." }),
+      });
+
+    expect(pluginRegistry.registry.readinessCriteria).toEqual([]);
+    expect(pluginRegistry.registry.diagnostics).toContainEqual(
+      expect.objectContaining({ level: "error", pluginId: longPluginId }),
+    );
   });
 });

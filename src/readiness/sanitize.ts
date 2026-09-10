@@ -1,12 +1,13 @@
 import { Buffer } from "node:buffer";
 import { redactSensitiveText } from "../logging/redact.js";
 import { truncateUtf8Prefix } from "../utils/utf8-truncate.js";
+import { MAX_READINESS_REASON_LENGTH } from "./limits.js";
 
 const MAX_READINESS_MESSAGE_BYTES = 512;
-const READINESS_REASON_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/;
+const READINESS_REASON_PATTERN = /^[A-Za-z][A-Za-z0-9._-]*$/;
 
 export function sanitizeProviderReadinessReason(value: string): string | undefined {
-  if (!READINESS_REASON_PATTERN.test(value)) {
+  if (value.length > MAX_READINESS_REASON_LENGTH || !READINESS_REASON_PATTERN.test(value)) {
     return undefined;
   }
   const redacted = redactSensitiveText(value, { mode: "tools" });

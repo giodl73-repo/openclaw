@@ -12,6 +12,7 @@ import {
   TALK_SECRETS_SCOPE,
   WRITE_SCOPE,
 } from "../gateway/operator-scopes.js";
+import { MAX_READINESS_REASON_LENGTH } from "../readiness/limits.js";
 import { SecretInputSchema } from "./zod-schema.core.js";
 import {
   GatewayRemoteConfigSchema,
@@ -56,7 +57,7 @@ const ReadinessCriterionIdSchema = z
   .string()
   .trim()
   .min(1)
-  .max(160)
+  .max(MAX_READINESS_REASON_LENGTH)
   .regex(/^(?:openclaw|plugin)\.[a-z0-9][a-z0-9._-]*$/, {
     message: "criterion must be a namespaced openclaw.* or plugin.* identifier",
   });
