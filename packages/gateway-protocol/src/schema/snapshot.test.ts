@@ -194,6 +194,33 @@ describe("SnapshotSchema", () => {
     expect(Value.Check(SnapshotSchema, snapshot)).toBe(true);
   });
 
+  it("accepts documented maximum-length plugin subject parts", () => {
+    const part = `a${"b".repeat(63)}`;
+    const ref = `plugin.${part}/${part}/${part}`;
+    const kind = `plugin.${part}.${part}`;
+    const snapshot = {
+      ...snapshotWithPresence({ ts: 1 }),
+      health: {
+        readiness: {
+          contractVersion: 1,
+          evaluatedAtMs: 1_000,
+          identity: {
+            producerRef: ref,
+            subjects: [{ ref, kind }],
+          },
+          ready: true,
+          conditions: [],
+          failures: [],
+          advisories: [],
+        },
+      },
+    };
+
+    expect(ref).toHaveLength(201);
+    expect(kind).toHaveLength(136);
+    expect(Value.Check(SnapshotSchema, snapshot)).toBe(true);
+  });
+
   it("rejects a partial unversioned canonical readiness package", () => {
     const snapshot = {
       ...snapshotWithPresence({ ts: 1 }),

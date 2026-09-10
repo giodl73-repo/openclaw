@@ -26,8 +26,10 @@ export const CORE_READINESS_SUBJECT_REFS = {
 const INSTANCE_ID_ENV = "OPENCLAW_INSTANCE_ID";
 const HOST_INSTANCE_ID = process.env[INSTANCE_ID_ENV]?.trim();
 
-const SUBJECT_REF_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,191}$/;
-const SUBJECT_KIND_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+// These composed limits admit three documented 64-character plugin subject
+// parts plus the plugin namespace separators.
+const SUBJECT_REF_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,200}$/;
+const SUBJECT_KIND_PATTERN = /^[a-z0-9][a-z0-9._-]{0,135}$/;
 const PLUGIN_SUBJECT_PART_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SUBJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 export const MAX_READINESS_SUBJECTS = 128;

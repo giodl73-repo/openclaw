@@ -65,12 +65,12 @@ const HealthSessionSummarySchema = closedObject({
 
 const ReadinessRefSchema = Type.String({
   minLength: 1,
-  maxLength: 192,
+  maxLength: 201,
   pattern: "^[a-z0-9][a-z0-9._/-]*$",
 });
 const ReadinessKindSchema = Type.String({
   minLength: 1,
-  maxLength: 128,
+  maxLength: 136,
   pattern: "^[a-z0-9][a-z0-9._-]*$",
 });
 const ReadinessIdentityValueSchema = Type.String({

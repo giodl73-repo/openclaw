@@ -119,6 +119,19 @@ describe("readiness subjects", () => {
     expect(collection.subjects.filter((subject) => subject.ref === first)).toHaveLength(1);
   });
 
+  it("accepts documented maximum-length plugin subject parts", () => {
+    const part = `a${"b".repeat(63)}`;
+    const collection = createPluginReadinessSubjectCollection({
+      pluginId: part,
+      criterionId: part,
+    });
+
+    const ref = collection.collector.declare({ kind: part, key: part });
+
+    expect(ref).toHaveLength(201);
+    expect(collection.subjects.find((subject) => subject.ref === ref)?.kind).toHaveLength(136);
+  });
+
   it("rejects conflicting plugin declarations", () => {
     const collection = createPluginReadinessSubjectCollection({
       pluginId: "storage",
