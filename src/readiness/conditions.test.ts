@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  getRuntimeConfigAppliedHash,
+  setRuntimeConfigAppliedHash,
+} from "../config/runtime-snapshot.js";
+import { listActivationReadinessSubjects } from "./activation.js";
 import { buildRuntimeReadiness } from "./conditions.js";
+
+afterEach(() => {
+  setRuntimeConfigAppliedHash(null);
+});
 
 describe("buildRuntimeReadiness", () => {
   it("reports ready when every required condition is true", () => {
@@ -223,5 +232,22 @@ describe("buildRuntimeReadiness", () => {
         .filter((condition) => condition.type === "SharedDependencyReady")
         .map((condition) => condition.subjectRef),
     ).toEqual(["plugin.a/dependency/default", "plugin.z/dependency/default"]);
+  });
+
+  it("assembles a schema-valid identity for base64url config generations", () => {
+    const canonicalHash = "-DxZG5-dg0gGsOgDCgzANKKE8wL56agnMzrXFPPZ8aI";
+    setRuntimeConfigAppliedHash(canonicalHash);
+
+    const readiness = buildRuntimeReadiness({
+      configLoaded: true,
+      gateway: "responding",
+      additionalSubjects: listActivationReadinessSubjects(),
+    });
+
+    expect(getRuntimeConfigAppliedHash()).toBe(canonicalHash);
+    expect(
+      readiness.identity.subjects.find((subject) => subject.ref === "openclaw/config/active")
+        ?.generation,
+    ).toBe(`sha256:${canonicalHash}`);
   });
 });

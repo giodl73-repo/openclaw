@@ -391,25 +391,29 @@ export async function buildCurrentProviderAuthStateSnapshot(
       return { agents: [] };
     }
     const syntheticAuth = options.syntheticAuth?.get(agentId);
+    const syntheticMetadataSnapshot = syntheticAuth
+      ? restorePluginMetadataSnapshot(syntheticAuth.metadataSnapshot)
+      : undefined;
     const prepareState = async () => {
       const agentDir = resolveAgentDir(cfg, agentId);
       // Worker warmup is the only path that may need to construct a read-only catalog generation.
       // Keep the lifecycle graph out of foreground provider-auth module initialization.
-      const preparedOwner = syntheticAuth?.modelCatalog
-        ? {
-            workspaceDir: syntheticAuth.workspaceDir,
-            modelCatalog: syntheticAuth.modelCatalog,
-            metadataSnapshot: restorePluginMetadataSnapshot(syntheticAuth.metadataSnapshot),
-          }
-        : await (
-            await import("./prepared-model-catalog.js")
-          ).loadPreparedModelCatalogOwnerSnapshot({
-            config: cfg,
-            agentId,
-            agentDir,
-            ...(syntheticAuth ? { workspaceDir: syntheticAuth.workspaceDir } : {}),
-            readOnly: true,
-          });
+      const preparedOwner =
+        syntheticAuth?.modelCatalog && syntheticMetadataSnapshot
+          ? {
+              workspaceDir: syntheticAuth.workspaceDir,
+              modelCatalog: syntheticAuth.modelCatalog,
+              metadataSnapshot: syntheticMetadataSnapshot,
+            }
+          : await (
+              await import("./prepared-model-catalog.js")
+            ).loadPreparedModelCatalogOwnerSnapshot({
+              config: cfg,
+              agentId,
+              agentDir,
+              ...(syntheticAuth ? { workspaceDir: syntheticAuth.workspaceDir } : {}),
+              readOnly: true,
+            });
       const workspaceDir = preparedOwner.workspaceDir ?? resolveAgentWorkspaceDir(cfg, agentId);
       const catalog = preparedOwner.modelCatalog.entries;
       if (isWarmStale()) {
@@ -450,7 +454,7 @@ export async function buildCurrentProviderAuthStateSnapshot(
         workspaceDir,
         authStore: store,
         runtimeAuthLookup,
-        metadataSnapshot: preparedOwner.metadataSnapshot,
+        metadataSnapshot: syntheticMetadataSnapshot ?? preparedOwner.metadataSnapshot,
         modelCatalog: preparedOwner.modelCatalog,
       });
       const state = new Map<string, boolean>();
@@ -488,9 +492,9 @@ export async function buildCurrentProviderAuthStateSnapshot(
         ...(defaultModelRoute ? { defaultModelRoute } : {}),
       });
     };
-    await (syntheticAuth
+    await (syntheticMetadataSnapshot
       ? withPluginRuntimeGenerationScope(
-          { metadataSnapshot: restorePluginMetadataSnapshot(syntheticAuth.metadataSnapshot) },
+          { metadataSnapshot: syntheticMetadataSnapshot },
           prepareState,
         )
       : prepareState());

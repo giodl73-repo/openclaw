@@ -48,21 +48,21 @@ afterEach(() => {
 });
 
 describe("session delivery queue runtime", () => {
-  it("publishes lifecycle transitions without exposing runtime internals", () => {
+  it("publishes lifecycle transitions without exposing runtime internals", async () => {
     expect(getSessionDeliveryRuntimeReadiness().active).toBe(false);
 
     const stop = startSessionDeliveryRuntime({ deliver: vi.fn(async () => {}), log: logger });
     const active = getSessionDeliveryRuntimeReadiness();
     expect(active.active).toBe(true);
 
-    stop();
+    await stop();
     expect(getSessionDeliveryRuntimeReadiness()).toEqual({
       active: false,
       generation: active.generation + 1,
     });
   });
 
-  it("ignores a stale runtime stop after ownership changes", () => {
+  it("ignores a stale runtime stop after ownership changes", async () => {
     const stopOld = startSessionDeliveryRuntime({ deliver: vi.fn(async () => {}), log: logger });
     const stopCurrent = startSessionDeliveryRuntime({
       deliver: vi.fn(async () => {}),
@@ -70,10 +70,10 @@ describe("session delivery queue runtime", () => {
     });
     const active = getSessionDeliveryRuntimeReadiness();
 
-    stopOld();
+    await stopOld();
     expect(getSessionDeliveryRuntimeReadiness()).toEqual(active);
 
-    stopCurrent();
+    await stopCurrent();
     expect(getSessionDeliveryRuntimeReadiness().active).toBe(false);
   });
 

@@ -1,5 +1,8 @@
 import path from "node:path";
-import { registerOpenClawStateDatabaseLifecycleListener } from "./openclaw-state-db-cache.js";
+import {
+  closeOpenClawStateDatabaseForTest as closeCachedOpenClawStateDatabaseForTest,
+  registerOpenClawStateDatabaseLifecycleListener,
+} from "./openclaw-state-db-cache.js";
 
 type OpenClawStateDatabaseReadinessStatus = "active" | "failed" | "inactive";
 
@@ -27,10 +30,18 @@ export function clearOpenClawStateDatabaseReadinessForTest(): void {
   readinessByPath.clear();
 }
 
+export function closeOpenClawStateDatabaseForTest(): void {
+  closeCachedOpenClawStateDatabaseForTest();
+  clearOpenClawStateDatabaseReadinessForTest();
+}
+
 registerOpenClawStateDatabaseLifecycleListener((event) => {
   if (event.kind === "opened") {
     publishOpenClawStateDatabaseReadiness(event.database.path, "active");
     return;
   }
-  publishOpenClawStateDatabaseReadiness(event.path, event.kind === "closed" ? "inactive" : "failed");
+  publishOpenClawStateDatabaseReadiness(
+    event.path,
+    event.kind === "closed" ? "inactive" : "failed",
+  );
 });

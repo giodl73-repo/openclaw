@@ -301,6 +301,7 @@ describe("status-json-payload", () => {
       memory: null,
       memoryPlugin: null,
       agents: [],
+      configDiagnostics: null,
       secretDiagnostics: [],
     });
 

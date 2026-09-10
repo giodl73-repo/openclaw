@@ -34,7 +34,6 @@ import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.j
 import { loadTaskRegistryStateFromSqlite } from "../tasks/task-registry.store.sqlite.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { VERSION } from "../version.js";
-import { getOpenClawStateDatabaseReadiness } from "./openclaw-state-db-readiness.js";
 import {
   readConfigMachineState,
   readConfigMachineStateWithMetadata,
@@ -47,6 +46,7 @@ import {
 } from "./openclaw-state-db-contract.js";
 import { hasDanglingSkillWorkshopCollectionReviewIndex } from "./openclaw-state-db-dangling-workshop-index.js";
 import { prepareStateDatabaseSchemaRepair } from "./openclaw-state-db-maintenance.js";
+import { getOpenClawStateDatabaseReadiness } from "./openclaw-state-db-readiness.js";
 import { ensureGitHubPublicationSchema } from "./openclaw-state-db-schema-additive.js";
 import { OpenClawStateDatabaseSchemaMigrationRequiredError } from "./openclaw-state-db-schema-migration-required.js";
 import type { DB as OpenClawStateKyselyDatabase } from "./openclaw-state-db.generated.js";

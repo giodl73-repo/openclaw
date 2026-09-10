@@ -96,7 +96,7 @@ export class CronService implements CronServiceContract {
     return {
       enabled: true,
       phase,
-      recoveryPending: this.state.restartRecoveryPending,
+      recoveryPending: this.state.startupCatchup !== undefined,
     };
   }
 

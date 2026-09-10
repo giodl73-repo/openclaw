@@ -100,7 +100,7 @@ describe("createPluginReadinessResolver", () => {
     expect(check).toHaveBeenCalledTimes(1);
   });
 
-  it("does not reuse a retired callback that ignores abort and succeeds late", async () => {
+  it("returns unavailable until a retired callback settles, then evaluates its replacement", async () => {
     let resolveRetired:
       | ((value: { status: "True"; reason: string; message: string }) => void)
       | undefined;
@@ -125,10 +125,16 @@ describe("createPluginReadinessResolver", () => {
       config: {},
     });
     await vi.waitFor(() => expect(resolveRetired).toBeTypeOf("function"));
-    const replacementResult = await resolve({
+    const blockedReplacement = await resolve({
       registry: { readinessCriteria: [replacement] },
       config: {},
     });
+    expect(blockedReplacement.conditions[0]).toMatchObject({
+      status: "Unknown",
+      reason: "CriterionEvaluationPending",
+    });
+    expect(replacementCheck).not.toHaveBeenCalled();
+
     resolveRetired?.({
       status: "True",
       reason: "RetiredReady",
@@ -138,7 +144,13 @@ describe("createPluginReadinessResolver", () => {
     await expect(retiredResult).resolves.toMatchObject({
       conditions: [expect.objectContaining({ reason: "RetiredReady" })],
     });
+    await Promise.resolve();
     expect(retiredSignal?.aborted).toBe(true);
+
+    const replacementResult = await resolve({
+      registry: { readinessCriteria: [replacement] },
+      config: {},
+    });
     expect(replacementResult.conditions[0]).toMatchObject({
       status: "False",
       reason: "ReplacementUnavailable",
