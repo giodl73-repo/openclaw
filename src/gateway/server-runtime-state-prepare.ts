@@ -484,39 +484,40 @@ export async function prepareGatewayKernelState(params: {
   });
   const readinessIdentity = createGatewayReadinessIdentity();
   const resolveSelectedReadiness = createSelectedReadinessResolver();
-  const evaluateRuntimeReadiness = async () => {
+  const getReadiness = async (): Promise<CanonicalGatewayReadinessResult> => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const snapshot = pluginRuntime.readinessSnapshot;
-      const contribution = await resolveSelectedReadiness({
+      const result = await evaluateConfiguredGatewayReadiness({
         config: snapshot.config,
-        registry: snapshot.registry,
-        executionCapabilities: snapshot.executionCapabilities,
-        env: process.env,
-        stateServices: {
-          scheduler: runtimeStateRef.current?.cronState.cron.getReadinessSnapshot(),
+        identity: readinessIdentity,
+        evaluateGateway: getGatewayReadiness,
+        evaluateRuntime: async () => {
+          const contribution = await resolveSelectedReadiness({
+            config: snapshot.config,
+            registry: snapshot.registry,
+            executionCapabilities: snapshot.executionCapabilities,
+            env: process.env,
+            stateServices: {
+              scheduler: runtimeStateRef.current?.cronState.cron.getReadinessSnapshot(),
+            },
+          });
+          return buildRuntimeReadiness({
+            identity: readinessIdentity,
+            configLoaded: true,
+            gateway: "responding",
+            plugins: buildGatewayPluginReadinessInput(snapshot.registry),
+            additionalConditions: contribution.conditions,
+            additionalSubjects: contribution.subjects,
+          });
         },
       });
       if (snapshot !== pluginRuntime.readinessSnapshot) {
         continue;
       }
-      return buildRuntimeReadiness({
-        identity: readinessIdentity,
-        configLoaded: true,
-        gateway: "responding",
-        plugins: buildGatewayPluginReadinessInput(snapshot.registry),
-        additionalConditions: contribution.conditions,
-        additionalSubjects: contribution.subjects,
-      });
+      return result;
     }
     throw new Error("Readiness runtime changed while it was being evaluated.");
   };
-  const getReadiness = (): Promise<CanonicalGatewayReadinessResult> =>
-    evaluateConfiguredGatewayReadiness({
-      config: pluginRuntime.readinessSnapshot.config,
-      identity: readinessIdentity,
-      evaluateGateway: getGatewayReadiness,
-      evaluateRuntime: evaluateRuntimeReadiness,
-    });
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   } = {};
