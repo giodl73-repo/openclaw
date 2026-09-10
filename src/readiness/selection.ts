@@ -83,8 +83,15 @@ export function applySelectedCanonicalRequirements(
     }
   }
   const projected = conditions.map((condition) => {
-    const requirement = requirementsByType.get(condition.type);
-    return requirement === undefined ? condition : { ...condition, requirement };
+    const selectedRequirement = requirementsByType.get(condition.type);
+    if (selectedRequirement === undefined) {
+      return condition;
+    }
+    const requirement: ReadinessRequirement =
+      condition.requirement === "required" || selectedRequirement === "required"
+        ? "required"
+        : "advisory";
+    return { ...condition, requirement };
   });
   const presentTypes = new Set(projected.map((condition) => condition.type));
   for (const [type, requirement] of requirementsByType) {

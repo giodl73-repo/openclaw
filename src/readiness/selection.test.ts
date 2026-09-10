@@ -125,6 +125,29 @@ describe("createSelectedReadinessResolver", () => {
     ]);
   });
 
+  it("does not let an advisory selector demote a required canonical condition", () => {
+    expect(
+      applySelectedCanonicalRequirements(
+        {
+          gateway: {
+            readiness: {
+              advisoryCriteria: ["openclaw.plugins-loaded"],
+            },
+          },
+        },
+        [
+          {
+            type: "PluginsLoaded",
+            status: "False",
+            requirement: "required",
+            reason: "PluginLoadFailures",
+            message: "A required plugin failed to load.",
+          },
+        ],
+      ),
+    ).toEqual([expect.objectContaining({ type: "PluginsLoaded", requirement: "required" })]);
+  });
+
   it("does not synthesize duplicate conditions for canonical selectors", async () => {
     const resolve = createSelectedReadinessResolver();
 

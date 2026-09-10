@@ -174,7 +174,7 @@ describe("gateway e2e", () => {
     try {
       setTestEnvValue("OPENCLAW_HOSTING_PROFILE", "unsupported");
 
-      await expect(startGatewayServer(await getFreeGatewayPort())).rejects.toThrow(
+      await expect(startGatewayServer(await getGatewayE2ePortBlock())).rejects.toThrow(
         'Invalid hosting profile from OPENCLAW_HOSTING_PROFILE: "unsupported".',
       );
     } finally {
