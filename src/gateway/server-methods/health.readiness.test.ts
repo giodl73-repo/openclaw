@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { ReadinessEvaluationSupersededError } from "../../readiness/conditions.js";
 
 const getStatusSummaryMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../commands/status.js", () => ({
+vi.mock("../../status/summary.js", () => ({
   getStatusSummary: getStatusSummaryMock,
 }));
 
@@ -123,5 +124,79 @@ describe("healthHandlers.ready", () => {
     });
 
     expect(respond).toHaveBeenCalledWith(true, expect.objectContaining({ readiness }), undefined);
+  });
+
+  it("preserves health when its live readiness evaluation is superseded", async () => {
+    const health = {
+      ok: true,
+      ts: 1,
+      durationMs: 1,
+      channels: {},
+      channelOrder: [],
+      channelLabels: {},
+      heartbeatSeconds: 0,
+      defaultAgentId: "main",
+      agents: [],
+      sessions: { path: "/tmp/sessions.json", count: 0, recent: [] },
+    };
+    const respond = vi.fn();
+    const healthHandler = healthHandlers.health;
+    if (!healthHandler) {
+      throw new Error("healthHandlers.health must be registered");
+    }
+
+    await healthHandler({
+      req: {} as never,
+      params: { probe: false },
+      respond,
+      context: {
+        getHealthCache: () => null,
+        refreshHealthSnapshot: async () => health,
+        getReadiness: async () => {
+          throw new ReadinessEvaluationSupersededError();
+        },
+        getRuntimeSnapshot: () => ({ channels: {}, channelAccounts: {} }),
+        logHealth: { error: vi.fn() },
+      } as never,
+      client: { connect: { scopes: ["operator.read"] } } as never,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(true, health, undefined);
+  });
+
+  it("preserves fallback status readiness when its live evaluation is superseded", async () => {
+    const fallbackReadiness = {
+      ready: false,
+      conditions: [],
+      failures: ["GatewayNotChecked"],
+      advisories: [],
+    };
+    const status = { readiness: fallbackReadiness };
+    const respond = vi.fn();
+    getStatusSummaryMock.mockResolvedValueOnce(status);
+    const statusHandler = healthHandlers.status;
+    if (!statusHandler) {
+      throw new Error("healthHandlers.status must be registered");
+    }
+
+    await statusHandler({
+      req: {} as never,
+      params: { includeChannelSummary: true },
+      respond,
+      context: {
+        getReadiness: async () => {
+          throw new ReadinessEvaluationSupersededError();
+        },
+      } as never,
+      client: { connect: { scopes: ["operator.read"] } } as never,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ readiness: fallbackReadiness }),
+      undefined,
+    );
   });
 });

@@ -3,7 +3,10 @@ import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coe
 // detecting stale channel runtime state against live gateway snapshots.
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
-import type { CanonicalReadinessResult } from "../../readiness/conditions.js";
+import {
+  ReadinessEvaluationSupersededError,
+  type CanonicalReadinessResult,
+} from "../../readiness/conditions.js";
 import { getStatusSummary } from "../../status/summary.js";
 import type { GatewayHotReloadStatus } from "../config-reload-status.types.js";
 import { buildContextEngineHealthSummary } from "../health/context-engine.js";
@@ -25,7 +28,14 @@ async function withLiveReadiness<T extends { readiness?: CanonicalReadinessResul
   if (!context.getReadiness) {
     return summary;
   }
-  return { ...summary, readiness: await context.getReadiness() };
+  try {
+    return { ...summary, readiness: await context.getReadiness() };
+  } catch (error) {
+    if (!(error instanceof ReadinessEvaluationSupersededError)) {
+      throw error;
+    }
+    return summary;
+  }
 }
 
 function cachedLifecycleDiffersFromRuntime(params: {

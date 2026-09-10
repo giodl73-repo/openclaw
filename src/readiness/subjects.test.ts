@@ -164,6 +164,20 @@ describe("readiness subjects", () => {
     ).toThrow("invalid plugin readiness subject parent");
   });
 
+  it("allows plugin subjects parented to any canonical core subject", () => {
+    const collection = createPluginReadinessSubjectCollection({
+      pluginId: "storage",
+      criterionId: "backend",
+    });
+    const backend = collection.collector.declare({
+      kind: "backend",
+      key: "primary",
+      parentRef: CORE_READINESS_SUBJECT_REFS.scheduler,
+    });
+
+    expect(collection.validateReferences(backend)).toBe(true);
+  });
+
   it("allows parent-independent declaration order and validates the completed graph", () => {
     const collection = createPluginReadinessSubjectCollection({
       pluginId: "storage",

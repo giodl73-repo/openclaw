@@ -31,6 +31,7 @@ const SUBJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 export const MAX_READINESS_SUBJECTS = 128;
 const MAX_PLUGIN_SUBJECTS = 64;
 const MAX_RELATED_SUBJECTS = 16;
+const CORE_READINESS_SUBJECT_REF_SET = new Set<string>(Object.values(CORE_READINESS_SUBJECT_REFS));
 
 export type ReadinessSubject = {
   ref: string;
@@ -220,9 +221,7 @@ export function createPluginReadinessSubjectCollection(params: {
         if (
           input.parentRef &&
           !input.parentRef.startsWith(prefix) &&
-          !Object.values(CORE_READINESS_SUBJECT_REFS).includes(
-            input.parentRef as (typeof CORE_READINESS_SUBJECT_REFS)[keyof typeof CORE_READINESS_SUBJECT_REFS],
-          )
+          !CORE_READINESS_SUBJECT_REF_SET.has(input.parentRef)
         ) {
           throw new InvalidReadinessSubjectError("invalid plugin readiness subject parent");
         }
@@ -259,11 +258,7 @@ export function createPluginReadinessSubjectCollection(params: {
       }
       const references = [subjectRef, ...relatedSubjectRefs];
       const referencesValid = references.every(
-        (ref) =>
-          subjects.has(ref) ||
-          Object.values(CORE_READINESS_SUBJECT_REFS).includes(
-            ref as (typeof CORE_READINESS_SUBJECT_REFS)[keyof typeof CORE_READINESS_SUBJECT_REFS],
-          ),
+        (ref) => subjects.has(ref) || CORE_READINESS_SUBJECT_REF_SET.has(ref),
       );
       if (!referencesValid) {
         return false;
@@ -274,6 +269,7 @@ export function createPluginReadinessSubjectCollection(params: {
             ...createCoreSubjects().map((subject) => [subject.ref, subject] as const),
             ...subjects.entries(),
           ]),
+          CORE_READINESS_SUBJECT_REF_SET,
         );
         return true;
       } catch {
@@ -283,12 +279,18 @@ export function createPluginReadinessSubjectCollection(params: {
   };
 }
 
-function assertNoParentCycles(subjects: Map<string, ReadinessSubject>): void {
+function assertNoParentCycles(
+  subjects: Map<string, ReadinessSubject>,
+  allowedExternalRefs: ReadonlySet<string> = new Set(),
+): void {
   for (const subject of subjects.values()) {
     const seen = new Set<string>([subject.ref]);
     let parentRef = subject.parentRef;
     while (parentRef) {
       if (!subjects.has(parentRef)) {
+        if (allowedExternalRefs.has(parentRef)) {
+          break;
+        }
         throw new Error("unresolved readiness subject parent");
       }
       if (seen.has(parentRef)) {

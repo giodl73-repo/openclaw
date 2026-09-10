@@ -63,6 +63,13 @@ export type ReadinessContribution = {
   subjects: ReadinessSubject[];
 };
 
+export class ReadinessEvaluationSupersededError extends Error {
+  constructor() {
+    super("Readiness runtime changed while it was being evaluated.");
+    this.name = "ReadinessEvaluationSupersededError";
+  }
+}
+
 export type PluginReadinessInput = {
   errors: Array<{
     id: string;

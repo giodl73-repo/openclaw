@@ -148,11 +148,11 @@ function enforceSelectedSubjectLimit(
       if (!ref || refs.has(ref)) {
         continue;
       }
+      refs.add(ref);
       const subject = subjectsByRef.get(ref);
       if (!subject) {
         continue;
       }
-      refs.add(ref);
       if (subject.parentRef) {
         pending.push(subject.parentRef);
       }
