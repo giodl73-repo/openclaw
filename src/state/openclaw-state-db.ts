@@ -35,10 +35,6 @@ import {
   clearOpenClawStateDatabaseOpenFailure,
 } from "./openclaw-state-db-cache.js";
 import {
-  clearOpenClawStateDatabaseReadinessForTest,
-  publishOpenClawStateDatabaseReadiness,
-} from "./openclaw-state-db-readiness.js";
-import {
   OPENCLAW_DATABASE_SCHEMA_DOCS_URL,
   LAZY_ADDITIVE_STATE_TABLES,
   OPENCLAW_SQLITE_BUSY_TIMEOUT_MS,
@@ -66,6 +62,7 @@ import {
 import { openUnpublishedStateDatabase } from "./openclaw-state-db-open.js";
 import * as operatorApprovalMigration from "./openclaw-state-db-operator-approval-migration.js";
 import { ensureOpenClawStatePermissions } from "./openclaw-state-db-permissions.js";
+import { publishOpenClawStateDatabaseReadiness } from "./openclaw-state-db-readiness.js";
 import { withExistingOpenClawStateDatabaseReadOnly } from "./openclaw-state-db-readonly.js";
 import {
   ensureAdditiveStateColumns,
@@ -756,7 +753,4 @@ export {
   confirmOpenClawStateDatabaseIntegrity,
 } from "./openclaw-state-db-cache.js";
 
-export function closeOpenClawStateDatabaseForTest(): void {
-  stateDbCache.closeOpenClawStateDatabaseForTest();
-  clearOpenClawStateDatabaseReadinessForTest();
-}
+export { closeOpenClawStateDatabaseForTest } from "./openclaw-state-db-readiness.js";

@@ -3,7 +3,7 @@ import { open, unlink } from "node:fs/promises";
 import path from "node:path";
 import { listAgentIds } from "../agents/agent-scope.js";
 import { resolveStateDir } from "../config/paths.js";
-import { resolveStorePath } from "../config/sessions/paths.js";
+import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ReadinessCondition } from "./conditions.js";
 import { CORE_READINESS_SUBJECT_REFS, type ReadinessSubject } from "./subjects.js";
@@ -158,7 +158,7 @@ function resolveSessionStorageTargets(
   addTarget(resolveStateDir(env), false);
   for (const agentId of listAgentIds(config)) {
     addTarget(
-      path.dirname(resolveStorePath(config.session?.store, { agentId, env })),
+      path.dirname(resolveSessionStorePathCore(config.session?.store, { agentId, env })),
       !config.session?.store,
     );
   }

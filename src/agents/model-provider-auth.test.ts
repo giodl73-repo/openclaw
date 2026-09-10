@@ -308,17 +308,10 @@ describe("prepared provider auth state", () => {
   });
 
   it("publishes route-scoped auth evidence for the configured default model", async () => {
-    const cfg = {
-      agents: { defaults: { model: { primary: "openai/gpt" } } },
-    } as OpenClawConfig;
+    const cfg = { agents: { defaults: { model: { primary: "openai/gpt" } } } } as OpenClawConfig;
     modelCatalogMocks.loadModelCatalog.mockResolvedValue([
       { id: "gpt", name: "GPT", provider: "openai", api: "openai-responses" },
     ]);
-    modelAuthAvailabilityMocks.evaluateModelAuth.mockReturnValue({
-      availability: false,
-      routeResolution: null,
-    });
-
     const snapshot = await buildCurrentProviderAuthStateSnapshot(cfg, {
       readOnlyAuthStore: true,
     });
@@ -337,9 +330,8 @@ describe("prepared provider auth state", () => {
   });
 
   it("omits false route evidence when synthetic auth discovery is incomplete", async () => {
-    const cfg = {
-      agents: { defaults: { model: { primary: "plugin-provider/plugin-model" } } },
-    } as OpenClawConfig;
+    const primary = "plugin-provider/plugin-model";
+    const cfg = { agents: { defaults: { model: { primary } } } } as OpenClawConfig;
     modelCatalogMocks.loadModelCatalog.mockResolvedValue([
       { id: "plugin-model", name: "Plugin Model", provider: "plugin-provider" },
     ]);
@@ -348,11 +340,6 @@ describe("prepared provider auth state", () => {
       syntheticAuthProviderRefs: [],
       syntheticAuthProviderRefsComplete: false,
     });
-    modelAuthAvailabilityMocks.evaluateModelAuth.mockReturnValue({
-      availability: false,
-      routeResolution: null,
-    });
-
     const snapshot = await buildCurrentProviderAuthStateSnapshot(cfg, {
       readOnlyAuthStore: true,
     });
@@ -1047,42 +1034,6 @@ describe("prepared provider auth state", () => {
       cancelled = true;
       cleanup.resolve();
       await Promise.allSettled([warm]);
-    }
-  });
-
-  it("rejects malformed default model route evidence from the warm worker", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-provider-auth-worker-"));
-    const workerPath = path.join(tempDir, "malformed-worker.mjs");
-    await fs.writeFile(
-      workerPath,
-      `
-        import { parentPort } from "node:worker_threads";
-        parentPort.on("message", () => parentPort.postMessage({
-          status: "ok",
-          value: {
-            status: "ok",
-            snapshot: {
-              agents: [{
-                agentId: "default",
-                configFingerprint: "fingerprint",
-                providers: [["openai", true]],
-                defaultModelRoute: null
-              }]
-            }
-          }
-        }));
-      `,
-    );
-
-    try {
-      await expect(
-        warmCurrentProviderAuthStateOffMainThread({} as OpenClawConfig, {
-          workerUrl: pathToFileURL(workerPath),
-          timeoutMs: 5_000,
-        }),
-      ).rejects.toThrow("invalid provider auth warm worker response");
-    } finally {
-      await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
 

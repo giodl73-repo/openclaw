@@ -21,8 +21,8 @@ export const CORE_READINESS_SUBJECT_REFS = {
   scheduler: "openclaw/scheduler/active",
   sessionStorage: "openclaw/session-storage/active",
 } as const;
-const OPENCLAW_INSTANCE_ID_ENV = "OPENCLAW_INSTANCE_ID";
-const OPENCLAW_HOST_INSTANCE_ID = process.env[OPENCLAW_INSTANCE_ID_ENV]?.trim();
+const INSTANCE_ID_ENV = "OPENCLAW_INSTANCE_ID";
+const HOST_INSTANCE_ID = process.env[INSTANCE_ID_ENV]?.trim();
 
 const SUBJECT_REF_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,191}$/;
 const SUBJECT_KIND_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/;
@@ -83,10 +83,7 @@ function resolveHostInstanceId(params?: {
   hostInstanceId?: string;
   env?: NodeJS.ProcessEnv;
 }): string | undefined {
-  return (
-    params?.hostInstanceId ??
-    (params?.env ? params.env[OPENCLAW_INSTANCE_ID_ENV] : OPENCLAW_HOST_INSTANCE_ID)
-  );
+  return params?.hostInstanceId ?? (params?.env ? params.env[INSTANCE_ID_ENV] : HOST_INSTANCE_ID);
 }
 
 function mergeCompatibleSubjects(

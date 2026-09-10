@@ -258,7 +258,9 @@ export function clearOpenClawStateDatabaseOpenFailure(pathname: string): void {
   terminalOpenLatch.clear(resolvedPath);
   const cached = cachedDatabases.get(resolvedPath);
   notifyOpenClawStateDatabaseLifecycle(
-    cached?.db.isOpen ? { kind: "opened", database: cached } : { kind: "closed", path: resolvedPath },
+    cached?.db.isOpen
+      ? { kind: "opened", database: cached }
+      : { kind: "closed", path: resolvedPath },
   );
 }
 

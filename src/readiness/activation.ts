@@ -83,7 +83,7 @@ export function listActivationReadinessSubjects(): ReadinessSubject[] {
     {
       ref: CORE_READINESS_SUBJECT_REFS.config,
       kind: "openclaw.config",
-      ...(configGeneration ? { generation: configGeneration } : {}),
+      ...(configGeneration ? { generation: `sha256:${configGeneration}` } : {}),
     },
     { ref: CORE_READINESS_SUBJECT_REFS.modelRoute, kind: "openclaw.model-route" },
     { ref: CORE_READINESS_SUBJECT_REFS.secrets, kind: "openclaw.secrets" },

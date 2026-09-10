@@ -175,7 +175,6 @@ export function createPluginReadinessResolver(options?: {
       }
       activeControllers.clear();
       cache = new WeakMap();
-      pendingByCriterionId.clear();
       activeRegistry = params.registry;
       activeConfig = params.config;
     }
@@ -193,12 +192,6 @@ export function createPluginReadinessResolver(options?: {
       if (cached?.rawPending) {
         return cached.value;
       }
-      const pending = pendingByCriterionId.get(registration.id);
-      if (pending?.rawPending) {
-        return pending.value;
-      }
-      const controller = new AbortController();
-      activeControllers.add(controller);
       let subjectCollection: ReturnType<typeof createPluginReadinessSubjectCollection>;
       try {
         subjectCollection = createPluginReadinessSubjectCollection({
@@ -206,7 +199,6 @@ export function createPluginReadinessResolver(options?: {
           criterionId: registration.criterion.id,
         });
       } catch {
-        activeControllers.delete(controller);
         return Promise.resolve({
           condition: unavailableCondition(
             registration,
@@ -217,6 +209,20 @@ export function createPluginReadinessResolver(options?: {
           subjects: [],
         });
       }
+      const pending = pendingByCriterionId.get(registration.id);
+      if (pending?.rawPending) {
+        return Promise.resolve({
+          condition: unavailableCondition(
+            registration,
+            "CriterionEvaluationPending",
+            `Readiness criterion ${registration.id} is waiting for a retired evaluation to finish.`,
+            subjectCollection.defaultRef,
+          ),
+          subjects: defaultSubjects(subjectCollection),
+        });
+      }
+      const controller = new AbortController();
+      activeControllers.add(controller);
       const raw = Promise.resolve().then(() =>
         registration.criterion.check({
           config: params.config,
