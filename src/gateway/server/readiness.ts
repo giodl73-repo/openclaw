@@ -3,6 +3,7 @@ import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coe
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ReadinessCondition, CanonicalReadinessResult } from "../../readiness/conditions.js";
+import { boundedCoreReadinessMessage } from "../../readiness/sanitize.js";
 import { applySelectedCanonicalRequirements } from "../../readiness/selection.js";
 import {
   CORE_READINESS_SUBJECT_REFS,
@@ -146,7 +147,7 @@ function buildCoreCondition(params: {
     status: params.status,
     requirement: params.requirement ?? "required",
     reason: params.reason,
-    message: params.message,
+    message: boundedCoreReadinessMessage(params.message),
   };
 }
 
@@ -269,7 +270,7 @@ export function createReadinessChecker(
     shouldSkipChannelReadiness?: () => boolean;
     cacheTtlMs?: number;
   },
-): ReadinessChecker {
+): () => ReadinessResult {
   const { channelManager, startedAt } = deps;
   const getStartup = createStartupChecker(deps);
   const cacheTtlMs = Math.max(0, deps.cacheTtlMs ?? DEFAULT_READINESS_CACHE_TTL_MS);

@@ -234,6 +234,15 @@ export async function finishGatewayStartup(params: {
     const operation = Promise.resolve().then(() => run(runtime.connectionWork.signal));
     return runtime.connectionWork.track(() => operation);
   };
+  let providerAuthRewarm: ((reason: string) => void) | undefined;
+  let pendingProviderAuthRewarmReason: string | undefined;
+  const requestProviderAuthRewarm = (reason: string) => {
+    if (providerAuthRewarm) {
+      providerAuthRewarm(reason);
+      return;
+    }
+    pendingProviderAuthRewarmReason = reason;
+  };
   const postAttachHandles = await trackStartupWork(() =>
     startupTrace.measure("runtime.post-attach", () =>
       loadGatewayStartupPostAttachModule().then(({ startGatewayPostAttachRuntime }) =>
@@ -346,6 +355,13 @@ export async function finishGatewayStartup(params: {
           providerAuthPrewarm: {
             getConfig: getRuntimeConfig,
             ...pluginRuntime.modelRouteReadinessStartupOptions(cfgAtStart),
+            onRewarmReady: (requestRewarm) => {
+              providerAuthRewarm = requestRewarm;
+              if (pendingProviderAuthRewarmReason) {
+                requestRewarm(pendingProviderAuthRewarmReason);
+                pendingProviderAuthRewarmReason = undefined;
+              }
+            },
           },
         }),
       ),
@@ -498,6 +514,9 @@ export async function finishGatewayStartup(params: {
       nodeReapprovalCoordinator.updateConfig(rateLimit);
       terminalLaunchPolicy.commitConfig();
       pluginRuntime.readinessSnapshot = pluginRuntime.makeState(nextConfig, pluginRuntime.registry);
+      if (pluginRuntime.modelRouteReadinessStartupOptions(nextConfig).enabled === true) {
+        requestProviderAuthRewarm("config-reload");
+      }
       workerLiveEvents?.rebindAll(nextConfig);
     },
     acceptTerminalConfig: terminalLaunchPolicy.acceptConfig,

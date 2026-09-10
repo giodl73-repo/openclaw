@@ -1,6 +1,8 @@
 /**
  * Process-local state for warmed provider auth snapshots.
  */
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+
 export type PreparedProviderAuthState = {
   agentId: string;
   configFingerprint: string;
@@ -115,8 +117,9 @@ export function isProviderAuthWarmSnapshot(value: unknown): value is ProviderAut
   ) {
     return false;
   }
-  return (value as ProviderAuthWarmSnapshot).agents.every(
+  return (value as { agents: unknown[] }).agents.every(
     (agent) =>
+      isRecord(agent) &&
       typeof agent.agentId === "string" &&
       typeof agent.configFingerprint === "string" &&
       Array.isArray(agent.providers) &&
@@ -128,8 +131,7 @@ export function isProviderAuthWarmSnapshot(value: unknown): value is ProviderAut
           typeof entry[1] === "boolean",
       ) &&
       (agent.defaultModelRoute === undefined ||
-        (agent.defaultModelRoute !== null &&
-          typeof agent.defaultModelRoute === "object" &&
+        (isRecord(agent.defaultModelRoute) &&
           typeof agent.defaultModelRoute.provider === "string" &&
           typeof agent.defaultModelRoute.modelId === "string" &&
           typeof agent.defaultModelRoute.available === "boolean")),

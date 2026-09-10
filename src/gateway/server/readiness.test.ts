@@ -289,6 +289,20 @@ describe("createReadinessChecker", () => {
     });
   });
 
+  it("bounds dynamic readiness messages to the wire contract", () => {
+    withReadinessClock(() => {
+      const { readiness } = createReadinessHarness({
+        getStartupPending: () => true,
+        getStartupPendingReason: () => "x".repeat(1_000),
+      });
+
+      const message = readiness().conditions?.find(
+        (condition) => condition.type === "GatewayStartupComplete",
+      )?.message;
+      expect(Buffer.byteLength(message ?? "", "utf8")).toBeLessThanOrEqual(512);
+    });
+  });
+
   it("does not cache startup-pending readiness", () => {
     withReadinessClock(() => {
       let startupPending = true;
