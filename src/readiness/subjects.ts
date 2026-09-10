@@ -28,7 +28,7 @@ const SUBJECT_REF_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,191}$/;
 const SUBJECT_KIND_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const PLUGIN_SUBJECT_PART_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SUBJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
-const MAX_SUBJECTS = 128;
+export const MAX_READINESS_SUBJECTS = 128;
 const MAX_PLUGIN_SUBJECTS = 64;
 const MAX_RELATED_SUBJECTS = 16;
 
@@ -342,7 +342,7 @@ export function reconcileReadinessIdentity(params: {
       parentRef = subjects.get(parentRef)?.parentRef;
     }
   }
-  if (retained.size > MAX_SUBJECTS) {
+  if (retained.size > MAX_READINESS_SUBJECTS) {
     throw new Error("invalid readiness identity package");
   }
   return {

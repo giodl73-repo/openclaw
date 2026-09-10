@@ -7,7 +7,6 @@ const TRAIN_2026_7_METHODS = [
   "question.resolve",
   "question.get",
   "question.list",
-  "ready",
   "session.discussion.info",
   "session.discussion.open",
   "session.members.add",
@@ -194,6 +193,7 @@ describe("core gateway method release trains", () => {
       "update.runs.get",
       "update.runs.list",
       "update.report",
+      "ready",
     ]) {
       expect(methods.find((candidate) => candidate.name === method)?.since).toBe("2026.9");
     }
