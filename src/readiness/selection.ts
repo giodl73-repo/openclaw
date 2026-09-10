@@ -27,7 +27,11 @@ import {
   listStateServiceReadinessSubjects,
   type StateServiceReadinessSnapshot,
 } from "./state-services.js";
-import { CORE_READINESS_SUBJECT_REFS } from "./subjects.js";
+import {
+  CORE_READINESS_SUBJECT_REFS,
+  MAX_READINESS_SUBJECTS,
+  type ReadinessSubject,
+} from "./subjects.js";
 import {
   buildWorkspaceReadinessCondition,
   createWorkspaceReadinessEvidenceResolver,
@@ -40,6 +44,13 @@ type SelectedCriterion = {
 
 const EVENT_LOOP_HEALTHY_CRITERION_ID = "openclaw.event-loop-healthy";
 const PLUGINS_LOADED_CRITERION_ID = "openclaw.plugins-loaded";
+const BASE_RUNTIME_SUBJECT_REFS = [
+  CORE_READINESS_SUBJECT_REFS.hostInstance,
+  CORE_READINESS_SUBJECT_REFS.process,
+  CORE_READINESS_SUBJECT_REFS.gateway,
+  CORE_READINESS_SUBJECT_REFS.config,
+  CORE_READINESS_SUBJECT_REFS.plugins,
+] as const;
 
 const CANONICAL_CONDITION_TYPES = new Map<string, ReadinessCondition["type"]>([
   [EVENT_LOOP_HEALTHY_CRITERION_ID, "EventLoopHealthy"],
@@ -119,6 +130,81 @@ function withRequirement(
     requirement,
     reason: condition.reason,
     message: condition.message,
+  };
+}
+
+function enforceSelectedSubjectLimit(
+  conditions: ReadinessCondition[],
+  subjects: ReadinessSubject[],
+): ReadinessContribution {
+  const subjectsByRef = new Map(subjects.map((subject) => [subject.ref, subject]));
+  const retainedRefs = new Set<string>(BASE_RUNTIME_SUBJECT_REFS);
+  const projected = [...conditions];
+  const collectRefs = (condition: ReadinessCondition) => {
+    const refs = new Set<string>();
+    const pending = [condition.subjectRef, ...(condition.relatedSubjectRefs ?? [])];
+    while (pending.length > 0) {
+      const ref = pending.pop();
+      if (!ref || refs.has(ref)) {
+        continue;
+      }
+      const subject = subjectsByRef.get(ref);
+      if (!subject) {
+        continue;
+      }
+      refs.add(ref);
+      if (subject.parentRef) {
+        pending.push(subject.parentRef);
+      }
+    }
+    return refs;
+  };
+  const accept = (index: number) => {
+    const condition = projected[index];
+    if (!condition) {
+      return;
+    }
+    const conditionRefs = collectRefs(condition);
+    const additionalCount = [...conditionRefs].filter((ref) => !retainedRefs.has(ref)).length;
+    if (
+      condition.type.startsWith("plugin.") &&
+      retainedRefs.size + additionalCount > MAX_READINESS_SUBJECTS
+    ) {
+      projected[index] = {
+        type: condition.type,
+        subjectRef: CORE_READINESS_SUBJECT_REFS.plugins,
+        status: "Unknown",
+        requirement: condition.requirement,
+        reason: "CriterionSubjectLimitExceeded",
+        message: `Readiness criterion ${condition.type} exceeded the aggregate subject limit.`,
+      };
+      return;
+    }
+    for (const ref of conditionRefs) {
+      retainedRefs.add(ref);
+    }
+  };
+
+  const pluginIndices: number[] = [];
+  for (const [index, condition] of projected.entries()) {
+    if (condition.type.startsWith("plugin.")) {
+      pluginIndices.push(index);
+    } else {
+      accept(index);
+    }
+  }
+  pluginIndices.sort((left, right) => {
+    const leftRequired = projected[left]?.requirement === "required";
+    const rightRequired = projected[right]?.requirement === "required";
+    return Number(rightRequired) - Number(leftRequired) || left - right;
+  });
+  for (const index of pluginIndices) {
+    accept(index);
+  }
+
+  return {
+    conditions: projected,
+    subjects: subjects.filter((subject) => retainedRefs.has(subject.ref)),
   };
 }
 
@@ -215,20 +301,18 @@ export function createSelectedReadinessResolver() {
       conditions.set(condition.type, condition);
     }
 
-    return {
-      conditions: selected.map(({ id, requirement }) => {
-        const condition = conditions.get(id);
-        return condition
-          ? withRequirement(condition, requirement)
-          : unavailableCondition(id, requirement);
-      }),
-      subjects: [
-        ...listActivationReadinessSubjects(),
-        ...listExecutionCapabilityReadinessSubjects(),
-        ...listStateServiceReadinessSubjects(),
-        ...listSessionStorageReadinessSubjects(),
-        ...pluginContribution.subjects,
-      ],
-    };
+    const selectedConditions = selected.map(({ id, requirement }) => {
+      const condition = conditions.get(id);
+      return condition
+        ? withRequirement(condition, requirement)
+        : unavailableCondition(id, requirement);
+    });
+    return enforceSelectedSubjectLimit(selectedConditions, [
+      ...listActivationReadinessSubjects(),
+      ...listExecutionCapabilityReadinessSubjects(),
+      ...listStateServiceReadinessSubjects(),
+      ...listSessionStorageReadinessSubjects(),
+      ...pluginContribution.subjects,
+    ]);
   };
 }
