@@ -1,8 +1,6 @@
 import type { Result } from "@openclaw/normalization-core/result";
 import type { AmbientEnvTriggerPolicy } from "../channels/config-presence.js";
 import type { HostingProfileId } from "../hosting/types.js";
-import { normalizeDevicePublicKeyBase64Url } from "../infra/device-identity.js";
-import type { EffectiveOperatorDeviceIdentity } from "../infra/device-pairing.js";
 import type { GatewaySuspendHandoffOwner } from "../infra/gateway-suspend-coordinator.js";
 import type { GatewayRestartEmitter } from "../infra/restart.js";
 import type { GatewayTailscaleIngressEndpoint } from "./ingress-attribution.js";

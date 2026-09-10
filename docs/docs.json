@@ -2479,7 +2479,6 @@
                     "pages": [
                       "gateway/health",
                       "gateway/hosting-profiles",
-                      "gateway/heartbeat",
                       "gateway/doctor",
                       {
                         "group": "Doctor",

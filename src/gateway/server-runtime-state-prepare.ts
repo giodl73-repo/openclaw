@@ -10,28 +10,17 @@ import {
   advisoryCriteriaForHostingProfile,
   buildHostingProfileSubjects,
   buildHostingProfileConditions,
-  isReadinessCriterionSelectedByHostingProfile,
   requiredCriteriaForHostingProfile,
   resolveHostingProfileSelection,
 } from "../hosting/profiles.js";
-import { HOSTING_PROFILE_CONTRACT_VERSION } from "../hosting/types.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { loadGatewayTlsServerRuntime } from "../infra/tls/gateway.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { runtimeForLogger } from "../logging/subsystem.js";
-import {
-  listActiveDegradedPlugins,
-  toPublicPluginVerificationDiagnostic,
-} from "../plugins/runtime-degraded-state.js";
 import { isGatewayDraining } from "../process/command-queue.js";
-import {
-  isReadinessCriterionSelected,
-  MODEL_ROUTE_READY_CRITERION_ID,
-} from "../readiness/activation.js";
 import {
   buildRuntimeReadiness,
   ReadinessEvaluationSupersededError,
-  type PluginReadinessInput,
 } from "../readiness/conditions.js";
 import { captureExecutionCapabilityReadinessSnapshot } from "../readiness/execution-capabilities.js";
 import { createSelectedReadinessResolver } from "../readiness/selection.js";
@@ -52,18 +41,18 @@ import { createGatewayControlUiRootLifecycle } from "./server-control-ui-root.js
 import type { GatewayInstanceRuntime } from "./server-instance-runtime.types.js";
 import type { GatewayServerLiveState } from "./server-live-state.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
+import {
+  buildGatewayPluginReadinessInput,
+  createHostingProfileGatewayReadinessResolver,
+  resolveModelRouteReadinessStartupOptions,
+} from "./server-runtime-profile-readiness.js";
 import type { SharedGatewaySessionGenerationState } from "./server-shared-auth-generation.js";
 import type { prepareGatewayServerBootstrap } from "./server-startup-bootstrap.js";
 import { createGatewayTransportBridge } from "./server-transport-bridge.js";
 import { createWizardSessionTracker } from "./server-wizard-sessions.js";
 import { createGatewayEventLoopHealthMonitor } from "./server/event-loop-health.js";
 import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
-import {
-  createReadinessChecker,
-  createStartupChecker,
-  evaluateConfiguredGatewayReadiness,
-  type CanonicalGatewayReadinessResult,
-} from "./server/readiness.js";
+import { createReadinessChecker, createStartupChecker } from "./server/readiness.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 
 type GatewayBootstrap = Awaited<ReturnType<typeof prepareGatewayServerBootstrap>>;
@@ -71,32 +60,6 @@ type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
 type ChannelRuntime = ReturnType<
   (typeof import("../plugins/runtime/runtime-channel.js"))["createRuntimeChannel"]
 >;
-
-function buildGatewayPluginReadinessInput(
-  registry: GatewayBootstrap["pluginBootstrap"]["pluginRegistry"],
-): PluginReadinessInput {
-  const errors = registry.plugins
-    .filter((plugin) => plugin.status === "error")
-    .map((plugin): PluginReadinessInput["errors"][number] => {
-      const error: PluginReadinessInput["errors"][number] = {
-        id: plugin.id,
-        activated: plugin.activated === true,
-        error: plugin.error ?? "unknown plugin load error",
-      };
-      if (plugin.activationSource) {
-        error.activationSource = plugin.activationSource;
-      }
-      return error;
-    })
-    .toSorted((left, right) => left.id.localeCompare(right.id));
-  const unavailable = listActiveDegradedPlugins()
-    .map((plugin) => ({
-      id: plugin.pluginId,
-      diagnostic: toPublicPluginVerificationDiagnostic(plugin.diagnostic),
-    }))
-    .toSorted((left, right) => left.id.localeCompare(right.id));
-  return { errors, unavailable };
-}
 
 export async function prepareGatewayKernelState(params: {
   bootstrap: GatewayBootstrap;
@@ -151,8 +114,6 @@ export async function prepareGatewayKernelState(params: {
       bind: opts.bind,
       host: opts.host,
       controlUiEnabled: opts.controlUiEnabled,
-      openAiChatCompletionsEnabled: opts.openAiChatCompletionsEnabled,
-      openResponsesEnabled: opts.openResponsesEnabled,
       auth: resolvedStartupAuthOverride,
       tailscale: startupTailscaleOverride,
     });
@@ -160,11 +121,6 @@ export async function prepareGatewayKernelState(params: {
   const {
     bindHost,
     controlUiEnabled,
-    openAiChatCompletionsEnabled,
-    openAiChatCompletionsConfig,
-    openResponsesEnabled,
-    openResponsesConfig,
-    strictTransportSecurityHeader,
     controlUiBasePath,
     controlUiRoot: controlUiRootOverride,
     resolvedAuth,
@@ -220,18 +176,8 @@ export async function prepareGatewayKernelState(params: {
     registry: pluginBootstrap.pluginRegistry,
     baseGatewayMethods: pluginBootstrap.baseGatewayMethods,
     makeState,
-    modelRouteReadinessStartupOptions: (config: OpenClawConfig) => {
-      const profile = resolveHostingProfileSelection({
-        config,
-        env: process.env,
-        override: opts.hostingProfileOverride,
-      })?.profile;
-      return isReadinessCriterionSelected(config, MODEL_ROUTE_READY_CRITERION_ID) ||
-        (profile &&
-          isReadinessCriterionSelectedByHostingProfile(profile, MODEL_ROUTE_READY_CRITERION_ID))
-        ? { enabled: true as const }
-        : {};
-    },
+    modelRouteReadinessStartupOptions: (config: OpenClawConfig) =>
+      resolveModelRouteReadinessStartupOptions(config, opts.hostingProfileOverride),
     readinessSnapshot: makeState(cfgAtStart, pluginBootstrap.pluginRegistry),
   };
   const listGatewayStartupChannelPlugins = () =>
@@ -597,43 +543,16 @@ export async function prepareGatewayKernelState(params: {
     }
     throw new ReadinessEvaluationSupersededError();
   };
-  const getReadiness = (): Promise<CanonicalGatewayReadinessResult> => {
-    const snapshot = pluginRuntime.readinessSnapshot;
-    const profileSelection = resolveHostingProfileSelection({
-      config: snapshot.config,
-      env: process.env,
-      override: opts.hostingProfileOverride,
-    });
-    const failureContext = profileSelection
-      ? {
-          conditions: buildHostingProfileConditions(profileSelection.profile, {
-            bind: opts.bind ?? snapshot.config.gateway?.bind ?? "loopback",
-            bindHost,
-            port,
-            authMode: snapshot.auth.mode,
-            trustedProxyUserHeader: snapshot.auth.trustedProxy?.userHeader,
-            trustedProxySources: snapshot.config.gateway?.trustedProxies ?? [],
-            trustedProxyAllowLoopback: snapshot.auth.trustedProxy?.allowLoopback === true,
-          }).filter((condition) => condition.type === "ProfileSelected"),
-          subjects: buildHostingProfileSubjects(profileSelection),
-        }
-      : undefined;
-    return evaluateConfiguredGatewayReadiness({
-      config: snapshot.config,
-      identity: readinessIdentity,
-      canonicalEvaluationEnabled: profileSelection !== undefined,
-      failureContext,
-      profileMetadata: profileSelection
-        ? {
-            profileContractVersion: HOSTING_PROFILE_CONTRACT_VERSION,
-            profile: profileSelection.profile,
-            profileSource: profileSelection.source,
-          }
-        : undefined,
-      evaluateGateway: getGatewayReadiness,
-      evaluateRuntime: evaluateRuntimeReadiness,
-    });
-  };
+  const getReadiness = createHostingProfileGatewayReadinessResolver({
+    getSnapshot: () => pluginRuntime.readinessSnapshot,
+    identity: readinessIdentity,
+    bind: opts.bind,
+    bindHost,
+    port,
+    hostingProfileOverride: opts.hostingProfileOverride,
+    evaluateGateway: getGatewayReadiness,
+    evaluateRuntime: evaluateRuntimeReadiness,
+  });
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
   } = {};
@@ -713,7 +632,6 @@ export async function prepareGatewayKernelState(params: {
     bootId,
     pluginRuntime,
     nodeReadiness,
-    hasConfiguredWorkerProfiles,
     workerEnvironmentService,
     workerLiveEvents,
     bindDeviceNodeControl: bindDeviceNodeRuntime,

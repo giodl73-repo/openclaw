@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT_DIR/scripts/lib/docker-e2e-image.sh"
 
-IMAGE_NAME="$(docker_e2e_resolve_image "openclaw-hosting-profiles-e2e" OPENCLAW_HOSTING_PROFILES_E2E_IMAGE)"
-SKIP_BUILD="${OPENCLAW_HOSTING_PROFILES_E2E_SKIP_BUILD:-0}"
+IMAGE_NAME="$(docker_e2e_resolve_image "openclaw-hosting-profiles-e2e" OPENCLAW_IMAGE)"
+SKIP_BUILD="${OPENCLAW_SKIP_DOCKER_BUILD:-0}"
 PORT="18789"
 TOKEN="hosting-profiles-$(date +%s)-$$"
 CONTAINER_NAMES=()
