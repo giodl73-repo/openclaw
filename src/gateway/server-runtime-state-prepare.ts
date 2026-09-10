@@ -18,7 +18,11 @@ import {
   isReadinessCriterionSelected,
   MODEL_ROUTE_READY_CRITERION_ID,
 } from "../readiness/activation.js";
-import { buildRuntimeReadiness, type PluginReadinessInput } from "../readiness/conditions.js";
+import {
+  buildRuntimeReadiness,
+  ReadinessEvaluationSupersededError,
+  type PluginReadinessInput,
+} from "../readiness/conditions.js";
 import { captureExecutionCapabilityReadinessSnapshot } from "../readiness/execution-capabilities.js";
 import { createSelectedReadinessResolver } from "../readiness/selection.js";
 import { createGatewayReadinessIdentity } from "../readiness/subjects.js";
@@ -516,7 +520,7 @@ export async function prepareGatewayKernelState(params: {
       }
       return result;
     }
-    throw new Error("Readiness runtime changed while it was being evaluated.");
+    throw new ReadinessEvaluationSupersededError();
   };
   const watchNodeRequestHandler: {
     current?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;

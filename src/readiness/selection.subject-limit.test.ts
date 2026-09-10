@@ -1,11 +1,16 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
 import { buildRuntimeReadiness } from "./conditions.js";
 import { createSelectedReadinessResolver } from "./selection.js";
+import { createGatewayReadinessIdentity } from "./subjects.js";
 
 function chainedCriterion(
   pluginId: string,
   criterionId: string,
+  subjectCount = 64,
 ): PluginReadinessCriterionRegistration {
   return {
     id: `plugin.${pluginId}.${criterionId}`,
@@ -16,7 +21,7 @@ function chainedCriterion(
       description: "Reports readiness with a retained subject chain.",
       check: ({ subjects }) => {
         let parentRef: string | undefined;
-        for (let index = 0; index < 64; index += 1) {
+        for (let index = 0; index < subjectCount; index += 1) {
           parentRef = subjects.declare({
             kind: "node",
             key: `level-${index}`,
@@ -84,5 +89,46 @@ describe("selected readiness aggregate subject limit", () => {
       advisories: ["CriterionSubjectLimitExceeded"],
     });
     expect(readiness.identity.subjects.length).toBeLessThanOrEqual(128);
+  });
+
+  it("counts a selected workspace subject before accepting plugin evidence", async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), "openclaw-subject-limit-"));
+    const advisory = chainedCriterion("advisory", "workspace", 59);
+    const required = chainedCriterion("required", "workspace");
+    try {
+      const contribution = await createSelectedReadinessResolver()({
+        config: {
+          agents: { defaults: { workspace } },
+          gateway: {
+            readiness: {
+              advisoryCriteria: [advisory.id],
+              requiredCriteria: ["openclaw.workspace-writable", required.id],
+            },
+          },
+        },
+        registry: { readinessCriteria: [advisory, required] },
+      });
+
+      expect(contribution.conditions).toContainEqual(
+        expect.objectContaining({
+          type: advisory.id,
+          status: "Unknown",
+          requirement: "advisory",
+          reason: "CriterionSubjectLimitExceeded",
+        }),
+      );
+      const readiness = buildRuntimeReadiness({
+        identity: createGatewayReadinessIdentity({ hostInstanceId: "host-1" }),
+        configLoaded: true,
+        gateway: "responding",
+        plugins: { errors: [] },
+        additionalConditions: contribution.conditions,
+        additionalSubjects: contribution.subjects,
+      });
+      expect(readiness.ready).toBe(true);
+      expect(readiness.identity.subjects.length).toBeLessThanOrEqual(128);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 });
