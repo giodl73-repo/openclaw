@@ -192,6 +192,7 @@ describe("listGatewayMethods", () => {
       "models.authRefresh",
       "models.authLogin",
       "models.authSetApiKey",
+      "ready",
     ];
     expect(listGatewayMethods().slice(-expectedSuffix.length)).toEqual(expectedSuffix);
     const methods = listGatewayMethods();
@@ -376,6 +377,7 @@ describe("listGatewayMethods", () => {
       "models.authRefresh",
       "models.authLogin",
       "models.authSetApiKey",
+      "ready",
     ];
     expect(coreMethods.slice(-expectedCoreSuffix.length)).toEqual(expectedCoreSuffix);
     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));
