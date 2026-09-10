@@ -39,4 +39,20 @@ describe("OpenClawSchema gateway readiness validation", () => {
       }),
     ).toThrow(/namespaced openclaw.* or plugin.*/i);
   });
+
+  it("bounds selector ids to the canonical wire limit", () => {
+    const atLimit = `plugin.${"x".repeat(121)}`;
+    const overLimit = `plugin.${"x".repeat(122)}`;
+
+    expect(
+      OpenClawSchema.safeParse({
+        gateway: { readiness: { requiredCriteria: [atLimit] } },
+      }).success,
+    ).toBe(true);
+    expect(
+      OpenClawSchema.safeParse({
+        gateway: { readiness: { requiredCriteria: [overLimit] } },
+      }).success,
+    ).toBe(false);
+  });
 });

@@ -315,7 +315,7 @@ export function reconcileReadinessIdentity(params: {
     }
     subjects.set(subject.ref, merged);
   }
-  if (subjects.size > MAX_SUBJECTS || !subjects.has(params.base.producerRef)) {
+  if (!subjects.has(params.base.producerRef)) {
     throw new Error("invalid readiness identity package");
   }
   assertNoParentCycles(subjects);
@@ -341,6 +341,9 @@ export function reconcileReadinessIdentity(params: {
       retained.add(parentRef);
       parentRef = subjects.get(parentRef)?.parentRef;
     }
+  }
+  if (retained.size > MAX_SUBJECTS) {
+    throw new Error("invalid readiness identity package");
   }
   return {
     producerRef: params.base.producerRef,

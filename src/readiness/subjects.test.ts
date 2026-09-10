@@ -229,6 +229,37 @@ describe("readiness subjects", () => {
     ]);
   });
 
+  it("applies the global subject limit after pruning unreferenced declarations", () => {
+    const base = createGatewayReadinessIdentity({
+      createGatewayInstanceId: () => "gateway-1",
+    });
+    const first = createPluginReadinessSubjectCollection({
+      pluginId: "first",
+      criterionId: "one",
+    });
+    const second = createPluginReadinessSubjectCollection({
+      pluginId: "second",
+      criterionId: "two",
+    });
+    for (let index = 0; index < 64; index += 1) {
+      first.collector.declare({ kind: "replica", key: `replica-${index}` });
+      second.collector.declare({ kind: "replica", key: `replica-${index}` });
+    }
+
+    const identity = reconcileReadinessIdentity({
+      base,
+      subjects: [...first.subjects, ...second.subjects],
+      references: [{ subjectRef: first.defaultRef }, { subjectRef: second.defaultRef }],
+    });
+
+    expect(identity.subjects.map((subject) => subject.ref)).toEqual([
+      CORE_READINESS_SUBJECT_REFS.gateway,
+      CORE_READINESS_SUBJECT_REFS.process,
+      first.defaultRef,
+      second.defaultRef,
+    ]);
+  });
+
   it("rejects unresolved and cyclic references", () => {
     const base = createGatewayReadinessIdentity({
       createGatewayInstanceId: () => "gateway-1",
