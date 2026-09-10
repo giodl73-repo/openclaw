@@ -81,7 +81,7 @@ async function resolveNodeModeReadinessEvidenceWith(
       }))
       .toSorted(
         (left, right) =>
-          Number(left.connected) - Number(right.connected) ||
+          Number(right.connected) - Number(left.connected) ||
           left.subject.ref.localeCompare(right.subject.ref),
       )
       .slice(0, MAX_NODE_MODE_RELATED_SUBJECTS)

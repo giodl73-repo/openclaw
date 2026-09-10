@@ -133,6 +133,18 @@ const GatewayEventLoopHealthSchema = closedObject({
 
 const CanonicalReadinessResultSchema = closedObject({
   contractVersion: Type.Literal(1),
+  profileContractVersion: Type.Optional(Type.Literal(1)),
+  profile: Type.Optional(
+    Type.Union([
+      Type.Literal("local"),
+      Type.Literal("container"),
+      Type.Literal("reverse-proxy"),
+      Type.Literal("node-mode"),
+    ]),
+  ),
+  profileSource: Type.Optional(
+    Type.Union([Type.Literal("argument"), Type.Literal("environment"), Type.Literal("config")]),
+  ),
   evaluatedAtMs: Type.Integer({ minimum: 0 }),
   identity: closedObject({
     producerRef: ReadinessRefSchema,

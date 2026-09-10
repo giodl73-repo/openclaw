@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
 import { buildRuntimeReadiness } from "./conditions.js";
-import { createSelectedReadinessResolver } from "./selection.js";
+import { createSelectedReadinessResolver, reserveSelectedReadinessSubjects } from "./selection.js";
 import { createGatewayReadinessIdentity } from "./subjects.js";
 
 function chainedCriterion(
@@ -130,5 +130,48 @@ describe("selected readiness aggregate subject limit", () => {
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+
+  it("reserves externally composed subjects before retaining plugin evidence", async () => {
+    const advisory = chainedCriterion("advisory", "reserved", 60);
+    const required = chainedCriterion("required", "reserved", 60);
+    const contribution = await createSelectedReadinessResolver()({
+      config: {
+        gateway: {
+          readiness: {
+            advisoryCriteria: [advisory.id],
+            requiredCriteria: [required.id],
+          },
+        },
+      },
+      registry: { readinessCriteria: [advisory, required] },
+    });
+    const reservedSubjects = Array.from({ length: 4 }, (_, index) => ({
+      ref: `openclaw/reserved/${index}`,
+      kind: "openclaw.reserved",
+      parentRef: "openclaw/gateway/current",
+    }));
+
+    const bounded = reserveSelectedReadinessSubjects(contribution, reservedSubjects);
+
+    expect(bounded.conditions).toEqual([
+      expect.objectContaining({
+        type: advisory.id,
+        status: "Unknown",
+        reason: "CriterionSubjectLimitExceeded",
+      }),
+      expect.objectContaining({
+        type: required.id,
+        status: "True",
+      }),
+    ]);
+    const readiness = buildRuntimeReadiness({
+      configLoaded: true,
+      gateway: "responding",
+      plugins: { errors: [] },
+      additionalConditions: bounded.conditions,
+      additionalSubjects: [...reservedSubjects, ...bounded.subjects],
+    });
+    expect(readiness.identity.subjects.length).toBeLessThanOrEqual(128);
   });
 });

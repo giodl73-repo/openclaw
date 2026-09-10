@@ -146,6 +146,9 @@ describe("SnapshotSchema", () => {
       health: {
         readiness: {
           contractVersion: 1,
+          profileContractVersion: 1,
+          profile: "container",
+          profileSource: "config",
           evaluatedAtMs: 1_000,
           identity: {
             producerRef: "openclaw/gateway/current",

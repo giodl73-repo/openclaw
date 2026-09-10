@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 const listNodePairing = vi.hoisted(() => vi.fn());
@@ -166,6 +167,24 @@ describe("resolveNodeModeReadinessEvidence", () => {
     expect(evidence.pairing?.pairedCount).toBe(17);
     expect(evidence.targets?.connectedCount).toBe(17);
     expect(evidence.subjects).toHaveLength(16);
+  });
+
+  it("retains connected nodes when bounded subjects omit disconnected peers", async () => {
+    const paired = Array.from({ length: 17 }, (_, index) => ({
+      nodeId: `node-${index}`,
+      commands: ["system.run"],
+    }));
+    const connectedNode = paired[16]!;
+    listNodePairing.mockResolvedValue({ paired, pending: [] });
+
+    const evidence = await resolveNodeModeReadinessEvidence({
+      config: {},
+      connectedNodes: [{ ...connectedNode } as never],
+    });
+
+    const connectedRef = `openclaw/node/${createHash("sha256").update(connectedNode.nodeId).digest("hex").slice(0, 24)}`;
+    expect(evidence.subjects).toHaveLength(16);
+    expect(evidence.subjects).toContainEqual(expect.objectContaining({ ref: connectedRef }));
   });
 
   it("coalesces pairing reads while reevaluating live sessions and config", async () => {

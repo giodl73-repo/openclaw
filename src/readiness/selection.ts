@@ -136,10 +136,23 @@ function withRequirement(
 function enforceSelectedSubjectLimit(
   conditions: ReadinessCondition[],
   subjects: ReadinessSubject[],
+  reservedSubjects: readonly ReadinessSubject[] = [],
 ): ReadinessContribution {
-  const subjectsByRef = new Map(subjects.map((subject) => [subject.ref, subject]));
+  const subjectsByRef = new Map(
+    [...subjects, ...reservedSubjects].map((subject) => [subject.ref, subject]),
+  );
   const retainedRefs = new Set<string>(BASE_RUNTIME_SUBJECT_REFS);
   const projected = [...conditions];
+  const retainSubject = (ref: string) => {
+    let currentRef: string | undefined = ref;
+    while (currentRef && !retainedRefs.has(currentRef)) {
+      retainedRefs.add(currentRef);
+      currentRef = subjectsByRef.get(currentRef)?.parentRef;
+    }
+  };
+  for (const subject of reservedSubjects) {
+    retainSubject(subject.ref);
+  }
   const collectRefs = (condition: ReadinessCondition) => {
     const refs = new Set<string>();
     const pending = [condition.subjectRef, ...(condition.relatedSubjectRefs ?? [])];
@@ -206,6 +219,17 @@ function enforceSelectedSubjectLimit(
     conditions: projected,
     subjects: subjects.filter((subject) => retainedRefs.has(subject.ref)),
   };
+}
+
+export function reserveSelectedReadinessSubjects(
+  contribution: ReadinessContribution,
+  reservedSubjects: readonly ReadinessSubject[],
+): ReadinessContribution {
+  return enforceSelectedSubjectLimit(
+    contribution.conditions,
+    contribution.subjects,
+    reservedSubjects,
+  );
 }
 
 function stateServiceSelectorId(condition: ReadinessCondition): string | undefined {

@@ -23,7 +23,10 @@ import {
   ReadinessEvaluationSupersededError,
 } from "../readiness/conditions.js";
 import { captureExecutionCapabilityReadinessSnapshot } from "../readiness/execution-capabilities.js";
-import { createSelectedReadinessResolver } from "../readiness/selection.js";
+import {
+  createSelectedReadinessResolver,
+  reserveSelectedReadinessSubjects,
+} from "../readiness/selection.js";
 import { createGatewayReadinessIdentity } from "../readiness/subjects.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
@@ -526,6 +529,7 @@ export async function prepareGatewayKernelState(params: {
       const profileSubjects = profileSelection
         ? buildHostingProfileSubjects(profileSelection, nodeMode)
         : [];
+      const boundedContribution = reserveSelectedReadinessSubjects(contribution, profileSubjects);
       if (snapshot !== pluginRuntime.readinessSnapshot) {
         continue;
       }
@@ -537,8 +541,8 @@ export async function prepareGatewayKernelState(params: {
         pluginsRequired:
           profile !== undefined &&
           requiredCriteriaForHostingProfile(profile).includes("openclaw.plugins-loaded"),
-        additionalConditions: [...profileConditions, ...contribution.conditions],
-        additionalSubjects: [...profileSubjects, ...contribution.subjects],
+        additionalConditions: [...profileConditions, ...boundedContribution.conditions],
+        additionalSubjects: [...profileSubjects, ...boundedContribution.subjects],
       });
     }
     throw new ReadinessEvaluationSupersededError();
