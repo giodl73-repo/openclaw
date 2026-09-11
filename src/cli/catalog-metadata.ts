@@ -1,3 +1,5 @@
+import { isRecord } from "@openclaw/normalization-core";
+
 export type CliCatalogRisk = "low" | "medium" | "high";
 export type CliCatalogEffectMode = "read" | "mutating" | "mixed";
 export type CliCatalogVisibility = "docs" | "audit" | "operator" | "policy";
@@ -13,14 +15,14 @@ export type CommandExposure = {
   readonly tier?: CliCommandExposureTier;
 };
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
+export const CONFIG_UNSET_EFFECT_PROFILE = {
+  effectMode: "mutating",
+  confirmationRequired: false,
+  risk: "medium",
+} satisfies CommandEffectProfile;
 
 export function normalizeCommandEffectProfile(value: unknown): CommandEffectProfile | undefined {
-  const record = asRecord(value);
+  const record = isRecord(value) ? value : undefined;
   if (
     !record ||
     Object.keys(record).some(
@@ -50,7 +52,7 @@ export function normalizeCommandEffectProfile(value: unknown): CommandEffectProf
 }
 
 export function normalizeCommandExposure(value: unknown): CommandExposure | undefined {
-  const record = asRecord(value);
+  const record = isRecord(value) ? value : undefined;
   if (
     !record ||
     Object.keys(record).some((key) => key !== "tier") ||

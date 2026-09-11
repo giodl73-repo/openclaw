@@ -39,7 +39,7 @@ async function loadInspectedCommandGroup(
       import("./program/context.js"),
       import("./program/register.subclis.js"),
     ]);
-  if (await registerCoreCliByName(program, createProgramContext(), root, argv)) {
+  if (await registerCoreCliByName(program, createProgramContext(), root)) {
     return;
   }
   await registerSubCliByName(program, root, argv, { purpose: "inspection" });

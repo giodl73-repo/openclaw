@@ -1,6 +1,6 @@
 // Declarative CLI command catalog for startup policy and fast-path routing.
 import { hasFlag } from "./argv.js";
-import type { CommandEffectProfile } from "./catalog-metadata.js";
+import { CONFIG_UNSET_EFFECT_PROFILE, type CommandEffectProfile } from "./catalog-metadata.js";
 
 export type CliCommandPluginLoadPolicy =
   | "never"
@@ -334,14 +334,7 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
     commandPath: ["config", "unset"],
     exact: true,
     policy: { configGuard: "run", ensureCliPath: false, networkProxy: "bypass" },
-    route: {
-      id: "config-unset",
-      effectProfile: {
-        risk: "medium",
-        confirmationRequired: false,
-        effectMode: "mutating",
-      },
-    },
+    route: { id: "config-unset", effectProfile: CONFIG_UNSET_EFFECT_PROFILE },
   },
   {
     commandPath: ["models"],
@@ -376,15 +369,7 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
     },
     route: { id: "models-status" },
   },
-  {
-    commandPath: ["tools", "commands"],
-    policy: {
-      configGuard: "skip",
-      ensureCliPath: false,
-      loadPlugins: "never",
-      networkProxy: "bypass",
-    },
-  },
+  { commandPath: ["tools", "commands"], policy: PASSIVE_STARTUP_POLICY },
   {
     commandPath: ["tasks", "list"],
     exact: true,
