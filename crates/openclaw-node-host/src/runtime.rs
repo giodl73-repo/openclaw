@@ -1954,7 +1954,9 @@ mod tests {
             .unwrap();
         let active = ActiveInvocations::default();
         let cancellation = CancellationToken::new();
-        let tracking = active.track("invoke-1", &cancellation).unwrap();
+        let tracking = active
+            .track("invoke-1", "node-1", &cancellation, false)
+            .unwrap();
         cancellation.cancel();
 
         let evaluation = runtime
