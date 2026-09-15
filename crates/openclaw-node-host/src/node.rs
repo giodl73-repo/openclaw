@@ -6,15 +6,15 @@ pub use openclaw_gateway_client::{Event, EventSubscription};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     future::Future,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use thiserror::Error;
 
-use crate::identity::{IdentityError, NodeIdentity};
+use crate::identity::{DeviceSigningRequest, IdentityError, NodeIdentity};
 
 const PROTOCOL_VERSION: u32 = 4;
 const MINIMUM_NODE_PROTOCOL_VERSION: u32 = 3;
@@ -376,6 +376,31 @@ impl NodeConnectOptions {
         self
     }
 
+    /// Prepare the canonical v3 payload for an embedding-owned Ed25519 key.
+    ///
+    /// The caller signs [`DeviceSigningRequest::payload`] with the private key
+    /// corresponding to `public_key`, completes the request, and supplies the
+    /// resulting proof through [`Self::device`]. The private key never enters
+    /// this crate.
+    /// # Errors
+    ///
+    /// Returns an error when the public key cannot form a valid signing request.
+    pub fn external_signing_request(
+        &self,
+        public_key: [u8; 32],
+        challenge: &ConnectChallenge,
+    ) -> Result<DeviceSigningRequest, IdentityError> {
+        let (platform, device_family) = self.identity_metadata(challenge.protocol);
+        DeviceSigningRequest::new(
+            public_key,
+            &challenge.nonce,
+            &platform,
+            device_family.as_deref(),
+            self.auth.as_ref().and_then(ConnectAuth::signature_token),
+            challenge.issued_at_ms,
+        )
+    }
+
     #[must_use]
     pub fn auth(mut self, value: ConnectAuth) -> Self {
         self.auth = Some(value);
@@ -404,7 +429,18 @@ impl NodeConnectOptions {
         self
     }
 
-    fn finalize_identity(mut self, nonce: &str, issued_at_ms: u64) -> Self {
+    fn identity_metadata(&self, protocol: NodeProtocolVersion) -> (String, Option<String>) {
+        if protocol == NodeProtocolVersion::V3 {
+            (legacy_node_platform(&self.client.platform), None)
+        } else {
+            (
+                self.client.platform.clone(),
+                self.client.device_family.clone(),
+            )
+        }
+    }
+
+    fn finalize_identity(mut self, nonce: &str, issued_at_ms: u64) -> Result<Self, IdentityError> {
         if self.activated {
             self.advertised_caps.clone_from(&self.declared_caps);
             self.advertised_commands.clone_from(&self.declared_commands);
@@ -412,7 +448,7 @@ impl NodeConnectOptions {
                 .clone_from(&self.declared_permissions);
         }
         let Some(identity) = self.identity.take() else {
-            return self;
+            return Ok(self);
         };
         self.device = Some(identity.sign_connect_at(
             nonce,
@@ -420,8 +456,8 @@ impl NodeConnectOptions {
             self.client.device_family.as_deref(),
             self.auth.as_ref().and_then(ConnectAuth::signature_token),
             issued_at_ms,
-        ));
-        self
+        )?);
+        Ok(self)
     }
 }
 
@@ -472,7 +508,16 @@ impl PartialEq for NodeInvocation {
 #[derive(Clone, Debug, PartialEq)]
 pub enum NodeSessionEvent {
     Invocation(NodeInvocation),
-    InvocationCancelled { invoke_id: String, node_id: String },
+    InvocationInput {
+        invoke_id: String,
+        node_id: String,
+        seq: u64,
+        payload_json: String,
+    },
+    InvocationCancelled {
+        invoke_id: String,
+        node_id: String,
+    },
 }
 
 impl NodeInvocation {
@@ -603,18 +648,18 @@ impl NodeClient {
                 .header(&name, &value)
                 .map_err(map_gateway_error)?;
         }
-        let activated = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let activated_for_connect = activated.clone();
-        let protocol = Arc::new(std::sync::atomic::AtomicU32::new(
-            NodeProtocolVersion::V4.number(),
-        ));
-        let protocol_for_connect = protocol.clone();
+        let connection_surface = Arc::new(Mutex::new((
+            false,
+            BTreeSet::new(),
+            NodeProtocolVersion::V4,
+        )));
+        let surface_for_connect = Arc::clone(&connection_surface);
         let mut make_options = make_options;
         let gateway = GatewayClient::connect_with_protocol_fallback(
             gateway_config,
             MINIMUM_NODE_PROTOCOL_VERSION,
             move |challenge, attempt| {
-                let selected_protocol = match attempt {
+                let protocol = match attempt {
                     GatewayConnectAttempt::Current => NodeProtocolVersion::V4,
                     GatewayConnectAttempt::ProtocolFallback { expected_protocol } => {
                         debug_assert_eq!(expected_protocol, MINIMUM_NODE_PROTOCOL_VERSION);
@@ -624,22 +669,24 @@ impl NodeClient {
                 let challenge = ConnectChallenge {
                     nonce: challenge.nonce,
                     issued_at_ms: challenge.issued_at_ms,
-                    protocol: selected_protocol,
+                    protocol,
                 };
                 let options = make_options(challenge.clone());
-                let activated_for_connect = activated_for_connect.clone();
-                let protocol_for_connect = protocol_for_connect.clone();
+                let surface_for_connect = Arc::clone(&surface_for_connect);
                 async move {
                     let options = options
                         .await
                         .map_err(|error| ConnectOptionsError(error.to_string()))?
-                        .for_protocol(selected_protocol)
-                        .finalize_identity(&challenge.nonce, challenge.issued_at_ms);
-                    activated_for_connect
-                        .store(options.activated, std::sync::atomic::Ordering::Relaxed);
-                    protocol_for_connect.store(
-                        selected_protocol.number(),
-                        std::sync::atomic::Ordering::Relaxed,
+                        .for_protocol(protocol);
+                    let options = options
+                        .finalize_identity(&challenge.nonce, challenge.issued_at_ms)
+                        .map_err(|error| ConnectOptionsError(error.to_string()))?;
+                    *surface_for_connect
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = (
+                        options.activated,
+                        options.advertised_commands.iter().cloned().collect(),
+                        protocol,
                     );
                     serde_json::to_value(options)
                         .map_err(|error| ConnectOptionsError(error.to_string()))
@@ -649,10 +696,10 @@ impl NodeClient {
         .await
         .map_err(map_gateway_error)?;
 
-        let protocol = match protocol.load(std::sync::atomic::Ordering::Relaxed) {
-            3 => NodeProtocolVersion::V3,
-            _ => NodeProtocolVersion::V4,
-        };
+        let (activated, advertised_commands, protocol) = connection_surface
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if gateway.hello()["protocol"].as_u64() != Some(u64::from(protocol.number())) {
             return Err(ClientError::InvalidFrame(
                 "Gateway hello protocol did not match the node connect envelope".into(),
@@ -660,7 +707,8 @@ impl NodeClient {
         }
         Ok(NodeSession {
             gateway,
-            activated: activated.load(std::sync::atomic::Ordering::Relaxed),
+            activated,
+            advertised_commands: Arc::new(advertised_commands),
             protocol,
             runtime_marker: Arc::new(()),
         })
@@ -675,6 +723,7 @@ struct ConnectOptionsError(String);
 pub struct NodeSession {
     gateway: GatewaySession,
     activated: bool,
+    advertised_commands: Arc<BTreeSet<String>>,
     protocol: NodeProtocolVersion,
     runtime_marker: Arc<()>,
 }
@@ -685,6 +734,10 @@ impl NodeSession {
             Arc::as_ptr(&self.runtime_marker) as usize,
             Arc::downgrade(&self.runtime_marker),
         )
+    }
+
+    pub(crate) fn advertises_command(&self, command: &str) -> bool {
+        self.advertised_commands.contains(command)
     }
 
     #[must_use]
@@ -703,6 +756,16 @@ impl NodeSession {
         self.protocol
     }
 
+    /// Return the issued device token from `hello-ok`, when the Gateway supplied
+    /// one. Embeddings remain responsible for secure persistence and for
+    /// selecting it on a later connection attempt.
+    #[must_use]
+    pub fn issued_device_token(&self) -> Option<&str> {
+        self.hello()["auth"]["deviceToken"]
+            .as_str()
+            .filter(|token| !token.is_empty())
+    }
+
     #[must_use]
     pub fn subscribe(&self) -> EventSubscription {
         self.gateway.subscribe()
@@ -716,7 +779,7 @@ impl NodeSession {
         self.gateway.next_event().await.map_err(map_gateway_error)
     }
 
-    /// Receive the next invocation or cancellation event for this node.
+    /// Receive the next invocation, ordered input, or cancellation event for this node.
     /// # Errors
     ///
     /// Returns an activation, payload, lag, transport, or closed-session error.
@@ -731,6 +794,9 @@ impl NodeSession {
                     return parse_invocation(event.payload, Instant::now())
                         .map(NodeSessionEvent::Invocation);
                 }
+                "node.invoke.input" => {
+                    return parse_invocation_input(event.payload);
+                }
                 "node.invoke.cancel" => {
                     return parse_invocation_cancel(event.payload);
                 }
@@ -742,7 +808,7 @@ impl NodeSession {
     /// Receive the next authorized node invocation.
     ///
     /// Embeddings that execute more than one invocation concurrently should use
-    /// [`Self::next_node_event`] so Gateway cancellation events are not discarded.
+    /// [`Self::next_node_event`] so Gateway input and cancellation events are not discarded.
     /// # Errors
     ///
     /// Returns an activation, payload, lag, transport, or closed-session error.
@@ -766,24 +832,7 @@ impl NodeSession {
         if !self.activated {
             return Err(ClientError::NotActivated);
         }
-        let params = match result {
-            InvocationResult::Success(payload) => json!({
-                "id": invocation.id,
-                "nodeId": invocation.node_id,
-                "ok": true,
-                "payload": payload,
-            }),
-            InvocationResult::Failure { code, message } => {
-                let code = require_non_empty_result_field("error code", code)?;
-                let message = require_non_empty_result_field("error message", message)?;
-                json!({
-                    "id": invocation.id,
-                    "nodeId": invocation.node_id,
-                    "ok": false,
-                    "error": { "code": code, "message": message },
-                })
-            }
-        };
+        let params = invocation_result_params(invocation, result)?;
         self.request("node.invoke.result", params).await.map(|_| ())
     }
 
@@ -825,6 +874,30 @@ impl NodeSession {
     }
 }
 
+fn invocation_result_params(
+    invocation: &NodeInvocation,
+    result: InvocationResult,
+) -> Result<Value, ClientError> {
+    Ok(match result {
+        InvocationResult::Success(payload) => json!({
+            "id": invocation.id,
+            "nodeId": invocation.node_id,
+            "ok": true,
+            "payload": payload,
+        }),
+        InvocationResult::Failure { code, message } => {
+            let code = require_non_empty_result_field("error code", code)?;
+            let message = require_non_empty_result_field("error message", message)?;
+            json!({
+                "id": invocation.id,
+                "nodeId": invocation.node_id,
+                "ok": false,
+                "error": { "code": code, "message": message },
+            })
+        }
+    })
+}
+
 fn map_gateway_error(error: GatewayClientError) -> ClientError {
     match error {
         GatewayClientError::InvalidUrl(error) | GatewayClientError::InvalidHeader(error) => {
@@ -861,6 +934,34 @@ fn map_gateway_error(error: GatewayClientError) -> ClientError {
         GatewayClientError::InvalidFrame(error) => ClientError::InvalidFrame(error),
         GatewayClientError::EventLagged(count) => ClientError::EventLagged(count),
     }
+}
+
+fn parse_invocation_input(payload: Value) -> Result<NodeSessionEvent, ClientError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    #[serde(rename_all = "camelCase")]
+    struct Payload {
+        id: String,
+        node_id: String,
+        seq: u64,
+        #[serde(rename = "payloadJSON")]
+        json: String,
+    }
+
+    let payload: Payload = serde_json::from_value(payload).map_err(|error| {
+        ClientError::InvalidFrame(format!("invalid node.invoke.input: {error}"))
+    })?;
+    if payload.json.len() > crate::duplex::MAX_INPUT_FRAME_BYTES {
+        return Err(ClientError::InvalidFrame(
+            "node.invoke.input payloadJSON exceeds 16 KiB".into(),
+        ));
+    }
+    Ok(NodeSessionEvent::InvocationInput {
+        invoke_id: require_non_empty_result_field("input invocation id", payload.id)?,
+        node_id: require_non_empty_result_field("input invocation node id", payload.node_id)?,
+        seq: payload.seq,
+        payload_json: payload.json,
+    })
 }
 
 fn parse_invocation_cancel(payload: Value) -> Result<NodeSessionEvent, ClientError> {
@@ -999,6 +1100,67 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shared_invocation_lifecycle_contract_matches_openclaw() {
+        let fixture: Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../test/fixtures/node-invoke-lifecycle-contract.json"
+        )))
+        .expect("valid node invocation lifecycle fixture");
+        assert_eq!(fixture["version"], 1);
+
+        let invocation = parse_invocation(fixture["request"]["canonical"].clone(), Instant::now())
+            .expect("canonical invocation request");
+        assert_eq!(invocation.id, "invoke-1");
+        assert_eq!(invocation.command, "example.duplex");
+        assert_eq!(invocation.params, Value::Null);
+        assert_eq!(invocation.timeout_ms, Some(0));
+        assert_eq!(invocation.idempotency_key.as_deref(), Some("idem-1"));
+        assert_eq!(invocation.session_key.as_deref(), Some("agent:main:main"));
+        assert!(parse_invocation(fixture["request"]["invalid"].clone(), Instant::now(),).is_err());
+
+        let inputs = fixture["input"]["canonical"]
+            .as_array()
+            .expect("canonical input array");
+        for (seq, payload) in inputs.iter().enumerate() {
+            assert_eq!(
+                parse_invocation_input(payload.clone()).expect("canonical invocation input"),
+                NodeSessionEvent::InvocationInput {
+                    invoke_id: "invoke-1".into(),
+                    node_id: "node-1".into(),
+                    seq: seq as u64,
+                    payload_json: if seq == 0 { "one" } else { "two" }.into(),
+                }
+            );
+        }
+        assert!(parse_invocation_input(fixture["input"]["invalid"].clone()).is_err());
+
+        let success = invocation_result_params(
+            &invocation,
+            InvocationResult::success(fixture["results"]["success"]["payload"].clone()),
+        )
+        .expect("canonical success result");
+        assert_eq!(success, fixture["results"]["success"]);
+        let failure = &fixture["results"]["failure"];
+        let failed_invocation = NodeInvocation::new(
+            failure["id"].as_str().expect("failure invocation id"),
+            failure["nodeId"].as_str().expect("failure node id"),
+            "example.duplex",
+            Value::Null,
+        );
+        let failure_params = invocation_result_params(
+            &failed_invocation,
+            InvocationResult::failure(
+                failure["error"]["code"].as_str().expect("failure code"),
+                failure["error"]["message"]
+                    .as_str()
+                    .expect("failure message"),
+            ),
+        )
+        .expect("canonical failure result");
+        assert_eq!(failure_params, failure.clone());
+    }
+
+    #[test]
     fn parses_gateway_invocation_cancellation() {
         assert_eq!(
             parse_invocation_cancel(json!({"invokeId": "invoke-1", "nodeId": "node-1"}))
@@ -1010,6 +1172,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn external_signing_request_uses_final_connect_metadata_and_auth() {
+        let options = NodeConnectOptions::new("test", "Windows")
+            .device_family("Desktop")
+            .auth(ConnectAuth::token("test-token"));
+        let public_key = ed25519_dalek::SigningKey::from_bytes(&[7; 32])
+            .verifying_key()
+            .to_bytes();
+        let request = options
+            .external_signing_request(
+                public_key,
+                &ConnectChallenge {
+                    nonce: "nonce-1".into(),
+                    issued_at_ms: 1_700_000_000_000,
+                    protocol: NodeProtocolVersion::V4,
+                },
+            )
+            .expect("external signing request");
+        assert_eq!(
+            request.payload(),
+            format!(
+                "v3|{}|node-host|node|node||{}|test-token|nonce-1|windows|desktop",
+                request.device_id(),
+                request.signed_at()
+            )
+        );
+    }
     #[test]
     fn invocation_accepts_gateway_null_params_and_session_key() {
         let invocation = parse_invocation(
