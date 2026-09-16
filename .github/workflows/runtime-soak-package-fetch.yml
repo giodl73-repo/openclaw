@@ -1,0 +1,37 @@
+name: Runtime Soak Package Fetch
+
+on:
+  push:
+    branches:
+      - user/giodl/runtime-soak-package-build
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download and verify OpenClaw package
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            --output openclaw-2026.9.4.tgz \
+            https://registry.npmjs.org/openclaw/-/openclaw-2026.9.4.tgz
+          echo "4f1f656770461d4677dea755b1899cba12b912b06798c89a59e2f0c18688b761  openclaw-2026.9.4.tgz" |
+            sha256sum --check --strict
+          actual_integrity="$(
+            openssl dgst -sha512 -binary openclaw-2026.9.4.tgz |
+              openssl base64 -A
+          )"
+          test "$actual_integrity" = \
+            "lTQpEEe1Xm3u2PCHaPEr+vP8paGk1vLdHuzdItsNToaLI6hAqRVvgJYg+GxukJhETJp4tPy/S1Gftl4KuB8n7A=="
+      - name: Upload verified package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-2026.9.4-npm-tarball
+          path: openclaw-2026.9.4.tgz
+          if-no-files-found: error
+          retention-days: 1
