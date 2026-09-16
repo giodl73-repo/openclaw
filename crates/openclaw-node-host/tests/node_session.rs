@@ -103,7 +103,8 @@ async fn serve_public_runtime_authority(listener: TcpListener, handler_entered: 
     send_json(
         &mut socket,
         json!({"type":"res","id":connect["id"],"ok":true,
-            "payload":{"type":"hello-ok","protocol":4}}),
+            "payload":{"type":"hello-ok","protocol":4,
+                "auth":{"deviceToken":"issued-device-token"}}}),
     )
     .await;
     send_json(
