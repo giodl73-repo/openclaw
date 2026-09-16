@@ -269,7 +269,9 @@ async fn wire_cancellation_during_admission_prevents_handler_construction() {
                     "command":"example.status"}}),
         )
         .await;
-        server_admission_started.notified().await;
+        tokio::time::timeout(Duration::from_secs(1), server_admission_started.notified())
+            .await
+            .expect("admission policy did not reach its authority boundary");
         send_json(
             &mut socket,
             json!({"type":"event","event":"node.invoke.cancel",
