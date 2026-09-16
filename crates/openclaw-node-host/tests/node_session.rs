@@ -240,6 +240,75 @@ async fn runtime_rejects_buffered_invocation_after_session_retirement_is_request
 }
 
 #[tokio::test]
+async fn wire_cancellation_during_admission_prevents_handler_construction() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let admission_started = Arc::new(Notify::new());
+    let server_admission_started = Arc::clone(&admission_started);
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(tcp).await.unwrap();
+        send_json(
+            &mut socket,
+            json!({"type":"event","event":"connect.challenge",
+                "payload":{"nonce":"node-nonce","ts":1_700_000_000_123_u64}}),
+        )
+        .await;
+        let connect = receive_json(&mut socket).await;
+        send_json(
+            &mut socket,
+            json!({"type":"res","id":connect["id"],"ok":true,
+                "payload":{"type":"hello-ok","protocol":4}}),
+        )
+        .await;
+        send_json(
+            &mut socket,
+            json!({"type":"event","event":"node.invoke.request",
+                "payload":{"id":"cancel-during-admission","nodeId":"node-1",
+                    "command":"example.status"}}),
+        )
+        .await;
+        server_admission_started.notified().await;
+        send_json(
+            &mut socket,
+            json!({"type":"event","event":"node.invoke.cancel",
+                "payload":{"invokeId":"cancel-during-admission","nodeId":"node-1"}}),
+        )
+        .await;
+        let result = receive_json(&mut socket).await;
+        assert_eq!(result["method"], "node.invoke.result");
+        assert_eq!(result["params"]["id"], "cancel-during-admission");
+        assert_eq!(result["params"]["ok"], false);
+        assert_eq!(result["params"]["error"]["code"], "INVOCATION_CANCELLED");
+        acknowledge(&mut socket, &result).await;
+        socket.close(None).await.unwrap();
+    });
+
+    let policy_started = Arc::clone(&admission_started);
+    let handler_constructed = Arc::new(AtomicBool::new(false));
+    let handler_state = Arc::clone(&handler_constructed);
+    let runtime = CommandRuntime::builder()
+        .admission_policy(move |context| {
+            policy_started.notify_one();
+            async move {
+                context.cancellation.cancelled().await;
+                Ok::<(), HandlerError>(())
+            }
+        })
+        .command("example.status", move |_context| {
+            handler_state.store(true, Ordering::SeqCst);
+            async { Ok(Value::Null) }
+        })
+        .build()
+        .unwrap();
+    let session = connect_with_command(address, "example.status").await;
+
+    assert!(runtime.run(session).await.is_err());
+    server.await.unwrap();
+    assert!(!handler_constructed.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
 async fn node_protocol_fallback_uses_fresh_legacy_connect_material_and_recovers_to_v4() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
