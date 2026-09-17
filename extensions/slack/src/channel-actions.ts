@@ -62,6 +62,15 @@ export function createSlackActions(
   options?: { invoke?: SlackActionInvoke },
 ): ChannelMessageActionAdapter {
   return {
+    providerOwnedReadGates: true,
+    readAuthorityActions: [
+      "read",
+      "reactions",
+      "list-pins",
+      "member-info",
+      "emoji-list",
+      "download-file",
+    ],
     describeMessageTool: describeSlackMessageTool,
     extractToolSend: ({ args }) => extractSlackToolSend(args),
     isToolDeliveryAction: ({ args }) =>

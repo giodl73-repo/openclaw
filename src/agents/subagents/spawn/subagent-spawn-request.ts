@@ -2,12 +2,9 @@ import crypto from "node:crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { SubagentLifecycleHookRunner } from "../../../plugins/hooks.js";
-import {
-  isValidAgentId,
-  normalizeAgentId,
-  parseAgentSessionKey,
-} from "../../../routing/session-key.js";
+import { isValidAgentId, normalizeAgentId } from "../../../routing/session-key.js";
 import { listAgentIds } from "../../agent-scope-config.js";
+import { resolveSessionAgentId } from "../../agent-scope.js";
 import { reserveChildAdmissionSlot } from "../../child-admission.js";
 import { resolveSpawnAdmission, resolveSpawnMode } from "../../spawn-plan.js";
 import { listSwarmRunsForGroup } from "../registry/subagent-registry.js";
@@ -24,7 +21,12 @@ import { getSubagentSpawnDeps } from "./subagent-spawn-deps.js";
 import { resolveSubagentSpawnOwnership } from "./subagent-spawn-ownership.js";
 import { resolveConfiguredSubagentRunTimeoutSeconds } from "./subagent-spawn-plan.js";
 import { loadSubagentConfig } from "./subagent-spawn-session-patch.js";
-import { resolveInternalSessionKey, resolveMainSessionAlias } from "./subagent-spawn.runtime.js";
+import {
+  loadSessionEntry,
+  resolveGatewaySessionStoreTarget,
+  resolveInternalSessionKey,
+  resolveMainSessionAlias,
+} from "./subagent-spawn.runtime.js";
 import { normalizeSubagentTaskName } from "./subagent-task-name.js";
 
 type ResolvedSubagentSpawnRequest = {
@@ -33,6 +35,7 @@ type ResolvedSubagentSpawnRequest = {
     spawnMode: ReturnType<typeof resolveSpawnMode>;
     cleanup: "delete" | "keep";
     expectsCompletionMessage: boolean;
+    completionRequesterSessionId?: string;
   };
   runtime: {
     hookRunner: SubagentLifecycleHookRunner | null;
@@ -49,6 +52,7 @@ type ResolvedSubagentSpawnRequest = {
     groupId?: string;
     schedulerGroupKey?: string;
     launchReplayKey?: string;
+    soleImplicitMember: boolean;
     reservationPending: boolean;
   };
   admission: {
@@ -75,17 +79,13 @@ function rejectSubagentSpawnRequest(
 export function resolveSubagentSpawnRequest(
   params: SpawnSubagentParams,
   ctx: SpawnSubagentContext,
-  requestedAgent: {
-    initial?: string;
-    applyDefault: (agentId?: string) => string | undefined;
-  },
 ): ResolveSubagentSpawnRequestResult {
+  const requestedAgentId = params.agentId?.trim();
   const taskNameResult = normalizeSubagentTaskName(params.taskName);
   if (taskNameResult.error) {
     return rejectSubagentSpawnRequest("error", taskNameResult.error);
   }
   const taskName = taskNameResult.taskName;
-  const requestedAgentId = requestedAgent.initial;
 
   // Reject malformed agentId before normalizeAgentId can mangle it.
   // Without this gate, error-message strings like "Agent not found: xyz" pass
@@ -94,7 +94,7 @@ export function resolveSubagentSpawnRequest(
   if (requestedAgentId && !isValidAgentId(requestedAgentId)) {
     return rejectSubagentSpawnRequest(
       "error",
-      `Invalid agentId "${requestedAgentId}". Agent IDs must match [a-z0-9][a-z0-9_-]{0,63}. Use agents_list to discover valid targets.`,
+      `Invalid agentId "${requestedAgentId}". Agent IDs must match [a-z0-9][a-z0-9_-]{0,63}.`,
     );
   }
   const requestThreadBinding = params.thread === true;
@@ -102,6 +102,18 @@ export function resolveSubagentSpawnRequest(
     requestedMode: params.mode,
     threadRequested: requestThreadBinding,
   });
+  if (
+    params.completionTarget === "parent" &&
+    (params.collect ||
+      requestThreadBinding ||
+      spawnMode !== "run" ||
+      params.expectsCompletionMessage === false)
+  ) {
+    return rejectSubagentSpawnRequest(
+      "error",
+      'sessions_spawn completionTarget="parent" requires mode="run", thread=false, collect=false, and completion notifications enabled.',
+    );
+  }
   if (params.collect && (requestThreadBinding || spawnMode === "session")) {
     return rejectSubagentSpawnRequest(
       "error",
@@ -112,7 +124,7 @@ export function resolveSubagentSpawnRequest(
     return rejectSubagentSpawnRequest(
       "error",
       'sessions_spawn(mode="session") requires thread=true so the subagent can stay bound to a channel thread. ' +
-        'Retry with { mode: "session", thread: true } on a channel that supports threads, use mode="run" for one-shot work, or use sessions_send(sessionKey=...) to keep talking to a persistent session without thread binding.',
+        'Retry with { mode: "session", thread: true } on a channel that supports threads, or use mode="run" for one-shot work.',
     );
   }
   const cleanup =
@@ -158,9 +170,32 @@ export function resolveSubagentSpawnRequest(
     completionOwnerKey: ctx.completionOwnerKey,
   });
 
-  const requesterAgentId = normalizeAgentId(
-    ctx.requesterAgentIdOverride ?? parseAgentSessionKey(requesterInternalKey)?.agentId,
-  );
+  // Bind private results to the admitted parent incarnation; a reset must not
+  // transfer a retained child result to a replacement session at the same key.
+  let completionRequesterSessionId: string | undefined;
+  if (params.completionTarget === "parent") {
+    const target = resolveGatewaySessionStoreTarget({
+      cfg,
+      key: ownership.completionRequesterSessionKey,
+    });
+    completionRequesterSessionId = loadSessionEntry({
+      storePath: target.storePath,
+      sessionKey: target.canonicalKey,
+      clone: false,
+    })?.sessionId;
+    if (!completionRequesterSessionId) {
+      return rejectSubagentSpawnRequest(
+        "error",
+        "Private completion requires an existing requester session. Retry from an active session.",
+      );
+    }
+  }
+
+  const requesterAgentId = resolveSessionAgentId({
+    config: cfg,
+    sessionKey: requesterInternalKey,
+    agentId: ctx.requesterAgentIdOverride,
+  });
   const swarmConfig = resolveSwarmConfig(cfg, requesterAgentId);
   const hasSwarmParams =
     params.collect !== undefined ||
@@ -192,7 +227,7 @@ export function resolveSubagentSpawnRequest(
   const usingDefaultAgentId =
     params.collect === true && !requestedAgentId && Boolean(swarmConfig.defaultAgentId);
   const effectiveRequestedAgentId = usingDefaultAgentId
-    ? requestedAgent.applyDefault(swarmConfig.defaultAgentId)
+    ? swarmConfig.defaultAgentId
     : requestedAgentId;
   if (usingDefaultAgentId) {
     if (!isValidAgentId(effectiveRequestedAgentId)) {
@@ -213,12 +248,12 @@ export function resolveSubagentSpawnRequest(
       (requesterRunId ? `swarm:${requesterInternalKey}:${requesterRunId}` : undefined))
     : undefined;
   const swarmSchedulerGroupKey = swarmGroupId
-    ? JSON.stringify([requesterInternalKey, swarmGroupId])
+    ? JSON.stringify([requesterAgentId, requesterInternalKey, swarmGroupId])
     : undefined;
   const resolveAdmission = (pendingChildren = 0) => {
     const collectorRuns = params.collect
       ? swarmGroupId
-        ? listSwarmRunsForGroup(swarmGroupId, requesterInternalKey)
+        ? listSwarmRunsForGroup(swarmGroupId, requesterInternalKey, requesterAgentId)
         : []
       : undefined;
     return resolveSpawnAdmission({
@@ -246,6 +281,9 @@ export function resolveSubagentSpawnRequest(
         resolveAdmission,
       });
   const admission = admissionReservation ?? resolveAdmission();
+  if (admissionReservation?.ok) {
+    ctx.onSpawnEffectsStart?.();
+  }
   if (!admission.ok) {
     return rejectSubagentSpawnRequest(
       "forbidden",
@@ -272,15 +310,22 @@ export function resolveSubagentSpawnRequest(
         .slice(0, 32)}`
     : crypto.randomUUID();
   let reservationPending = false;
+  let soleImplicitMember = false;
   if (params.collect && swarmGroupId && swarmSchedulerGroupKey) {
-    const groupRuns = listSwarmRunsForGroup(swarmGroupId, requesterInternalKey);
+    const groupRuns = listSwarmRunsForGroup(swarmGroupId, requesterInternalKey, requesterAgentId);
+    soleImplicitMember = !explicitSwarmGroupId && !swarmLaunchReplayKey && groupRuns.length === 0;
+    // Swarm reservation can reconcile existing lane state even when it rejects a duplicate.
+    ctx.onSpawnEffectsStart?.();
     if (
       !reserveSwarmRun({
         groupId: swarmSchedulerGroupKey,
         runId: childIdem,
         maxConcurrent: swarmConfig.maxConcurrent,
         activeRunIds: groupRuns
-          .filter((entry) => entry.execution.status === "running")
+          .filter(
+            (entry) =>
+              entry.execution.status === "running" || entry.execution.status === "interrupted",
+          )
           .map((entry) => entry.schedulerSlotId ?? entry.runId),
       })
     ) {
@@ -299,6 +344,7 @@ export function resolveSubagentSpawnRequest(
         spawnMode,
         cleanup,
         expectsCompletionMessage,
+        completionRequesterSessionId,
       },
       runtime: {
         hookRunner,
@@ -315,6 +361,7 @@ export function resolveSubagentSpawnRequest(
         groupId: swarmGroupId,
         schedulerGroupKey: swarmSchedulerGroupKey,
         launchReplayKey: swarmLaunchReplayKey,
+        soleImplicitMember,
         reservationPending,
       },
       admission: {

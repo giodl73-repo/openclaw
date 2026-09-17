@@ -12,15 +12,21 @@ import {
   loadSessionEntry,
   loadTranscriptEvents,
   replaceSessionEntry,
+  replaceSessionEntrySync,
 } from "./session-accessor.js";
-import { planSessionLifecycleArtifactCleanup } from "./session-accessor.sqlite-lifecycle-state.js";
+import { planSessionLifecycleArtifactCleanup } from "./session-accessor.sqlite-lifecycle-artifacts.js";
 import { replaceTranscriptEvents } from "./session-accessor.sqlite-transcript-write.js";
 import { resolveSqliteTargetFromSessionStorePath } from "./session-sqlite-target.js";
+import { runByteLimitedArchiveCleanupFixture } from "./test-helpers.js";
 import type { SessionEntry } from "./types.js";
 
 const archiveMaterializationHook = vi.hoisted(() => ({
   beforeMaterialize: undefined as (() => Promise<void>) | undefined,
   afterMaterialize: undefined as (() => void) | undefined,
+  onMaterialize: undefined as ((sessionIds: string[]) => void) | undefined,
+}));
+const archivePublicationHook = vi.hoisted(() => ({
+  failNext: undefined as Error | undefined,
 }));
 
 // Place test mutations after the real Worker finishes but before cleanup opens
@@ -33,9 +39,28 @@ vi.mock("./session-accessor.sqlite-archive.js", async (importOriginal) => {
       ...args: Parameters<typeof actual.materializeSessionStateDeletePlans>
     ) => {
       await archiveMaterializationHook.beforeMaterialize?.();
+      archiveMaterializationHook.onMaterialize?.(args[0].map((plan) => plan.sessionId));
       const result = await actual.materializeSessionStateDeletePlans(...args);
       archiveMaterializationHook.afterMaterialize?.();
       return result;
+    },
+  };
+});
+
+vi.mock("./session-accessor.sqlite-archive-store.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./session-accessor.sqlite-archive-store.js")>();
+  return {
+    ...actual,
+    publishSessionStateArchives: async (
+      ...args: Parameters<typeof actual.publishSessionStateArchives>
+    ) => {
+      const error = archivePublicationHook.failNext;
+      archivePublicationHook.failNext = undefined;
+      if (error) {
+        throw error;
+      }
+      return await actual.publishSessionStateArchives(...args);
     },
   };
 });
@@ -54,6 +79,8 @@ describe("SQLite lifecycle cleanup races", () => {
   afterEach(() => {
     archiveMaterializationHook.beforeMaterialize = undefined;
     archiveMaterializationHook.afterMaterialize = undefined;
+    archiveMaterializationHook.onMaterialize = undefined;
+    archivePublicationHook.failNext = undefined;
     closeOpenClawAgentDatabasesForTest();
   });
 
@@ -673,6 +700,172 @@ describe("SQLite lifecycle cleanup races", () => {
     });
     await expect(writer).resolves.toMatchObject({ label: "progressed" });
     expect(progressedDuringMaterialization).toBe(true);
+  });
+
+  it("reports zero maintenance removals when final compare-and-delete does not commit", async () => {
+    const sessionKey = "agent:main:subagent:maintenance-compare-failed";
+    const entry = { sessionId: "maintenance-compare-failed", updatedAt: 1 };
+    await replaceSessionEntry({ sessionKey, storePath }, entry);
+    const databasePath = resolveSqliteTargetFromSessionStorePath(storePath, {
+      agentId: "main",
+    }).path;
+    if (!databasePath) {
+      throw new Error("expected maintenance race database path");
+    }
+    const database = openOpenClawAgentDatabase({ agentId: "main", path: databasePath });
+    let materializations = 0;
+    archiveMaterializationHook.afterMaterialize = () => {
+      materializations += 1;
+      if (materializations !== 1) {
+        return;
+      }
+      const changedEntry = { ...entry, label: "changed", updatedAt: 2 };
+      database.db
+        .prepare("UPDATE session_nodes SET entry_json = ?, updated_at = ? WHERE session_key = ?")
+        .run(JSON.stringify(changedEntry), changedEntry.updatedAt, sessionKey);
+    };
+
+    const result = await applySessionEntryLifecycleMutation({
+      storePath,
+      maintenanceOverride: { mode: "enforce", pruneAfterMs: 1 },
+    });
+
+    expect(result).toMatchObject({
+      beforeCount: 1,
+      afterCount: 1,
+      removedEntries: 0,
+      removedSessionKeys: [],
+      modelRunPruned: 0,
+      pruned: 0,
+      capped: 0,
+    });
+    expect(materializations).toBe(1);
+    expect(loadSessionEntry({ sessionKey, storePath })).toMatchObject({ label: "changed" });
+  });
+
+  it("retains committed maintenance counts when archive publication fails", async () => {
+    const sessionKey = "agent:main:subagent:maintenance-publication-failed";
+    await replaceSessionEntry(
+      { sessionKey, storePath },
+      { sessionId: "maintenance-publication-failed", updatedAt: 1 },
+    );
+    archivePublicationHook.failNext = new Error("injected archive publication failure");
+
+    const result = await applySessionEntryLifecycleMutation({
+      storePath,
+      maintenanceOverride: { mode: "enforce", pruneAfterMs: 1 },
+    });
+
+    expect(result).toMatchObject({
+      beforeCount: 1,
+      afterCount: 0,
+      modelRunPruned: 0,
+      pruned: 1,
+      capped: 0,
+    });
+    expect(loadSessionEntry({ sessionKey, storePath })).toBeUndefined();
+  });
+
+  it("splits byte-limited cleanup into real worker batches", async () => {
+    const batches: string[][] = [];
+    archiveMaterializationHook.onMaterialize = (ids) => void batches.push(ids);
+    const ids = await runByteLimitedArchiveCleanupFixture(storePath);
+    expect(batches.toSorted((left, right) => left[0]!.localeCompare(right[0]!))).toEqual(
+      ids.toSorted((left, right) => left.localeCompare(right)).map((id) => [id]),
+    );
+  });
+  it("continues a maintenance batch after one entry changes", async () => {
+    const entryCount = 66;
+    const historicalSessionId = "maintenance-batch-historical-session";
+    const sessionKeyById = new Map<string, string>();
+    const sessionKeys = Array.from(
+      { length: entryCount },
+      (_, index) => `agent:main:subagent:maintenance-batch-${String(index).padStart(2, "0")}`,
+    );
+    for (const [index, sessionKey] of sessionKeys.entries()) {
+      const sessionId = `maintenance-batch-session-${String(index).padStart(2, "0")}`;
+      sessionKeyById.set(sessionId, sessionKey);
+      await replaceSessionEntry(
+        { sessionKey, storePath },
+        { sessionId, updatedAt: index === entryCount - 1 ? Date.now() : index + 1 },
+      );
+      await replaceTranscriptEvents({ sessionKey, sessionId, storePath }, [
+        { type: "session", id: sessionId, content: `batch transcript ${index}` },
+      ]);
+    }
+    const historicalOwnerKey = sessionKeys[entryCount - 2] ?? "";
+    await replaceTranscriptEvents(
+      { sessionKey: historicalOwnerKey, sessionId: historicalSessionId, storePath },
+      [{ type: "session", id: historicalSessionId, content: "historical batch transcript" }],
+    );
+
+    const batchSizes: number[] = [];
+    let currentBatchSessionIds: string[] = [];
+    let materializations = 0;
+    archiveMaterializationHook.onMaterialize = (sessionIds) => {
+      currentBatchSessionIds = sessionIds;
+      batchSizes.push(sessionIds.length);
+    };
+    let racedKey: string | undefined;
+    archiveMaterializationHook.afterMaterialize = () => {
+      materializations += 1;
+      if (materializations !== 2) {
+        return;
+      }
+      racedKey = sessionKeyById.get(currentBatchSessionIds[0] ?? "");
+      if (!racedKey) {
+        throw new Error("expected a maintenance entry in the second batch");
+      }
+      const current = loadSessionEntry({ sessionKey: racedKey, storePath });
+      if (!current) {
+        throw new Error("expected the raced maintenance entry to remain");
+      }
+      replaceSessionEntrySync(
+        { sessionKey: racedKey, storePath },
+        { ...current, label: "changed during batch materialization" },
+      );
+    };
+
+    const result = await applySessionEntryLifecycleMutation({
+      storePath,
+      maintenanceOverride: {
+        mode: "enforce",
+        maxEntries: entryCount,
+        pruneAfterMs: 60_000,
+      },
+    });
+
+    expect(batchSizes).toEqual([64, 2]);
+    expect(result).toMatchObject({
+      beforeCount: entryCount,
+      afterCount: 2,
+      modelRunPruned: 0,
+      pruned: 64,
+      capped: 0,
+    });
+    expect(loadSessionEntry({ sessionKey: racedKey ?? "", storePath })).toMatchObject({
+      label: "changed during batch materialization",
+    });
+    expect(loadSessionEntry({ sessionKey: sessionKeys.at(-1) ?? "", storePath })).toBeDefined();
+    await expect(
+      loadTranscriptEvents({
+        sessionKey: historicalOwnerKey,
+        sessionId: historicalSessionId,
+        storePath,
+      }),
+    ).resolves.toHaveLength(0);
+    const databasePath = resolveSqliteTargetFromSessionStorePath(storePath, {
+      agentId: "main",
+    }).path;
+    if (!databasePath) {
+      throw new Error("expected maintenance batch database path");
+    }
+    const database = openOpenClawAgentDatabase({ agentId: "main", path: databasePath });
+    expect(
+      database.db
+        .prepare("SELECT 1 AS present FROM session_nodes WHERE session_key = ?")
+        .get(historicalOwnerKey),
+    ).toBeDefined();
   });
 
   it("retains unplanned historical windows behind a placeholder node", async () => {

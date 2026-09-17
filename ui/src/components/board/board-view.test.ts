@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createDeferred as deferred } from "../../../../test/helpers/promise.js";
 import type { BoardSnapshot } from "../../lib/board/types.ts";
 // Side-effect import: registers the custom elements mount() depends on
 // without relying on transitive fixture imports.
@@ -8,8 +9,6 @@ import { applyBoardFixtureOps } from "../../test-helpers/board-fixture.ts";
 import {
   boardWidget,
   callbacks,
-  deferred,
-  deferredValue,
   gatewayContext,
   mount,
   settleCells,
@@ -41,7 +40,7 @@ describe("openclaw-board-view", () => {
     }
   });
 
-  it("renders the shared sandbox for an empty same-origin gateway URL", async () => {
+  it("renders an ungranted widget in the shared sandbox without popup authority", async () => {
     const view = await mount({
       context: gatewayContext(null),
       snapshot: snapshot({
@@ -58,12 +57,18 @@ describe("openclaw-board-view", () => {
 
     const frame = view.querySelector("iframe");
     expect(frame?.getAttribute("src")).toContain(":18790/mcp-app-sandbox");
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts allow-same-origin allow-forms");
+    expect(frame?.getAttribute("sandbox")).not.toContain("allow-popups");
     expect(frame?.getAttribute("loading")).toBe("eager");
     expect(view.querySelector('[data-test-id="board-widget-error"]')).toBeNull();
   });
 
   it("bounds the wait for a sandbox proxy that never becomes ready", async () => {
     vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<!doctype html><p>Ready document</p>")),
+    );
     const frameLoadFailed = vi.fn(async () => undefined);
     const view = await mount({
       context: gatewayContext(null),
@@ -94,7 +99,7 @@ describe("openclaw-board-view", () => {
     const fetchMock = vi.fn(async () => new Response("<!doctype html><p>weather</p>"));
     vi.stubGlobal("fetch", fetchMock);
     const view = await mount({
-      context: gatewayContext({ request: firstRequest }),
+      context: gatewayContext({ request: firstRequest }, "/control"),
       snapshot: snapshot({
         widgets: [
           boardWidget({
@@ -125,7 +130,7 @@ describe("openclaw-board-view", () => {
     });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     const bridgeChannel = new MessageChannel();
-    const initialized = new Promise<void>((resolve) => {
+    const initialized = new Promise<{ controlUiBaseUrl?: string }>((resolve) => {
       bridgeChannel.port2.addEventListener("message", (event) => {
         if (event.data?.type !== "openclaw:widget-host-init") {
           return;
@@ -137,12 +142,13 @@ describe("openclaw-board-view", () => {
           },
           [],
         );
-        resolve();
+        resolve(event.data as { controlUiBaseUrl?: string });
       });
     });
     bridgeChannel.port2.start();
     send({ type: "openclaw:widget-bridge-port-offer" }, [bridgeChannel.port1]);
-    await initialized;
+    const hostInit = await initialized;
+    expect(hostInit.controlUiBaseUrl).toBe(`${window.location.origin}/control`);
     bridgeChannel.port2.postMessage(
       {
         type: "openclaw:widget-bridge-request",
@@ -161,7 +167,7 @@ describe("openclaw-board-view", () => {
     );
 
     const provider = view.parentElement as ReturnType<typeof createApplicationContextProvider>;
-    provider.setContext(gatewayContext({ request: secondRequest }));
+    provider.setContext(gatewayContext({ request: secondRequest }, "/control"));
     await cell.updateComplete;
     bridgeChannel.port2.postMessage(
       {
@@ -426,8 +432,46 @@ describe("openclaw-board-view", () => {
 
     view.activeTabId = "ops";
     const cells = await settleCells(view);
-    expect(cells).toHaveLength(1);
-    expect(cells[0]?.widget?.name).toBe("ops-only");
+    const visible = cells.filter((cell) => !cell.hidden);
+    expect(visible.map((cell) => cell.widget?.name)).toEqual(["ops-only"]);
+    for (const cell of cells.filter((candidate) => candidate.hidden)) {
+      expect(cell.active).toBe(false);
+      expect(cell.hasAttribute("inert")).toBe(true);
+    }
+  });
+
+  it("refreshes retained widgets and releases removed tabs without mounting unvisited tabs", async () => {
+    const view = await mount({ widgetFrameUrl: (name, revision) => `/${name}/${revision}` });
+    const first = view.querySelector("openclaw-board-widget-cell")!;
+    const frame = first.querySelector("iframe");
+    expect(view.querySelectorAll("openclaw-board-widget-cell")).toHaveLength(2);
+    view.activeTabId = "ops";
+    await settleCells(view);
+    const updated = snapshot({ revision: 2 });
+    updated.widgets[0]!.revision = 3;
+    view.snapshot = updated;
+    await settleCells(view);
+    expect(first.querySelector("iframe")).toBe(frame);
+    expect(frame?.getAttribute("src")).toBe("/alpha/3");
+    view.snapshot = {
+      ...view.snapshot,
+      tabs: view.snapshot.tabs.filter((tab) => tab.tabId !== "main"),
+    };
+    const remaining = await settleCells(view);
+    expect(first.isConnected).toBe(false);
+    expect(remaining.map((cell) => cell.widget?.name)).toEqual(["ops-only"]);
+  });
+
+  it("retires cached documents when the exact agent owner changes", async () => {
+    const view = await mount();
+    view.session = { agentId: "first-agent", sessionKey: "shared-display-key" };
+    const previous = await settleCells(view);
+    view.activeTabId = "ops";
+    await settleCells(view);
+    view.session = { agentId: "second-agent", sessionKey: "shared-display-key" };
+    const current = await settleCells(view);
+    expect(previous.every((cell) => !cell.isConnected)).toBe(true);
+    expect(current.map((cell) => cell.widget?.name)).toEqual(["ops-only"]);
   });
 
   it("hides the tab strip when the board has only one tab", async () => {
@@ -644,7 +688,7 @@ describe("openclaw-board-view", () => {
   it("does not schedule renewal when an in-flight MCP App load resolves after disconnect", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
-    const pending = deferredValue<{
+    const pending = deferred<{
       status: "ready";
       viewId: string;
       expiresAtMs: number;
@@ -669,7 +713,7 @@ describe("openclaw-board-view", () => {
     expect(refreshWidgetAppView).not.toHaveBeenCalled();
   });
 
-  it("shows stale MCP Apps with retry and remove without breaking the board", async () => {
+  it("shows stale MCP Apps with retry and delete without breaking the board", async () => {
     if (!customElements.get("mcp-app-view")) {
       customElements.define("mcp-app-view", class extends HTMLElement {});
     }
@@ -695,7 +739,7 @@ describe("openclaw-board-view", () => {
     const buttons = view.querySelectorAll<HTMLButtonElement>(
       '[data-test-id="board-mcp-app-stale"] button',
     );
-    expect([...buttons].map((button) => button.textContent?.trim())).toEqual(["Retry", "Remove"]);
+    expect([...buttons].map((button) => button.textContent?.trim())).toEqual(["Retry", "Delete"]);
     buttons[1]?.click();
     await vi.waitFor(() =>
       expect(applyOps).toHaveBeenCalledWith([{ kind: "widget_remove", name: "alpha" }]),
@@ -772,20 +816,34 @@ describe("openclaw-board-view", () => {
     await vi.waitFor(() => expect(allow?.disabled).toBe(false));
   });
 
-  it("keeps approval controls after a failed decision and clears the error on refresh", async () => {
-    const grant = vi.fn(async () => {
-      throw new Error("approval service unavailable");
+  it("toasts failed rejection while keeping controls and leaves successful decisions quiet", async () => {
+    const toastHost = document.createElement("openclaw-toast-host");
+    document.body.append(toastHost);
+    const grant = vi.fn(async (_name: string, decision: "granted" | "rejected") => {
+      if (decision === "rejected") {
+        throw new Error("approval service unavailable");
+      }
     });
     const source = snapshot({ widgets: [boardWidget({ grantState: "pending" })] });
     const view = await mount({ snapshot: source, callbacks: callbacks({ grant }) });
-    view.querySelector<HTMLButtonElement>('[data-test-id="board-grant-allow"]')?.click();
+    const allow = view.querySelector<HTMLButtonElement>('[data-test-id="board-grant-allow"]');
+    const reject = view.querySelector<HTMLButtonElement>('[data-test-id="board-grant-reject"]');
+    allow?.click();
+    await vi.waitFor(() => expect(grant).toHaveBeenCalledWith("alpha", "granted"));
+    await vi.waitFor(() => expect(reject?.disabled).toBe(false));
+    expect(toastHost.querySelector(".app-toast")).toBeNull();
+
+    reject?.click();
     await vi.waitFor(() => {
       expect(
         view.querySelector('[data-test-id="board-widget-action-error"]')?.textContent,
       ).toContain("approval service unavailable");
+      expect(toastHost.querySelector(".app-toast__message")?.textContent).toContain(
+        "Could not reject widget access. Try again.",
+      );
     });
-    expect(view.querySelector('[data-test-id="board-grant-allow"]')).not.toBeNull();
-    expect(view.querySelector('[data-test-id="board-grant-reject"]')).not.toBeNull();
+    expect(allow?.disabled).toBe(false);
+    expect(reject?.disabled).toBe(false);
 
     view.snapshot = structuredClone({ ...source, revision: source.revision + 1 });
     await settleCells(view);

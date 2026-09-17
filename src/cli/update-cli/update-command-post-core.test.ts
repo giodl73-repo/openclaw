@@ -9,14 +9,33 @@ import {
   setPluginInstallRecordMapEntry,
 } from "../../config/plugin-install-record-map.js";
 import type { PluginInstallRecord } from "../../config/types.plugins.js";
+import { isPidAlive } from "../../shared/pid-alive.js";
+import { killPidIfAlive, readPidFile, waitForPidToExit } from "../../test-utils/process-tree.js";
+import type { PostCorePluginUpdateResult } from "./update-command-plugins.js";
 import {
+  continuePostCoreUpdateInFreshProcess,
   preparePostCorePluginInstallRecordsForFreshProcess,
   readPostCorePluginInstallRecordsFile,
   shouldResumePostCoreUpdateInFreshProcess,
   writePostCorePluginInstallRecordsFile,
+  writePostCorePluginUpdateResultFile,
+  writePostCoreUpdateFailureFile,
 } from "./update-command-post-core.js";
 
 const tempDirs: string[] = [];
+const pluginUpdate: PostCorePluginUpdateResult = {
+  status: "ok",
+  changed: true,
+  sync: {
+    changed: false,
+    switchedToBundled: [],
+    switchedToNpm: [],
+    warnings: [],
+    errors: [],
+  },
+  npm: { changed: false, outcomes: [] },
+  integrityDrifts: [],
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -31,6 +50,128 @@ async function withTempDir(): Promise<string> {
   tempDirs.push(dir);
   return dir;
 }
+
+describe("continuePostCoreUpdateInFreshProcess", () => {
+  it.runIf(process.platform !== "win32").each([true, false])(
+    "waits for a committed child's shutdown before returning its result (cooperative=%s)",
+    async (cooperative) => {
+      const root = await withTempDir();
+      const settledPath = path.join(root, "settled");
+      const pidPath = path.join(root, "writer.pid");
+      const argvPath = path.join(root, "argv.json");
+      const handoffPath = path.join(root, "handoff-observation.json");
+      const pluginInstallRecords: Record<string, PluginInstallRecord> = {
+        demo: { source: "npm", spec: "@openclaw/demo@1.0.0" },
+      };
+      const preUpdateConfig = {
+        sourceConfig: { gateway: { port: 18789 } },
+        authoredConfig: { gateway: { port: 18790 } },
+      };
+      await fs.mkdir(path.join(root, "dist"));
+      await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ version: "9999.0.0" }));
+      await fs.writeFile(
+        path.join(root, "dist", "entry.mjs"),
+        `import fs from "node:fs/promises";
+import path from "node:path";
+const hold = setInterval(() => {}, 1000);
+setTimeout(() => process.exit(2), 10000).unref();
+process.once("SIGTERM", () => {
+  if (!${JSON.stringify(cooperative)}) return;
+  setTimeout(async () => {
+    await fs.writeFile(${JSON.stringify(settledPath)}, "settled");
+    clearInterval(hold);
+  }, 150);
+});
+await fs.writeFile(${JSON.stringify(pidPath)}, String(process.pid));
+await fs.writeFile(${JSON.stringify(argvPath)}, JSON.stringify(process.argv.slice(2)));
+const resultDir = path.dirname(process.env.OPENCLAW_UPDATE_POST_CORE_RESULT_PATH);
+await fs.writeFile(${JSON.stringify(handoffPath)}, JSON.stringify({
+  resultDir,
+  mode: (await fs.stat(resultDir)).mode & 0o777,
+  marker: JSON.parse(await fs.readFile(path.join(resultDir, "handoff.json"), "utf8")),
+  installRecords: await fs.readFile(process.env.OPENCLAW_UPDATE_POST_CORE_INSTALL_RECORDS_PATH, "utf8"),
+  sourceConfig: await fs.readFile(process.env.OPENCLAW_UPDATE_POST_CORE_SOURCE_CONFIG_PATH, "utf8"),
+}));
+await fs.writeFile(process.env.OPENCLAW_UPDATE_POST_CORE_RESULT_PATH, ${JSON.stringify(JSON.stringify(pluginUpdate))});
+`,
+      );
+
+      let settledAtReturn: string | undefined;
+      let aliveAtReturn: boolean | undefined;
+      let result: Awaited<ReturnType<typeof continuePostCoreUpdateInFreshProcess>>;
+      try {
+        result = await continuePostCoreUpdateInFreshProcess({
+          root,
+          channel: "stable",
+          requestedChannel: null,
+          opts: { json: true, yes: true, timeout: cooperative ? undefined : "3600" },
+          pluginInstallRecords,
+          preUpdateConfig,
+          updateStartedAtMs: Date.now(),
+          timeoutMs: 5000,
+          nodeRunner: process.execPath,
+        });
+        settledAtReturn = await fs.readFile(settledPath, "utf8").catch(() => undefined);
+        aliveAtReturn = isPidAlive(await readPidFile(pidPath));
+      } finally {
+        // Join the real fixture even on the unsafe baseline before temp cleanup.
+        const pid = await readPidFile(pidPath);
+        if (cooperative) {
+          await expect
+            .poll(() => fs.readFile(settledPath, "utf8").catch(() => undefined), { timeout: 5000 })
+            .toBe("settled");
+        }
+        killPidIfAlive(pid);
+        expect(await waitForPidToExit(pid)).toBe(true);
+      }
+      expect(result).toEqual({ resumed: true, pluginUpdate });
+      expect(JSON.parse(await fs.readFile(argvPath, "utf8"))).toEqual([
+        "update",
+        "--json",
+        "--yes",
+        "--timeout",
+        cooperative ? "5" : "3600",
+      ]);
+      expect(aliveAtReturn).toBe(false);
+      expect(settledAtReturn).toBe(cooperative ? "settled" : undefined);
+      const handoff = JSON.parse(await fs.readFile(handoffPath, "utf8"));
+      expect(handoff).toEqual({
+        resultDir: expect.any(String),
+        mode: 0o700,
+        marker: { completionOwner: "parent" },
+        installRecords: `${JSON.stringify(pluginInstallRecords)}\n`,
+        sourceConfig: `${JSON.stringify(preUpdateConfig)}\n`,
+      });
+      await expect(fs.stat(handoff.resultDir)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
+});
+
+describe("post-core result publication", () => {
+  it.runIf(process.platform !== "win32").each(["success", "failure"] as const)(
+    "keeps the handoff private after publishing %s",
+    async (outcome) => {
+      const dir = await withTempDir();
+      await fs.chmod(dir, 0o700);
+      const siblingPath = path.join(dir, "source-config.json");
+      const sibling = '{"sourceConfig":{"gateway":{"port":18789}}}\n';
+      await fs.writeFile(siblingPath, sibling);
+      const resultPath = path.join(dir, "plugins.json");
+      if (outcome === "success") {
+        await writePostCorePluginUpdateResultFile(resultPath, pluginUpdate);
+      } else {
+        await writePostCoreUpdateFailureFile(resultPath, new Error("Plugin finalization failed"));
+      }
+      expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
+      expect(await fs.readFile(siblingPath, "utf8")).toBe(sibling);
+      expect(JSON.parse(await fs.readFile(resultPath, "utf8"))).toEqual(
+        outcome === "success"
+          ? pluginUpdate
+          : { status: "failed", error: "Plugin finalization failed" },
+      );
+    },
+  );
+});
 
 describe("readPostCorePluginInstallRecordsFile", () => {
   it("returns undefined when the path is omitted", async () => {
@@ -219,5 +360,26 @@ describe("shouldResumePostCoreUpdateInFreshProcess", () => {
         installKindChanged: true,
       }),
     ).toBe(false);
+  });
+
+  it.each([
+    { version: "2026.4.28", fresh: false },
+    { version: "2026.4.29-beta.1", fresh: false },
+    { version: "2026.4.29", fresh: true },
+    { version: "2026.9.1", fresh: true },
+    { version: "unknown", fresh: false },
+    { version: undefined, fresh: false },
+  ])("selects the downgrade config writer for $version", ({ version, fresh }) => {
+    expect(
+      shouldResumePostCoreUpdateInFreshProcess({
+        result: {
+          ...unchangedGitResult,
+          mode: "npm",
+          before: { version: "2026.9.3-beta.1" },
+          after: { version },
+        },
+        downgradeRisk: true,
+      }),
+    ).toBe(fresh);
   });
 });

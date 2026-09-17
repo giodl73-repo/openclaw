@@ -1,13 +1,14 @@
+import { safeParseJsonRecord } from "@openclaw/normalization-core";
 import { asPositiveSafeInteger } from "@openclaw/normalization-core/number-coercion";
 import { asOptionalRecord as readRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { readAssistantDisplayContent } from "../shared/assistant-display-content.js";
 import { isOpenClawDeliveryMirrorAssistantMessage } from "../shared/transcript-only-openclaw-assistant.js";
-import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
 import {
   extractAssistantTextForSilentCheck,
   hasAssistantDisplayableNonTextContent,
-  isProjectedSessionsSendForwardedMessage,
-  isSessionsSendInterSessionUserMessage,
+  isProjectedForwardedMessage,
+  isForwardedUserMessage,
 } from "./chat-display-projection.helpers.js";
 import { displayTextForDuplicateCheck } from "./chat-display-projection.history.js";
 import { isSuppressedControlReplyText } from "./control-reply-text.js";
@@ -29,17 +30,9 @@ function normalizeToolHistoryType(value: unknown): string | undefined {
   return normalized ? normalized.replace(/_/g, "") : undefined;
 }
 
-function parseJsonRecord(value: string): Record<string, unknown> | undefined {
-  try {
-    return readRecord(JSON.parse(value));
-  } catch {
-    return undefined;
-  }
-}
-
 function readMaybeJsonRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value === "string") {
-    return parseJsonRecord(value);
+    return safeParseJsonRecord(value);
   }
   return readRecord(value);
 }
@@ -94,7 +87,7 @@ function hasNonEmptyValue(value: unknown): boolean {
   if (!value || typeof value !== "object") {
     return value != null;
   }
-  return Object.values(value as Record<string, unknown>).some(hasNonEmptyValue);
+  return Object.values(value).some(hasNonEmptyValue);
 }
 
 function hasExplicitMessageToolRoute(args: Record<string, unknown>): boolean {
@@ -125,7 +118,7 @@ function readMessageToolVisibleText(args: Record<string, unknown>): string | und
   for (const field of ["message", "text", "content", "body", "caption"] as const) {
     const value = args[field];
     if (typeof value === "string" && value.trim()) {
-      return stripInlineDirectiveTagsForDisplay(value).text;
+      return value;
     }
   }
   return undefined;
@@ -219,95 +212,7 @@ function readMessageToolResultCallId(message: Record<string, unknown>): string |
   );
 }
 
-function readToolResultOkValue(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  const record = readMaybeJsonRecord(value);
-  if (record && typeof record.ok === "boolean") {
-    return record.ok;
-  }
-  if (Array.isArray(value)) {
-    for (const block of value) {
-      const blockOk = readToolResultOkValue(block);
-      if (blockOk !== undefined) {
-        return blockOk;
-      }
-      const recordBlock = readRecord(block);
-      if (typeof recordBlock?.text === "string") {
-        const textOk = readToolResultOkValue(recordBlock.text);
-        if (textOk !== undefined) {
-          return textOk;
-        }
-      }
-      if (typeof recordBlock?.content === "string") {
-        const contentOk = readToolResultOkValue(recordBlock.content);
-        if (contentOk !== undefined) {
-          return contentOk;
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
-function hasDryRunToolResultValue(value: unknown): boolean {
-  const record = readMaybeJsonRecord(value);
-  if (record && isDryRunMessageToolRecord(record)) {
-    return true;
-  }
-  if (!Array.isArray(value)) {
-    return false;
-  }
-  return value.some((block) => {
-    if (hasDryRunToolResultValue(block)) {
-      return true;
-    }
-    const recordBlock = readRecord(block);
-    if (typeof recordBlock?.text === "string" && hasDryRunToolResultValue(recordBlock.text)) {
-      return true;
-    }
-    return (
-      typeof recordBlock?.content === "string" && hasDryRunToolResultValue(recordBlock.content)
-    );
-  });
-}
-
-function hasSuppressedToolResultValue(value: unknown): boolean {
-  const record = readMaybeJsonRecord(value);
-  if (record) {
-    const messageId = normalizeOptionalString(record.messageId)?.toLowerCase();
-    const status = (
-      normalizeOptionalString(record.deliveryStatus) ??
-      normalizeOptionalString(record.delivery_status) ??
-      normalizeOptionalString(record.status)
-    )?.toLowerCase();
-    if (
-      record.delivered === false ||
-      messageId === "skipped" ||
-      messageId === "suppressed" ||
-      status === "skipped" ||
-      status === "suppressed"
-    ) {
-      return true;
-    }
-  }
-  if (!Array.isArray(value)) {
-    return false;
-  }
-  return value.some((block) => {
-    if (hasSuppressedToolResultValue(block)) {
-      return true;
-    }
-    const blockRecord = readRecord(block);
-    return (
-      hasSuppressedToolResultValue(blockRecord?.text) ||
-      hasSuppressedToolResultValue(blockRecord?.content)
-    );
-  });
-}
-
-function isSuccessfulMessageToolResult(
+function matchesMessageToolResult(
   message: Record<string, unknown>,
   pending: PendingMessageToolVisibleReply,
 ): boolean {
@@ -323,43 +228,66 @@ function isSuccessfulMessageToolResult(
   const hasConfirmedSourceRoute =
     !pending.requiresSourceRouteConfirmation ||
     readRecord(message.details)?.sourceReplyRoute === "current-source";
-  if (pending.toolCallId) {
-    return (
-      resultCallId === pending.toolCallId &&
-      isSuccessfulMessageToolResultPayload(message) &&
-      hasConfirmedSourceRoute
-    );
-  }
-  return isSuccessfulMessageToolResultPayload(message) && hasConfirmedSourceRoute;
+  return (!pending.toolCallId || resultCallId === pending.toolCallId) && hasConfirmedSourceRoute;
 }
 
 function isSuccessfulMessageToolResultPayload(message: Record<string, unknown>): boolean {
   if (message.isError === true || (message.error != null && message.error !== false)) {
     return false;
   }
-  if (
-    hasDryRunToolResultValue(message.result) ||
-    hasDryRunToolResultValue(message.output) ||
-    hasDryRunToolResultValue(message.content) ||
-    hasDryRunToolResultValue(message.text)
-  ) {
-    return false;
+  let ok: boolean | undefined;
+  const isRejectedValue = (value: unknown, includeOutcome = true): boolean => {
+    if (includeOutcome && typeof value === "boolean") {
+      ok ??= value;
+    }
+    const record = readMaybeJsonRecord(value);
+    if (record) {
+      if (includeOutcome) {
+        if (isDryRunMessageToolRecord(record)) {
+          return true;
+        }
+        if (typeof record.ok === "boolean") {
+          ok ??= record.ok;
+        }
+      }
+      const messageId = normalizeOptionalString(record.messageId)?.toLowerCase();
+      const status = (
+        normalizeOptionalString(record.deliveryStatus) ??
+        normalizeOptionalString(record.delivery_status) ??
+        normalizeOptionalString(record.status)
+      )?.toLowerCase();
+      if (
+        record.delivered === false ||
+        messageId === "skipped" ||
+        messageId === "suppressed" ||
+        status === "skipped" ||
+        status === "suppressed"
+      ) {
+        return true;
+      }
+    }
+    if (!Array.isArray(value)) {
+      return false;
+    }
+    return value.some((block) => {
+      if (isRejectedValue(block, includeOutcome)) {
+        return true;
+      }
+      const entry = readRecord(block);
+      // Only suppression historically inspects non-string wrapper values.
+      return (
+        isRejectedValue(entry?.text, includeOutcome && typeof entry?.text === "string") ||
+        isRejectedValue(entry?.content, includeOutcome && typeof entry?.content === "string")
+      );
+    });
+  };
+  for (const value of [message.result, message.output, message.content, message.text]) {
+    if (isRejectedValue(value)) {
+      return false;
+    }
   }
-  if (
-    hasSuppressedToolResultValue(message.details) ||
-    hasSuppressedToolResultValue(message.result) ||
-    hasSuppressedToolResultValue(message.output) ||
-    hasSuppressedToolResultValue(message.content) ||
-    hasSuppressedToolResultValue(message.text)
-  ) {
-    return false;
-  }
-  const ok =
-    readToolResultOkValue(message.result) ??
-    readToolResultOkValue(message.output) ??
-    readToolResultOkValue(message.content) ??
-    readToolResultOkValue(message.text);
-  return ok !== false;
+  // Details can veto a delivery, but do not supply ok or dry-run outcome fields.
+  return !isRejectedValue(message.details, false) && ok !== false;
 }
 
 function readMessageToolSourceReplySink(
@@ -373,9 +301,15 @@ function buildMessageToolVisibleReplyMirror(
   pending: PendingMessageToolVisibleReply,
 ): Record<string, unknown> {
   const sourceMessageSeq = asPositiveSafeInteger(readRecord(pending.anchor["__openclaw"])?.seq);
+  const deliveryMirror = [pending.deliveryMirrorAnchor, pending.completionAnchor].find((message) =>
+    isOpenClawDeliveryMirrorAssistantMessage(message),
+  );
+  const displayContent = readAssistantDisplayContent(deliveryMirror);
+  const content =
+    displayContent.length > 0 ? displayContent : [{ type: "text", text: pending.text }];
   const mirror: Record<string, unknown> = {
     role: "assistant",
-    content: [{ type: "text", text: pending.text }],
+    content,
     openclawMessageToolMirror: {
       toolName: "message",
       ...(pending.toolCallId ? { toolCallId: pending.toolCallId } : {}),
@@ -405,14 +339,14 @@ function readMessageToolDeliveryMirrorText(message: Record<string, unknown>): st
   return displayTextForDuplicateCheck(message);
 }
 
-export function mirrorMessageToolVisibleReplies(messages: unknown[]): unknown[] {
-  if (messages.length === 0) {
-    return messages;
+function readMessageToolDeliveryMirrorCallId(message: Record<string, unknown>): string | undefined {
+  if (!isOpenClawDeliveryMirrorAssistantMessage(message)) {
+    return undefined;
   }
-  if (!messages.some((message) => readRecord(message))) {
-    return messages;
-  }
-  let changed = false;
+  return normalizeOptionalString(readRecord(message.openclawDeliveryMirror)?.toolCallId);
+}
+
+export function createMessageToolVisibleReplyProjection() {
   const next: unknown[] = [];
   const pending: PendingMessageToolVisibleReply[] = [];
 
@@ -428,7 +362,6 @@ export function mirrorMessageToolVisibleReplies(messages: unknown[]): unknown[] 
         continue;
       }
       next.push(buildMessageToolVisibleReplyMirror(item));
-      changed = true;
     }
     clearPending();
   };
@@ -442,7 +375,6 @@ export function mirrorMessageToolVisibleReplies(messages: unknown[]): unknown[] 
     for (const item of pending) {
       if (selected.has(item) && item.succeeded) {
         next.push(buildMessageToolVisibleReplyMirror(item));
-        changed = true;
         continue;
       }
       remaining.push(item);
@@ -451,87 +383,111 @@ export function mirrorMessageToolVisibleReplies(messages: unknown[]): unknown[] 
     pending.push(...remaining);
   };
 
-  for (const message of messages) {
-    const record = readRecord(message);
-    if (!record) {
-      next.push(message);
-      continue;
-    }
+  return {
+    append(messages: unknown[]) {
+      let replacedFrom: number | undefined;
+      for (const message of messages) {
+        const record = readRecord(message);
+        if (!record) {
+          next.push(message);
+          continue;
+        }
 
-    if (
-      (record.role === "user" && isSessionsSendInterSessionUserMessage(record)) ||
-      isProjectedSessionsSendForwardedMessage(record)
-    ) {
-      next.push(message);
-      continue;
-    }
+        if (isForwardedUserMessage(record) || isProjectedForwardedMessage(record)) {
+          next.push(message);
+          continue;
+        }
 
-    if (record.role === "user") {
-      clearPending();
-      next.push(message);
-      continue;
-    }
+        if (record.role === "user") {
+          clearPending();
+          next.push(message);
+          continue;
+        }
 
-    const flushAfterCurrentMessage: PendingMessageToolVisibleReply[] = [];
-    const deliveryMirrorText = readMessageToolDeliveryMirrorText(record);
-    const matchingDeliveryMirrorPending = deliveryMirrorText
-      ? pending.filter((item) => item.text.trim() === deliveryMirrorText)
-      : [];
-    const duplicateDeliveryMirror = matchingDeliveryMirrorPending.some((item) => item.succeeded);
-    const visibleReplies = extractMessageToolVisibleReplies(record);
-    if (visibleReplies.length > 0) {
-      for (const reply of visibleReplies) {
-        pending.push({
-          ...reply,
-          anchor: record,
-          succeeded: false,
-        });
-      }
-    } else if (
-      matchingDeliveryMirrorPending.length === 0 &&
-      isRenderableAssistantDisplayMessage(record)
-    ) {
-      clearPending();
-    }
-
-    if (pending.length > 0) {
-      for (const item of pending) {
-        if (!item.succeeded && isSuccessfulMessageToolResult(record, item)) {
-          item.succeeded = true;
-          const sourceReplySink = readMessageToolSourceReplySink(record);
-          if (sourceReplySink) {
-            item.sourceReplySink = sourceReplySink;
+        const flushAfterCurrentMessage: PendingMessageToolVisibleReply[] = [];
+        const deliveryMirrorText = readMessageToolDeliveryMirrorText(record);
+        const deliveryMirrorCallId = readMessageToolDeliveryMirrorCallId(record);
+        const exactDeliveryMirrorPending = deliveryMirrorCallId
+          ? pending.filter((item) => item.toolCallId === deliveryMirrorCallId)
+          : [];
+        const textMatchingDeliveryMirrorPending = deliveryMirrorText
+          ? pending.filter((item) => item.text.trim() === deliveryMirrorText)
+          : [];
+        const matchingDeliveryMirrorPending = deliveryMirrorCallId
+          ? exactDeliveryMirrorPending.length === 1
+            ? exactDeliveryMirrorPending
+            : []
+          : textMatchingDeliveryMirrorPending.length === 1
+            ? textMatchingDeliveryMirrorPending
+            : [];
+        const duplicateDeliveryMirror = matchingDeliveryMirrorPending.some(
+          (item) => item.succeeded,
+        );
+        const visibleReplies = extractMessageToolVisibleReplies(record);
+        if (visibleReplies.length > 0) {
+          for (const reply of visibleReplies) {
+            pending.push({
+              ...reply,
+              anchor: record,
+              succeeded: false,
+            });
           }
-          item.completionAnchor = item.deliveryMirrorAnchor ?? record;
-          if (item.deliveryMirrorAnchor) {
-            if (typeof item.deliveryMirrorIndex === "number") {
-              next[item.deliveryMirrorIndex] = { ...item.deliveryMirrorAnchor, display: false };
+        } else if (
+          pending.length > 0 &&
+          deliveryMirrorText === undefined &&
+          isRenderableAssistantDisplayMessage(record)
+        ) {
+          clearPending();
+        }
+
+        if (pending.length > 0) {
+          let resultSucceeded: boolean | undefined;
+          for (const item of pending) {
+            if (
+              !item.succeeded &&
+              matchesMessageToolResult(record, item) &&
+              (resultSucceeded ??= isSuccessfulMessageToolResultPayload(record))
+            ) {
+              item.succeeded = true;
+              const sourceReplySink = readMessageToolSourceReplySink(record);
+              if (sourceReplySink) {
+                item.sourceReplySink = sourceReplySink;
+              }
+              item.completionAnchor = item.deliveryMirrorAnchor ?? record;
+              if (item.deliveryMirrorAnchor) {
+                if (typeof item.deliveryMirrorIndex === "number") {
+                  next[item.deliveryMirrorIndex] = { ...item.deliveryMirrorAnchor, display: false };
+                  replacedFrom = Math.min(
+                    replacedFrom ?? item.deliveryMirrorIndex,
+                    item.deliveryMirrorIndex,
+                  );
+                }
+                flushAfterCurrentMessage.push(item);
+              }
             }
-            flushAfterCurrentMessage.push(item);
+          }
+          if (isAssistantSilentControlReplyOnly(record)) {
+            flushSucceededMirrors();
           }
         }
-      }
-      if (isAssistantSilentControlReplyOnly(record)) {
-        flushSucceededMirrors();
-      }
-    }
 
-    if (duplicateDeliveryMirror) {
-      for (const item of matchingDeliveryMirrorPending) {
-        item.completionAnchor = record;
+        if (duplicateDeliveryMirror) {
+          for (const item of matchingDeliveryMirrorPending) {
+            item.completionAnchor = record;
+          }
+          flushSelectedMirrors(matchingDeliveryMirrorPending);
+          continue;
+        }
+
+        for (const item of matchingDeliveryMirrorPending) {
+          item.deliveryMirrorAnchor = record;
+          item.deliveryMirrorIndex = next.length;
+        }
+        next.push(message);
+        flushSelectedMirrors(flushAfterCurrentMessage);
       }
-      flushSelectedMirrors(matchingDeliveryMirrorPending);
-      changed = true;
-      continue;
-    }
 
-    for (const item of matchingDeliveryMirrorPending) {
-      item.deliveryMirrorAnchor = record;
-      item.deliveryMirrorIndex = next.length;
-    }
-    next.push(message);
-    flushSelectedMirrors(flushAfterCurrentMessage);
-  }
-
-  return changed ? next : messages;
+      return { messages: next, replacedFrom };
+    },
+  };
 }

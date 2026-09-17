@@ -1,5 +1,6 @@
 import Foundation
 import OpenClawKit
+import os
 import Security
 import Testing
 @testable import OpenClaw
@@ -685,6 +686,25 @@ private func withLastGatewaySnapshot(_ body: () -> Void) {
         }
     }
 
+    @Test func `registry observers refresh only after successful mutations`() {
+        withLastGatewaySnapshot {
+            applyKeychain([gatewayRegistryKeychainEntry: nil, lastGatewayKeychainEntry: nil])
+            let notifications = OSAllocatedUnfairLock(initialState: 0)
+            let observer = NotificationCenter.default.addObserver(
+                forName: GatewaySettingsStore.gatewayRegistryDidChange,
+                object: nil,
+                queue: nil) { _ in notifications.withLock { $0 += 1 } }
+            defer { NotificationCenter.default.removeObserver(observer) }
+
+            #expect(GatewaySettingsStore.saveGatewayRegistry(.empty))
+            #expect(notifications.withLock { $0 } == 1)
+            #expect(!GatewaySettingsStore.setActiveGateway(stableID: "missing-gateway"))
+            #expect(notifications.withLock { $0 } == 1)
+            GatewaySettingsStore.clearGatewayRegistry()
+            #expect(notifications.withLock { $0 } == 2)
+        }
+    }
+
     @Test func `registry CRUD round trip persists deterministic ordering`() {
         withLastGatewaySnapshot {
             applyKeychain([gatewayRegistryKeychainEntry: nil, lastGatewayKeychainEntry: nil])
@@ -695,6 +715,7 @@ private func withLastGatewaySnapshot(_ body: () -> Void) {
                 host: "z.example.com",
                 port: 443,
                 useTLS: true,
+                contextPath: "/openclaw-gateway",
                 lastConnectedAtMs: nil)
             let gatewayA = GatewaySettingsStore.GatewayRegistryEntry(
                 stableID: "bonjour|alpha",
@@ -716,6 +737,7 @@ private func withLastGatewaySnapshot(_ body: () -> Void) {
             #expect(registry.connectedStableIDs == [gatewayB.stableID])
             #expect(GatewaySettingsStore.connectedGatewayEntries().map(\.stableID) == [gatewayB.stableID])
             #expect(registry.entries.last?.lastConnectedAtMs == 1234)
+            #expect(registry.entries.last?.contextPath == "/openclaw-gateway")
             #expect(GatewaySettingsStore.upsertGatewayRegistryEntry(gatewayA))
             #expect(KeychainStore.loadString(service: gatewayService, account: "gateway-registry") == firstJSON)
 

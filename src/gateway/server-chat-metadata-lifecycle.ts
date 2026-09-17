@@ -1,9 +1,20 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
-import type { GatewayPostReadySidecarHandle } from "./server-startup-post-attach.js";
+import type { GatewaySidecarStopOwner } from "./server-sidecar-owners.js";
 
 type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
+
+/** A committed auth change remains successful even if its best-effort UI notification fails. */
+export function broadcastChatMetadataChanged(
+  context: Pick<GatewayRequestContext, "broadcast" | "logGateway">,
+): void {
+  try {
+    context.broadcast("chat.metadata.changed", {}, { dropIfSlow: true });
+  } catch {
+    context.logGateway.warn("chat metadata change notification failed");
+  }
+}
 
 export async function createGatewayChatMetadataLifecycle(params: {
   getConfig: () => OpenClawConfig;
@@ -11,6 +22,8 @@ export async function createGatewayChatMetadataLifecycle(params: {
   log: GatewayLogger;
 }) {
   let context: GatewayRequestContext | undefined;
+  let preparedModelRuntimeState: "unobserved" | "available" | "unavailable" = "unobserved";
+  let preparedModelRuntimeEventVersion = 0;
   const { ChatMetadataSnapshotUnavailableError, createGatewayChatMetadataRuntime } =
     await import("./server-methods/chat-metadata-runtime.js");
   const runtime = createGatewayChatMetadataRuntime({
@@ -35,6 +48,11 @@ export async function createGatewayChatMetadataLifecycle(params: {
           refreshOnRead: true,
         }
       : {}),
+    onChanged: () => {
+      if (context) {
+        broadcastChatMetadataChanged(context);
+      }
+    },
     log: params.log,
   });
   const refreshLogged = () => {
@@ -42,7 +60,16 @@ export async function createGatewayChatMetadataLifecycle(params: {
       params.log.warn(`chat metadata refresh failed: ${String(error)}`);
     });
   };
-  const registerRefreshListeners = async (): Promise<GatewayPostReadySidecarHandle | undefined> => {
+  const refreshForSubordinateChange = () => {
+    // Auth and skill facts are subordinate to the prepared model owner. During replacement the
+    // publication event owns the one catch-up refresh after every related fact is committed.
+    if (preparedModelRuntimeState === "available") {
+      // The metadata owner compares captured facts before fencing changed generations.
+      // Unrelated workspace events and repeated catalog statuses must not discard its cache.
+      refreshLogged();
+    }
+  };
+  const registerRefreshListeners = async (): Promise<(() => void) | undefined> => {
     if (params.minimalTestGateway) {
       return undefined;
     }
@@ -57,51 +84,81 @@ export async function createGatewayChatMetadataLifecycle(params: {
     ]);
     const unregisterPreparedModelRuntimePublication =
       registerPreparedModelRuntimePublicationListener((event) => {
+        if (event.phase === "catalog-published" || event.phase === "catalog-failed") {
+          refreshForSubordinateChange();
+          return;
+        }
+        preparedModelRuntimeEventVersion += 1;
         if (event.phase === "invalidated") {
-          runtime.invalidate();
+          // Initial catch-up may already be building an owner published before attachment.
+          // Later invalidations preserve the existing replacement wait or terminal failure.
+          if (preparedModelRuntimeState !== "unavailable") {
+            runtime.invalidate();
+          }
+          preparedModelRuntimeState = "unavailable";
           return;
         }
         if (event.phase === "failed") {
+          preparedModelRuntimeState = "unavailable";
           runtime.fail(event.error);
           return;
         }
+        preparedModelRuntimeState = "available";
         refreshLogged();
       });
     const unregisterSkillsChange = registerSkillsChangeListener(() => {
-      runtime.invalidate();
-      refreshLogged();
+      refreshForSubordinateChange();
     });
     const unregisterRuntimeAuthProfileStoreMutation =
       registerRuntimeAuthProfileStoreMutationListener(() => {
-        runtime.invalidate();
-        refreshLogged();
+        refreshForSubordinateChange();
       });
-    return {
-      stop: async () => {
-        unregisterRuntimeAuthProfileStoreMutation();
-        unregisterPreparedModelRuntimePublication();
-        unregisterSkillsChange();
-      },
+    return () => {
+      unregisterRuntimeAuthProfileStoreMutation();
+      unregisterPreparedModelRuntimePublication();
+      unregisterSkillsChange();
     };
   };
 
   return {
     attachContext: async (
       next: GatewayRequestContext,
-      sidecars: GatewayPostReadySidecarHandle[],
+      publishSidecars: GatewaySidecarStopOwner["publish"],
     ) => {
       context = next;
-      const sidecar = await registerRefreshListeners();
-      if (sidecar) {
-        sidecars.push(sidecar);
+      const unregister = await registerRefreshListeners();
+      // Minimal Gateways still own read-triggered preparation. Every lifetime
+      // must join it before shutdown retires the config and model owners.
+      publishSidecars({
+        stop: async () => {
+          unregister?.();
+          await runtime.stop();
+        },
+      });
+      if (unregister) {
         // Publications that complete before listener registration would otherwise be missed.
         // During ordinary startup the owner is published after attachment, so an unavailable
         // snapshot here is expected and the publication listener performs the first refresh.
-        await runtime.refresh().catch((error: unknown) => {
-          if (!(error instanceof ChatMetadataSnapshotUnavailableError)) {
-            params.log.warn(`chat metadata catch-up refresh failed: ${String(error)}`);
-          }
-        });
+        const eventVersion = preparedModelRuntimeEventVersion;
+        await runtime.refresh().then(
+          () => {
+            // A successful catch-up proves availability when publication completed before the
+            // listener was registered. Do not overwrite a newer invalidation or failure event.
+            if (preparedModelRuntimeEventVersion === eventVersion) {
+              preparedModelRuntimeState = "available";
+            }
+          },
+          (error: unknown) => {
+            if (!(error instanceof ChatMetadataSnapshotUnavailableError)) {
+              // Capture reached a published owner before this later metadata build failed. Keep
+              // stable auth/skill changes able to retry unless a newer owner event says otherwise.
+              if (preparedModelRuntimeEventVersion === eventVersion) {
+                preparedModelRuntimeState = "available";
+              }
+              params.log.warn(`chat metadata catch-up refresh failed: ${String(error)}`);
+            }
+          },
+        );
       }
     },
     read: runtime.read,

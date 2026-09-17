@@ -3,7 +3,7 @@
  *
  * Creates/reuses Docker containers and exposes backend-neutral exec and shell-command handles.
  */
-import { buildDockerExecArgs } from "../bash-tools.shared.js";
+import { createContainerEnvFile } from "../../infra/container-env-file.js";
 import type { SandboxBackendCommandParams } from "./backend-handle.types.js";
 import type {
   CreateSandboxBackendParams,
@@ -24,7 +24,44 @@ import {
   type SandboxContainerEngineTarget,
   validateSandboxContainerEngineTarget,
 } from "./docker.js";
+import { resolveSandboxContainerOnlyMounts } from "./mount-plan.js";
 import type { SandboxRegistryEntry } from "./registry.js";
+
+type ContainerExecFinalizeToken = () => Promise<void>;
+
+function resolveContainerExecEnv(env: Record<string, string>): Record<string, string> {
+  const { PATH: requestedPath, ...containerEnv } = env;
+  if (requestedPath) {
+    containerEnv.OPENCLAW_PREPEND_PATH = requestedPath;
+  }
+  return containerEnv;
+}
+
+function buildContainerExecArgs(params: {
+  containerName: string;
+  command: string;
+  workdir?: string;
+  env: Record<string, string>;
+  envFile: string;
+  tty: boolean;
+}): string[] {
+  const args = ["exec", "-i"];
+  if (params.tty) {
+    args.push("-t");
+  }
+  if (params.workdir) {
+    args.push("-w", params.workdir);
+  }
+  args.push("--env-file", params.envFile);
+  // Apply the staged prepend only after login profile sourcing; direct PATH
+  // injection can break the container engine's initial executable lookup.
+  const pathExport = params.env.PATH
+    ? 'export PATH="${OPENCLAW_PREPEND_PATH}:$PATH"; unset OPENCLAW_PREPEND_PATH; '
+    : "";
+  // Use absolute path for sh to avoid dependency on PATH resolution during exec.
+  args.push(params.containerName, "/bin/sh", "-lc", `${pathExport}${params.command}`);
+  return args;
+}
 
 function resolveConfiguredDockerRuntimeImage(params: {
   config: CreateSandboxBackendParams["cfg"] | import("../../config/config.js").OpenClawConfig;
@@ -59,12 +96,20 @@ async function createContainerSandboxBackend(
     workspaceDir: params.workspaceDir,
     agentWorkspaceDir: params.agentWorkspaceDir,
     skillsWorkspaceDir: params.skillsWorkspaceDir,
+    readOnlyResourceMounts: params.readOnlyResourceMounts,
     cfg: params.cfg,
     ...(params.requireCurrentConfig !== undefined
       ? { requireCurrentConfig: params.requireCurrentConfig }
       : {}),
   });
-  return createContainerSandboxBackendHandle({
+  // Image volumes and engine-created tmpfs are runtime facts. Snapshot them
+  // once at preparation so file tools never read an obscured host subtree.
+  const containerOnlyMounts = await resolveSandboxContainerOnlyMounts({
+    engine: boundEngine,
+    containerName,
+  });
+  const { createSandboxFsBridge } = await import("./fs-bridge.js");
+  const handle = createContainerSandboxBackendHandle({
     engine: boundEngine,
     containerName,
     workdir: params.cfg.docker.workdir,
@@ -72,6 +117,8 @@ async function createContainerSandboxBackend(
     image: params.cfg.docker.image,
     podmanTarget,
   });
+  handle.createFsBridge = ({ sandbox }) => createSandboxFsBridge({ sandbox, containerOnlyMounts });
+  return handle;
 }
 
 export async function createDockerSandboxBackend(
@@ -104,24 +151,43 @@ function createContainerSandboxBackendHandle(params: {
     configLabelKind: "Image",
     capabilities: {
       browser: params.engine.id === "docker",
+      readOnlyResourceMounts: true,
     },
     async buildExecSpec({ command, workdir, env, usePty }) {
       await validateSandboxContainerEngineTarget(params.engine, params.podmanTarget);
-      return {
-        argv: [
+      const envFile = await createContainerEnvFile(resolveContainerExecEnv(env));
+      try {
+        const argv = [
           params.engine.command,
           ...(params.engine.globalArgs ?? []),
-          ...buildDockerExecArgs({
+          ...buildContainerExecArgs({
             containerName: params.containerName,
             command,
             workdir: workdir ?? params.workdir,
             env,
+            envFile: envFile.path,
             tty: usePty,
           }),
-        ],
-        env: process.env,
-        stdinMode: usePty ? "pipe-open" : "pipe-closed",
-      };
+        ];
+        return {
+          argv,
+          env: process.env,
+          stdinMode: usePty ? "pipe-open" : "pipe-closed",
+          finalizeToken: envFile.cleanup satisfies ContainerExecFinalizeToken,
+        };
+      } catch (error) {
+        await envFile.cleanup();
+        throw error;
+      }
+    },
+    async finalizeExec({ token }) {
+      if (token === undefined) {
+        return;
+      }
+      if (typeof token !== "function") {
+        throw new Error("Invalid container sandbox execution cleanup token.");
+      }
+      await token();
     },
     runShellCommand(command) {
       return runContainerSandboxShellCommand({

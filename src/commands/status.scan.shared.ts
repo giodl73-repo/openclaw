@@ -2,12 +2,6 @@
 // This file owns the cross-command contracts reused by normal, JSON, and status-all scans.
 
 import { existsSync } from "node:fs";
-import type { DatabaseSync } from "node:sqlite";
-import { isLoopbackIpAddress } from "@openclaw/net-policy/ip";
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
 import {
   GATEWAY_CLIENT_MODES,
   GATEWAY_CLIENT_NAMES,
@@ -16,24 +10,36 @@ import { listAgentEntries } from "../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { buildGatewayConnectionDetailsWithResolvers } from "../gateway/connection-details.js";
 import { normalizeControlUiBasePath } from "../gateway/control-ui-shared.js";
+import { isLoopbackGatewayUrl } from "../gateway/net.js";
 import { resolveGatewayProbeTarget } from "../gateway/probe-target.js";
 import type { GatewayProbeResult, probeGateway as probeGatewayFn } from "../gateway/probe.js";
-import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
 import type { MemoryProviderStatus } from "../memory-host-sdk/engine-storage.js";
 import { defaultSlotIdForKey } from "../plugins/slots.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { resolveTailscalePublishedHost } from "../shared/tailscale-status.js";
+import type { MemoryPluginStatus } from "../status/memory-plugin.js";
+import type { StatusSummary } from "../status/summary.js";
 import { pickGatewaySelfPresence } from "./gateway-presence.js";
 import { isProbeReachable } from "./gateway-status/helpers.js";
 
 const gatewayProbeModuleLoader = createLazyImportLoader(() => import("./status.gateway-probe.js"));
 const probeGatewayModuleLoader = createLazyImportLoader(() => import("../gateway/probe.js"));
 const gatewayCallModuleLoader = createLazyImportLoader(() => import("../gateway/call.js"));
-const memoryEngineStorageModuleLoader = createLazyImportLoader(
-  () => import("../memory-host-sdk/engine-storage.js"),
-);
-const MEMORY_INDEX_META_KEY = "memory_index_meta_v1";
+const memoryPresenceModuleLoader = createLazyImportLoader(async () => {
+  const { loadBundledPluginPublicArtifactModuleSync } =
+    await import("../plugins/public-surface-loader.js");
+  return loadBundledPluginPublicArtifactModuleSync<{
+    inspectMemoryIndexPresence: (databasePath: string) => Promise<boolean>;
+  }>({ dirName: "memory-core", artifactBasename: "status-api.js" });
+});
+
+export function resolveStatusGatewayProbeTimeoutMs(opts: {
+  timeoutMs?: number;
+  all?: boolean;
+}): number {
+  return opts.timeoutMs ?? (opts.all ? 5000 : 2500);
+}
 
 function loadGatewayProbeModule() {
   return gatewayProbeModuleLoader.load();
@@ -51,75 +57,12 @@ async function hasBuiltInMemoryState(databasePath: string): Promise<boolean> {
   if (!existsSync(databasePath)) {
     return false;
   }
-  const { MEMORY_INDEX_CHUNKS_TABLE, MEMORY_INDEX_META_TABLE, MEMORY_INDEX_SOURCES_TABLE } =
-    await memoryEngineStorageModuleLoader.load();
-  let db: DatabaseSync | undefined;
-  try {
-    db = openNodeSqliteDatabase(databasePath, { readOnly: true });
-    const builtInMemoryTableSets = [
-      {
-        meta: MEMORY_INDEX_META_TABLE,
-        sources: MEMORY_INDEX_SOURCES_TABLE,
-        chunks: MEMORY_INDEX_CHUNKS_TABLE,
-      },
-      {
-        meta: "meta",
-        sources: "files",
-        chunks: "chunks",
-      },
-    ] as const;
-    const builtInMemoryTables = builtInMemoryTableSets.flatMap(({ meta, sources, chunks }) => [
-      meta,
-      sources,
-      chunks,
-    ]);
-    const tableNames = new Set(
-      (
-        db
-          .prepare(
-            `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${builtInMemoryTables.map(() => "?").join(", ")})`,
-          )
-          .all(...builtInMemoryTables) as Array<{ name?: unknown }>
-      )
-        .map((row) => row.name)
-        .filter((name): name is string => typeof name === "string"),
-    );
-    for (const tables of builtInMemoryTableSets) {
-      if (
-        tableNames.has(tables.meta) &&
-        db
-          .prepare(`SELECT 1 AS ok FROM ${tables.meta} WHERE key = ? LIMIT 1`)
-          .get(MEMORY_INDEX_META_KEY)
-      ) {
-        return true;
-      }
-      for (const tableName of [tables.sources, tables.chunks]) {
-        if (
-          tableNames.has(tableName) &&
-          db.prepare(`SELECT 1 AS ok FROM ${tableName} LIMIT 1`).get()
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  } finally {
-    try {
-      db?.close();
-    } catch {}
-  }
+  const { inspectMemoryIndexPresence } = await memoryPresenceModuleLoader.load();
+  return await inspectMemoryIndexPresence(databasePath);
 }
 
 export type MemoryStatusSnapshot = MemoryProviderStatus & {
   agentId: string;
-};
-
-export type MemoryPluginStatus = {
-  enabled: boolean;
-  slot: string | null;
-  reason?: string;
 };
 
 export type GatewayProbeSnapshot = {
@@ -152,20 +95,10 @@ type StatusMemorySearchManagerResolver = (params: {
   cfg: OpenClawConfig;
   agentId: string;
   purpose: "status";
+  inspectSources: true;
 }) => Promise<{
   manager: StatusMemorySearchManager | null;
 }>;
-
-function isLoopbackGatewayUrl(rawUrl: string): boolean {
-  try {
-    const hostname = new URL(rawUrl).hostname.toLowerCase();
-    const unbracketed =
-      hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
-    return unbracketed === "localhost" || isLoopbackIpAddress(unbracketed);
-  } catch {
-    return false;
-  }
-}
 
 function shouldTryLocalStatusRpcFallback(params: {
   gatewayMode: "local" | "remote";
@@ -191,6 +124,7 @@ function shouldTryLocalStatusRpcFallback(params: {
 
 async function applyLocalStatusRpcFallback(params: {
   cfg: OpenClawConfig;
+  configPath: string;
   gatewayMode: "local" | "remote";
   gatewayUrl: string;
   gatewayProbe: GatewayProbeResult | null;
@@ -216,8 +150,9 @@ async function applyLocalStatusRpcFallback(params: {
   // The fallback uses the gateway status RPC because it can succeed after probe handshake ambiguity.
   const status = await loadGatewayCallModule()
     .then(({ callGateway }) =>
-      callGateway({
+      callGateway<Partial<StatusSummary>>({
         config: params.cfg,
+        configPath: params.configPath,
         method: "status",
         token: params.gatewayProbeAuth.token,
         password: params.gatewayProbeAuth.password,
@@ -261,22 +196,11 @@ function hasExplicitMemorySearchConfig(cfg: OpenClawConfig, agentId: string): bo
   );
 }
 
-/** Resolves whether memory status should be shown and which slot owns it. */
-export function resolveMemoryPluginStatus(cfg: OpenClawConfig): MemoryPluginStatus {
-  const pluginsEnabled = cfg.plugins?.enabled !== false;
-  if (!pluginsEnabled) {
-    return { enabled: false, slot: null, reason: "plugins disabled" };
-  }
-  const raw = normalizeOptionalString(cfg.plugins?.slots?.memory) ?? "";
-  if (normalizeOptionalLowercaseString(raw) === "none") {
-    return { enabled: false, slot: null, reason: 'plugins.slots.memory="none"' };
-  }
-  return { enabled: true, slot: raw || defaultSlotIdForKey("memory") };
-}
-
 /** Resolves gateway connection details, probe result, auth warnings, and call overrides. */
 export async function resolveGatewayProbeSnapshot(params: {
   cfg: OpenClawConfig;
+  configPath: string;
+  env: NodeJS.ProcessEnv;
   opts: {
     timeoutMs?: number;
     all?: boolean;
@@ -288,7 +212,10 @@ export async function resolveGatewayProbeSnapshot(params: {
     localStatusRpcFallback?: boolean;
   };
 }): Promise<GatewayProbeSnapshot> {
-  const gatewayConnection = buildGatewayConnectionDetailsWithResolvers({ config: params.cfg });
+  const gatewayConnection = buildGatewayConnectionDetailsWithResolvers({
+    config: params.cfg,
+    configPath: params.configPath,
+  });
   const { gatewayMode, remoteUrlMissing } = resolveGatewayProbeTarget(params.cfg);
   const shouldResolveAuth =
     params.opts.skipProbe !== true &&
@@ -298,19 +225,20 @@ export async function resolveGatewayProbeSnapshot(params: {
     (!remoteUrlMissing || params.opts.probeWhenRemoteUrlMissing === true);
   const gatewayProbeAuthResolution = shouldResolveAuth
     ? await loadGatewayProbeModule().then(({ resolveGatewayProbeAuthResolution }) =>
-        resolveGatewayProbeAuthResolution(params.cfg),
+        resolveGatewayProbeAuthResolution(params.cfg, params.env),
       )
     : { auth: {}, warning: undefined };
   let gatewayProbeAuthWarning = gatewayProbeAuthResolution.warning;
-  const defaultProbeTimeoutMs = params.opts.all ? 5000 : 2500;
   const timeoutMsExplicit = params.opts.timeoutMs !== undefined;
-  const probeTimeoutMs = params.opts.timeoutMs ?? defaultProbeTimeoutMs;
+  const probeTimeoutMs = resolveStatusGatewayProbeTimeoutMs(params.opts);
   const initialGatewayProbe = shouldProbe
     ? await loadProbeGatewayModule()
         .then(({ probeGateway }) =>
           probeGateway({
             url: gatewayConnection.url,
+            config: params.cfg,
             auth: gatewayProbeAuthResolution.auth,
+            env: params.env,
             timeoutMs: probeTimeoutMs,
             detailLevel: params.opts.detailLevel ?? "presence",
           }),
@@ -319,6 +247,7 @@ export async function resolveGatewayProbeSnapshot(params: {
     : null;
   const gatewayProbe = await applyLocalStatusRpcFallback({
     cfg: params.cfg,
+    configPath: params.configPath,
     gatewayMode,
     gatewayUrl: gatewayConnection.url,
     gatewayProbe: initialGatewayProbe,
@@ -367,13 +296,11 @@ export async function resolveGatewayProbeSnapshot(params: {
 export function buildTailscaleHttpsUrl(params: {
   tailscaleMode: string;
   tailscaleDns: string | null;
-  serviceName?: string | null;
   controlUiBasePath?: string;
 }): string | null {
   const host = resolveTailscalePublishedHost({
     tailscaleMode: params.tailscaleMode,
     tailnetHost: params.tailscaleDns,
-    serviceName: params.serviceName,
   });
   return params.tailscaleMode !== "off" && host
     ? `https://${host}${normalizeControlUiBasePath(params.controlUiBasePath)}`
@@ -396,7 +323,12 @@ export async function resolveSharedMemoryStatusSnapshot(params: {
   if (!memoryPlugin.enabled || !memoryPlugin.slot) {
     return null;
   }
-  const agentId = agentStatus.defaultId ?? "main";
+  const agentId = agentStatus.defaultId;
+  if (!agentId) {
+    // Memory is agent-scoped. An explicit fleet has no default owner, so status must not
+    // inspect an arbitrary first agent's database merely to populate a read-only summary.
+    return null;
+  }
 
   if (memoryPlugin.slot !== defaultSlotIdForKey("memory")) {
     // Non-default memory slots are plugin-owned; ask the manager directly instead of checking built-in files.
@@ -436,6 +368,7 @@ async function resolveMemoryManagerStatusSnapshot(
     cfg: params.cfg,
     agentId,
     purpose: "status",
+    inspectSources: true,
   });
   if (!manager) {
     return null;

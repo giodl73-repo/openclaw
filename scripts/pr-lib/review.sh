@@ -17,12 +17,11 @@ review_artifacts_helper_path() {
 
 review_claim() {
   local pr="$1"
-  mark_pr_operation_side_effects_started
   # Claim logs are per-PR review state: keeping them in the PR worktree leaves the
   # shared canonical checkout with no scripts/pr-owned .local, so a stray artifact
   # there can never be mistaken for this flow's output. Claiming still works on a
   # cold PR because enter_worktree provisions both the worktree and .local.
-  enter_worktree "$pr" false
+  enter_worktree "$pr" false || return 1
 
   local reviewer=""
   local max_attempts=3
@@ -32,7 +31,8 @@ review_claim() {
     local user_log
     user_log=".local/review-claim-user-attempt-$attempt.log"
 
-    if reviewer=$(gh_plain api user --jq .login 2>"$user_log"); then
+    # A relay's REST /user may identify its caller, not the local mutation writer.
+    if reviewer=$(gh_plain api graphql -f 'query=query { viewer { login } }' --jq .data.viewer.login 2>"$user_log"); then
       printf "%s\n" "$reviewer" >"$user_log"
       break
     fi
@@ -73,10 +73,9 @@ review_claim() {
 
 review_checkout_main() {
   local pr="$1"
-  enter_worktree "$pr" false
+  enter_worktree "$pr" false || return 1
   mark_pr_operation_side_effects_started
-  git fetch origin main
-  git checkout --detach origin/main
+  checkout_pr_worktree_target "$pr" "$PR_MAIN_SHA" || return 1
   set_review_mode main
 
   echo "review mode set to main baseline"
@@ -86,10 +85,13 @@ review_checkout_main() {
 
 review_checkout_pr() {
   local pr="$1"
-  enter_worktree "$pr" false
+  enter_worktree "$pr" false || return 1
   mark_pr_operation_side_effects_started
-  git fetch origin "pull/$pr/head:pr-$pr" --force
-  git checkout --detach "pr-$pr"
+  require_artifact .local/pr-meta.env
+  local expected_sha
+  expected_sha=$(source .local/pr-meta.env; printf '%s\n' "${PR_HEAD_SHA:-}")
+  fetch_pr_head "$pr" "$expected_sha" "refs/heads/pr-$pr" || return 1
+  checkout_pr_worktree_target "$pr" "pr-$pr" || return 1
   set_review_mode pr
 
   echo "review mode set to PR head"
@@ -99,7 +101,7 @@ review_checkout_pr() {
 
 review_guard() {
   local pr="$1"
-  enter_worktree "$pr" false
+  enter_worktree "$pr" false || return 1
   require_artifact .local/review-mode.env
   require_artifact .local/pr-meta.env
 
@@ -120,10 +122,8 @@ review_guard() {
 
   case "${REVIEW_MODE:-}" in
     main)
-      local expected_main_sha
-      expected_main_sha=$(git rev-parse origin/main)
-      if [ "$head_sha" != "$expected_main_sha" ]; then
-        echo "Review guard failed: expected HEAD at origin/main ($expected_main_sha) for main baseline mode, got $head_sha"
+      if [ "$head_sha" != "$PR_MAIN_SHA" ]; then
+        echo "Review guard failed: expected HEAD at origin/main ($PR_MAIN_SHA) for main baseline mode, got $head_sha"
         exit 1
       fi
       ;;
@@ -151,7 +151,7 @@ review_guard() {
 
 review_artifacts_init() {
   local pr="$1"
-  enter_worktree "$pr" false
+  enter_worktree "$pr" false || return 1
   require_artifact .local/pr-meta.env
   require_artifact .local/pr-meta.json
 
@@ -168,19 +168,12 @@ review_artifacts_init() {
     exit 1
   fi
 
-  # Take the first line in the shell, not through `head`: pipefail turns the
-  # helper's EPIPE into a spurious failure once the template outgrows the pipe.
-  local identity_line
-  identity_line=$(node "$(review_artifacts_helper_path)" markdown "$meta_number" "$head_sha")
-  identity_line=${identity_line%%$'\n'*}
-
-  if [ -f .local/review.json ] && [ -f .local/review.md ] &&
+  if [ -f .local/review.json ] &&
     jq -e --argjson number "$meta_number" --arg head "$head_sha" \
-      '.pr.number == $number and .pr.headSha == $head' .local/review.json >/dev/null 2>&1 &&
-    [ "$(head -n1 .local/review.md)" = "$identity_line" ]
+      '.pr.number == $number and .pr.headSha == $head' .local/review.json >/dev/null 2>&1
   then
     echo "review artifacts already stamped for PR #$meta_number at $head_sha"
-    echo "files=.local/review.md .local/review.json"
+    echo "file=.local/review.json (rendered summary: review-validate-artifacts)"
     return 0
   fi
 
@@ -200,11 +193,10 @@ review_artifacts_init() {
     echo "moved aside .local/review.$ext -> $superseded_dir/review.$ext (not authored for PR #$meta_number at $head_sha)"
   done
 
-  node "$(review_artifacts_helper_path)" markdown "$meta_number" "$head_sha" > .local/review.md
   node "$(review_artifacts_helper_path)" template "$meta_number" "$head_sha" > .local/review.json
 
   echo "review artifact templates are ready"
-  echo "files=.local/review.md .local/review.json"
+  echo "file=.local/review.json (rendered summary: review-validate-artifacts)"
 }
 
 validate_review_artifact_data() {
@@ -226,7 +218,6 @@ validate_review_artifact_data() {
 
   if ! node "$(review_artifacts_helper_path)" validate \
     .local/review.json \
-    .local/review.md \
     .local/pr-meta.json
   then
     return 1
@@ -240,17 +231,37 @@ require_ready_review_recommendation() {
   fi
 }
 
+# Pure local admission: malformed or unfinished input must not start a fetch or
+# leave an operation lock behind. This does not establish remote freshness.
+review_artifact_preflight() (
+  local pr="$1" ready="${2:-false}" root state target
+  root=$(common_repo_root) || return 1
+  state=$(pr_worktree_state "$root/.worktrees/pr-$pr" "" entry) || return 1
+  target=$(printf '%s\n' "$state" | jq -er 'select(.present == true) | .path') || {
+    echo "Missing PR review worktree. Run: scripts/pr review-init $pr"
+    return 1
+  }
+  cd "$target" || return 1
+  require_artifact .local/review.json || return 1
+  require_artifact .local/pr-meta.json || return 1
+  require_artifact .local/pr-meta.env || return 1
+  node "$(review_artifacts_helper_path)" validate .local/review.json .local/pr-meta.json || return 1
+  if [ "$(jq -r '.number' .local/pr-meta.json)" != "$pr" ]; then
+    echo "Review artifact identity mismatch: expected PR #$pr. Re-run scripts/pr review-init $pr"
+    return 1
+  fi
+  if [ "$ready" = true ]; then require_ready_review_recommendation || return 1; fi
+)
+
 review_validate_artifacts() {
   local pr="$1"
   # Callers use an OR-list to keep pre-mutation failures reversible; Bash disables
   # errexit within that context, so every artifact and exact-head guard must propagate.
-  enter_worktree "$pr" false || return 1
-  require_artifact .local/review.md || return 1
+  review_artifact_preflight "$pr" "${2:-false}" || return 1
+  review_guard "$pr" || return 1
   require_artifact .local/review.json || return 1
-  require_artifact .local/pr-meta.env || return 1
   require_artifact .local/pr-meta.json || return 1
 
-  review_guard "$pr" || return 1
   if [ "${REVIEW_MODE:-}" != "pr" ]; then
     echo "Review artifact validation requires the reviewed PR head, not main-baseline mode."
     return 1
@@ -270,8 +281,7 @@ review_tests() {
     exit 2
   fi
 
-  enter_worktree "$pr" false
-  review_guard "$pr"
+  review_guard "$pr" || return 1
 
   local target
   for target in "$@"; do
@@ -313,17 +323,20 @@ review_tests() {
 
 review_init() {
   local pr="$1"
-  mark_pr_operation_side_effects_started
-  enter_worktree "$pr" true
-
   local json pr_url
-  json=$(pr_meta_json "$pr")
+  # Metadata reads are read-only, so fetching before the side-effect marker keeps a
+  # transient GitHub failure inside the lock's auto-release window.
+  json=$(pr_meta_json "$pr") || return 1
+
+  enter_worktree "$pr" true || return 1
   write_pr_meta_files "$json"
   pr_url=$(printf '%s\n' "$json" | jq -r .url)
 
-  git fetch origin "pull/$pr/head:pr-$pr" --force
+  local expected_sha
+  expected_sha=$(pr_view_string_field "$json" headRefOid "$pr") || return 1
+  fetch_pr_head "$pr" "$expected_sha" "refs/heads/pr-$pr" || return 1
   local mb
-  mb=$(git merge-base origin/main "pr-$pr")
+  mb=$(git merge-base "$PR_MAIN_SHA" "refs/heads/pr-$pr")
 
   # Security: shell-escape values to prevent command injection when sourced.
   printf '%s=%q\n' \

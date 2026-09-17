@@ -9,6 +9,8 @@ export type DoctorSessionSqliteIssue = {
 
 const SESSION_SQLITE_WARNING_ISSUE_CODES = new Set([
   "entry_invalid",
+  "historical_transcript_deferred",
+  "plugin_migration_source_retained",
   "transcript_archive_failed",
   "transcript_malformed",
   "transcript_missing",
@@ -67,13 +69,11 @@ export type SessionSqliteMigrationFailureIssue = {
   body: string;
   bodyPath?: string;
   github?: {
-    fallbackUrl?: string;
     message?: string;
     status: "created" | "failed" | "skipped";
     url?: string;
   };
   title: string;
-  url: string;
 };
 
 export type DoctorSessionSqliteMode =
@@ -177,6 +177,13 @@ export function createDoctorSessionSqliteTotals(
   > = {},
 ): DoctorSessionSqliteReport["totals"] {
   const { archivedLegacyStoreFiles, reclaimedBytes } = values;
+  const sqliteEntries = new Map<string, number>();
+  for (const target of targets) {
+    sqliteEntries.set(
+      target.sqlitePath,
+      Math.max(sqliteEntries.get(target.sqlitePath) ?? 0, target.sqliteEntries),
+    );
+  }
   return {
     ...(archivedLegacyStoreFiles === undefined ? {} : { archivedLegacyStoreFiles }),
     archivedTranscriptFiles: values.archivedTranscriptFiles ?? 0,
@@ -186,7 +193,7 @@ export function createDoctorSessionSqliteTotals(
     issues: sumDoctorSessionSqliteTargets(targets, (target) => target.issues.length),
     legacyEntries: values.legacyEntries ?? 0,
     ...(reclaimedBytes === undefined ? {} : { reclaimedBytes }),
-    sqliteEntries: sumDoctorSessionSqliteTargets(targets, (target) => target.sqliteEntries),
+    sqliteEntries: [...sqliteEntries.values()].reduce((total, count) => total + count, 0),
     targets: targets.length,
     unreferencedJsonlFiles: values.unreferencedJsonlFiles ?? 0,
     validatedEntries: values.validatedEntries ?? 0,

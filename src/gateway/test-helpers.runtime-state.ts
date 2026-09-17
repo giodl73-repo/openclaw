@@ -24,7 +24,10 @@ export type GetReplyFromConfigFn = (
   configOverride?: OpenClawConfig,
 ) => Promise<ReplyPayload | ReplyPayload[] | undefined>;
 type CronIsolatedRunFn = (...args: unknown[]) => Promise<RunCronAgentTurnResult>;
-type AgentCommandFn = (...args: unknown[]) => Promise<void>;
+type AgentCommandResult = Awaited<
+  ReturnType<(typeof import("../agents/agent-command.js"))["agentCommand"]>
+>;
+type AgentCommandFn = (...args: unknown[]) => Promise<AgentCommandResult | void>;
 type SendWhatsAppFn = (...args: unknown[]) => Promise<{ messageId: string; toJid: string }>;
 export type RunBtwSideQuestionFn = (...args: unknown[]) => Promise<unknown>;
 type DispatchInboundMessageFn = (...args: unknown[]) => Promise<unknown>;
@@ -42,6 +45,8 @@ type GatewayTestHoistedState = {
       name?: string;
       provider: string;
       contextWindow?: number;
+      contextWindows?: Array<{ id: string; label: string; contextWindow: number }>;
+      contextWindowDefault?: string;
       reasoning?: boolean;
       input?: string[];
     }>;
@@ -61,7 +66,13 @@ type GatewayTestHoistedState = {
     resolveEndBeforeTimeoutIds: Set<string>;
     compactEmbeddedAgentSession: Mock<CompactEmbeddedAgentSessionFn>;
   };
-  testTailscaleWhois: { value: TailscaleWhoisIdentity | null };
+  testTailscaleWhois: {
+    value: TailscaleWhoisIdentity | null;
+    calls: Array<{
+      ip: string;
+      opts?: { timeoutMs?: number; cacheTtlMs?: number; errorTtlMs?: number };
+    }>;
+  };
   getReplyFromConfig: Mock<GetReplyFromConfigFn>;
   sendWhatsAppMock: Mock<SendWhatsAppFn>;
   testState: {
@@ -74,6 +85,7 @@ type GatewayTestHoistedState = {
     allowFrom: string[] | undefined;
     cronStorePath: string | undefined;
     cronEnabled: boolean | undefined;
+    cronTriggersEnabled: boolean | undefined;
     gatewayBind: "auto" | "lan" | "tailnet" | "loopback" | undefined;
     gatewayAuth: Record<string, unknown> | undefined;
     gatewayControlUi: Record<string, unknown> | undefined;
@@ -122,7 +134,7 @@ const gatewayTestHoisted = vi.hoisted(() => {
         },
       }),
     },
-    testTailscaleWhois: { value: null },
+    testTailscaleWhois: { value: null, calls: [] },
     getReplyFromConfig: vi.fn<GetReplyFromConfigFn>().mockResolvedValue(undefined),
     sendWhatsAppMock: vi.fn().mockResolvedValue({ messageId: "msg-1", toJid: "jid-1" }),
     testState: {
@@ -135,6 +147,7 @@ const gatewayTestHoisted = vi.hoisted(() => {
       allowFrom: undefined,
       cronStorePath: undefined,
       cronEnabled: false,
+      cronTriggersEnabled: undefined,
       gatewayBind: undefined,
       gatewayAuth: undefined,
       gatewayControlUi: undefined,

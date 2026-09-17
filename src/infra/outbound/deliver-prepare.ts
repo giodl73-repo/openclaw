@@ -2,6 +2,7 @@ import { copyReplyPayloadMetadata } from "../../auto-reply/reply-payload.js";
 // Finalizes outbound modifying policy before durable queue custody is created.
 import type { ReplyPayload } from "../../auto-reply/types.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import type { HookRunner } from "../../plugins/hooks.js";
 import { throwIfAborted } from "./abort.js";
 import { createChannelHandler, resolveChannelOutboundDirectiveOptions } from "./deliver-channel.js";
 import type { DeliverOutboundPayloadsParams } from "./deliver-contracts.js";
@@ -19,9 +20,9 @@ import {
   type PreparedOutboundBatch,
   type PreparedOutboundBatchEntry,
 } from "./prepared-batch.js";
-import { createReplyToDeliveryPolicy } from "./reply-policy.js";
+import { createReplyToDeliveryPolicy, normalizeOutboundReplyFacts } from "./reply-policy.js";
 
-export class OutboundPayloadPreparationError extends Error {
+class OutboundPayloadPreparationError extends Error {
   readonly sourceIndex: number;
   readonly payload: ReplyPayload;
 
@@ -46,14 +47,16 @@ function throwIfPreparationAborted(
 }
 
 async function createPreparationHandler(params: DeliverOutboundPayloadsParams) {
+  const reply = normalizeOutboundReplyFacts(params);
   return await createChannelHandler({
     cfg: params.cfg,
+    agentId: params.session?.agentId,
     channel: params.channel,
     to: params.to,
     deps: params.deps,
     accountId: params.accountId,
-    replyToId: params.replyToId,
-    replyToMode: params.replyToMode,
+    replyToId: reply?.replyToId,
+    replyToMode: reply?.source === "implicit" ? reply.mode : undefined,
     formatting: params.formatting,
     threadId: params.threadId,
     identity: params.identity,
@@ -117,10 +120,11 @@ function compactPreparedPayload(payload: ReplyPayload): ReplyPayload {
  */
 export async function prepareOutboundPayloadBatch(
   params: DeliverOutboundPayloadsParams,
-  options?: { onBeforeFirstModifier?: () => void },
+  options?: { onBeforeFirstModifier?: () => Promise<void>; hookRunner?: HookRunner },
 ): Promise<PreparedOutboundBatch> {
   const directiveOptions = await resolveChannelOutboundDirectiveOptions({
     cfg: params.cfg,
+    agentId: params.session?.agentId,
     channel: params.channel,
   });
   const plan = createOutboundPayloadPlan(params.payloads, {
@@ -140,31 +144,32 @@ export async function prepareOutboundPayloadBatch(
     }
   }
 
-  const hookRunner = getGlobalHookRunner();
+  const hookRunner = options?.hookRunner ?? getGlobalHookRunner();
   const hasReplyPayloadSendingHooks =
     params.replyPayloadSendingHook !== undefined &&
     (hookRunner?.hasHooks("reply_payload_sending") ?? false);
   const hasMessageSendingHooks = hookRunner?.hasHooks("message_sending") ?? false;
   const hasModifyingHooks = hasReplyPayloadSendingHooks || hasMessageSendingHooks;
-  const { resolveCurrentReplyTo } = createReplyToDeliveryPolicy({
-    replyToId: params.replyToId,
-    replyToMode: params.replyToMode,
-  });
+  const { resolveCurrentReplyTo } = createReplyToDeliveryPolicy(params);
   const sessionKeyForHooks = params.mirror?.sessionKey ?? params.session?.key;
   let modifierBoundaryEntered = false;
 
   for (const { index: sourceIndex, payload } of normalized) {
     throwIfPreparationAborted(params.abortSignal, sourceIndex, payload);
     if (hasModifyingHooks && !modifierBoundaryEntered) {
-      options?.onBeforeFirstModifier?.();
+      await options?.onBeforeFirstModifier?.();
+      throwIfPreparationAborted(params.abortSignal, sourceIndex, payload);
       modifierBoundaryEntered = true;
     }
     let replyHookResult: Awaited<ReturnType<typeof applyReplyPayloadSendingHook>>;
     try {
-      replyHookResult = await applyReplyPayloadSendingHook({
-        hook: params.replyPayloadSendingHook,
-        payload,
-      });
+      replyHookResult = await applyReplyPayloadSendingHook(
+        {
+          hook: params.replyPayloadSendingHook,
+          payload,
+        },
+        hookRunner,
+      );
     } catch (error) {
       throw new OutboundPayloadPreparationError(error, sourceIndex, payload);
     }
@@ -257,8 +262,11 @@ export async function prepareOutboundPayloadBatch(
     schemaVersion: PREPARED_OUTBOUND_BATCH_SCHEMA_VERSION,
     sourcePayloadCount: params.payloads.length,
     channelNormalized: true,
-    ...(params.replyPayloadSendingHook?.runId
-      ? { runId: params.replyPayloadSendingHook.runId }
+    ...((params.runId ?? params.replyPayloadSendingHook?.runId)
+      ? { runId: params.runId ?? params.replyPayloadSendingHook?.runId }
+      : {}),
+    ...(params.executionIdentityToken
+      ? { executionIdentityToken: params.executionIdentityToken }
       : {}),
     entries,
   };

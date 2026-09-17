@@ -1,8 +1,19 @@
-import { vi } from "vitest";
+import type { PreparedAgentCredentialModes } from "../../agents/agent-auth-credential-modes.js";
+import { loadAuthProfileStoreWithoutExternalProfiles } from "../../agents/auth-profiles.js";
 import type { ModelCatalogEntry } from "../../agents/model-catalog.types.js";
 import type { createOpenAIModelRoutesResolver } from "../../agents/openai-model-routes.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { buildModelsListResult } from "./models-list-result.js";
+import { loadManifestMetadataSnapshot } from "../../plugins/manifest-contract-eligibility.js";
+import type { PluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.types.js";
+import type { PluginRegistry } from "../../plugins/registry-types.js";
+import {
+  type PreparedGatewayModelCatalogSnapshot,
+  registerGatewayModelCatalogPrivateAccess,
+} from "../server-model-catalog-auth.js";
+import {
+  buildModelsListResult,
+  createGatewayAgentModelCatalogProjector,
+} from "./models-list-result.js";
 import type { GatewayRequestContext } from "./types.js";
 
 export const WITHOUT_OPENAI_ENV_AUTH = {
@@ -22,31 +33,96 @@ export function providerCatalogEntry(provider: string, id: string): ModelCatalog
   return { ...catalogEntry(id, "openai-completions"), provider };
 }
 
-export async function listModels(params: {
+type ListModelsParams = {
+  agentId?: string;
+  agentDir?: string;
+  workspaceDir?: string;
+  preparedOnly?: boolean;
+  includeDefaultModels?: boolean;
   catalog: ModelCatalogEntry[];
+  catalogLoadDelayMs?: number;
+  preparedCatalog?: ModelCatalogEntry[];
+  publishedCatalog?: ModelCatalogEntry[];
+  refresh?: boolean;
+  staticEntries?: ModelCatalogEntry[];
   cfg?: OpenClawConfig;
   discoveryModes?: Record<string, "refreshable" | "runtime" | "static">;
+  catalogComplete?: boolean;
+  preparedAuthModes?: PreparedAgentCredentialModes;
+  metadataSnapshot?: PluginMetadataSnapshot;
+  pluginRegistry?: PluginRegistry;
   routeResolverFactory?: typeof createOpenAIModelRoutesResolver;
   view?: "all" | "configured" | "provider-config" | "default";
-}) {
+};
+
+export function createModelsListTestContext(params: ListModelsParams) {
+  const agentId = params.agentId ?? "main";
   const config = params.cfg ?? ({} as OpenClawConfig);
+  const createCatalogSnapshot = (entries: ModelCatalogEntry[]) =>
+    ({
+      agentId,
+      agentDir: params.agentDir ?? "/tmp/models-list-openai-agent",
+      catalogComplete: params.catalogComplete ?? false,
+      workspaceDir: params.workspaceDir ?? "/tmp/models-list-openai-workspace",
+      config,
+      observationConfig: config,
+      pluginRegistry: params.pluginRegistry,
+      isCurrent: () => true,
+      authModes: params.preparedAuthModes ?? {},
+      authStore: loadAuthProfileStoreWithoutExternalProfiles(
+        params.agentDir ?? "/tmp/models-list-openai-agent",
+        {
+          allowKeychainPrompt: false,
+        },
+      ),
+      metadataSnapshot:
+        params.metadataSnapshot ?? loadManifestMetadataSnapshot({ config, env: process.env }),
+      entries,
+      routeVariants: entries,
+      ...(params.staticEntries ? { staticEntries: params.staticEntries } : {}),
+      authMaterializations: [],
+    }) satisfies PreparedGatewayModelCatalogSnapshot;
+  let publishedEntries = params.publishedCatalog ?? params.catalog;
+  const loadGatewayModelCatalogSnapshot = async (loadParams?: object) => {
+    if (params.catalogLoadDelayMs !== undefined) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, params.catalogLoadDelayMs);
+      });
+    }
+    const readOnly = loadParams && "readOnly" in loadParams && loadParams.readOnly === true;
+    const entries = readOnly && params.preparedCatalog ? params.preparedCatalog : params.catalog;
+    if (!readOnly) {
+      publishedEntries = entries;
+    }
+    return createCatalogSnapshot(entries);
+  };
+  registerGatewayModelCatalogPrivateAccess(loadGatewayModelCatalogSnapshot, {
+    loadDeferred: loadGatewayModelCatalogSnapshot,
+    readPrepared: async () => createCatalogSnapshot(publishedEntries),
+  });
   const context = {
     getRuntimeConfig: () => config,
-    loadGatewayModelCatalog: vi.fn(() => Promise.resolve(params.catalog)),
-    loadGatewayModelCatalogSnapshot: vi.fn(() =>
-      Promise.resolve({
-        agentId: "main",
-        agentDir: "/tmp/models-list-openai-agent",
-        config,
-        entries: params.catalog,
-        routeVariants: params.catalog,
-      }),
-    ),
-    logGateway: { debug: vi.fn() },
+    loadGatewayModelCatalogSnapshot,
+    logGateway: { debug: () => {}, warn: () => {} },
   } as unknown as GatewayRequestContext;
+  return context;
+}
+
+export async function listModels(params: ListModelsParams) {
+  const context = createModelsListTestContext(params);
+  const agentId = params.agentId ?? "main";
+  const config = params.cfg ?? ({} as OpenClawConfig);
   return await buildModelsListResult({
-    context,
-    params: { view: params.view ?? "all" },
+    source: { kind: "gateway", context },
+    agentId,
+    params: {
+      view: params.view ?? "all",
+      ...(params.includeDefaultModels === undefined
+        ? {}
+        : { includeDefaultModels: params.includeDefaultModels }),
+      ...(params.refresh ? { refresh: true } : {}),
+      ...(params.preparedOnly ? { preparedOnly: true } : {}),
+    },
     ...(params.discoveryModes
       ? {
           preloadedCatalog: {
@@ -54,13 +130,19 @@ export async function listModels(params: {
             config,
             snapshot: { entries: params.catalog, routeVariants: params.catalog },
           },
-          catalogProjector: {
+          catalogProjector: createGatewayAgentModelCatalogProjector({
+            cfg: config,
+            agentId,
+            snapshot: { entries: params.catalog, routeVariants: params.catalog },
             metadataSnapshot: {
+              index: { plugins: [] },
+              manifestRegistry: { plugins: [] },
               plugins: [
                 { id: "test-provider", modelCatalog: { discovery: params.discoveryModes } },
               ],
-            },
-          } as never,
+            } as never,
+            preparedAuthStore: { version: 1, profiles: {} },
+          }),
         }
       : {}),
     ...(params.routeResolverFactory ? { routeResolverFactory: params.routeResolverFactory } : {}),

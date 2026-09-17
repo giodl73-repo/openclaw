@@ -61,9 +61,14 @@ export function createSlackSystemEventTestHarness(overrides?: SlackSystemEventTe
     resolveUserName: async (userId: string) => ({
       name: overrides?.userNames?.[userId] ?? "alice",
     }),
-    resolveSlackSystemEventSessionKey: () => "agent:main:main",
+    resolveSlackSystemEventRoute: () => ({ agentId: "main", sessionKey: "agent:main:main" }),
+    getSlackAssistantThreadContext: () => undefined,
+    isSlackManagedViewThread: async () => false,
+    isSlackAgentView: async () => true,
   } as unknown as SlackMonitorContext;
 
+  ctx.readRuntimeContext = async () => ctx;
+  ctx.isRuntimePolicyCurrent = () => true;
   return {
     ctx,
     getHandler(name: string): SlackSystemEventHandler | null {

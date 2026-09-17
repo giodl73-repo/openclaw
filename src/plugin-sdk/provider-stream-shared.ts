@@ -1,6 +1,9 @@
 // Provider stream shared helpers implement reusable stream wrappers and payload policies.
 import { resolveOpenAIReasoningEffortForModel } from "@openclaw/ai/internal/openai";
-import { resolveOpenAIReasoningEffortMap } from "@openclaw/ai/transports";
+import {
+  createEmptyTransportUsage,
+  resolveOpenAIReasoningEffortMap,
+} from "@openclaw/ai/transports";
 import { asOptionalObjectRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   createPromotedPlainTextToolCallBlock,
@@ -21,9 +24,21 @@ import {
 import { mapThinkingLevelToReasoningEffort } from "../llm/providers/stream-wrappers/reasoning-effort-utils.js";
 import { streamWithPayloadPatch } from "../llm/providers/stream-wrappers/stream-payload-utils.js";
 import { streamSimple } from "../llm/stream.js";
+import type { Model } from "../llm/types.js";
 import { createAssistantMessageEventStream } from "../llm/utils/event-stream.js";
 import { findCodeRegions } from "../shared/text/code-regions.js";
-export { applyAnthropicRefusal } from "@openclaw/ai/internal/anthropic";
+import { assertProviderStreamEvent } from "./provider-stream-event-normalization.js";
+export {
+  isGoogleGemini3FlashModel,
+  isGoogleGemini3ProModel,
+  isGoogleGemini3ThinkingLevelModel,
+} from "@openclaw/ai/internal/google-model-family";
+export {
+  applyAnthropicRefusal,
+  isAnthropicOAuthApiKey,
+  resolveAnthropicServerCompactionPlan,
+  resolveAnthropicThinkingEffort,
+} from "@openclaw/ai/internal/anthropic";
 export { createDeferredEventBuffer } from "@openclaw/ai/internal/runtime";
 export { notifyLlmRequestActivity, onLlmRequestActivity } from "@openclaw/ai/internal/runtime";
 
@@ -131,8 +146,9 @@ function scrubProviderTerminalMessage(
 }
 
 function wrapPlainTextToolCallStream(
-  source: ReturnType<StreamFn>,
+  source: Awaited<ReturnType<StreamFn>>,
   context: Parameters<StreamFn>[1],
+  model: Model,
 ): ReturnType<StreamFn> {
   const toolNames = resolveContextToolNames(context);
   if (toolNames.size === 0) {
@@ -140,47 +156,53 @@ function wrapPlainTextToolCallStream(
   }
   const matcher = createProviderToolNameMatcher(toolNames);
   const output = createAssistantMessageEventStream();
-  const stream = output as unknown as { push(event: unknown): void; end(): void };
 
   void (async () => {
     let ended = false;
     const endStream = () => {
       if (!ended) {
         ended = true;
-        stream.end();
+        output.end();
       }
     };
 
     try {
-      const normalizedEvents = normalizePlainTextToolCallStreamEvents(
-        source as AsyncIterable<unknown>,
-        {
-          createPromotedToolCallEvents: createPromotedPlainTextToolCallEvents,
-          matcher,
-          normalizeTerminalMessage: ({ allowPromotion, message, preserveEmptyTextBlocks }) =>
-            normalizeProviderDoneMessage(
-              message,
-              allowPromotion,
-              toolNames,
-              matcher,
-              preserveEmptyTextBlocks,
-            ),
-          resolveProtectedRanges: findCodeRegions,
-          stopAfterDone: true,
-        },
-      );
-      for await (const event of normalizedEvents) {
-        stream.push(event);
+      const normalizedEvents = normalizePlainTextToolCallStreamEvents(source, {
+        createPromotedToolCallEvents: createPromotedPlainTextToolCallEvents,
+        matcher,
+        normalizeTerminalMessage: ({ allowPromotion, message, preserveEmptyTextBlocks }) =>
+          normalizeProviderDoneMessage(
+            message,
+            allowPromotion,
+            toolNames,
+            matcher,
+            preserveEmptyTextBlocks,
+          ),
+        // findCodeRegions resolves exactly the CommonMark fenced/indented/inline code shapes
+        // the carried fence scan models (and yields to the full parse for the rest), so its
+        // protection is safe to trust from the fast path.
+        protectedRangesFenceCompatible: true,
+        resolveProtectedRanges: findCodeRegions,
+        stopAfterDone: true,
+      });
+      for await (const normalizedEvent of normalizedEvents) {
+        assertProviderStreamEvent(normalizedEvent, model);
+        output.push(normalizedEvent);
       }
     } catch (error) {
-      stream.push({
+      output.push({
         type: "error",
         reason: "error",
         error: {
           role: "assistant",
           content: [],
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          usage: createEmptyTransportUsage(),
           stopReason: "error",
           errorMessage: error instanceof Error ? error.message : String(error),
+          timestamp: Date.now(),
         },
       });
     } finally {
@@ -188,7 +210,7 @@ function wrapPlainTextToolCallStream(
     }
   })();
 
-  return output as ReturnType<StreamFn>;
+  return output;
 }
 
 /**
@@ -204,10 +226,10 @@ export function createPlainTextToolCallCompatWrapper(
     const maybeStream = underlying(model, context, options);
     if (maybeStream && typeof maybeStream === "object" && "then" in maybeStream) {
       return Promise.resolve(maybeStream).then((stream) =>
-        wrapPlainTextToolCallStream(stream, context),
-      ) as ReturnType<StreamFn>;
+        wrapPlainTextToolCallStream(stream, context, model),
+      );
     }
-    return wrapPlainTextToolCallStream(maybeStream, context);
+    return wrapPlainTextToolCallStream(maybeStream, context, model);
   };
 }
 
@@ -268,13 +290,15 @@ export function createPayloadPatchStreamWrapper(
 export function createOpenAICompatibleCompletionsThinkingOffWrapper(
   baseStreamFn: StreamFn | undefined,
   thinkingLevel?: ThinkLevel,
+  /** Original wire API when the runtime uses a dispatch alias. */
+  sourceApi?: ProviderWrapStreamFnContext["sourceApi"],
 ): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
-  if (thinkingLevel !== "off") {
-    return underlying;
-  }
   return (model, context, options) => {
-    if (model.api !== "openai-completions") {
+    if (
+      (options?.reasoning ?? thinkingLevel) !== "off" ||
+      (sourceApi ?? model.api) !== "openai-completions"
+    ) {
       return underlying(model, context, options);
     }
     return streamWithPayloadPatch(underlying, model, context, options, (payload) => {
@@ -283,10 +307,10 @@ export function createOpenAICompatibleCompletionsThinkingOffWrapper(
       }
       const disabled = resolveOpenAIReasoningEffortForModel({
         model,
-        effort: "none",
+        effort: "off",
         fallbackMap: resolveOpenAIReasoningEffortMap({
-          provider: typeof model.provider === "string" ? model.provider : null,
-          id: typeof model.id === "string" ? model.id : null,
+          provider: model.provider,
+          id: model.id,
           compat: model.compat,
         }),
       });
@@ -519,8 +543,9 @@ export function createDeepSeekV4OpenAICompatibleThinkingWrapper(params: {
       return underlying(model, context, options);
     }
 
+    const thinkingLevel = options?.reasoning ?? params.thinkingLevel;
     return streamWithPayloadPatch(underlying, model, context, options, (payload) => {
-      if (isDisabledDeepSeekV4ThinkingLevel(params.thinkingLevel)) {
+      if (isDisabledDeepSeekV4ThinkingLevel(thinkingLevel)) {
         payload.thinking = { type: "disabled" };
         delete payload.reasoning_effort;
         delete payload.reasoning;
@@ -529,7 +554,7 @@ export function createDeepSeekV4OpenAICompatibleThinkingWrapper(params: {
       }
 
       payload.thinking = { type: "enabled" };
-      payload.reasoning_effort = resolveReasoningEffort(params.thinkingLevel);
+      payload.reasoning_effort = resolveReasoningEffort(thinkingLevel);
       normalizeOpenAICompatibleReasoningReplay(payload, {
         thinkingEnabled: true,
         shouldBackfillAssistantMessage: params.shouldBackfillAssistantReasoningContent,
@@ -659,9 +684,6 @@ export function createThinkingOnlyFinalTextWrapper(params: {
 
 export {
   isGoogleGemini25ThinkingBudgetModel,
-  isGoogleGemini3FlashModel,
-  isGoogleGemini3ProModel,
-  isGoogleGemini3ThinkingLevelModel,
   isGoogleThinkingRequiredModel,
   resolveGoogleGemini3ThinkingLevel,
   sanitizeGoogleThinkingPayload,
@@ -700,7 +722,11 @@ export {
 export { applyAnthropicEphemeralCacheControlMarkers } from "../llm/providers/stream-wrappers/anthropic-cache-control-payload.js";
 export {
   createMoonshotThinkingWrapper,
+  resolveMoonshotThinkingKeep,
   resolveMoonshotThinkingType,
 } from "../llm/providers/stream-wrappers/moonshot-thinking.js";
 export { streamWithPayloadPatch };
 export { createToolStreamWrapper } from "../llm/providers/stream-wrappers/zai.js";
+
+export { applyCompletionsAnthropicCacheControl } from "@openclaw/ai/transports";
+export { projectCopilotRequestFacts } from "@openclaw/ai/internal/shared";

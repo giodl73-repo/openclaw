@@ -59,27 +59,56 @@ actor PortGuardian {
         self.postSpawnCompatibilityCheck = postSpawnCompatibilityCheck
     }
 
-    func sweep(mode: AppState.ConnectionMode) async {
+    func sweep(mode: AppState.ConnectionMode, hostsLocalGateway: Bool) async {
+        guard !Task.isCancelled else { return }
         self.logger.info("port sweep starting (mode=\(mode.rawValue, privacy: .public))")
         // Reap before the port scan and in every mode: orphans come from earlier
         // remote sessions and must die even after the user switched modes.
         await self.reapOrphanedTunnels()
+        guard !Task.isCancelled else { return }
         guard mode != .unconfigured else {
             self.logger.info("port sweep skipped (mode=unconfigured)")
             return
         }
-        let port = GatewayEnvironment.gatewayPort()
+        let localGatewayPort = GatewayEnvironment.gatewayPort()
+        let tunnelPort = RemotePortTunnel.localPort(root: OpenClawConfigFile.loadDict())
+        let ports = mode == .remote
+            ? Array(Set([tunnelPort] + (hostsLocalGateway ? [localGatewayPort] : []))).sorted()
+            : [localGatewayPort]
+        for port in ports {
+            await self.sweep(
+                port: port,
+                mode: mode,
+                tunnelPort: tunnelPort,
+                localGatewayPort: localGatewayPort,
+                hostsLocalGateway: hostsLocalGateway)
+        }
+        self.logger.info("port sweep done")
+    }
+
+    private func sweep(
+        port: Int,
+        mode: AppState.ConnectionMode,
+        tunnelPort: Int,
+        localGatewayPort: Int,
+        hostsLocalGateway: Bool) async
+    {
+        guard !Task.isCancelled else { return }
         // Capture the listener before launchd status. If its process exits and the
         // PID is reused, the newer status snapshot cannot bless the replacement.
         let listeners = await self.listeners(on: port)
-        let managedGatewayPID = mode == .local
+        guard !Task.isCancelled else { return }
+        let managedGatewayPID = (mode == .local || hostsLocalGateway) && port == localGatewayPort
             ? await GatewayLaunchAgentManager.runningGatewayPID()
             : nil
+        guard !Task.isCancelled else { return }
         for listener in listeners {
             if Self.isExpected(
                 listener,
                 port: port,
                 mode: mode,
+                tunnelPort: tunnelPort,
+                localGatewayPort: localGatewayPort,
                 managedGatewayPID: managedGatewayPID)
             {
                 let message = """
@@ -103,6 +132,7 @@ actor PortGuardian {
                         "(pid \(listener.pid, privacy: .public)); preserving conflict")
                 continue
             }
+            guard !Task.isCancelled else { return }
             if await Self.terminateProcess(listener.pid) {
                 let message = """
                 port \(port) was held by \(listener.command)
@@ -113,7 +143,6 @@ actor PortGuardian {
                 self.logger.error("failed to terminate pid \(listener.pid) on port \(port, privacy: .public)")
             }
         }
-        self.logger.info("port sweep done")
     }
 
     /// Finishes legacy reconciliation before SSH starts. The returned store can
@@ -330,9 +359,10 @@ actor PortGuardian {
     /// forget a still-running tunnel (the record is its only retry path).
     private static func terminateProcess(_ pid: Int32) async -> Bool {
         #if canImport(Darwin)
-        guard pid > 0 else { return false }
+        guard !Task.isCancelled, pid > 0 else { return false }
         _ = Darwin.kill(pid, SIGTERM)
         if await self.waitForProcessExit(pid: pid) { return true }
+        guard !Task.isCancelled else { return false }
         _ = Darwin.kill(pid, SIGKILL)
         return await self.waitForProcessExit(pid: pid)
         #else
@@ -343,7 +373,7 @@ actor PortGuardian {
     private static func waitForProcessExit(pid: Int32, timeout: TimeInterval = 1.0) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while self.tunnelProcessInfo(pid: pid) != nil {
-            guard Date() < deadline else { return false }
+            guard !Task.isCancelled, Date() < deadline else { return false }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return true
@@ -431,21 +461,38 @@ actor PortGuardian {
         }
     }
 
-    func diagnose(mode: AppState.ConnectionMode) async -> [PortReport] {
-        if mode == .unconfigured {
-            return []
+    func diagnose(
+        mode: AppState.ConnectionMode,
+        activeTunnelPort: UInt16?,
+        hostsLocalGateway: Bool = false) async -> [PortReport]
+    {
+        guard mode != .unconfigured else { return [] }
+        let root = OpenClawConfigFile.loadDict()
+        var ports: [(port: Int, mode: AppState.ConnectionMode)] = []
+        if mode == .remote, GatewayRemoteConfig.resolveTransport(root: root) == .ssh {
+            let tunnelPort = activeTunnelPort.map(Int.init) ?? RemotePortTunnel.localPort(root: root)
+            ports.append((tunnelPort, .remote))
         }
-        let port = GatewayEnvironment.gatewayPort()
-        let listeners = await self.listeners(on: port)
-        let tunnelHealthy = await self.probeGatewayHealthIfNeeded(
-            port: port,
-            mode: mode,
-            listeners: listeners)
-        return [Self.buildReport(
-            port: port,
-            listeners: listeners,
-            mode: mode,
-            tunnelHealthy: tunnelHealthy)]
+        if mode == .local || hostsLocalGateway {
+            let localPort = GatewayEnvironment.gatewayPort(root: root)
+            if !ports.contains(where: { $0.port == localPort }) {
+                ports.append((localPort, .local))
+            }
+        }
+        var reports: [PortReport] = []
+        for (port, portMode) in ports {
+            let listeners = await self.listeners(on: port)
+            let tunnelHealthy = await self.probeGatewayHealthIfNeeded(
+                port: port,
+                mode: portMode,
+                listeners: listeners)
+            reports.append(Self.buildReport(
+                port: port,
+                listeners: listeners,
+                mode: portMode,
+                tunnelHealthy: tunnelHealthy))
+        }
+        return reports
     }
 
     func probeGatewayHealth(port: Int, timeout: TimeInterval = 2.0) async -> Bool {
@@ -617,8 +664,7 @@ actor PortGuardian {
             return .init(port: port, expected: expectedDesc, status: .missing(text), listeners: [])
         }
 
-        let tunnelUnhealthy =
-            mode == .remote && port == GatewayEnvironment.gatewayPort() && tunnelHealthy == false
+        let tunnelUnhealthy = mode == .remote && tunnelHealthy == false
         let reportListeners = listeners.map { listener in
             var expected = okPredicate(listener)
             if tunnelUnhealthy, expected { expected = false }
@@ -677,14 +723,16 @@ actor PortGuardian {
         _ listener: Listener,
         port: Int,
         mode: AppState.ConnectionMode,
+        tunnelPort: Int? = nil,
+        localGatewayPort: Int? = nil,
         managedGatewayPID: Int32? = nil) -> Bool
     {
         let cmd = listener.command.lowercased()
         let full = listener.fullCommand.lowercased()
         switch mode {
         case .remote:
-            if port == GatewayEnvironment.gatewayPort() { return true }
-            return false
+            return port == tunnelPort ||
+                (port == localGatewayPort && managedGatewayPID != nil && listener.pid == managedGatewayPID)
         case .local:
             // Daemon status owns this process identity; the listener snapshot proves
             // that the same launchd PID currently holds the configured Gateway port.
@@ -733,7 +781,7 @@ actor PortGuardian {
         mode: AppState.ConnectionMode,
         listeners: [Listener]) async -> Bool?
     {
-        guard mode == .remote, port == GatewayEnvironment.gatewayPort(), !listeners.isEmpty else { return nil }
+        guard mode == .remote, !listeners.isEmpty else { return nil }
         let hasSsh = listeners.contains { $0.command.lowercased().contains("ssh") }
         guard hasSsh else { return nil }
         return await self.probeGatewayHealth(port: port)
@@ -909,6 +957,8 @@ extension PortGuardian {
         fullCommand: String,
         port: Int,
         mode: AppState.ConnectionMode,
+        tunnelPort: Int? = nil,
+        localGatewayPort: Int? = nil,
         pid: Int32 = 0,
         managedGatewayPID: Int32? = nil) -> Bool
     {
@@ -917,6 +967,8 @@ extension PortGuardian {
             listener,
             port: port,
             mode: mode,
+            tunnelPort: tunnelPort,
+            localGatewayPort: localGatewayPort,
             managedGatewayPID: managedGatewayPID)
     }
 

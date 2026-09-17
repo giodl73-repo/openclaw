@@ -9,40 +9,68 @@ import type {
 import { t } from "../../i18n/index.ts";
 import type {
   PluginCatalogItem,
-  PluginInstallRequest,
+  PluginDiscoveryDetailResult,
   PluginListResult,
   PluginMutationResult,
-  PluginSearchResult,
+  PluginsInspectResult,
 } from "../../lib/plugins/index.ts";
 import {
   createApplicationContextProvider,
   type ApplicationContextProvider,
 } from "../../test-helpers/application-context.ts";
-import type { PluginsRouteData } from "./plugins-page.ts";
+import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
+import type { InstallWizardController } from "./install-wizard-controller.ts";
+import type { PluginInstallWizardState } from "./install-wizard-model.ts";
+import type { PluginRowMessage } from "./plugin-row-message.ts";
+import type { PluginsConsentController } from "./plugins-consent-controller.ts";
+import type { PluginsRouteData } from "./route-data.ts";
 import "./plugins-page.ts";
 
 type RequestHandler = (method: string, params: unknown) => Promise<unknown>;
 
+const PLUGINS_GATEWAY_HELLO = gatewayHelloForMethods([
+  "config.set",
+  "plugins.inspect",
+  "plugins.install",
+  "plugins.list",
+  "plugins.reload",
+  "plugins.setEnabled",
+  "plugins.uninstall",
+]);
+
 type GatewayHarness = {
   gateway: ApplicationGateway;
-  emit: (client: GatewayBrowserClient | null, connected: boolean) => ApplicationGatewaySnapshot;
+  emit: (
+    client: GatewayBrowserClient | null,
+    connected: boolean,
+    overrides?: Partial<ApplicationGatewaySnapshot>,
+  ) => ApplicationGatewaySnapshot;
 };
 
 type TestPluginsPage = HTMLElement & {
+  surface: "discovery" | "settings";
   routeData?: PluginsRouteData;
   updateComplete: Promise<boolean>;
   result: PluginListResult | null;
   loading: boolean;
   busy: Record<string, boolean>;
-  activeTab: "installed" | "discover";
-  searchResults: PluginSearchResult[] | null;
+  messages: Record<string, PluginRowMessage>;
+  detail: {
+    pluginId: string;
+    inspection: PluginsInspectResult | null;
+    error: string | null;
+  } | null;
+  pluginConfigEditPending: boolean;
   applyMutationResult: (result: PluginMutationResult) => void;
-  install: (rowKey: string, request: PluginInstallRequest) => Promise<void>;
-  updateEnabled: (pluginId: string, enabled: boolean, key?: string) => Promise<void>;
+  consentController: Pick<PluginsConsentController, "install" | "mutateInstalledPlugin">;
+  installWizard: PluginInstallWizardState | null;
+  installWizardController: InstallWizardController;
+  refreshCatalog: () => Promise<void>;
   uninstall: (pluginId: string, rowKey: string) => Promise<void>;
 };
 
 export type RuntimeConfigTestState = {
+  connected?: boolean;
   configFormDirty: boolean;
   lastError: string | null;
   configSnapshot?: { sourceConfig: Record<string, unknown>; hash: string } | null;
@@ -63,8 +91,90 @@ export function createPlugin(overrides: Partial<PluginCatalogItem> = {}): Plugin
   };
 }
 
-export function createResult(plugin = createPlugin()): PluginListResult {
-  return { plugins: [plugin], diagnostics: [], mutationAllowed: true };
+export function createResult(
+  pluginOrPlugins: PluginCatalogItem | PluginCatalogItem[] = createPlugin(),
+): PluginListResult {
+  return {
+    plugins: Array.isArray(pluginOrPlugins) ? pluginOrPlugins : [pluginOrPlugins],
+    diagnostics: [],
+    mutationAllowed: true,
+  };
+}
+
+export function createDiscoveryDetail(plugin = createPlugin()): PluginDiscoveryDetailResult {
+  return {
+    plugin: {
+      id: `catalog:${plugin.id}`,
+      catalog: {
+        name: plugin.name,
+        family: "code-plugin",
+        official: plugin.origin === "official",
+        categories: [],
+      },
+      local: {
+        present: plugin.installed,
+        installed: plugin.installed,
+        enabled: plugin.enabled,
+        state: plugin.state,
+        action: "install",
+        install: plugin.install,
+      },
+    },
+    detail: {
+      origin: "clawhub",
+      packageName: plugin.packageName ?? plugin.id,
+      topics: [],
+      configuration: [],
+      mcpServers: [],
+      skills: [],
+      versions: [],
+    },
+  };
+}
+
+export function createInspectResult(
+  overrides: Partial<PluginsInspectResult> = {},
+): PluginsInspectResult {
+  return {
+    ok: true,
+    reviewToken: "review-token-workboard",
+    plugin: {
+      id: "workboard",
+      name: "Workboard",
+      origin: "global",
+      installed: true,
+      enabled: false,
+    },
+    source: { kind: "npm", packageName: "workboard" },
+    declared: {
+      channels: [],
+      providers: [],
+      tools: [],
+      contracts: [],
+      hooks: [],
+      mcpServers: [],
+      cliCommands: [],
+      cliBackends: [],
+      skills: [],
+      dangerousConfigFlags: [],
+    },
+    components: {
+      mapped: [],
+      skills: [],
+      mcpServers: [],
+      commands: [],
+      hooks: [],
+      lspServers: [],
+      unavailable: { capabilities: [], mcpServers: [], lspServers: [] },
+    },
+    grants: {
+      hooks: {
+        allowPromptInjection: { effective: true },
+        allowConversationAccess: { effective: false },
+      },
+    },
+    ...overrides,
+  };
 }
 
 export function createPluginsRouteLocation(url = "/settings/plugins"): RouteLocation {
@@ -101,11 +211,7 @@ function createSnapshot(
     phase: connected ? "connected" : "reconnecting",
     offlineStable: false,
     canvasPluginSurfaceUrl: null,
-    hello: {
-      type: "hello-ok",
-      protocol: 1,
-      auth: { role: "operator", scopes: ["operator.read", "operator.admin"] },
-    },
+    hello: PLUGINS_GATEWAY_HELLO,
     assistantAgentId: "main",
     sessionKey: "main",
     lastError: null,
@@ -121,7 +227,9 @@ export function createGateway(client: GatewayBrowserClient, connected = true): G
       return snapshot;
     },
     connection: { gatewayUrl: "ws://localhost", token: "", password: "", bootstrapToken: "" },
+    connectionRevision: 0,
     eventLog: [],
+    eventLogRevision: 0,
     connect: () => undefined,
     setSessionKey: () => undefined,
     start: () => undefined,
@@ -135,8 +243,8 @@ export function createGateway(client: GatewayBrowserClient, connected = true): G
   } satisfies ApplicationGateway;
   return {
     gateway,
-    emit(nextClient, nextConnected) {
-      snapshot = createSnapshot(nextClient, nextConnected);
+    emit(nextClient, nextConnected, overrides = {}) {
+      snapshot = { ...createSnapshot(nextClient, nextConnected), ...overrides };
       for (const listener of listeners) {
         listener(snapshot);
       }
@@ -148,10 +256,22 @@ export function createGateway(client: GatewayBrowserClient, connected = true): G
 type RuntimeConfigTestHarness = {
   runtimeConfig: {
     state: RuntimeConfigTestState;
+    canSet: boolean;
     refresh: ApplicationContext["runtimeConfig"]["refresh"];
     ensureLoaded: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
+    ensureSchemaLoaded: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
+    refreshSchema: ReturnType<typeof vi.fn<() => Promise<undefined>>>;
+    retry: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
     patch: ReturnType<
       typeof vi.fn<(options: { raw: Record<string, unknown>; note: string }) => Promise<boolean>>
+    >;
+    patchForm: ReturnType<typeof vi.fn<ApplicationContext["runtimeConfig"]["patchForm"]>>;
+    removeFormValue: ReturnType<
+      typeof vi.fn<ApplicationContext["runtimeConfig"]["removeFormValue"]>
+    >;
+    save: ReturnType<typeof vi.fn<ApplicationContext["runtimeConfig"]["save"]>>;
+    flushFormChanges: ReturnType<
+      typeof vi.fn<ApplicationContext["runtimeConfig"]["flushFormChanges"]>
     >;
     patchFromSnapshot: ApplicationContext["runtimeConfig"]["patchFromSnapshot"];
     runExternalMutation: ApplicationContext["runtimeConfig"]["runExternalMutation"];
@@ -169,11 +289,22 @@ export function createRuntimeConfigHarness(
   const patch = vi.fn<
     (options: { raw: Record<string, unknown>; note: string }) => Promise<boolean>
   >(async () => true);
+  const patchForm = vi.fn<(path: Array<string | number>, value: unknown) => void>();
+  const removeFormValue = vi.fn<(path: Array<string | number>) => void>();
+  const save = vi.fn(async () => true);
   const runtimeConfig = {
     state: runtimeConfigState,
+    canSet: true,
     refresh: refreshConfig,
     ensureLoaded: vi.fn(async () => undefined),
+    ensureSchemaLoaded: vi.fn(async () => undefined),
+    refreshSchema: vi.fn(async () => undefined),
+    retry: vi.fn(async () => true),
     patch,
+    patchForm,
+    removeFormValue,
+    save,
+    flushFormChanges: vi.fn(async () => true),
     patchFromSnapshot: vi.fn(async (build) => {
       const config = runtimeConfigState.configSnapshot?.sourceConfig ?? {};
       const built = build(config);
@@ -246,6 +377,7 @@ export function createContext(
   return {
     gateway,
     basePath: "",
+    resourceBasePath: "",
     runtimeConfig: harness.runtimeConfig,
     navigate: vi.fn(),
     replace: vi.fn(),
@@ -255,9 +387,13 @@ export function createContext(
 export async function mountPage(
   context: ApplicationContext,
   routeData?: PluginsRouteData,
+  surface: TestPluginsPage["surface"] = routeData?.location.pathname.includes("/settings/plugins")
+    ? "settings"
+    : "discovery",
 ): Promise<{ page: TestPluginsPage; provider: ApplicationContextProvider }> {
   const provider = createApplicationContextProvider(context);
   const page = document.createElement("openclaw-plugins-page") as unknown as TestPluginsPage;
+  page.surface = surface;
   page.routeData = routeData;
   provider.append(page);
   document.body.append(provider);
@@ -265,19 +401,38 @@ export async function mountPage(
   return { page, provider };
 }
 
-export function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => {
-    resolve = nextResolve;
-  });
-  return { promise, resolve };
-}
-
-export async function clickRowAction(page: TestPluginsPage, pluginSelector: string, label: string) {
-  const button = [...page.querySelectorAll<HTMLButtonElement>(`${pluginSelector} button`)].find(
-    (element) => (element.getAttribute("aria-label") ?? element.textContent ?? "").includes(label),
-  );
-  button?.click();
+export async function activatePluginControl(
+  page: TestPluginsPage,
+  pluginSelector: string,
+  label: string,
+) {
+  const controls = [
+    ...page.querySelectorAll<HTMLElement>(`${pluginSelector} button, ${pluginSelector} wa-switch`),
+  ];
+  const control =
+    controls.find((element) =>
+      (element.getAttribute("aria-label") ?? element.textContent ?? "").includes(label),
+    ) ?? controls.find((element) => element.tagName.toLowerCase() === "wa-switch");
+  if (!control) {
+    const pluginId = /data-plugin-id=["']([^"']+)["']/u.exec(pluginSelector)?.[1];
+    const plugin = page.result?.plugins.find((entry) => entry.id === pluginId);
+    if (!plugin) {
+      throw new Error(`No plugin control matching ${label} under ${pluginSelector}`);
+    }
+    void page.consentController.mutateInstalledPlugin(
+      plugin.id,
+      plugin.enabled ? "disable" : "enable",
+    );
+    await page.updateComplete;
+    return;
+  }
+  if (control.tagName.toLowerCase() === "wa-switch") {
+    const toggle = control as HTMLElement & { checked: boolean };
+    toggle.checked = !toggle.checked;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+  } else {
+    control.click();
+  }
   await page.updateComplete;
 }
 

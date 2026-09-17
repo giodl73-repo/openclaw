@@ -1,9 +1,11 @@
 // Mattermost tests cover draft-preview delivery settlement.
+import { setImmediate } from "node:timers/promises";
 import {
   createChannelPartialDeliveryError,
   isChannelPartialDeliveryError,
 } from "openclaw/plugin-sdk/channel-inbound";
 import { createMessageReceiptFromOutboundResults } from "openclaw/plugin-sdk/channel-outbound";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as clientModule from "./client.js";
 import type { MattermostClient } from "./client.js";
@@ -122,15 +124,32 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
   it("records thread participation when a same-thread final finalizes the preview in place", async () => {
     const draftStream = createDraftStreamMock();
     const deliverFinal = createDeliverFinalMock();
-    const recordThreadParticipation = vi.fn();
+    const recording = createDeferred<void>();
+    const registered = createDeferred<void>();
+    const recordThreadParticipation = vi.fn(() => {
+      recording.resolve();
+      return registered.promise;
+    });
+    let settled = false;
 
-    const result = await deliverDraftPreview({
+    const delivery = deliverDraftPreview({
       payload: { text: "All good" } as never,
       draftStream,
       effectiveReplyToId: "thread-root-1",
       recordThreadParticipation,
       deliverPayload: deliverFinal,
+    }).finally(() => {
+      settled = true;
     });
+    try {
+      await recording.promise;
+      await setImmediate();
+      expect(settled).toBe(false);
+    } finally {
+      registered.resolve();
+      await delivery;
+    }
+    const result = await delivery;
 
     // Default streaming finalizes by editing the preview post, bypassing deliverPayload —
     // participation must still be recorded (regression: PR #95552 review P1).
@@ -145,6 +164,41 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
       visibleReplySent: true,
       content: "All good",
     });
+  });
+
+  it.each([
+    {
+      name: "native value buttons",
+      presentation: {
+        blocks: [{ type: "buttons" as const, buttons: [{ label: "Open", value: "open" }] }],
+      },
+    },
+    {
+      name: "navigation URLs",
+      presentation: {
+        blocks: [
+          {
+            type: "buttons" as const,
+            buttons: [{ label: "Docs", url: "https://example.com/docs" }],
+          },
+        ],
+      },
+    },
+  ])("delivers $name instead of losing them in a preview edit", async ({ presentation }) => {
+    const draftStream = createDraftStreamMock();
+    const deliverFinal = createDeliverFinalMock();
+    const payload = { text: "Choose an option", presentation };
+
+    await deliverDraftPreview({
+      payload,
+      draftStream,
+      effectiveReplyToId: "thread-root-1",
+      deliverPayload: deliverFinal,
+    });
+
+    expect(deliverFinal).toHaveBeenCalledExactlyOnceWith(payload);
+    expect(updateMattermostPostSpy).not.toHaveBeenCalled();
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
   });
 
   it("reports a final already published in a sealed preview generation", async () => {
@@ -172,6 +226,26 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
       visibleReplySent: true,
       content: "Already visible",
     });
+  });
+
+  it("delivers unsent presentation controls after preview text was already published", async () => {
+    const draftStream = createDraftStreamMock(null);
+    const deliverFinal = createDeliverFinalMock();
+    const confirmedDelivery = createConfirmedPreviewDelivery("sealed-post-1", "Already visible");
+    const presentation = {
+      blocks: [{ type: "buttons" as const, buttons: [{ label: "Open", value: "open" }] }],
+    };
+
+    const result = await deliverDraftPreview({
+      payload: { text: "Already visible", presentation },
+      draftStream,
+      effectiveReplyToId: "thread-root-1",
+      resolvePreviewFinalText: () => ({ alreadyDelivered: true, confirmedDelivery }),
+      deliverPayload: deliverFinal,
+    });
+
+    expect(deliverFinal).toHaveBeenCalledExactlyOnceWith({ text: "", presentation });
+    expect(result.messageIds).toEqual(["sealed-post-1", "delivered-post-1"]);
   });
 
   it("still delivers media when the text is already published", async () => {
@@ -321,22 +395,13 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     draftStream.clear.mockRejectedValueOnce(new Error("preview cleanup failed"));
     const deliverFinal = createDeliverFinalMock();
 
-    let caught: unknown;
-    try {
-      await deliverDraftPreview({
-        payload: { text: "Already visible", replyToId: "reply-1" } as never,
-        draftStream,
-        deliverPayload: deliverFinal,
-      });
-    } catch (error: unknown) {
-      caught = error;
-    }
+    const result = await deliverDraftPreview({
+      payload: { text: "Already visible", replyToId: "reply-1" } as never,
+      draftStream,
+      deliverPayload: deliverFinal,
+    });
 
-    expect(isChannelPartialDeliveryError(caught)).toBe(true);
-    if (!isChannelPartialDeliveryError(caught)) {
-      throw new Error("expected a partial Mattermost preview delivery error");
-    }
-    expect(caught.deliveryResult).toMatchObject({
+    expect(result).toMatchObject({
       messageIds: ["delivered-post-1"],
       visibleReplySent: true,
       content: "Already visible",

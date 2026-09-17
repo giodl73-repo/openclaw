@@ -1,3 +1,4 @@
+import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
 /**
  * Usage-state and failure cooldown tests for auth profiles.
  * Covers unusable-window helpers, provider bypasses, WHAM probes, and store
@@ -5,11 +6,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { MAX_DATE_TIMESTAMP_MS } from "../../shared/number-coercion.js";
+import { setLoggerOverride } from "../../logging/logger.js";
+import { createApiKeyCredential } from "./credential-fixtures.test-support.js";
 import type { AuthProfileStore, ProfileUsageStats } from "./types.js";
 import { resolveProfileUnusableUntil } from "./usage-state.js";
 import {
-  clearAuthProfileCooldown,
   clearExpiredCooldowns,
   getSoonestCooldownExpiry,
   isProfileInCooldown,
@@ -22,22 +23,34 @@ import {
 } from "./usage.js";
 import { testing as authProfileUsageTesting } from "./usage.test-support.js";
 
-// Mirrors the module-local WHAM half-open reprobe interval contract (45 minutes).
-const WHAM_HALF_OPEN_REPROBE_INTERVAL_MS = 45 * 60 * 1000;
-
 const storeMocks = vi.hoisted(() => ({
+  resolvePersistedAuthProfileOwnerAgentDir: vi.fn(
+    (params: { agentDir?: string }) => params.agentDir,
+  ),
   saveAuthProfileStore: vi.fn(),
+  loadAuthProfileStoreWithoutExternalProfiles: vi.fn(),
   updateAuthProfileStoreWithLock: vi.fn().mockResolvedValue(null),
 }));
 const fetchMock = vi.hoisted(() => vi.fn());
 
-vi.mock("./store.js", () => ({
+vi.mock("./store.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./store.js")>()),
+  resolvePersistedAuthProfileOwnerAgentDir: storeMocks.resolvePersistedAuthProfileOwnerAgentDir,
+}));
+vi.mock("./store-runtime.js", () => ({
+  loadAuthProfileStoreWithoutExternalProfiles:
+    storeMocks.loadAuthProfileStoreWithoutExternalProfiles,
   updateAuthProfileStoreWithLock: storeMocks.updateAuthProfileStoreWithLock,
   saveAuthProfileStore: storeMocks.saveAuthProfileStore,
 }));
 
 beforeEach(() => {
+  storeMocks.resolvePersistedAuthProfileOwnerAgentDir.mockReset();
+  storeMocks.resolvePersistedAuthProfileOwnerAgentDir.mockImplementation(
+    (params: { agentDir?: string }) => params.agentDir,
+  );
   storeMocks.saveAuthProfileStore.mockReset();
+  storeMocks.loadAuthProfileStoreWithoutExternalProfiles.mockReset();
   storeMocks.updateAuthProfileStoreWithLock.mockReset();
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
@@ -76,6 +89,7 @@ function makeStore(usageStats: AuthProfileStore["usageStats"]): AuthProfileStore
 }
 
 function mockLockedUpdateForStore(store: AuthProfileStore): void {
+  storeMocks.loadAuthProfileStoreWithoutExternalProfiles.mockImplementation(() => store);
   storeMocks.updateAuthProfileStoreWithLock.mockImplementationOnce(
     async (lockParams: { updater: (store: AuthProfileStore) => boolean }) => {
       const freshStore = structuredClone(store);
@@ -86,6 +100,7 @@ function mockLockedUpdateForStore(store: AuthProfileStore): void {
 }
 
 function mockLockedUpdatesForStore(store: AuthProfileStore): void {
+  storeMocks.loadAuthProfileStoreWithoutExternalProfiles.mockImplementation(() => store);
   storeMocks.updateAuthProfileStoreWithLock.mockImplementation(
     async (lockParams: { updater: (store: AuthProfileStore) => boolean }) => {
       const freshStore = structuredClone(store);
@@ -102,6 +117,7 @@ function expectProfileErrorStateCleared(
   expect(stats?.blockedReason).toBeUndefined();
   expect(stats?.blockedScope).toBeUndefined();
   expect(stats?.cooldownUntil).toBeUndefined();
+  expect(stats?.cooldownClassification).toBeUndefined();
   expect(stats?.disabledUntil).toBeUndefined();
   expect(stats?.disabledReason).toBeUndefined();
   expect(stats?.errorCount).toBe(0);
@@ -132,6 +148,56 @@ describe("resolveProfileUnusableUntil", () => {
     const stats = { blockedUntil: 300, blockedModel: "model-a", blockedScope: "model" as const };
     expect(resolveProfileUnusableUntil(stats, "model-a")).toBe(300);
     expect(resolveProfileUnusableUntil(stats, "model-b")).toBeNull();
+  });
+});
+
+describe("account-wide auth profile cooldowns", () => {
+  it("ignores windows scoped to one model", () => {
+    expect(
+      resolveProfileUnusableUntil(
+        {
+          blockedUntil: 300,
+          blockedModel: "model-a",
+          blockedScope: "model",
+          cooldownUntil: 400,
+          cooldownReason: "rate_limit",
+          cooldownModel: "model-a",
+        },
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps profile-wide and disabled windows", () => {
+    expect(
+      resolveProfileUnusableUntil(
+        {
+          blockedUntil: 300,
+          cooldownUntil: 400,
+          cooldownReason: "rate_limit",
+          disabledUntil: 500,
+        },
+        null,
+      ),
+    ).toBe(500);
+  });
+
+  it("distinguishes model-scoped and profile-wide cooldowns", () => {
+    const now = Date.now();
+    const store = makeStore({
+      "openai:api-key": {
+        cooldownUntil: now + 60_000,
+        cooldownReason: "rate_limit",
+        cooldownModel: "gpt-5.5",
+      },
+      "anthropic:default": {
+        cooldownUntil: now + 60_000,
+        cooldownReason: "rate_limit",
+      },
+    });
+
+    expect(isProfileInCooldown(store, "openai:api-key", now, null)).toBe(false);
+    expect(isProfileInCooldown(store, "anthropic:default", now, null)).toBe(true);
   });
 });
 
@@ -408,12 +474,13 @@ describe("resolveProfilesUnavailableReason", () => {
     ).toBe("auth_permanent");
   });
 
-  it("uses recorded non-rate-limit failure counts for active cooldown windows", () => {
+  it("prefers an explicit cooldown reason over stale failure counts", () => {
     const now = Date.now();
     const store = makeStore({
       "anthropic:default": {
         cooldownUntil: now + 60_000,
-        failureCounts: { auth: 3, rate_limit: 1 },
+        cooldownReason: "auth",
+        failureCounts: { rate_limit: 99 },
       },
     });
 
@@ -424,6 +491,28 @@ describe("resolveProfilesUnavailableReason", () => {
         now,
       }),
     ).toBe("auth");
+  });
+
+  it("returns session_expired when every cooled profile has an expired session", () => {
+    const now = Date.now();
+    const store = makeStore({
+      "anthropic:default": {
+        cooldownUntil: now + 60_000,
+        failureCounts: { session_expired: 1 },
+      },
+      "anthropic:backup": {
+        cooldownUntil: now + 60_000,
+        failureCounts: { session_expired: 1 },
+      },
+    });
+
+    expect(
+      resolveProfilesUnavailableReason({
+        store,
+        profileIds: ["anthropic:default", "anthropic:backup"],
+        now,
+      }),
+    ).toBe("session_expired");
   });
 
   it("returns overloaded for active overloaded cooldown windows", () => {
@@ -542,8 +631,9 @@ describe("clearExpiredCooldowns", () => {
       usageStats: {
         "anthropic:default": {
           cooldownUntil: now - 1_000,
+          cooldownClassification: "wham_token_expired",
           errorCount: 4,
-          failureCounts: { rate_limit: 3, timeout: 1 },
+          failureCounts: { timeout: 1 },
           lastFailureAt: now - 120_000,
         },
       },
@@ -552,6 +642,7 @@ describe("clearExpiredCooldowns", () => {
       expectedUsageStats: {
         "anthropic:default": {
           cooldownUntil: undefined,
+          cooldownClassification: undefined,
           cooldownReason: undefined,
           cooldownModel: undefined,
           errorCount: 0,
@@ -626,7 +717,7 @@ describe("clearExpiredCooldowns", () => {
       },
     },
     {
-      name: "resets errorCount only when both cooldown and disabled have expired",
+      name: "resets aggregate count but preserves rate-limit history after all windows expire",
       usageStats: {
         "anthropic:default": {
           cooldownUntil: now - 2_000,
@@ -637,16 +728,16 @@ describe("clearExpiredCooldowns", () => {
         },
       },
       expectedMutated: true,
-      expectCleared: true,
       expectedUsageStats: {
         "anthropic:default": {
           cooldownUntil: undefined,
           cooldownReason: undefined,
+          cooldownClassification: undefined,
           cooldownModel: undefined,
           disabledUntil: undefined,
           disabledReason: undefined,
           errorCount: 0,
-          failureCounts: undefined,
+          failureCounts: { rate_limit: 2 },
         },
       },
     },
@@ -724,7 +815,7 @@ describe("clearExpiredCooldowns", () => {
     }
   });
 
-  it("clears expired blockedUntil and resets errorCount", () => {
+  it("clears an expired provider block but preserves retry backoff until success", () => {
     const lastFailureAt = Date.now() - 120_000;
     const store = makeStore({
       "openai:default": {
@@ -732,7 +823,7 @@ describe("clearExpiredCooldowns", () => {
         blockedReason: "subscription_limit",
         blockedSource: "codex_rate_limits",
         errorCount: 4,
-        failureCounts: { rate_limit: 4 },
+        failureCounts: { rate_limit: 4, timeout: 2 },
         lastFailureAt,
       },
     });
@@ -744,7 +835,7 @@ describe("clearExpiredCooldowns", () => {
     expect(stats?.blockedReason).toBeUndefined();
     expect(stats?.blockedSource).toBeUndefined();
     expect(stats?.errorCount).toBe(0);
-    expect(stats?.failureCounts).toBeUndefined();
+    expect(stats?.failureCounts).toEqual({ rate_limit: 4 });
     expect(stats?.lastFailureAt).toBe(lastFailureAt);
   });
 
@@ -772,57 +863,6 @@ describe("clearExpiredCooldowns", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// clearAuthProfileCooldown
-// ---------------------------------------------------------------------------
-
-describe("clearAuthProfileCooldown", () => {
-  it("clears all error state fields including disabledUntil and failureCounts", async () => {
-    const store = makeStore({
-      "anthropic:default": {
-        cooldownUntil: Date.now() + 60_000,
-        disabledUntil: Date.now() + 3_600_000,
-        disabledReason: "billing",
-        errorCount: 5,
-        failureCounts: { billing: 3, rate_limit: 2 },
-      },
-    });
-    mockLockedUpdateForStore(store);
-
-    await clearAuthProfileCooldown({ store, profileId: "anthropic:default" });
-
-    const stats = store.usageStats?.["anthropic:default"];
-    expectProfileErrorStateCleared(stats);
-  });
-
-  it("preserves lastUsed and lastFailureAt timestamps", async () => {
-    const lastUsed = Date.now() - 10_000;
-    const lastFailureAt = Date.now() - 5_000;
-    const store = makeStore({
-      "anthropic:default": {
-        cooldownUntil: Date.now() + 60_000,
-        errorCount: 3,
-        lastUsed,
-        lastFailureAt,
-      },
-    });
-    mockLockedUpdateForStore(store);
-
-    await clearAuthProfileCooldown({ store, profileId: "anthropic:default" });
-
-    const stats = store.usageStats?.["anthropic:default"];
-    expect(stats?.lastUsed).toBe(lastUsed);
-    expect(stats?.lastFailureAt).toBe(lastFailureAt);
-  });
-
-  it("no-ops for unknown profile id", async () => {
-    const store = makeStore(undefined);
-    mockLockedUpdateForStore(store);
-    await clearAuthProfileCooldown({ store, profileId: "nonexistent" });
-    expect(store.usageStats).toBeUndefined();
-  });
-});
-
 describe("markAuthProfileFailure — active windows do not extend on retry", () => {
   // Regression for https://github.com/openclaw/openclaw/issues/23516
   // When all providers are at saturation backoff (60 min) and retries fire every 30 min,
@@ -832,7 +872,7 @@ describe("markAuthProfileFailure — active windows do not extend on retry", () 
   async function markFailureAt(params: {
     store: ReturnType<typeof makeStore>;
     now: number;
-    reason: "rate_limit" | "billing" | "auth_permanent";
+    reason: "rate_limit" | "timeout" | "billing" | "auth_permanent";
     cfg?: OpenClawConfig;
   }): Promise<void> {
     const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(params.now);
@@ -848,6 +888,67 @@ describe("markAuthProfileFailure — active windows do not extend on retry", () 
       dateNowSpy.mockRestore();
     }
   }
+
+  it("exponentially backs off rate limits without a provider reset up to 24 hours", async () => {
+    const store = makeStore(undefined);
+    let now = 1_700_000_000_000;
+    const expectedDelays = [
+      30_000,
+      60_000,
+      2 * 60_000,
+      4 * 60_000,
+      8 * 60_000,
+      16 * 60_000,
+      32 * 60_000,
+      64 * 60_000,
+      128 * 60_000,
+      256 * 60_000,
+      512 * 60_000,
+      1_024 * 60_000,
+      24 * 60 * 60 * 1000,
+      24 * 60 * 60 * 1000,
+    ];
+
+    for (const [index, expectedDelay] of expectedDelays.entries()) {
+      clearExpiredCooldowns(store, now);
+      await markFailureAt({ store, now, reason: "rate_limit" });
+      const stats = store.usageStats?.["anthropic:default"];
+      expect((stats?.cooldownUntil ?? 0) - now, `attempt ${index + 1}`).toBe(expectedDelay);
+      now += expectedDelay + 1;
+    }
+
+    expect(store.usageStats?.["anthropic:default"]?.failureCounts?.rate_limit).toBe(
+      expectedDelays.length,
+    );
+  });
+
+  it("preserves rate-limit history through a differently classified failed probe", async () => {
+    let now = 1_700_000_000_000;
+    const store = makeStore({
+      "anthropic:default": {
+        cooldownUntil: now - 1,
+        cooldownReason: "rate_limit",
+        errorCount: 3,
+        failureCounts: { rate_limit: 3 },
+        lastFailureAt: now - 60_000,
+      },
+    });
+
+    await markFailureAt({ store, now, reason: "timeout" });
+    expect(store.usageStats?.["anthropic:default"]?.errorCount).toBe(1);
+    expect(store.usageStats?.["anthropic:default"]?.failureCounts).toEqual({
+      rate_limit: 3,
+      timeout: 1,
+    });
+
+    now = (store.usageStats?.["anthropic:default"]?.cooldownUntil ?? now) + 1;
+    clearExpiredCooldowns(store, now);
+    expect(store.usageStats?.["anthropic:default"]?.failureCounts).toEqual({ rate_limit: 3 });
+
+    await markFailureAt({ store, now, reason: "rate_limit" });
+    expect(store.usageStats?.["anthropic:default"]?.failureCounts?.rate_limit).toBe(4);
+    expect((store.usageStats?.["anthropic:default"]?.cooldownUntil ?? 0) - now).toBe(4 * 60_000);
+  });
 
   const activeWindowCases = [
     {
@@ -932,8 +1033,8 @@ describe("markAuthProfileFailure — active windows do not extend on retry", () 
         lastFailureAt: now - 60_000,
       }),
       // errorCount resets, billing count resets to 1 →
-      // calculateDisabledLaneBackoffMs(1, 5h, 24h) = 5h
-      expectedUntil: (now: number) => now + 5 * 60 * 60 * 1000,
+      // calculateDisabledLaneBackoffMs(1, 10m, 24h) = 10m (#135835)
+      expectedUntil: (now: number) => now + 10 * 60 * 1000,
       readUntil: (stats: WindowStats | undefined) => stats?.disabledUntil,
     },
     {
@@ -1036,6 +1137,21 @@ describe("markAuthProfileBlockedUntil", () => {
     expect(isProfileInCooldown(store, "openai:default", now, "gpt-5.4-mini")).toBe(false);
   });
 
+  it("clears stale WHAM classification when a profile becomes blocked", async () => {
+    const now = Date.parse("2026-05-30T18:00:00.000Z");
+    const store = makeStore({
+      "openai:default": {
+        cooldownUntil: now + 60_000,
+        cooldownReason: "auth",
+        cooldownClassification: "wham_token_expired",
+      },
+    });
+
+    await applyBlockedUntil({ store, now, blockedUntil: now + 120_000 });
+
+    expect(store.usageStats?.["openai:default"]?.cooldownClassification).toBeUndefined();
+  });
+
   it("widens an active block after a different model fails", async () => {
     const now = Date.parse("2026-05-30T18:00:00.000Z");
     const store = makeStore({
@@ -1106,11 +1222,10 @@ describe("markAuthProfileBlockedUntil", () => {
 describe("markAuthProfileFailure — detail-less provider failures", () => {
   it("does not persist unverifiable failures for API-key profiles", async () => {
     const store = makeStore(undefined);
-    store.profiles["azure-foundry:default"] = {
-      type: "api_key",
-      provider: "azure-foundry",
-      key: "azure-foundry-test-key",
-    };
+    store.profiles["azure-foundry:default"] = createApiKeyCredential(
+      "azure-foundry",
+      "azure-foundry-test-key",
+    );
 
     for (const profileId of ["azure-foundry:default", "openai:api-key"]) {
       await markAuthProfileFailure({
@@ -1131,11 +1246,8 @@ describe("markAuthProfileFailure — locked update failure", () => {
   it("drops bookkeeping without an unlocked full-store save", async () => {
     const store = makeStore(undefined);
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const previousTestConsole = process.env.OPENCLAW_TEST_CONSOLE;
-    const previousLogLevel = process.env.OPENCLAW_LOG_LEVEL;
     storeMocks.updateAuthProfileStoreWithLock.mockResolvedValueOnce(null);
-    process.env.OPENCLAW_TEST_CONSOLE = "1";
-    process.env.OPENCLAW_LOG_LEVEL = "warn";
+    setLoggerOverride({ level: "silent", consoleLevel: "warn" });
     try {
       await markAuthProfileFailure({
         store,
@@ -1152,16 +1264,7 @@ describe("markAuthProfileFailure — locked update failure", () => {
         ),
       ).toBe(true);
     } finally {
-      if (previousTestConsole === undefined) {
-        delete process.env.OPENCLAW_TEST_CONSOLE;
-      } else {
-        process.env.OPENCLAW_TEST_CONSOLE = previousTestConsole;
-      }
-      if (previousLogLevel === undefined) {
-        delete process.env.OPENCLAW_LOG_LEVEL;
-      } else {
-        process.env.OPENCLAW_LOG_LEVEL = previousLogLevel;
-      }
+      setLoggerOverride(null);
       consoleWarn.mockRestore();
     }
   });
@@ -1195,10 +1298,12 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
   async function markCodexFailureAt(params: {
     store: ReturnType<typeof makeStore>;
     now: number;
-    reason?: "rate_limit" | "no_error_details" | "unknown";
+    reason?: "auth" | "rate_limit" | "no_error_details" | "unknown";
+    modelId?: string;
     mockLock?: boolean;
   }): Promise<void> {
     const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(params.now);
+    storeMocks.loadAuthProfileStoreWithoutExternalProfiles.mockReturnValue(params.store);
     if (params.mockLock !== false) {
       mockLockedUpdateForStore(params.store);
     }
@@ -1207,6 +1312,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
         store: params.store,
         profileId: "openai:default",
         reason: params.reason ?? "rate_limit",
+        modelId: params.modelId,
       });
     } finally {
       dateNowSpy.mockRestore();
@@ -1225,64 +1331,24 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     mockWhamResponse(200, { rate_limit: { limit_reached: false } });
     mockLockedUpdatesForStore(store);
 
-    maybeReprobeWhamBlockedProfiles({
+    const firstProbe = maybeReprobeWhamBlockedProfiles({
       store,
       profileIds: ["openai:default"],
       now,
     });
-    maybeReprobeWhamBlockedProfiles({
+    const secondProbe = maybeReprobeWhamBlockedProfiles({
       store,
       profileIds: ["openai:default"],
       now,
     });
 
+    await Promise.all([firstProbe, secondProbe]);
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledOnce();
       expect(store.usageStats?.["openai:default"]?.blockedUntil).toBeUndefined();
     });
     expect(store.usageStats?.["openai:default"]?.lastProbeAt).toBe(now);
     expect(storeMocks.updateAuthProfileStoreWithLock).toHaveBeenCalledTimes(2);
-  });
-
-  it("leaves non-WHAM blocks outside the half-open probe path", () => {
-    const now = 1_700_000_000_000;
-    const store = makeStore({
-      "openai:default": {
-        blockedUntil: now + 6 * 24 * 60 * 60 * 1000,
-        blockedReason: "subscription_limit",
-        blockedSource: "codex_rate_limits",
-      },
-    });
-
-    maybeReprobeWhamBlockedProfiles({
-      store,
-      profileIds: ["openai:default"],
-      now,
-    });
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(storeMocks.updateAuthProfileStoreWithLock).not.toHaveBeenCalled();
-  });
-
-  it("does not re-probe a WHAM block inside the half-open interval", () => {
-    const now = 1_700_000_000_000;
-    const store = makeStore({
-      "openai:default": {
-        blockedUntil: now + 6 * 24 * 60 * 60 * 1000,
-        blockedReason: "subscription_limit",
-        blockedSource: "wham",
-        lastProbeAt: now - WHAM_HALF_OPEN_REPROBE_INTERVAL_MS + 1,
-      },
-    });
-
-    maybeReprobeWhamBlockedProfiles({
-      store,
-      profileIds: ["openai:default"],
-      now,
-    });
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(storeMocks.updateAuthProfileStoreWithLock).not.toHaveBeenCalled();
   });
 
   it("re-arms a stale WHAM block from the latest blocked snapshot", async () => {
@@ -1306,7 +1372,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(now);
 
     try {
-      maybeReprobeWhamBlockedProfiles({
+      await maybeReprobeWhamBlockedProfiles({
         store,
         profileIds: ["openai:default"],
         forModel: "gpt-5.5",
@@ -1343,7 +1409,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     );
     mockLockedUpdatesForStore(store);
 
-    maybeReprobeWhamBlockedProfiles({
+    const probe = maybeReprobeWhamBlockedProfiles({
       store,
       profileIds: ["openai:default"],
       now,
@@ -1357,6 +1423,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     stats.lastFailureAt = now + 1;
     releaseResponse(Response.json({ rate_limit: { limit_reached: false } }));
 
+    await probe;
     await vi.waitFor(() => {
       expect(storeMocks.updateAuthProfileStoreWithLock).toHaveBeenCalledTimes(2);
     });
@@ -1436,6 +1503,51 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     }
   });
 
+  it("uses an exact provider reset instead of the local exponential backoff", async () => {
+    const now = 1_700_000_000_000;
+    const providerResetMs = 5 * 60 * 60 * 1000;
+    const store = makeStore({
+      "openai:default": {
+        cooldownUntil: now - 1,
+        cooldownReason: "rate_limit",
+        errorCount: 12,
+        failureCounts: { rate_limit: 12 },
+        lastFailureAt: now - 1,
+      },
+    });
+    mockWhamResponse(200, {
+      rate_limit: {
+        limit_reached: true,
+        primary_window: { used_percent: 100, reset_after_seconds: providerResetMs / 1000 },
+      },
+    });
+
+    await markCodexFailureAt({ store, now });
+
+    const stats = store.usageStats?.["openai:default"];
+    expect(stats?.blockedUntil).toBe(now + providerResetMs);
+    expect(stats?.blockedReason).toBe("subscription_limit");
+    expect(stats?.cooldownUntil).toBeUndefined();
+  });
+
+  it("uses local exponential backoff when OpenAI reports no reset", async () => {
+    const store = makeStore(undefined);
+    let now = 1_700_000_000_000;
+
+    for (const expectedDelay of [30_000, 60_000, 2 * 60_000]) {
+      mockWhamResponse(200, {
+        rate_limit: {
+          limit_reached: true,
+          primary_window: { used_percent: 100 },
+        },
+      });
+      clearExpiredCooldowns(store, now);
+      await markCodexFailureAt({ store, now });
+      expect((store.usageStats?.["openai:default"]?.cooldownUntil ?? 0) - now).toBe(expectedDelay);
+      now += expectedDelay + 1;
+    }
+  });
+
   it("probes WHAM before recording an OpenAI OAuth detail-less failure", async () => {
     const now = 1_700_000_000_000;
     const store = makeStore(undefined);
@@ -1465,11 +1577,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     storeMocks.updateAuthProfileStoreWithLock.mockImplementationOnce(
       async (lockParams: { updater: (store: AuthProfileStore) => boolean }) => {
         const freshStore = structuredClone(store);
-        freshStore.profiles["openai:default"] = {
-          type: "api_key",
-          provider: "openai",
-          key: "rotated-api-key",
-        };
+        freshStore.profiles["openai:default"] = createApiKeyCredential("openai", "rotated-api-key");
         lockParams.updater(freshStore);
         return freshStore;
       },
@@ -1482,14 +1590,64 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     expect(storeMocks.saveAuthProfileStore).not.toHaveBeenCalled();
   });
 
-  it("maps HTTP 401 to a 12h cooldown", async () => {
+  it.each([
+    {
+      status: 401,
+      expectedMs: 12 * 60 * 60 * 1000,
+      expectedCooldownReason: "auth",
+      expectedCooldownClassification: "wham_token_expired",
+      expectedUnavailableReason: "auth",
+    },
+    {
+      status: 403,
+      expectedMs: 24 * 60 * 60 * 1000,
+      expectedCooldownReason: "auth_permanent",
+      expectedCooldownClassification: "wham_account_dead",
+      expectedUnavailableReason: "auth_permanent",
+    },
+  ])(
+    "persists WHAM HTTP $status auth classification and canonical fallback reason",
+    async ({
+      status,
+      expectedMs,
+      expectedCooldownReason,
+      expectedCooldownClassification,
+      expectedUnavailableReason,
+    }) => {
+      const now = 1_700_000_000_000;
+      const store = makeStore({});
+      mockWhamResponse(status);
+
+      await markCodexFailureAt({ store, now, modelId: "gpt-5.6-luna" });
+
+      const stats = store.usageStats?.["openai:default"];
+      expect(stats?.cooldownUntil).toBe(now + expectedMs);
+      expect(stats?.cooldownReason).toBe(expectedCooldownReason);
+      expect(stats?.cooldownClassification).toBe(expectedCooldownClassification);
+      expect(stats?.cooldownModel).toBeUndefined();
+      expect(
+        resolveProfilesUnavailableReason({
+          store,
+          profileIds: ["openai:default"],
+          now,
+        }),
+      ).toBe(expectedUnavailableReason);
+    },
+  );
+
+  it("clears stale WHAM classification on a later ordinary failure", async () => {
     const now = 1_700_000_000_000;
-    const store = makeStore({});
-    mockWhamResponse(401);
+    const store = makeStore({
+      "openai:default": {
+        cooldownUntil: now + 12 * 60 * 60 * 1000,
+        cooldownReason: "auth",
+        cooldownClassification: "wham_token_expired",
+      },
+    });
 
-    await markCodexFailureAt({ store, now });
+    await markCodexFailureAt({ store, now, reason: "auth", modelId: "gpt-5.6-luna" });
 
-    expect(store.usageStats?.["openai:default"]?.cooldownUntil).toBe(now + 43_200_000);
+    expect(store.usageStats?.["openai:default"]?.cooldownClassification).toBeUndefined();
   });
 
   it("skips WHAM probe for locally expired OAuth access tokens", async () => {
@@ -1510,24 +1668,14 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     expect(stats?.cooldownReason).toBe("rate_limit");
   });
 
-  it("maps HTTP 403 to a 24h cooldown", async () => {
-    const now = 1_700_000_000_000;
-    const store = makeStore({});
-    mockWhamResponse(403);
-
-    await markCodexFailureAt({ store, now });
-
-    expect(store.usageStats?.["openai:default"]?.cooldownUntil).toBe(now + 86_400_000);
-  });
-
-  it("maps other HTTP errors to a 5m cooldown", async () => {
+  it("uses local rate-limit backoff when the WHAM request fails", async () => {
     const now = 1_700_000_000_000;
     const store = makeStore({});
     mockWhamResponse(500);
 
     await markCodexFailureAt({ store, now });
 
-    expect(store.usageStats?.["openai:default"]?.cooldownUntil).toBe(now + 300_000);
+    expect(store.usageStats?.["openai:default"]?.cooldownUntil).toBe(now + 30_000);
   });
 
   it("cancels WHAM HTTP error response bodies", async () => {
@@ -1540,7 +1688,7 @@ describe("markAuthProfileFailure — WHAM-aware Codex cooldowns", () => {
     await markCodexFailureAt({ store, now });
 
     expect(cancel).toHaveBeenCalledOnce();
-    expect(store.usageStats?.["openai:default"]?.cooldownUntil).toBe(now + 300_000);
+    expect(store.usageStats?.["openai:default"]?.cooldownUntil).toBe(now + 30_000);
   });
 
   it("preserves a longer existing cooldown via max semantics", async () => {
@@ -1633,11 +1781,7 @@ describe("markAuthProfileFailure — per-model cooldown metadata", () => {
 
   function makeStoreWithCopilot(usageStats: AuthProfileStore["usageStats"]): AuthProfileStore {
     const store = makeStore(usageStats);
-    store.profiles["github-copilot:github"] = {
-      type: "api_key",
-      provider: "github-copilot",
-      key: "ghu_test",
-    };
+    store.profiles["github-copilot:github"] = createApiKeyCredential("github-copilot", "ghu_test");
     return store;
   }
 

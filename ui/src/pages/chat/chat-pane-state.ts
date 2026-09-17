@@ -1,11 +1,15 @@
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ArtifactDownloadResult, GatewaySessionRow } from "../../api/types.ts";
 import { resolveControlUiAuthToken } from "../../app/control-ui-auth.ts";
+import { t } from "../../i18n/index.ts";
+import { getChatHistoryLoadState } from "./chat-history-state.ts";
+import type { ChatState } from "./chat-state-contract.ts";
 
 type SelectedSessionProjectionState = {
   chatEffectiveQueueMode?: GatewaySessionRow["effectiveQueueMode"];
   chatQueueModeOverride?: GatewaySessionRow["queueMode"];
   selectedChatSessionArchived: boolean;
+  selectedChatSessionIncognito: boolean;
 };
 
 export function applySelectedSessionProjection(
@@ -16,6 +20,7 @@ export function applySelectedSessionProjection(
     return false;
   }
   state.selectedChatSessionArchived = session.archived === true;
+  state.selectedChatSessionIncognito = session.incognito === true;
   state.chatQueueModeOverride = session.queueMode;
   state.chatEffectiveQueueMode = session.effectiveQueueMode;
   return true;
@@ -113,4 +118,13 @@ export function dismissChatError(state: {
   state.lastError = null;
   state.lastErrorCode = null;
   state.chatError = null;
+}
+
+export function initialHistorySubmitState(state: ChatState, unavailable: boolean) {
+  const historyLoad = getChatHistoryLoadState(state);
+  const failure = unavailable && historyLoad.phase === "failed" ? historyLoad.message : null;
+  return {
+    submitDisabledReason: unavailable ? (failure ?? t("chat.thread.loading")) : null,
+    submitPending: unavailable && historyLoad.phase !== "failed",
+  };
 }

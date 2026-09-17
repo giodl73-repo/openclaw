@@ -1,4 +1,9 @@
 // Matrix helper module supports config behavior.
+import {
+  DEFAULT_ACCOUNT_ID,
+  normalizeAccountId,
+  normalizeOptionalAccountId,
+} from "openclaw/plugin-sdk/account-id";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
@@ -7,9 +12,14 @@ import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
 import { sleepWithAbort } from "openclaw/plugin-sdk/runtime-env";
 import {
   coerceSecretRef,
+  isBuiltInDefaultSecretProviderRef,
   normalizeResolvedSecretInputString,
-} from "openclaw/plugin-sdk/secret-input-runtime";
+} from "openclaw/plugin-sdk/secret-input";
 import type { PinnedDispatcherPolicy } from "openclaw/plugin-sdk/ssrf-dispatcher";
+import {
+  isPrivateNetworkOptInEnabled,
+  ssrfPolicyFromDangerouslyAllowPrivateNetwork,
+} from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   requiresExplicitMatrixDefaultAccount,
   resolveMatrixDefaultOrOnlyAccountId,
@@ -27,13 +37,6 @@ import {
 } from "../account-config.js";
 import { resolveMatrixConfigFieldPath } from "../config-paths.js";
 import type { MatrixStoredCredentials } from "../credentials-state.js";
-import {
-  DEFAULT_ACCOUNT_ID,
-  isPrivateNetworkOptInEnabled,
-  normalizeAccountId,
-  normalizeOptionalAccountId,
-  ssrfPolicyFromDangerouslyAllowPrivateNetwork,
-} from "./config-runtime-api.js";
 import { resolveGlobalMatrixEnvConfig, resolveScopedMatrixEnvConfig } from "./env-auth.js";
 import { repairCurrentTokenStorageMetaDeviceId } from "./storage.js";
 import type { MatrixAuth, MatrixResolvedConfig } from "./types.js";
@@ -147,20 +150,18 @@ function readMatrixEnvSecretRef(params: {
   env: NodeJS.ProcessEnv;
 }): string | undefined {
   const provider = params.cfg.secrets?.providers?.[params.ref.provider];
-  if (provider) {
-    if (provider.source !== "env") {
-      throw new Error(
-        `Secret provider "${params.ref.provider}" has source "${provider.source}" but ref requests "env".`,
-      );
-    }
+  // Canonical source-specific aliases keep sync and async secret resolution aligned.
+  if (provider?.source === "env") {
     if (provider.allowlist && !provider.allowlist.includes(params.ref.id)) {
       throw new Error(
         `Environment variable "${params.ref.id}" is not allowlisted in secrets.providers.${params.ref.provider}.allowlist.`,
       );
     }
-  } else if (params.ref.provider !== (params.cfg.secrets?.defaults?.env?.trim() || "default")) {
+  } else if (!isBuiltInDefaultSecretProviderRef(params.cfg, params.ref)) {
     throw new Error(
-      `Secret provider "${params.ref.provider}" is not configured (ref: env:${params.ref.provider}:${params.ref.id}).`,
+      provider
+        ? `Secret provider "${params.ref.provider}" has source "${provider.source}" but ref requests "env".`
+        : `Secret provider "${params.ref.provider}" is not configured (ref: env:${params.ref.provider}:${params.ref.id}).`,
     );
   }
   return params.env[params.ref.id]?.trim() || undefined;
@@ -511,8 +512,9 @@ export async function resolveMatrixAuth(params?: {
   const homeserver = await resolveValidatedMatrixHomeserverUrl(resolved.homeserver, {
     dangerouslyAllowPrivateNetwork: resolved.allowPrivateNetwork,
   });
-  const { loadMatrixCredentials, credentialsMatchConfig } = await loadMatrixCredentialsReadDeps();
-  const cached = loadMatrixCredentials(env, accountId);
+  const { loadMatrixCredentialsAsync, credentialsMatchConfig } =
+    await loadMatrixCredentialsReadDeps();
+  const cached = await loadMatrixCredentialsAsync(env, accountId);
   const cachedCredentials =
     cached &&
     credentialsMatchConfig(cached, {
@@ -697,13 +699,17 @@ export async function backfillMatrixAuthDeviceIdAfterStartup(params: {
   }
 
   const env = params.env ?? process.env;
-  const { loadMatrixCredentials } = await loadMatrixCredentialsReadDeps();
+  const { loadMatrixCredentialsAsync } = await loadMatrixCredentialsReadDeps();
   if (
     !credentialsMatchBackfillAuthLineage({
-      stored: loadMatrixCredentials(env, params.auth.accountId),
+      stored: await loadMatrixCredentialsAsync(env, params.auth.accountId),
       auth: params.auth,
     })
   ) {
+    return undefined;
+  }
+
+  if (isAbortSignalTriggered(params.abortSignal)) {
     return undefined;
   }
 

@@ -70,11 +70,8 @@ describe("AppSidebar gateway footer subtitle", () => {
     const gateway = createGateway({} as GatewayBrowserClient);
     const { sidebar } = await mountSidebar(gateway, createSessions("main", ["agent:main:main"]));
 
-    expect(sidebar.querySelector(".sidebar-identity-card__subtitle")?.textContent).toBe(
-      "git@e8cbc62 · 4h ago",
-    );
     expect(sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label")).toBe(
-      "Identity and app menu for Account: git@e8cbc62 · 4h ago",
+      "Identity and app menu for Owner: git@e8cbc62 · 4h ago",
     );
 
     setControlUiBuildInfo({
@@ -87,27 +84,36 @@ describe("AppSidebar gateway footer subtitle", () => {
     sidebar.requestUpdate();
     await sidebar.updateComplete;
 
-    expect(sidebar.querySelector(".sidebar-identity-card__subtitle")).toBeNull();
     expect(sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label")).toBe(
-      "Identity and app menu for Account",
+      "Identity and app menu for Owner",
     );
+    expect(sidebar.querySelector(".sidebar-identity-card__gateway")).toBeNull();
   });
 
-  it("stays hidden outside native chrome", async () => {
-    const nativeWindow = window as SidebarNativeGatewayTestWindow;
-    nativeWindow["__OPENCLAW_NATIVE_GATEWAYS__"] = twoGateways;
+  it.each([false, true])("keeps plain web one line (offline: %s)", async (offline) => {
     const gateway = createGateway({} as GatewayBrowserClient);
     const { sidebar } = await mountSidebar(gateway, createSessions("main", ["agent:main:main"]));
+    sidebar.offline = offline;
+    await sidebar.updateComplete;
 
-    expect(sidebar.querySelector(".sidebar-identity-card__subtitle")).toBeNull();
+    expect(
+      sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label"),
+    ).not.toContain("Local Gateway");
+    expect(sidebar.querySelector(".sidebar-identity-card__gateway")).toBeNull();
   });
 
-  it("stays hidden with one configured gateway", async () => {
+  it("shows a single configured gateway below the identity name", async () => {
     setNativeGatewayTestState({ gateways: [twoGateways.gateways[0]!], currentId: "local" });
     const gateway = createGateway({} as GatewayBrowserClient);
     const { sidebar } = await mountSidebar(gateway, createSessions("main", ["agent:main:main"]));
 
-    expect(sidebar.querySelector(".sidebar-identity-card__subtitle")).toBeNull();
+    expect(sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label")).toBe(
+      "Identity and app menu for Owner: Local Gateway, primary",
+    );
+    expect(sidebar.querySelector(".sidebar-identity-card__name")?.textContent).toBe("Owner");
+    const detail = sidebar.querySelector(".sidebar-identity-card__gateway");
+    expect(detail?.textContent).toContain("Local Gateway");
+    expect(detail?.querySelector(".sidebar-gateway-primary")?.textContent).toBe("primary");
   });
 
   it("shows the current gateway health, name, and primary suffix", async () => {
@@ -116,44 +122,63 @@ describe("AppSidebar gateway footer subtitle", () => {
     const gateway = createGateway({} as GatewayBrowserClient);
     const { sidebar } = await mountSidebar(gateway, createSessions("main", ["agent:main:main"]));
 
-    expect(
-      sidebar.querySelector(".sidebar-identity-card__gateway-health")?.getAttribute("data-health"),
-    ).toBe("ok");
-    expect(sidebar.querySelector(".sidebar-identity-card__gateway-name")?.textContent).toBe(
-      "Local Gateway",
-    );
-    expect(sidebar.querySelector(".sidebar-identity-card__gateway-primary")?.textContent).toBe(
-      "· primary",
-    );
-    expect(sidebar.querySelector(".sidebar-identity-card__subtitle")?.textContent).not.toContain(
-      "git@e8cbc62",
-    );
     expect(sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label")).toBe(
-      "Identity and app menu for Account: Local Gateway, primary",
+      "Identity and app menu for Owner: Local Gateway, primary",
+    );
+    const detail = sidebar.querySelector(".sidebar-identity-card__gateway");
+    expect(detail?.textContent).toContain("Local Gateway");
+    expect(detail?.querySelector(".sidebar-gateway-primary")?.textContent).toBe("primary");
+    expect(detail?.querySelector(".sidebar-gateway-health")?.getAttribute("data-health")).toBe(
+      "ok",
     );
     expect(
       sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label"),
     ).not.toContain("git@e8cbc62");
   });
 
-  it("keeps the reconnecting subtitle while offline", async () => {
+  it("shows reconnecting below the identity name and retains the offline retry action", async () => {
     setControlUiBuildInfo({ commit: CONTROL_UI_TEST_COMMIT, release: false });
     setNativeGatewayTestState(twoGateways);
     const gateway = createGateway({} as GatewayBrowserClient);
     const { sidebar } = await mountSidebar(gateway, createSessions("main", ["agent:main:main"]));
+    const onRetryConnect = vi.fn();
     sidebar.offline = true;
+    sidebar.queuedOutboxCount = 3;
+    sidebar.lastError = "connection refused?token=footer-secret";
+    sidebar.onRetryConnect = onRetryConnect;
     await sidebar.updateComplete;
 
-    expect(sidebar.querySelector(".sidebar-identity-card__subtitle")?.textContent).toBe(
-      "Reconnecting…",
-    );
-    expect(sidebar.querySelector(".sidebar-identity-card__gateway-name")).toBeNull();
+    const status = sidebar.querySelector<HTMLButtonElement>(".sidebar-footer-bar__status");
+    expect(status?.textContent).toContain("Offline");
+    expect(status?.textContent).toContain("Reconnecting…");
+    expect(status?.textContent).toContain("3 queued");
+    expect(
+      (status?.closest("openclaw-tooltip") as (HTMLElement & { content?: string }) | null)?.content,
+    ).toBe("connection refused?[redacted-credential]");
+    status?.click();
+    expect(onRetryConnect).toHaveBeenCalledOnce();
     expect(sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label")).toBe(
-      "Identity and app menu for Account: Reconnecting…",
+      "Identity and app menu for Owner: Reconnecting…",
     );
+    const detail = sidebar.querySelector(".sidebar-identity-card__gateway");
+    expect(detail?.textContent?.trim()).toBe("Reconnecting…");
+    expect(detail?.querySelector(".sidebar-gateway-primary")).toBeNull();
     expect(
       sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label"),
     ).not.toContain("git@e8cbc62");
+  });
+
+  it("prioritizes an announced restart over the stable offline state", async () => {
+    const gateway = createGateway({} as GatewayBrowserClient);
+    const { sidebar } = await mountSidebar(gateway, createSessions("main", ["agent:main:main"]));
+    sidebar.offline = true;
+    sidebar.restartPending = true;
+    await sidebar.updateComplete;
+
+    const status = sidebar.querySelector(".sidebar-footer-bar__status--restarting");
+    expect(status?.textContent).toBe("Restarting…");
+    expect(status?.getAttribute("aria-live")).toBe("polite");
+    expect(sidebar.querySelector("button.sidebar-footer-bar__status")).toBeNull();
   });
 
   it("updates when the native gateway snapshot changes", async () => {
@@ -170,12 +195,14 @@ describe("AppSidebar gateway footer subtitle", () => {
     window.dispatchEvent(new CustomEvent("openclaw:native-gateways-changed"));
     await sidebar.updateComplete;
 
-    expect(sidebar.querySelector(".sidebar-identity-card__gateway-name")?.textContent).toBe(
-      "Remote Gateway",
+    const ariaLabel = sidebar.querySelector(".sidebar-identity-card")?.getAttribute("aria-label");
+    expect(ariaLabel).toContain("Remote Gateway");
+    expect(ariaLabel).not.toContain("primary");
+    const detail = sidebar.querySelector(".sidebar-identity-card__gateway");
+    expect(detail?.textContent).toContain("Remote Gateway");
+    expect(detail?.querySelector(".sidebar-gateway-primary")).toBeNull();
+    expect(detail?.querySelector(".sidebar-gateway-health")?.getAttribute("data-health")).toBe(
+      "error",
     );
-    expect(
-      sidebar.querySelector(".sidebar-identity-card__gateway-health")?.getAttribute("data-health"),
-    ).toBe("error");
-    expect(sidebar.querySelector(".sidebar-identity-card__gateway-primary")).toBeNull();
   });
 });

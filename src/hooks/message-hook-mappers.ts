@@ -14,6 +14,7 @@ import { normalizeMediaFacts } from "../media/media-facts.js";
 import type {
   PluginHookInboundClaimContext,
   PluginHookInboundClaimEvent,
+  PluginHookInboundMessageMetadata,
   PluginHookMessageContext,
   PluginHookMessageReceivedEvent,
   PluginHookMessageSentEvent,
@@ -27,63 +28,6 @@ import type {
   MessageTranscribedHookContext,
 } from "./internal-hooks.js";
 import { projectMessageHookMediaFacts, type MessageHookMediaFact } from "./message-hook-media.js";
-
-type CanonicalInboundMessageHookContext = {
-  from: string;
-  to?: string;
-  content: string;
-  body?: string;
-  bodyForAgent?: string;
-  transcript?: string;
-  timestamp?: number;
-  channelId: string;
-  accountId?: string;
-  conversationId?: string;
-  sessionKey?: string;
-  agentId?: string;
-  runId?: string;
-  messageId?: string;
-  senderId?: string;
-  senderName?: string;
-  senderUsername?: string;
-  senderE164?: string;
-  replyToId?: string;
-  replyToIdFull?: string;
-  replyToBody?: string;
-  replyToSender?: string;
-  replyToIsQuote?: boolean;
-  provider?: string;
-  surface?: string;
-  threadId?: string | number;
-  threadParentId?: string | number;
-  media?: MessageHookMediaFact[];
-  originalMedia?: MessageHookMediaFact[];
-  // `mediaPath(s)` are files OpenClaw has already staged locally. `mediaUrl(s)`
-  // are provider/media-server references that may not exist on this host.
-  mediaPath?: string;
-  mediaUrl?: string;
-  mediaType?: string;
-  mediaPaths?: string[];
-  mediaUrls?: string[];
-  mediaTypes?: string[];
-  mediaRemoteHost?: string;
-  mediaStagingPending?: boolean;
-  originalMediaPath?: string;
-  originalMediaUrl?: string;
-  originalMediaType?: string;
-  originalMediaPaths?: string[];
-  originalMediaUrls?: string[];
-  originalMediaTypes?: string[];
-  originatingChannel?: string;
-  originatingTo?: string;
-  guildId?: string;
-  channelName?: string;
-  isGroup: boolean;
-  groupId?: string;
-  topicName?: string;
-  trace?: DiagnosticTraceContext;
-  callDepth?: number;
-};
 
 type CanonicalSentMessageHookContext = {
   to: string;
@@ -136,13 +80,13 @@ function projectHookMediaState(canonical: CanonicalInboundMessageHookContext) {
   };
 }
 
-export function deriveInboundMessageHookContext(
+function deriveInboundMessageHookContextBase(
   ctx: FinalizedMsgContext,
   overrides?: {
     content?: string;
     messageId?: string;
   },
-): CanonicalInboundMessageHookContext {
+) {
   const content =
     overrides?.content ??
     readNonBlankString(ctx.BodyForCommands) ??
@@ -168,6 +112,17 @@ export function deriveInboundMessageHookContext(
   const mediaUrls = compact(media.map((fact) => fact.url ?? fact.path));
   const mediaTypes = compact(media.map((fact) => fact.contentType ?? fact.kind));
   const firstMedia = media[0];
+  const hasLocation =
+    typeof ctx.LocationLat === "number" &&
+    Number.isFinite(ctx.LocationLat) &&
+    typeof ctx.LocationLon === "number" &&
+    Number.isFinite(ctx.LocationLon);
+  const locationSource: NonNullable<PluginHookInboundClaimEvent["location"]>["source"] =
+    ctx.LocationSource === "pin" || ctx.LocationSource === "place" || ctx.LocationSource === "live"
+      ? ctx.LocationSource
+      : undefined;
+  const providerUpdateId = normalizeOptionalString(ctx.ProviderUpdateId);
+  const providerUpdateKind = normalizeOptionalString(ctx.ProviderUpdateKind);
   return {
     from: ctx.From ?? "",
     to: ctx.To,
@@ -217,7 +172,82 @@ export function deriveInboundMessageHookContext(
     isGroup,
     groupId: isGroup ? conversationId : undefined,
     topicName: ctx.TopicName,
+    ...(hasLocation
+      ? {
+          location: {
+            latitude: ctx.LocationLat as number,
+            longitude: ctx.LocationLon as number,
+            ...(typeof ctx.LocationAccuracy === "number" ? { accuracy: ctx.LocationAccuracy } : {}),
+            ...(ctx.LocationName ? { name: ctx.LocationName } : {}),
+            ...(ctx.LocationAddress ? { address: ctx.LocationAddress } : {}),
+            ...(locationSource ? { source: locationSource } : {}),
+            ...(typeof ctx.LocationIsLive === "boolean" ? { isLive: ctx.LocationIsLive } : {}),
+            ...(typeof ctx.LocationLivePeriodSeconds === "number" &&
+            Number.isFinite(ctx.LocationLivePeriodSeconds)
+              ? { livePeriodSeconds: ctx.LocationLivePeriodSeconds }
+              : {}),
+            ...(ctx.LocationCaption ? { caption: ctx.LocationCaption } : {}),
+          },
+        }
+      : {}),
+    ...(providerUpdateId && providerUpdateKind
+      ? {
+          providerUpdate: {
+            id: providerUpdateId,
+            kind: providerUpdateKind,
+            ...(normalizeOptionalString(ctx.MessageSidFull ?? ctx.MessageSid)
+              ? { messageId: normalizeOptionalString(ctx.MessageSidFull ?? ctx.MessageSid) }
+              : {}),
+            ...(typeof ctx.ProviderMessageTimestamp === "number" &&
+            Number.isFinite(ctx.ProviderMessageTimestamp)
+              ? { messageTimestamp: ctx.ProviderMessageTimestamp }
+              : {}),
+            ...(typeof ctx.ProviderEditTimestamp === "number" &&
+            Number.isFinite(ctx.ProviderEditTimestamp)
+              ? { editedTimestamp: ctx.ProviderEditTimestamp }
+              : {}),
+          },
+        }
+      : {}),
   };
+}
+
+type DerivedInboundMessageHookContext = ReturnType<typeof deriveInboundMessageHookContextBase>;
+type InboundMessageHookMetadataFields = Pick<
+  PluginHookInboundMessageMetadata,
+  | "mediaPath"
+  | "mediaUrl"
+  | "mediaType"
+  | "mediaPaths"
+  | "mediaUrls"
+  | "mediaTypes"
+  | "originalMediaPath"
+  | "originalMediaUrl"
+  | "originalMediaType"
+  | "originalMediaPaths"
+  | "originalMediaUrls"
+  | "originalMediaTypes"
+  | "mediaStagingPending"
+>;
+type CanonicalInboundMessageHookContext = Pick<
+  DerivedInboundMessageHookContext,
+  "from" | "content" | "channelId" | "isGroup"
+> &
+  Partial<DerivedInboundMessageHookContext> &
+  Partial<Pick<PluginHookMessageContext, "runId" | "trace" | "callDepth">> &
+  Partial<InboundMessageHookMetadataFields> & {
+    originalMedia?: MessageHookMediaFact[];
+    mediaRemoteHost?: string;
+  };
+
+export function deriveInboundMessageHookContext(
+  ctx: FinalizedMsgContext,
+  overrides?: {
+    content?: string;
+    messageId?: string;
+  },
+): CanonicalInboundMessageHookContext {
+  return deriveInboundMessageHookContextBase(ctx, overrides);
 }
 
 export function buildCanonicalSentMessageHookContext(params: {
@@ -291,6 +321,29 @@ function assignTraceFields(
   }
 }
 
+function projectHookReplyFields(
+  canonical: CanonicalInboundMessageHookContext | CanonicalSentMessageHookContext,
+) {
+  // Sent contexts may omit reply fields; empty strings and false remain meaningful.
+  return {
+    ...("replyToId" in canonical && canonical.replyToId !== undefined
+      ? { replyToId: canonical.replyToId }
+      : {}),
+    ...("replyToIdFull" in canonical && canonical.replyToIdFull !== undefined
+      ? { replyToIdFull: canonical.replyToIdFull }
+      : {}),
+    ...("replyToBody" in canonical && canonical.replyToBody !== undefined
+      ? { replyToBody: canonical.replyToBody }
+      : {}),
+    ...("replyToSender" in canonical && canonical.replyToSender !== undefined
+      ? { replyToSender: canonical.replyToSender }
+      : {}),
+    ...("replyToIsQuote" in canonical && canonical.replyToIsQuote !== undefined
+      ? { replyToIsQuote: canonical.replyToIsQuote }
+      : {}),
+  };
+}
+
 export function toPluginMessageContext(
   canonical: CanonicalInboundMessageHookContext | CanonicalSentMessageHookContext,
 ): PluginHookMessageContext {
@@ -311,21 +364,7 @@ export function toPluginMessageContext(
   if ("senderId" in canonical && canonical.senderId) {
     context.senderId = canonical.senderId;
   }
-  if ("replyToId" in canonical && canonical.replyToId !== undefined) {
-    context.replyToId = canonical.replyToId;
-  }
-  if ("replyToIdFull" in canonical && canonical.replyToIdFull !== undefined) {
-    context.replyToIdFull = canonical.replyToIdFull;
-  }
-  if ("replyToBody" in canonical && canonical.replyToBody !== undefined) {
-    context.replyToBody = canonical.replyToBody;
-  }
-  if ("replyToSender" in canonical && canonical.replyToSender !== undefined) {
-    context.replyToSender = canonical.replyToSender;
-  }
-  if ("replyToIsQuote" in canonical && canonical.replyToIsQuote !== undefined) {
-    context.replyToIsQuote = canonical.replyToIsQuote;
-  }
+  Object.assign(context, projectHookReplyFields(canonical));
   assignTraceFields(context, canonical.trace);
   if (canonical.callDepth != null) {
     context.callDepth = canonical.callDepth;
@@ -384,21 +423,7 @@ function buildPluginInboundClaimContext(
     runId: canonical.runId,
     callDepth: canonical.callDepth,
   };
-  if (canonical.replyToId !== undefined) {
-    context.replyToId = canonical.replyToId;
-  }
-  if (canonical.replyToIdFull !== undefined) {
-    context.replyToIdFull = canonical.replyToIdFull;
-  }
-  if (canonical.replyToBody !== undefined) {
-    context.replyToBody = canonical.replyToBody;
-  }
-  if (canonical.replyToSender !== undefined) {
-    context.replyToSender = canonical.replyToSender;
-  }
-  if (canonical.replyToIsQuote !== undefined) {
-    context.replyToIsQuote = canonical.replyToIsQuote;
-  }
+  Object.assign(context, projectHookReplyFields(canonical));
   assignTraceFields(context, canonical.trace);
   return context;
 }
@@ -424,11 +449,7 @@ function buildPluginInboundClaimEvent(
     senderId: canonical.senderId,
     senderName: canonical.senderName,
     senderUsername: canonical.senderUsername,
-    ...(canonical.replyToId !== undefined ? { replyToId: canonical.replyToId } : {}),
-    ...(canonical.replyToIdFull !== undefined ? { replyToIdFull: canonical.replyToIdFull } : {}),
-    ...(canonical.replyToBody !== undefined ? { replyToBody: canonical.replyToBody } : {}),
-    ...(canonical.replyToSender !== undefined ? { replyToSender: canonical.replyToSender } : {}),
-    ...(canonical.replyToIsQuote !== undefined ? { replyToIsQuote: canonical.replyToIsQuote } : {}),
+    ...projectHookReplyFields(canonical),
     threadId: canonical.threadId,
     messageId: canonical.messageId,
     sessionKey: canonical.sessionKey,
@@ -436,6 +457,8 @@ function buildPluginInboundClaimEvent(
     isGroup: canonical.isGroup,
     commandAuthorized: extras?.commandAuthorized,
     wasMentioned: extras?.wasMentioned,
+    ...(canonical.location ? { location: { ...canonical.location } } : {}),
+    ...(canonical.providerUpdate ? { providerUpdate: { ...canonical.providerUpdate } } : {}),
     ...projectHookMediaState(canonical),
     metadata: {
       from: canonical.from,
@@ -497,13 +520,11 @@ export function toPluginMessageReceivedEvent(
     threadId: canonical.threadId,
     messageId: canonical.messageId,
     senderId: canonical.senderId,
-    ...(canonical.replyToId !== undefined ? { replyToId: canonical.replyToId } : {}),
-    ...(canonical.replyToIdFull !== undefined ? { replyToIdFull: canonical.replyToIdFull } : {}),
-    ...(canonical.replyToBody !== undefined ? { replyToBody: canonical.replyToBody } : {}),
-    ...(canonical.replyToSender !== undefined ? { replyToSender: canonical.replyToSender } : {}),
-    ...(canonical.replyToIsQuote !== undefined ? { replyToIsQuote: canonical.replyToIsQuote } : {}),
+    ...projectHookReplyFields(canonical),
     sessionKey: canonical.sessionKey,
     runId: canonical.runId,
+    ...(canonical.location ? { location: { ...canonical.location } } : {}),
+    ...(canonical.providerUpdate ? { providerUpdate: { ...canonical.providerUpdate } } : {}),
     ...projectHookMediaState(canonical),
     metadata: {
       to: canonical.to,

@@ -2,6 +2,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PluginInstance } from "../../plugins/plugin-instance.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { getPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
@@ -10,6 +11,7 @@ import { createGatewayTestRegistry } from "./__tests__/test-utils.js";
 import {
   createGatewayPluginUpgradeHandler,
   createGatewayPluginRequestHandler,
+  isPluginAuthenticatedRoutePath,
   isRegisteredPluginHttpRoutePath,
   shouldEnforceGatewayAuthForPluginPath,
 } from "./plugins-http.js";
@@ -51,6 +53,10 @@ function createMockUpgradeSocket() {
     destroyed: false,
     write(chunk: string) {
       socket.chunks.push(chunk);
+    },
+    end(chunk: string, callback: () => void) {
+      socket.write(chunk);
+      callback();
     },
     destroy() {
       socket.destroyed = true;
@@ -178,6 +184,26 @@ async function invokeCanvasGatewayUpgrade(params: { gatewayAuthSatisfied: boolea
 describe("createGatewayPluginRequestHandler", () => {
   afterEach(() => {
     setActivePluginRegistry(createEmptyPluginRegistry());
+  });
+
+  it("fences an identity-preserved route after its plugin instance retires", async () => {
+    const instance = new PluginInstance("identity-route");
+    const routeHandler = instance.adopt(vi.fn(async () => true));
+    const log = createPluginLog();
+    const handler = createGatewayPluginRequestHandler({
+      registry: createGatewayTestRegistry({
+        httpRoutes: [createRoute({ path: "/identity", handler: routeHandler })],
+      }),
+      log,
+    });
+    await instance.dispose();
+
+    const { res } = makeMockHttpResponse();
+    await expect(handler({ url: "/identity" } as IncomingMessage, res)).resolves.toBe(true);
+    expect(routeHandler).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Plugin identity-route was reloaded or disabled"),
+    );
   });
 
   it("keeps unauthenticated plugin routes off operator runtime scopes", async () => {
@@ -394,7 +420,7 @@ describe("createGatewayPluginRequestHandler", () => {
     expect(end).toHaveBeenCalledWith("Internal Server Error");
   });
 
-  it("ends a plugin route response when the route throws after sending headers", async () => {
+  it("aborts an incomplete unframed response when the plugin route throws", async () => {
     const log = createPluginLog();
     const handler = createGatewayPluginRequestHandler({
       registry: createGatewayTestRegistry({
@@ -430,33 +456,15 @@ describe("createGatewayPluginRequestHandler", () => {
     if (!address || typeof address === "string") {
       throw new Error("server did not bind to a TCP port");
     }
-    const controller = new AbortController();
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-
     try {
-      const response = await fetch(`http://127.0.0.1:${address.port}/partial`, {
-        signal: controller.signal,
-      });
-      const result = await Promise.race([
-        response.text().then(
-          (body) => ({ kind: "body" as const, body }),
-          (err: unknown) => ({ kind: "error" as const, message: String(err) }),
-        ),
-        new Promise<{ kind: "timeout" }>((resolve) => {
-          timeout = setTimeout(() => {
-            controller.abort();
-            resolve({ kind: "timeout" });
-          }, 250);
-        }),
-      ]);
-
-      expect(response.status).toBe(200);
-      expect(result).toEqual({ kind: "body", body: "partial" });
+      await expect(
+        fetch(`http://127.0.0.1:${address.port}/partial`, {
+          signal: AbortSignal.timeout(1_000),
+        }).then(async (response) => await response.text()),
+      ).rejects.toMatchObject({ name: "TypeError" });
       expect(log.warn).toHaveBeenCalledWith("plugin http route failed (route): Error: boom");
     } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      server.closeAllConnections();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
       });
@@ -620,5 +628,22 @@ describe("plugin HTTP route auth checks", () => {
       ],
     });
     expect(shouldEnforceGatewayAuthForPluginPath(registry, "/plugin/secure/report")).toBe(true);
+  });
+
+  it("recognizes only existing, unambiguous plugin-authenticated routes", () => {
+    const registry = createGatewayTestRegistry({
+      httpRoutes: [
+        createRoute({ path: "/googlechat", match: "prefix", auth: "plugin" }),
+        createRoute({ path: "/plugin/secure", match: "prefix", auth: "gateway" }),
+        createRoute({ path: "/plugin/secure/report", auth: "plugin" }),
+      ],
+    });
+
+    expect(isPluginAuthenticatedRoutePath(registry, "/googlechat")).toBe(true);
+    expect(isPluginAuthenticatedRoutePath(registry, "/googlechat/events")).toBe(true);
+    expect(isPluginAuthenticatedRoutePath(registry, "/missing")).toBe(false);
+    expect(isPluginAuthenticatedRoutePath(registry, "/api/channels/status")).toBe(false);
+    expect(isPluginAuthenticatedRoutePath(registry, "/plugin/secure/report")).toBe(false);
+    expect(isPluginAuthenticatedRoutePath(registry, decodeOverflowPublicPath)).toBe(false);
   });
 });

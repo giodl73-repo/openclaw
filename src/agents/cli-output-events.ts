@@ -1,3 +1,4 @@
+import { asPositiveFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   createReasoningTagTextPartitioner,
@@ -14,13 +15,24 @@ import type {
   CliToolUseStartDelta,
   CliUsage,
 } from "./cli-output-contracts.js";
-import { isGeminiStreamJsonDialect, supportsCliJsonlToolEvents } from "./cli-output-records.js";
+import {
+  isClaudeSubagentRecord,
+  isGeminiStreamJsonDialect,
+  supportsCliJsonlToolEvents,
+} from "./cli-output-records.js";
 
 type PendingToolUse = {
   toolCallId: string;
   name: string;
   kind: CliToolUseStartDelta["kind"];
   inputJsonParts: string[];
+  /**
+   * Complete input carried on `content_block_start`. Some CLI backends send the
+   * whole tool input there and never emit `input_json_delta` chunks, so without
+   * this the start event reports empty args and the later complete copy is
+   * dropped by the `startedIds` dedup in `emitToolStartOnce`.
+   */
+  blockInput?: Record<string, unknown>;
 };
 
 type ToolUseTracker = {
@@ -174,13 +186,12 @@ export function projectCliBackendEvent(params: {
     params.onUsage?.(event.usage, true);
   }
   const existingErrorText = state.output?.errorText;
-  const eventText = event.text?.trim() ?? "";
-  const existingText = state.output?.text.trim() ?? "";
-  const streamedText = state.assistantText.trim();
-  const delegatedText = params.texts.join("\n").trim();
-  const resultText = existingErrorText
-    ? existingText || delegatedText || streamedText
-    : eventText || existingText || delegatedText || streamedText;
+  // Stop at the authoritative winner before composing fallback transcripts.
+  const resultText =
+    (!existingErrorText && event.text?.trim()) ||
+    state.output?.text.trim() ||
+    params.texts.join("\n").trim() ||
+    state.assistantText.trim();
   const errorText = existingErrorText || event.errorText;
   state.output = {
     ...state.output,
@@ -248,7 +259,7 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
   onToolUseStart?: (delta: CliToolUseStartDelta) => void;
   onToolResult?: (delta: CliToolResultDelta) => void;
 }): void {
-  if (!supportsCliJsonlToolEvents(params)) {
+  if (!supportsCliJsonlToolEvents(params) || isClaudeSubagentRecord(params.parsed)) {
     return;
   }
   const tracker = params.tracker;
@@ -270,6 +281,7 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
             name,
             kind: block.type,
             inputJsonParts: [],
+            ...(isRecord(block.input) ? { blockInput: block.input } : {}),
           });
         }
       } else if (isClaudeAssistantToolResultBlockType(block.type)) {
@@ -300,12 +312,19 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
       const pending = tracker.pendingByIndex.get(event.index);
       tracker.pendingByIndex.delete(event.index);
       if (pending) {
+        // Delta presence, not key count, decides the winner: a no-argument call
+        // arrives as an explicit `{}` delta, so keying on key count would let the
+        // start snapshot overwrite it.
+        const args =
+          pending.inputJsonParts.length > 0
+            ? parseToolInputJson(pending.inputJsonParts)
+            : (pending.blockInput ?? {});
         emitToolStartOnce(
           tracker,
           pending.toolCallId,
           pending.name,
           pending.kind,
-          parseToolInputJson(pending.inputJsonParts),
+          args,
           params.onToolUseStart,
         );
       }
@@ -375,6 +394,7 @@ type ThinkingTracker = {
   // is deduped against its own index; a single global concatenation misfires
   // once a message carries more than one thinking block (re-emits or reorders).
   streamedByIndex: Map<number, string>;
+  highestStreamedIndex: number;
   // Full thinking already emitted for the message in block order. The callback
   // contract exposes this as the running snapshot text for downstream coalescing,
   // so it stays a message-level concatenation, not a per-index value.
@@ -387,6 +407,7 @@ type ThinkingTracker = {
 export function createThinkingTracker(): ThinkingTracker {
   return {
     streamedByIndex: new Map(),
+    highestStreamedIndex: Number.NEGATIVE_INFINITY,
     emittedText: "",
     nextSyntheticBlockIndex: 0,
     progressTokens: 0,
@@ -395,6 +416,7 @@ export function createThinkingTracker(): ThinkingTracker {
 
 function resetThinkingBlockState(tracker: ThinkingTracker): void {
   tracker.streamedByIndex.clear();
+  tracker.highestStreamedIndex = Number.NEGATIVE_INFINITY;
   tracker.emittedText = "";
   tracker.currentSyntheticBlockIndex = undefined;
   tracker.nextSyntheticBlockIndex = 0;
@@ -461,8 +483,12 @@ function emitClaudeThinking(
   delta: string,
   onThinkingDelta: (delta: CliThinkingDelta) => void,
 ): void {
+  const appendToAggregate = index >= tracker.highestStreamedIndex;
   tracker.streamedByIndex.set(index, `${streamed}${delta}`);
-  tracker.emittedText = assembleThinkingTextByIndex(tracker.streamedByIndex);
+  tracker.highestStreamedIndex = Math.max(tracker.highestStreamedIndex, index);
+  tracker.emittedText = appendToAggregate
+    ? `${tracker.emittedText}${delta}`
+    : assembleThinkingTextByIndex(tracker.streamedByIndex);
   onThinkingDelta({ text: tracker.emittedText, delta, isReasoningSnapshot: true });
 }
 
@@ -470,11 +496,7 @@ function readThinkingProgressTokens(delta: Record<string, unknown>): number | un
   if (delta.type !== "thinking_delta" || delta.thinking !== "") {
     return undefined;
   }
-  const estimatedTokens = delta.estimated_tokens;
-  if (typeof estimatedTokens !== "number" || !Number.isFinite(estimatedTokens)) {
-    return undefined;
-  }
-  return estimatedTokens > 0 ? estimatedTokens : undefined;
+  return asPositiveFiniteNumber(delta.estimated_tokens);
 }
 
 function emitClaudeThinkingProgress(
@@ -494,7 +516,7 @@ export function dispatchClaudeCliThinking(params: {
   onThinkingDelta?: (delta: CliThinkingDelta) => void;
   onThinkingProgress?: (progress: CliThinkingProgress) => void;
 }): void {
-  if (!supportsCliJsonlToolEvents(params)) {
+  if (!supportsCliJsonlToolEvents(params) || isClaudeSubagentRecord(params.parsed)) {
     return;
   }
   const tracker = params.tracker;
@@ -564,6 +586,7 @@ export function dispatchClaudeCliThinking(params: {
         continue;
       }
       tracker.streamedByIndex.set(index, block.thinking);
+      tracker.highestStreamedIndex = Math.max(tracker.highestStreamedIndex, index);
       const text = assembleThinkingTextByIndex(tracker.streamedByIndex);
       if (text === tracker.emittedText) {
         continue;

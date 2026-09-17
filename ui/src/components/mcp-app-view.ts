@@ -1,18 +1,22 @@
 import { consume } from "@lit/context";
 import { Task, TaskStatus } from "@lit/task";
-import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
+import type {
+  CallToolResult,
+  ListToolsRequest,
+  ListToolsResult,
+} from "@modelcontextprotocol/client";
 import {
-  type CallToolResult,
-  type ListToolsRequest,
-  ListToolsRequestSchema,
-  type ListToolsResult,
-} from "@modelcontextprotocol/sdk/types.js";
+  AppBridge,
+  McpUiHostContextSchema,
+  PostMessageTransport,
+} from "@modelcontextprotocol/ext-apps/app-bridge";
 import { isMcpAppViewExpiredError } from "@openclaw/gateway-protocol";
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { applicationContext, type ApplicationContext } from "../app/context.ts";
 import { I18nController, t } from "../i18n/index.ts";
+import { formatUiError } from "../lib/format-error.ts";
 import { openExternalUrlSafe } from "../lib/open-external-url.ts";
 import {
   buildMcpAppHostCapabilities,
@@ -76,7 +80,8 @@ function hostContext(element: Element | undefined, height: number): HostContext 
   const rect = element?.getBoundingClientRect();
   const touch = navigator.maxTouchPoints > 0 || window.matchMedia?.("(pointer: coarse)").matches;
   const themeMode = document.documentElement.dataset.themeMode;
-  return {
+  // The SDK schema preserves optional style values while normalizing its complete key map.
+  return McpUiHostContextSchema.parse({
     theme:
       themeMode === "light" || themeMode === "dark"
         ? themeMode
@@ -101,7 +106,7 @@ function hostContext(element: Element | undefined, height: number): HostContext 
     // these say what it actually resolves to. Republished by the same theme
     // subscription that re-sends this context.
     styles: { variables: collectMcpAppStyleVariables() },
-  };
+  });
 }
 
 class OpenClawAppBridge extends AppBridge {
@@ -114,7 +119,7 @@ class OpenClawAppBridge extends AppBridge {
   }
 
   setListToolsHandler(handler: (params: ListToolsRequest["params"]) => Promise<ListToolsResult>) {
-    this.replaceRequestHandler(ListToolsRequestSchema, (request) => handler(request.params));
+    this.replaceRequestHandler("tools/list", (request) => handler(request.params));
   }
 }
 
@@ -368,6 +373,7 @@ export class McpAppView extends LitElement {
           payload.csp,
           payload.messageSupported === true,
           payload.updateModelContextSupported === true,
+          payload.messageSupported === true,
         ),
         { hostContext: hostContext(mount, this.height) },
       );
@@ -498,12 +504,7 @@ export class McpAppView extends LitElement {
     const error = this.setupTask.status === TaskStatus.ERROR ? this.setupTask.error : null;
     const errorText = error
       ? t("mcpApp.unavailable", {
-          error:
-            error instanceof Error
-              ? error.message
-              : typeof error === "string"
-                ? error
-                : t("mcpApp.errors.requestFailed"),
+          error: formatUiError(error, t("mcpApp.errors.requestFailed")),
         })
       : null;
     return html`<div ${ref(this.mount)} class="mount"></div>

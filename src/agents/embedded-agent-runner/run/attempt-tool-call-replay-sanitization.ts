@@ -1,21 +1,31 @@
 /** Sanitizes replayed tool calls and provider-specific transcript structure. */
+import { replaceCompactionReplayOwnerContent } from "@openclaw/ai/transports";
 import { hasNonEmptyString as replayToolCallNonEmptyString } from "../../../../packages/normalization-core/src/string-coerce.js";
 import {
   downgradeOpenAIFunctionCallReasoningPairs,
-  downgradeOpenAIReasoningBlocks,
   normalizeOpenAIResponsesToolCallIds,
   validateAnthropicTurns,
   validateGeminiTurns,
 } from "../../embedded-agent-helpers.js";
+import { mergeConsecutiveUserMessages } from "../../embedded-agent-helpers/turns.js";
 import type { AgentMessage, StreamFn } from "../../runtime/index.js";
-import { sanitizeToolUseResultPairing } from "../../session-transcript-repair.js";
+import {
+  sanitizeToolUseResultPairing,
+  sanitizeToolUseResultPairingForModel,
+} from "../../session-transcript-repair.js";
+import { isThinkingLikeBlock } from "../../thinking-block.js";
 import {
   extractToolCallsFromAssistant,
   extractToolResultIds,
+  hasToolCallInput,
   sanitizeToolCallIdsForCloudCodeAssist,
   type ToolCallIdMode,
 } from "../../tool-call-id.js";
-import { shouldAllowProviderOwnedThinkingReplay } from "../../transcript-policy.js";
+import { createCompletedToolCallPredicate } from "../../tool-call-shared.js";
+import {
+  shouldAllowProviderOwnedThinkingReplay,
+  shouldMergeConsecutiveUserTurns,
+} from "../../transcript-policy.js";
 import type { TranscriptPolicy } from "../../transcript-policy.js";
 import { isRunnerToolCallBlockType } from "./attempt-tool-call-block-type.js";
 import { resolveToolCallName } from "./attempt-tool-call-name-resolution.js";
@@ -43,15 +53,11 @@ type AnthropicToolResultContentBlock = {
   tool_call_id?: unknown;
 };
 
-function isThinkingLikeReplayBlock(block: unknown): boolean {
-  if (!block || typeof block !== "object") {
-    return false;
-  }
-  const type = (block as { type?: unknown }).type;
-  return type === "thinking" || type === "redacted_thinking";
-}
-
-function isReplaySafeThinkingTurn(content: unknown[], allowedToolNames?: Set<string>): boolean {
+function isReplaySafeThinkingTurn(
+  content: unknown[],
+  allowedToolNames: Set<string> | undefined,
+  isCompleted: ReturnType<typeof createCompletedToolCallPredicate>,
+): boolean {
   const seenToolCallIds = new Set<string>();
   for (const block of content) {
     if (!isReplayToolCallBlock(block)) {
@@ -59,12 +65,16 @@ function isReplaySafeThinkingTurn(content: unknown[], allowedToolNames?: Set<str
     }
     const replayBlock = block;
     const toolCallId = typeof replayBlock.id === "string" ? replayBlock.id.trim() : "";
-    if (!replayToolCallHasInput(replayBlock) || !toolCallId || seenToolCallIds.has(toolCallId)) {
+    if (!hasToolCallInput(replayBlock) || !toolCallId || seenToolCallIds.has(toolCallId)) {
       return false;
     }
     seenToolCallIds.add(toolCallId);
     const rawName = typeof replayBlock.name === "string" ? replayBlock.name : "";
-    const resolvedName = resolveReplayToolCallName(rawName, toolCallId, allowedToolNames);
+    const resolvedName = resolveReplayToolCallName(
+      rawName,
+      toolCallId,
+      isCompleted(replayBlock) ? undefined : allowedToolNames,
+    );
     if (!resolvedName || replayBlock.name !== resolvedName) {
       return false;
     }
@@ -77,13 +87,6 @@ function isReplayToolCallBlock(block: unknown): block is ReplayToolCallBlock {
     return false;
   }
   return isRunnerToolCallBlockType((block as { type?: unknown }).type);
-}
-
-function replayToolCallHasInput(block: ReplayToolCallBlock): boolean {
-  const hasInput = "input" in block ? block.input !== undefined && block.input !== null : false;
-  const hasArguments =
-    "arguments" in block ? block.arguments !== undefined && block.arguments !== null : false;
-  return hasInput || hasArguments;
 }
 
 function collectFollowingToolResults(
@@ -144,6 +147,7 @@ function sanitizeReplayToolCallInputs(
   const out: AgentMessage[] = [];
   const preservedThinkingToolCallIds = new Set<string>();
   const priorToolCallIds = new Set<string>();
+  const isCompleted = createCompletedToolCallPredicate(messages);
 
   for (const [index, message] of messages.entries()) {
     if (!message) {
@@ -160,13 +164,13 @@ function sanitizeReplayToolCallInputs(
     }
     if (
       allowProviderOwnedThinkingReplay &&
-      message.content.some((block) => isThinkingLikeReplayBlock(block)) &&
+      message.content.some((block) => isThinkingLikeBlock(block)) &&
       message.content.some((block) => isReplayToolCallBlock(block))
     ) {
       const replaySafeToolCalls = extractToolCallsFromAssistant(message);
       const followingToolResults = collectFollowingToolResults(messages, index);
       if (
-        isReplaySafeThinkingTurn(message.content, allowedToolNames) &&
+        isReplaySafeThinkingTurn(message.content, allowedToolNames, isCompleted) &&
         replaySafeToolCalls.every(
           (toolCall) =>
             !preservedThinkingToolCallIds.has(toolCall.id) &&
@@ -197,14 +201,18 @@ function sanitizeReplayToolCallInputs(
       }
       const replayBlock = block as ReplayToolCallBlock;
 
-      if (!replayToolCallHasInput(replayBlock) || !replayToolCallNonEmptyString(replayBlock.id)) {
+      if (!hasToolCallInput(replayBlock) || !replayToolCallNonEmptyString(replayBlock.id)) {
         changed = true;
         messageChanged = true;
         continue;
       }
 
       const rawName = typeof replayBlock.name === "string" ? replayBlock.name : "";
-      const resolvedName = resolveReplayToolCallName(rawName, replayBlock.id, allowedToolNames);
+      const resolvedName = resolveReplayToolCallName(
+        rawName,
+        replayBlock.id,
+        isCompleted(replayBlock) ? undefined : allowedToolNames,
+      );
       if (!resolvedName) {
         changed = true;
         messageChanged = true;
@@ -223,7 +231,7 @@ function sanitizeReplayToolCallInputs(
     if (messageChanged) {
       changed = true;
       if (nextContent.length > 0) {
-        const nextMessage = { ...message, content: nextContent };
+        const nextMessage = replaceCompactionReplayOwnerContent(message, nextContent);
         for (const toolCall of extractToolCallsFromAssistant(nextMessage)) {
           priorToolCallIds.add(toolCall.id);
         }
@@ -270,7 +278,7 @@ function isSignedThinkingReplayAssistantSpan(message: AgentMessage | undefined):
     return false;
   }
   return (
-    content.some((block) => isThinkingLikeReplayBlock(block)) &&
+    content.some((block) => isThinkingLikeBlock(block)) &&
     content.some((block) => isReplayToolCallBlock(block))
   );
 }
@@ -428,13 +436,8 @@ export function sanitizeReplayToolCallIdsForStream(params: {
 
 /** Downgrades OpenAI Responses replay turns into the stream format expected by runtime callers. */
 export function sanitizeOpenAIResponsesReplayForStream(messages: AgentMessage[]): AgentMessage[] {
-  const repaired = sanitizeToolUseResultPairing(messages, {
-    erroredAssistantResultPolicy: "drop",
-    missingToolResultText: "aborted",
-  });
-  return downgradeOpenAIFunctionCallReasoningPairs(
-    normalizeOpenAIResponsesToolCallIds(downgradeOpenAIReasoningBlocks(repaired)),
-  );
+  const repaired = sanitizeToolUseResultPairingForModel(messages, true);
+  return downgradeOpenAIFunctionCallReasoningPairs(normalizeOpenAIResponsesToolCallIds(repaired));
 }
 
 /**
@@ -448,18 +451,22 @@ export function wrapStreamFnSanitizeMalformedToolCalls(
   allowedToolNames?: Set<string>,
   transcriptPolicy?: Pick<
     TranscriptPolicy,
-    "validateGeminiTurns" | "validateAnthropicTurns" | "preserveSignatures" | "dropThinkingBlocks"
+    | "validateGeminiTurns"
+    | "validateAnthropicTurns"
+    | "preserveSignatures"
+    | "dropThinkingBlocks"
+    | "appendOnlyRuntimeContext"
   >,
   provider?: string | null,
 ): StreamFn {
   return (model, context, options) => {
-    const ctx = context as unknown as { messages?: unknown };
-    const messages = ctx?.messages;
+    const messages = context?.messages;
     if (!Array.isArray(messages)) {
       return baseFn(model, context, options);
     }
+    const modelApi = (model as { api?: unknown })?.api as string | null | undefined;
     const allowProviderOwnedThinkingReplay = shouldAllowProviderOwnedThinkingReplay({
-      modelApi: (model as { api?: unknown })?.api as string | null | undefined,
+      modelApi,
       provider,
       policy: {
         validateAnthropicTurns: transcriptPolicy?.validateAnthropicTurns === true,
@@ -478,10 +485,7 @@ export function wrapStreamFnSanitizeMalformedToolCalls(
       (model as { api?: unknown }).api === "azure-openai-responses";
     const replayInputsChanged = sanitized.messages !== messages;
     let nextMessages = isOpenAIResponsesApi
-      ? sanitizeToolUseResultPairing(sanitized.messages, {
-          erroredAssistantResultPolicy: "drop",
-          missingToolResultText: "aborted",
-        })
+      ? sanitizeToolUseResultPairingForModel(sanitized.messages, true)
       : replayInputsChanged
         ? sanitizeToolUseResultPairing(sanitized.messages)
         : sanitized.messages;
@@ -496,10 +500,13 @@ export function wrapStreamFnSanitizeMalformedToolCalls(
       nextMessages = stripTrailingAssistantPrefillTurns(nextMessages);
       strippedTrailingAssistantPrefill ||= nextMessages !== beforeStrip;
     }
+    // Appended Bedrock users need merging without revalidating unchanged signed tools.
     if (nextMessages === messages) {
-      return baseFn(model, context, options);
-    }
-    if (
+      if (modelApi !== "bedrock-converse-stream") {
+        return baseFn(model, context, options);
+      }
+      nextMessages = mergeConsecutiveUserMessages(nextMessages);
+    } else if (
       sanitized.droppedAssistantMessages > 0 ||
       transcriptPolicy?.validateAnthropicTurns ||
       strippedTrailingAssistantPrefill
@@ -508,13 +515,14 @@ export function wrapStreamFnSanitizeMalformedToolCalls(
         nextMessages = validateGeminiTurns(nextMessages);
       }
       if (transcriptPolicy?.validateAnthropicTurns) {
-        nextMessages = validateAnthropicTurns(nextMessages);
+        nextMessages = validateAnthropicTurns(nextMessages, {
+          mergeConsecutiveUserTurns: shouldMergeConsecutiveUserTurns(transcriptPolicy, modelApi),
+        });
       }
     }
-    const nextContext = {
-      ...(context as unknown as Record<string, unknown>),
-      messages: nextMessages,
-    } as unknown;
-    return baseFn(model, nextContext as typeof context, options);
+    if (nextMessages === messages) {
+      return baseFn(model, context, options);
+    }
+    return baseFn(model, { ...context, messages: nextMessages as typeof messages }, options);
   };
 }

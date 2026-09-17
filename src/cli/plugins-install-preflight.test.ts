@@ -9,7 +9,6 @@ import {
   installPluginFromNpmPackArchiveMock,
   installPluginFromNpmSpecMock,
   installPluginFromPathMock,
-  parseClawHubPluginSpecMock,
   promptYesNoMock,
   readConfigFileSnapshotForWriteMock,
   resetPluginsCliTestState,
@@ -18,7 +17,6 @@ import {
   runtimeErrors,
   configWriteMock,
 } from "./plugins-cli-test-helpers.js";
-import { resolvePluginInstallPreflight } from "./plugins-install-preflight.js";
 
 const { withPluginLifecycleLeaseMock } = vi.hoisted(() => ({
   withPluginLifecycleLeaseMock: vi.fn(),
@@ -26,6 +24,7 @@ const { withPluginLifecycleLeaseMock } = vi.hoisted(() => ({
 
 vi.mock("../plugins/plugin-lifecycle-lease.js", () => ({
   withPluginLifecycleLease: withPluginLifecycleLeaseMock,
+  hasPluginLifecycleLease: () => false,
 }));
 
 function expectNoPluginInstallSideEffects(): void {
@@ -62,18 +61,16 @@ describe("plugin install mutation-free preflight", () => {
     });
 
     await expect(
-      resolvePluginInstallPreflight({
-        raw: "superpowers@claude-plugins-official",
-        opts: { force: true },
-      }),
-    ).resolves.toMatchObject({
-      ok: true,
-      raw: "superpowers",
-      marketplace: "claude-plugins-official",
-      sourcePlan: null,
-    });
+      runPluginsCommand(["plugins", "install", "superpowers@claude-plugins-official", "--force"]),
+    ).rejects.toThrow("__exit__:1");
 
-    expectNoPluginInstallSideEffects();
+    expect(installPluginFromMarketplaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        marketplace: "claude-plugins-official",
+        plugin: "superpowers",
+      }),
+    );
+    expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -178,10 +175,6 @@ describe("plugin install mutation-free preflight", () => {
       error: "Plugin path not found:",
     },
   ])("rejects $label before the lifecycle lease", async ({ args, error }) => {
-    if (args[0] === "clawhub:demo") {
-      parseClawHubPluginSpecMock.mockReturnValue({ name: "demo" });
-    }
-
     await expect(runPluginsCommand(["plugins", "install", ...args, "--force"])).rejects.toThrow(
       "__exit__:1",
     );

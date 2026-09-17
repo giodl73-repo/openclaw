@@ -1,5 +1,6 @@
 ---
 summary: "Choose and configure Google Meet, Microsoft Teams, or Zoom meeting participation"
+doc-schema-version: 1
 read_when:
   - You want an OpenClaw agent to join a video meeting
   - You are choosing between the Google Meet, Microsoft Teams meetings, and Zoom meetings plugins
@@ -28,10 +29,19 @@ The three plugins share the same modes:
 | Mode         | Behavior                                                                                              | Audio requirements                                           |
 | ------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | `agent`      | Realtime transcription goes to the configured OpenClaw agent; regular OpenClaw TTS speaks the reply.  | Chrome talk-back requires a supported virtual-audio backend. |
-| `bidi`       | A realtime voice model listens and replies directly.                                                  | Chrome talk-back requires a supported virtual-audio backend. |
+| `bidi`       | A realtime voice model listens and replies directly, with OpenClaw agent delegation when supported.   | Chrome talk-back requires a supported virtual-audio backend. |
 | `transcribe` | Joins observe-only and exposes a bounded live-caption transcript when the platform provides captions. | No virtual-audio bridge.                                     |
 
 Use `transcribe` when the agent only needs meeting text. Use `agent` for normal OpenClaw reasoning and tools. Use `bidi` when low-latency direct voice is more important than routing each turn through the regular agent.
+
+Google Meet, Teams, and Zoom use one shared meeting audio engine. In `bidi`
+mode they support GPT-Live through the same provider selection, native agent
+delegation, and interruption policy used by Discord and Talk. GPT-Live owns
+interruptions; participant audio stays open while the model speaks.
+
+In `bidi` mode, recoverable provider diagnostics are logged without stopping the audio bridge. Providers that support reconnecting own that recovery. Terminal provider closure, exhausted recovery, failed initial setup, and local audio-transport failures still stop the bridge; leaving the meeting also stops it.
+
+Stopping a meeting requests cancellation of any active agent consult. In `agent` mode, OpenClaw finishes active output and turn events before closing the session, then ignores late speech synthesis and audio delivery results.
 
 The bounded live transcript remains available only in `transcribe` mode. In all
 three modes, browser joins also persist completed caption rows and a derived
@@ -44,6 +54,54 @@ Automatic notes are on by default. Set `transcripts.enabled: false` to disable
 durable notes globally. An explicitly selected `transcribe` session retains its
 bounded live-caption tail without writing durable rows. Caption availability
 still depends on the meeting platform, account, language, and host policy.
+
+## Configure Teams or Zoom
+
+The Teams and Zoom plugins share the same configuration shape for their common
+meeting runtime. Add an entry only when you need to override a default. This
+example selects the normal agent path, changes the guest display name, and runs
+Chrome on a paired node:
+
+```json5
+{
+  plugins: {
+    entries: {
+      "teams-meetings": {
+        config: {
+          defaultMode: "agent",
+          chrome: { guestName: "OpenClaw Agent" },
+          chromeNode: { node: "meeting-node" },
+        },
+      },
+    },
+  },
+}
+```
+
+Use `"zoom-meetings"` as the entry id for Zoom. Omit `chromeNode` to run
+Chrome on the Gateway host.
+
+| Setting                          | Purpose                                                                           |
+| -------------------------------- | --------------------------------------------------------------------------------- |
+| `defaultMode`                    | `agent` (default), `bidi`, or `transcribe`                                        |
+| `chrome.guestName`               | Guest display name entered on the platform prejoin page                           |
+| `chrome.browserProfile`          | OpenClaw browser profile used for the meeting                                     |
+| `chrome.audioBackend`            | `auto` (default), `blackhole-2ch`, or `pipewire-pulse`                            |
+| `chromeNode.node`                | Paired node id, name, or IP that owns Chrome and the native virtual-audio backend |
+| `realtime.transcriptionProvider` | Realtime transcription provider used by `agent` mode                              |
+| `realtime.voiceProvider`         | Realtime voice provider used by `bidi` mode                                       |
+| `realtime.model`                 | Optional realtime model override                                                  |
+| `realtime.agentId`               | Agent consulted in `agent` mode                                                   |
+| `realtime.toolPolicy`            | `safe-read-only`, `owner`, or `none`                                              |
+
+For GPT-Live with Cove, set `defaultMode: "bidi"`,
+`realtime.voiceProvider: "openai"`, `realtime.model: "gpt-live-1-codex"`, and
+`realtime.providers.openai.voice: "cove"`. Sign in with
+`openclaw models auth login --provider openai` on the Gateway host. The
+[Google Meet configuration example](/plugins/google-meet/config#gpt-live-with-cove)
+uses the same fields; substitute `teams-meetings` or `zoom-meetings` for the
+plugin entry. Unpinned configurations keep their provider's default model.
+`agent` mode continues to use regular OpenClaw TTS.
 
 ## Prepare Chrome and audio
 
@@ -78,15 +136,27 @@ Run the Gateway or paired node as the same desktop user that runs Chrome. A root
 
 The Gateway host still owns the OpenClaw agent and model credentials when Chrome runs on a paired node. Configure a realtime transcription provider and OpenClaw TTS for `agent` mode, or a realtime voice provider for `bidi` mode. The platform guides contain the provider and audio-command options.
 
+Chrome sessions without an explicit `chrome.audioInputCommand` capture participant audio directly from browser
+playback and keep that playback off the virtual microphone. The native output
+command injects assistant speech into the microphone; the native input command
+verifies that injection. Isolated participant input remains open during both
+realtime speech and TTS. A capture failure stops the bridge with an error;
+mixed loopback audio is not used as a fallback for Live.
+
+Explicit input commands retain their existing provider-input behavior on both
+local and paired-node Chrome, including custom capture, filters, and mixers.
+They keep the existing echo protection. To select GPT-Live, remove the input
+override and use managed isolated capture; Live rejects a custom command path
+whose isolation cannot be verified instead of silently replacing it.
+
 ## Install or disable plugins
 
 Install the meeting plugins you need. Each is enabled by default after installation:
 
 ```bash
-openclaw plugins install npm:@openclaw/google-meet
+openclaw plugins install @openclaw/google-meet
 openclaw plugins install @openclaw/teams-meetings
 openclaw plugins install @openclaw/zoom-meetings
-openclaw gateway restart
 ```
 
 Disable any meeting plugin you do not use:
@@ -97,7 +167,7 @@ openclaw plugins disable teams-meetings
 openclaw plugins disable zoom-meetings
 ```
 
-Restart the Gateway if your plugin-management path does not restart it automatically. Then run the platform setup check before joining.
+These changes apply to a running Gateway automatically. If it is offline, start it before joining. Check the application result, then run the platform setup check below; see [Apply changes and inspect](/plugins/manage-plugins#apply-changes-and-inspect).
 
 ## Verify and join
 
@@ -110,6 +180,9 @@ Restart the Gateway if your plugin-management path does not restart it automatic
 Treat any failed setup check as a blocker for that transport and mode. For an observe-only smoke test, select `transcribe` mode and confirm that status reports an in-call session before expecting caption text.
 
 For talk-back smoke tests, verified speech requires more than bytes accepted by the playback command. The shared command-pair bridge correlates a bounded waveform fingerprint from the current output generation with audio returning on the selected virtual microphone capture path; Google Meet, Teams, and Zoom do not report `speechOutputVerified: true` when only the output-byte counter advances or unrelated participant audio is present.
+
+That verifies local microphone injection. Use a controlled second participant
+to prove remote audibility and interruption during an actual meeting.
 
 ## Handle platform policy prompts
 
@@ -125,7 +198,7 @@ Only join meetings where the operator is authorized to add an agent. Tell partic
 
 ## Discord voice chat
 
-[Discord voice channels](/channels/discord#voice-channels) provide native, audio-only realtime conversation without browser meeting automation. OpenClaw can join a voice channel, listen, route turns through an OpenClaw agent or realtime voice model, and speak replies. It does not send or receive camera video or screen sharing, even when people use video in the same Discord channel, so Discord voice is a related live-conversation surface rather than a fourth browser meeting plugin.
+[Discord voice channels](/channels/discord/voice-channels#voice-channels) provide native, audio-only realtime conversation without browser meeting automation. OpenClaw can join a voice channel, listen, route turns through an OpenClaw agent or realtime voice model, and speak replies. It does not send or receive camera video or screen sharing, even when people use video in the same Discord channel, so Discord voice is a related live-conversation surface rather than a fourth browser meeting plugin.
 
 ## Platform guides
 

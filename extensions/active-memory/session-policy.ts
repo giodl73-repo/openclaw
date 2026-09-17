@@ -127,12 +127,6 @@ function isActiveMemoryPluginEnabled(cfg: OpenClawConfig): boolean {
   return plugins.entries["active-memory"]?.enabled !== false;
 }
 
-function hasRememberAcrossConversationsAgent(cfg: OpenClawConfig): boolean {
-  const configuredAgentIds = cfg.agents?.list?.map((agent) => agent.id) ?? [];
-  const agentIds = configuredAgentIds.length > 0 ? configuredAgentIds : ["main"];
-  return agentIds.some((agentId) => resolveRememberAcrossConversations(cfg, agentId));
-}
-
 function shouldRememberAcrossConversations(cfg: OpenClawConfig, agentId: string): boolean {
   return resolveRememberAcrossConversations(cfg, agentId);
 }
@@ -228,8 +222,14 @@ function isEligibleInteractiveSession(ctx: {
   sessionId?: string;
   messageProvider?: string;
   channelId?: string;
+  inputProvenance?: { kind?: string };
 }): boolean {
   if (ctx.trigger !== "user") {
+    return false;
+  }
+  // Inter-session deliveries retain the user trigger. Their typed origin keeps
+  // them out of human-message recall.
+  if (ctx.inputProvenance?.kind === "inter_session") {
     return false;
   }
   // Exclude only canonical dreaming-narrative session keys (bare or agent-prefixed).
@@ -438,7 +438,6 @@ export {
   isEnabledForAgent,
   isPrivateRecallDestination,
   isSessionActiveMemoryDisabled,
-  hasRememberAcrossConversationsAgent,
   lacksAdminToMutateActiveMemoryGlobal,
   resolveCommandSessionKey,
   setSessionActiveMemoryDisabled,

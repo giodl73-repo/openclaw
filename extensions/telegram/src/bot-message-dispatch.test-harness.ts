@@ -1,24 +1,20 @@
 import { expectDefined } from "@openclaw/normalization-core";
 // Telegram tests cover bot message dispatch plugin behavior.
 import type { Bot } from "grammy";
-import {
-  createPluginStateKeyedStoreForTests,
-  createPluginStateSyncKeyedStoreForTests,
-  resetPluginStateStoreForTests,
-} from "openclaw/plugin-sdk/plugin-state-test-runtime";
+import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { afterEach, beforeAll, beforeEach, describe, expect, vi } from "vitest";
 import { resolveAutoTopicLabelConfig as resolveAutoTopicLabelConfigRuntime } from "./auto-topic-label-config.js";
 import type { TelegramBotDeps } from "./bot-deps.js";
+import { withTelegramTestSettledReceipt } from "./bot-message-dispatch-receipt.test-support.js";
 import {
   createSequencedTestDraftStream,
   createTestDraftStream,
 } from "./draft-stream.test-helpers.js";
-import { setTelegramRuntime } from "./runtime.js";
+import { setTelegramPluginStateRuntimeForTests } from "./runtime-state.test-support.js";
 import {
   clearTelegramRuntimeForTest as clearTelegramRuntime,
   resetTelegramReplyFenceForTest as resetTelegramReplyFenceForTests,
 } from "./runtime.test-support.js";
-import type { TelegramRuntime } from "./runtime.types.js";
 
 export type DispatchReplyWithBufferedBlockDispatcherArgs = Parameters<
   TelegramBotDeps["dispatchReplyWithBufferedBlockDispatcher"]
@@ -32,6 +28,12 @@ export function requireInvocationOrder(
   return expectDefined(mock.mock.invocationCallOrder[index], context);
 }
 
+type InboundDeliveryForTest =
+  import("openclaw/plugin-sdk/channel-inbound").ChannelInboundTurnPlan<"provider_message_sending">["delivery"];
+const observeInboundDeliveryHoisted = vi.hoisted(() =>
+  vi.fn<(delivery: InboundDeliveryForTest) => void>(),
+);
+
 const createTelegramDraftStreamHoisted = vi.hoisted(() => vi.fn());
 const dispatchReplyWithBufferedBlockDispatcherHoisted = vi.hoisted(() =>
   vi.fn<(params: DispatchReplyWithBufferedBlockDispatcherArgs) => Promise<unknown>>(),
@@ -44,6 +46,7 @@ const createForumTopicTelegramHoisted = vi.hoisted(() => vi.fn());
 const deleteMessageTelegramHoisted = vi.hoisted(() => vi.fn());
 const editForumTopicTelegramHoisted = vi.hoisted(() => vi.fn());
 const editMessageTelegramHoisted = vi.hoisted(() => vi.fn());
+const editMessageReplyMarkupTelegramHoisted = vi.hoisted(() => vi.fn());
 const reactMessageTelegramHoisted = vi.hoisted(() => vi.fn());
 const sendMessageTelegramHoisted = vi.hoisted(() => vi.fn());
 const sendPollTelegramHoisted = vi.hoisted(() => vi.fn());
@@ -63,6 +66,7 @@ const buildModelsProviderDataHoisted = vi.hoisted(() =>
     providers: [],
     resolvedDefault: { provider: "openai", model: "gpt-test" },
     modelNames: new Map<string, string>(),
+    modelCatalog: [],
   })),
 );
 const listSkillCommandsForAgentsHoisted = vi.hoisted(() => vi.fn(() => []));
@@ -108,6 +112,7 @@ const resolveAgentWorkspaceDirHoisted = vi.hoisted(() => vi.fn(() => "/tmp/works
 const resolveDefaultModelForAgentHoisted = vi.hoisted(() =>
   vi.fn(() => ({ provider: "openai", model: "gpt-test" })),
 );
+const resolveHumanDelayConfigHoisted = vi.hoisted(() => vi.fn());
 const getAgentScopedMediaLocalRootsHoisted = vi.hoisted(() =>
   vi.fn((_cfg: unknown, agentId: string) => [`/tmp/.openclaw/workspace-${agentId}`]),
 );
@@ -115,6 +120,7 @@ const resolveChunkModeHoisted = vi.hoisted(() => vi.fn(() => undefined));
 const resolveMarkdownTableModeHoisted = vi.hoisted(() => vi.fn(() => "preserve"));
 const getGlobalHookRunnerHoisted = vi.hoisted(() => vi.fn());
 
+export const observeInboundDelivery = observeInboundDeliveryHoisted;
 export const createTelegramDraftStream = createTelegramDraftStreamHoisted;
 export const dispatchReplyWithBufferedBlockDispatcher =
   dispatchReplyWithBufferedBlockDispatcherHoisted;
@@ -127,6 +133,7 @@ const createForumTopicTelegram = createForumTopicTelegramHoisted;
 const deleteMessageTelegram = deleteMessageTelegramHoisted;
 const editForumTopicTelegram = editForumTopicTelegramHoisted;
 export const editMessageTelegram = editMessageTelegramHoisted;
+export const editMessageReplyMarkupTelegram = editMessageReplyMarkupTelegramHoisted;
 const reactMessageTelegram = reactMessageTelegramHoisted;
 export const sendMessageTelegram = sendMessageTelegramHoisted;
 const sendPollTelegram = sendPollTelegramHoisted;
@@ -151,6 +158,7 @@ const findModelInCatalog = findModelInCatalogHoisted;
 const modelSupportsVision = modelSupportsVisionHoisted;
 const resolveAgentDir = resolveAgentDirHoisted;
 const resolveDefaultModelForAgent = resolveDefaultModelForAgentHoisted;
+export const resolveHumanDelayConfig = resolveHumanDelayConfigHoisted;
 const getAgentScopedMediaLocalRoots = getAgentScopedMediaLocalRootsHoisted;
 const resolveChunkMode = resolveChunkModeHoisted;
 export const resolveMarkdownTableMode = resolveMarkdownTableModeHoisted;
@@ -207,6 +215,7 @@ vi.mock("openclaw/plugin-sdk/channel-inbound", async (importOriginal) => {
       }
       const delivery =
         resolved.delivery as unknown as import("openclaw/plugin-sdk/channel-inbound").ChannelInboundTurnPlan<"provider_message_sending">["delivery"];
+      observeInboundDeliveryHoisted(delivery);
       const testTurn = (params.raw as { turn: TestTurn }).turn;
       const result = await actual.runPreparedInboundReply({
         channel: resolved.channel,
@@ -220,8 +229,8 @@ vi.mock("openclaw/plugin-sdk/channel-inbound", async (importOriginal) => {
         history: resolved.history,
         admission: resolved.admission,
         botLoopProtection: resolved.botLoopProtection,
-        runDispatch: async () =>
-          await dispatchReplyWithBufferedBlockDispatcherHoisted({
+        runDispatch: async () => {
+          const dispatchResult = await dispatchReplyWithBufferedBlockDispatcherHoisted({
             ctx: resolved.ctxPayload,
             cfg: resolved.cfg,
             dispatcherOptions: {
@@ -230,6 +239,7 @@ vi.mock("openclaw/plugin-sdk/channel-inbound", async (importOriginal) => {
                 const providerInfo = {
                   ...info,
                   onPlatformSendDispatch: async () => undefined,
+                  assertPlatformSendAuthorized: () => undefined,
                 };
                 return delivery.deliverWithProviderMessageSending(payload, providerInfo);
               },
@@ -238,7 +248,10 @@ vi.mock("openclaw/plugin-sdk/channel-inbound", async (importOriginal) => {
             toolsAllow: resolved.toolsAllow,
             replyOptions: resolved.replyOptions,
             replyResolver: resolved.replyResolver,
-          }),
+            dispatchReplyFromConfig: resolved.dispatchReplyFromConfig,
+          });
+          return withTelegramTestSettledReceipt(dispatchResult);
+        },
       });
       await params.adapter.onFinalize?.(result);
       return result;
@@ -266,10 +279,12 @@ vi.mock("./bot/delivery.replies.js", () => ({
   emitTelegramMessageSentHooks: emitTelegramMessageSentHooksHoisted,
 }));
 
-vi.mock("./send.js", () => ({
+vi.mock("./send.js", async () => ({
+  buildInlineKeyboard: (await import("./inline-keyboard.js")).buildInlineKeyboard,
   createForumTopicTelegram: createForumTopicTelegramHoisted,
   deleteMessageTelegram: deleteMessageTelegramHoisted,
   editForumTopicTelegram: editForumTopicTelegramHoisted,
+  editMessageReplyMarkupTelegram: editMessageReplyMarkupTelegramHoisted,
   editMessageTelegram: editMessageTelegramHoisted,
   reactMessageTelegram: reactMessageTelegramHoisted,
   sendMessageTelegram: sendMessageTelegramHoisted,
@@ -294,6 +309,7 @@ vi.mock("./bot-message-dispatch.agent.runtime.js", () => ({
   resolveAgentDir: resolveAgentDirHoisted,
   resolveAgentWorkspaceDir: resolveAgentWorkspaceDirHoisted,
   resolveDefaultModelForAgent: resolveDefaultModelForAgentHoisted,
+  resolveHumanDelayConfig: resolveHumanDelayConfigHoisted,
 }));
 
 vi.mock("./sticker-cache.js", () => ({
@@ -306,24 +322,6 @@ vi.mock("./sticker-cache.js", () => ({
 }));
 
 export let dispatchTelegramMessage: typeof import("./bot-message-dispatch.js").dispatchTelegramMessage;
-
-function installTelegramStateRuntimeForTest(): void {
-  setTelegramRuntime({
-    state: {
-      openKeyedStore: ((options) =>
-        createPluginStateKeyedStoreForTests(
-          "telegram",
-          options,
-        )) as TelegramRuntime["state"]["openKeyedStore"],
-      openSyncKeyedStore: ((options) =>
-        createPluginStateSyncKeyedStoreForTests(
-          "telegram",
-          options,
-        )) as TelegramRuntime["state"]["openSyncKeyedStore"],
-    },
-    channel: {},
-  } as TelegramRuntime);
-}
 
 export const telegramDepsForTest: TelegramBotDeps = {
   getRuntimeConfig: loadConfig as TelegramBotDeps["getRuntimeConfig"],
@@ -363,8 +361,9 @@ async function loadTelegramDispatchForTests() {
 
 function resetTelegramDispatchTestState() {
   resetPluginStateStoreForTests({ closeDatabase: false });
-  installTelegramStateRuntimeForTest();
+  setTelegramPluginStateRuntimeForTests();
   resetTelegramReplyFenceForTests();
+  observeInboundDelivery.mockReset();
   createTelegramDraftStream.mockReset();
   dispatchReplyWithBufferedBlockDispatcher.mockReset();
   deliverReplies.mockReset();
@@ -375,6 +374,7 @@ function resetTelegramDispatchTestState() {
   deleteMessageTelegram.mockReset();
   editForumTopicTelegram.mockReset();
   editMessageTelegram.mockReset();
+  editMessageReplyMarkupTelegram.mockReset();
   reactMessageTelegram.mockReset();
   sendMessageTelegram.mockReset();
   sendPollTelegram.mockReset();
@@ -403,6 +403,7 @@ function resetTelegramDispatchTestState() {
   modelSupportsVision.mockReset();
   resolveAgentDir.mockReset();
   resolveDefaultModelForAgent.mockReset();
+  resolveHumanDelayConfig.mockReset();
   loadConfig.mockReturnValue({});
   dispatchReplyWithBufferedBlockDispatcher.mockResolvedValue({
     queuedFinal: false,
@@ -419,6 +420,7 @@ function resetTelegramDispatchTestState() {
   deleteMessageTelegram.mockResolvedValue(true);
   editForumTopicTelegram.mockResolvedValue(true);
   editMessageTelegram.mockResolvedValue({ ok: true });
+  editMessageReplyMarkupTelegram.mockResolvedValue({ ok: true });
   reactMessageTelegram.mockResolvedValue(true);
   sendMessageTelegram.mockResolvedValue({ message_id: 1001 });
   sendPollTelegram.mockResolvedValue({ message_id: 1001 });
@@ -429,12 +431,6 @@ function resetTelegramDispatchTestState() {
     created: true,
   });
   enqueueSystemEvent.mockResolvedValue(undefined);
-  buildModelsProviderData.mockResolvedValue({
-    byProvider: new Map<string, Set<string>>(),
-    providers: [],
-    resolvedDefault: { provider: "openai", model: "gpt-test" },
-    modelNames: new Map<string, string>(),
-  });
   listSkillCommandsForAgents.mockReturnValue([]);
   createChannelMessageReplyPipeline.mockReturnValue({
     responsePrefix: undefined,
@@ -464,6 +460,7 @@ function resetTelegramDispatchTestState() {
     provider: "openai",
     model: "gpt-test",
   });
+  resolveHumanDelayConfig.mockReturnValue(undefined);
   getGlobalHookRunner.mockReturnValue(null);
 }
 
@@ -524,6 +521,7 @@ export function telegramProgressPreview(_plainText: string, html: string) {
   return {
     text: html.replaceAll("\n", "<br>"),
     parseMode: "HTML" as const,
+    complete: true as const,
   };
 }
 
@@ -554,18 +552,6 @@ export function allDeliveredReplyTexts(): string[] {
 
 export function expectDispatchParams(expected: Record<string, unknown>) {
   return expectRecordFields(mockCallArg(dispatchReplyWithBufferedBlockDispatcher), expected);
-}
-
-// The collapse bar edits the live window message in place (finalizeToPreview)
-// instead of deleting it and reposting the bar as a new message.
-export function expectWindowCollapsedTo(
-  stream: { finalizeToPreview: { mock: { calls: unknown[][] } } },
-  barText: string,
-) {
-  const calls = stream.finalizeToPreview.mock.calls;
-  expect(calls.length).toBeGreaterThan(0);
-  const preview = calls.at(-1)?.[0] as { text?: string } | undefined;
-  expect(preview?.text).toBe(barText);
 }
 
 export function createContext(overrides?: Partial<TelegramMessageContext>): TelegramMessageContext {
@@ -677,6 +663,7 @@ export async function dispatchWithContext(params: {
   textLimit?: number;
   turnAdoptionLifecycle?: Parameters<typeof dispatchTelegramMessage>[0]["turnAdoptionLifecycle"];
   runtime?: Parameters<typeof dispatchTelegramMessage>[0]["runtime"];
+  opts?: Parameters<typeof dispatchTelegramMessage>[0]["opts"];
 }) {
   const bot = params.bot ?? createBot();
   return await dispatchTelegramMessage({
@@ -689,7 +676,7 @@ export async function dispatchWithContext(params: {
     textLimit: params.textLimit ?? 4096,
     telegramCfg: params.telegramCfg ?? {},
     telegramDeps: params.telegramDeps ?? telegramDepsForTest,
-    opts: { token: "token" },
+    opts: params.opts ?? { token: "token" },
     retryDispatchErrors: params.retryDispatchErrors,
     suppressFailureFallback: params.suppressFailureFallback,
     turnAdoptionLifecycle: params.turnAdoptionLifecycle,

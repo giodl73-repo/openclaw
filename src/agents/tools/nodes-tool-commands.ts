@@ -15,17 +15,11 @@ import {
   readToolStringParam,
 } from "./common.js";
 import type { GatewayCallOptions } from "./gateway.js";
-import { callGatewayTool } from "./gateway.js";
+import { callNodesToolNodeInvoke, resolveNodesToolInvokeTimeouts } from "./nodes-tool-invoke.js";
 import { POLICY_REDIRECT_INVOKE_COMMANDS } from "./nodes-tool-media.js";
 import { resolveAgentNodeId } from "./nodes-utils.js";
 
 const BLOCKED_INVOKE_COMMANDS = new Set(["system.run", "system.run.prepare"]);
-const DEDICATED_TOOL_INVOKE_COMMANDS = new Map([
-  ["computer.act", "computer"],
-  ["mobile.ui.observe", "mobile_ui"],
-  ["mobile.ui.act", "mobile_ui"],
-]);
-
 const NODE_READ_ACTION_COMMANDS = {
   camera_list: "camera.list",
   notifications_list: "notifications.list",
@@ -156,8 +150,14 @@ export async function executeNodeCommandAction(params: {
           ? params.input.desiredAccuracy
           : undefined;
       const locationTimeoutMs = readPositiveIntegerParam(params.input, "locationTimeoutMs");
-      const payload = await invokeNodeCommandPayload({
+      const timeouts = resolveNodesToolInvokeTimeouts({
+        input: params.input,
         gatewayOpts: params.gatewayOpts,
+        operationTimeoutMs: locationTimeoutMs,
+      });
+      const payload = await invokeNodeCommandPayload({
+        gatewayOpts: timeouts.gatewayOpts,
+        invokeTimeoutMs: timeouts.invokeTimeoutMs,
         node,
         command: "location.get",
         commandParams: {
@@ -187,12 +187,6 @@ export async function executeNodeCommandAction(params: {
       if (BLOCKED_INVOKE_COMMANDS.has(invokeCommandNormalized)) {
         throw new Error(
           `invokeCommand "${invokeCommand}" is reserved for shell execution; use exec with host=node instead`,
-        );
-      }
-      const dedicatedTool = DEDICATED_TOOL_INVOKE_COMMANDS.get(invokeCommandNormalized);
-      if (dedicatedTool) {
-        throw new Error(
-          `invokeCommand "${invokeCommand}" cannot be invoked through the generic nodes surface; use the dedicated ${dedicatedTool} tool`,
         );
       }
       const dedicatedAction = params.mediaInvokeActions[invokeCommandNormalized];
@@ -227,15 +221,22 @@ export async function executeNodeCommandAction(params: {
           });
         }
       }
-      const invokeTimeoutMs = readPositiveIntegerParam(params.input, "invokeTimeoutMs");
-      const raw = await callGatewayTool("node.invoke", params.gatewayOpts, {
-        nodeId,
-        command: invokeCommand,
-        params: invokeParams,
-        timeoutMs: invokeTimeoutMs,
-        idempotencyKey: crypto.randomUUID(),
-        ...(params.agentSessionKey ? { sessionKey: params.agentSessionKey } : {}),
+      const timeouts = resolveNodesToolInvokeTimeouts({
+        input: params.input,
+        gatewayOpts: params.gatewayOpts,
       });
+      const raw = await callNodesToolNodeInvoke(
+        timeouts.gatewayOpts,
+        {
+          nodeId,
+          command: invokeCommand,
+          params: invokeParams,
+          timeoutMs: timeouts.invokeTimeoutMs,
+          idempotencyKey: crypto.randomUUID(),
+          ...(params.agentSessionKey ? { sessionKey: params.agentSessionKey } : {}),
+        },
+        { rawInvoke: true },
+      );
       return jsonResult(raw ?? {});
     }
   }
@@ -247,12 +248,14 @@ async function invokeNodeCommandPayload(params: {
   node: string;
   command: string;
   commandParams?: Record<string, unknown>;
+  invokeTimeoutMs?: number;
 }): Promise<unknown> {
   const nodeId = await resolveAgentNodeId(params.gatewayOpts, params.node);
-  const raw = await callGatewayTool<{ payload: unknown }>("node.invoke", params.gatewayOpts, {
+  const raw = await callNodesToolNodeInvoke<{ payload: unknown }>(params.gatewayOpts, {
     nodeId,
     command: params.command,
     params: params.commandParams ?? {},
+    ...(params.invokeTimeoutMs === undefined ? {} : { timeoutMs: params.invokeTimeoutMs }),
     idempotencyKey: crypto.randomUUID(),
   });
   return raw && typeof raw === "object" && Object.hasOwn(raw, "payload") ? raw.payload : {};

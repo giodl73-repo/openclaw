@@ -13,9 +13,8 @@ import {
 import type { OpenClawConfig } from "../../../../src/config/types.openclaw.js";
 import { READ_SCOPE } from "../../../../src/gateway/method-scopes.js";
 import { clearModelAuthStatusUsageCache } from "../../../../src/gateway/server-methods/models-auth-status-usage-cache.js";
-import { testApi as usageTestApi } from "../../../../src/gateway/server-methods/usage.js";
 import { startGatewayServer } from "../../../../src/gateway/server.js";
-import { loadSessionEntryReadOnly } from "../../../../src/gateway/session-utils.js";
+import { loadGatewaySessionEntryReadOnly } from "../../../../src/gateway/session-utils.js";
 import {
   connectGatewayClient,
   disconnectGatewayClient,
@@ -191,8 +190,6 @@ describe("gateway usage and memory APIs", () => {
         clearRuntimeConfigSnapshot();
         clearConfigCache();
         clearModelAuthStatusUsageCache();
-        usageTestApi.costUsageCache.clear();
-        usageTestApi.sessionsUsageCache.clear();
 
         const { databasePath } = await seedCompletedUsageSession(state);
         const databaseStats = await fs.stat(databasePath);
@@ -204,7 +201,7 @@ describe("gateway usage and memory APIs", () => {
           sessionId: FIXTURE_SESSION_ID,
           storePath: databasePath,
         });
-        const storedSession = loadSessionEntryReadOnly(FIXTURE_SESSION_KEY);
+        const storedSession = loadGatewaySessionEntryReadOnly(FIXTURE_SESSION_KEY);
         expect(storedSession).toMatchObject({
           entry: {
             sessionId: FIXTURE_SESSION_ID,
@@ -336,8 +333,6 @@ describe("gateway usage and memory APIs", () => {
         }
         await server?.close({ reason: "gateway usage and memory QA complete" });
         clearModelAuthStatusUsageCache();
-        usageTestApi.costUsageCache.clear();
-        usageTestApi.sessionsUsageCache.clear();
         await state.cleanup();
       }
     },

@@ -1,12 +1,9 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { inheritSessionCreationPolicy } from "../../../config/sessions/session-entry-provenance.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { isIncognitoSessionKey } from "../../../routing/session-key.js";
 import { resolveUserPath } from "../../../utils.js";
 import { resolveAgentDir } from "../../agent-scope-config.js";
-import { findModelCatalogEntry } from "../../model-catalog-lookup.js";
-import { resolveDefaultModelForAgent } from "../../model-selection.js";
-import { supportsModelTools } from "../../model-tool-support.js";
-import { summarizeSpawnError } from "../../spawn-pipeline.js";
 import { resolveSpawnSandboxError, mintSpawnSessionKey } from "../../spawn-plan.js";
 import { resolveRequesterOriginForChild } from "../../spawn-requester-origin.js";
 import {
@@ -19,14 +16,13 @@ import type {
   SpawnSubagentParams,
   SpawnSubagentResult,
 } from "./subagent-spawn-contract.js";
-import { getSubagentSpawnDeps } from "./subagent-spawn-deps.js";
 import { resolveSubagentModelAndThinkingPlan, splitModelRef } from "./subagent-spawn-plan.js";
 import {
   readRequesterFastMode,
+  readRequesterModel,
   readRequesterThinkingLevel,
 } from "./subagent-spawn-requester-prefs.js";
 import {
-  loadPreparedModelCatalog,
   normalizeDeliveryContext,
   resolveAgentConfig,
   resolveSandboxRuntimeStatus,
@@ -47,40 +43,6 @@ function buildResolvedSubagentModelMetadata(resolvedModel?: string): {
   };
 }
 
-async function resolveCollectorOutputModelError(params: {
-  cfg: OpenClawConfig;
-  targetAgentId: string;
-  targetAgentDir: string;
-  workspaceDir?: string;
-  resolvedModel?: string;
-}): Promise<string | undefined> {
-  const selected = splitModelRef(params.resolvedModel);
-  const fallback = resolveDefaultModelForAgent({
-    cfg: params.cfg,
-    agentId: params.targetAgentId,
-  });
-  const provider = selected.provider ?? fallback.provider;
-  const model = selected.model ?? fallback.model;
-  if (!provider || !model) {
-    return undefined;
-  }
-  let catalog: Awaited<ReturnType<typeof loadPreparedModelCatalog>>;
-  try {
-    catalog = await getSubagentSpawnDeps().loadPreparedModelCatalog({
-      config: params.cfg,
-      agentDir: params.targetAgentDir,
-      workspaceDir: params.workspaceDir,
-    });
-  } catch (error) {
-    return `sessions_spawn could not verify outputSchema model capabilities: ${summarizeSpawnError(error)}`;
-  }
-  const entry = findModelCatalogEntry(catalog, { provider, modelId: model });
-  if (!entry || supportsModelTools(entry)) {
-    return undefined;
-  }
-  return `sessions_spawn outputSchema requires a tool-capable target model; "${provider}/${model}" declares compat.supportsTools=false.`;
-}
-
 type ResolvedSubagentChildPlan = {
   spawnedCwd?: string;
   toolSpawnMetadata: ReturnType<typeof mapToolContextToSpawnedRunMetadata>;
@@ -90,8 +52,12 @@ type ResolvedSubagentChildPlan = {
   incognito: boolean;
   childSessionKey: string;
   childRuntimeSandboxed: boolean;
+  creationPolicy: ReturnType<typeof inheritSessionCreationPolicy>;
   targetAgentDir: string;
-  modelPlan: Extract<ReturnType<typeof resolveSubagentModelAndThinkingPlan>, { status: "ok" }>;
+  modelPlan: Extract<
+    Awaited<ReturnType<typeof resolveSubagentModelAndThinkingPlan>>,
+    { status: "ok" }
+  >;
   launchAuthorization?: SubagentLaunchAuthorization;
   resolvedModelMetadata: ReturnType<typeof buildResolvedSubagentModelMetadata>;
 };
@@ -109,6 +75,9 @@ export async function resolveSubagentChildPlan(params: {
   targetAgentId: string;
   sandboxMode: "require" | "inherit";
   swarmEnabled: boolean;
+  /** Active requester sandbox classification from the spawn tool, preferred over key-derived
+   * status so durable-lineage key substitution does not weaken sandbox admission. */
+  requesterSandboxed?: boolean;
 }): Promise<ResolveSubagentChildPlanResult> {
   const requestedCwd = normalizeOptionalString(params.request.cwd);
   const spawnedCwd = requestedCwd ? resolveUserPath(requestedCwd) : undefined;
@@ -155,15 +124,26 @@ export async function resolveSubagentChildPlan(params: {
   const requesterRuntime = resolveSandboxRuntimeStatus({
     cfg: params.cfg,
     sessionKey: params.requesterInternalKey,
+    agentId: params.requesterAgentId,
   });
-  const childRuntime = resolveSandboxRuntimeStatus({
-    cfg: params.cfg,
-    sessionKey: childSessionKey,
-  });
+  const creationPolicy = inheritSessionCreationPolicy(
+    {
+      sandbox: requesterRuntime.sandboxRequired ? "required" : undefined,
+      createdActor: requesterRuntime.createdActor,
+    },
+    { type: "agent", id: params.requesterAgentId },
+  );
+  // A fresh child has no stored row yet; admission must include its inherited isolation.
+  const childRuntimeSandboxed =
+    creationPolicy.sandbox === "required" ||
+    resolveSandboxRuntimeStatus({ cfg: params.cfg, sessionKey: childSessionKey }).sandboxed;
   const sandboxError = resolveSpawnSandboxError({
     backend: "subagent",
-    requesterSandboxed: requesterRuntime.sandboxed,
-    childSandboxed: childRuntime.sandboxed,
+    // Prefer the explicit active classification from the spawn tool; fall back to key-derived
+    // status. Mirrors the visible/ACP paths so durable parent-lineage keys do not reclassify
+    // an actively sandboxed requester as unsandboxed.
+    requesterSandboxed: params.requesterSandboxed === true || requesterRuntime.sandboxed,
+    childSandboxed: childRuntimeSandboxed,
     sandbox: params.sandboxMode,
   });
   if (sandboxError) {
@@ -172,7 +152,7 @@ export async function resolveSubagentChildPlan(params: {
   const spawnedWorkspaceCwd = spawnedWorkspaceDir
     ? resolveUserPath(spawnedWorkspaceDir)
     : undefined;
-  if (childRuntime.sandboxed && spawnedCwd && spawnedCwd !== spawnedWorkspaceCwd) {
+  if (childRuntimeSandboxed && spawnedCwd && spawnedCwd !== spawnedWorkspaceCwd) {
     return {
       ok: false,
       result: {
@@ -185,11 +165,15 @@ export async function resolveSubagentChildPlan(params: {
   const targetAgentDir = resolveAgentDir(params.cfg, params.targetAgentId);
   const requesterAgentConfig = resolveAgentConfig(params.cfg, params.requesterAgentId);
   const targetAgentConfig = resolveAgentConfig(params.cfg, params.targetAgentId);
-  const callerThinkingRaw = readRequesterThinkingLevel({
-    cfg: params.cfg,
-    requesterInternalKey: params.requesterInternalKey,
-    requesterAgentId: params.requesterAgentId,
-  });
+  // The active turn owns inherited effort; saved preferences may already describe
+  // a later turn and cannot represent one-shot overrides.
+  const callerThinkingRaw =
+    params.ctx.requesterThinkingLevel ??
+    readRequesterThinkingLevel({
+      cfg: params.cfg,
+      requesterInternalKey: params.requesterInternalKey,
+      requesterAgentId: params.requesterAgentId,
+    });
   const inheritedFastMode =
     params.swarmEnabled && params.request.fastMode === undefined
       ? readRequesterFastMode({
@@ -198,7 +182,7 @@ export async function resolveSubagentChildPlan(params: {
           requesterAgentId: params.requesterAgentId,
         })
       : params.request.fastMode;
-  const modelPlan = resolveSubagentModelAndThinkingPlan({
+  const modelPlan = await resolveSubagentModelAndThinkingPlan({
     cfg: params.cfg,
     targetAgentId: params.targetAgentId,
     requesterAgentConfig,
@@ -206,7 +190,18 @@ export async function resolveSubagentChildPlan(params: {
     modelOverride: params.request.model,
     thinkingOverrideRaw: params.request.thinking,
     callerThinkingRaw,
+    inheritedModel:
+      params.targetAgentId === params.requesterAgentId
+        ? (params.ctx.requesterModel ??
+          readRequesterModel({
+            cfg: params.cfg,
+            requesterInternalKey: params.requesterInternalKey,
+            requesterAgentId: params.requesterAgentId,
+          }))
+        : undefined,
     fastMode: inheritedFastMode,
+    workspaceDir: spawnedWorkspaceDir,
+    requiresTools: params.request.outputSchema !== undefined,
   });
   if (modelPlan.status === "error") {
     return {
@@ -214,6 +209,7 @@ export async function resolveSubagentChildPlan(params: {
       result: {
         status: "error",
         error: modelPlan.error,
+        ...(params.request.outputSchema ? { childSessionKey } : {}),
       },
     };
   }
@@ -228,21 +224,6 @@ export async function resolveSubagentChildPlan(params: {
           },
         }
       : undefined;
-  if (params.request.outputSchema) {
-    const outputModelError = await resolveCollectorOutputModelError({
-      cfg: params.cfg,
-      targetAgentId: params.targetAgentId,
-      targetAgentDir,
-      workspaceDir: spawnedWorkspaceDir,
-      resolvedModel,
-    });
-    if (outputModelError) {
-      return {
-        ok: false,
-        result: { status: "error", error: outputModelError, childSessionKey },
-      };
-    }
-  }
   return {
     ok: true,
     resolved: {
@@ -253,7 +234,8 @@ export async function resolveSubagentChildPlan(params: {
       childSessionOrigin,
       incognito,
       childSessionKey,
-      childRuntimeSandboxed: childRuntime.sandboxed,
+      childRuntimeSandboxed,
+      creationPolicy,
       targetAgentDir,
       modelPlan,
       launchAuthorization,

@@ -194,10 +194,9 @@ export function startMatrixQaOpenClawCli(params: {
         result,
         outcome.settlementFailure
           ? primaryError
-            ? new AggregateError(
-                [primaryError, outcome.settlementFailure],
-                "Matrix QA CLI command and settlement failed",
-              )
+            ? new AggregateError([primaryError, outcome.settlementFailure], primaryError.message, {
+                cause: primaryError,
+              })
             : outcome.settlementFailure
           : primaryError,
       );
@@ -235,6 +234,7 @@ export function startMatrixQaOpenClawCli(params: {
       }).catch((error: unknown) => {
         throw new Error(
           `Matrix QA CLI command failed (${formatMatrixQaCliCommand(params.args)}): ${redactMatrixQaCliOutput(formatErrorMessage(error))}`,
+          { cause: error },
         );
       }),
     waitForOutput: async (predicate, label, timeoutMs) => {
@@ -281,7 +281,7 @@ export async function runMatrixQaOpenClawCli(params: {
   return await startMatrixQaOpenClawCli(params).wait();
 }
 
-async function assertMatrixQaPrivatePathMode(pathToCheck: string, label: string) {
+export async function assertMatrixQaPrivatePathMode(pathToCheck: string, label: string) {
   if (process.platform === "win32") {
     return;
   }

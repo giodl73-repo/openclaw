@@ -12,9 +12,40 @@ import { createTestRegistry } from "../test-utils/channel-plugins.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
 import { resolveConversationCapabilityProfile } from "./conversation-capability-profile.js";
 import { projectConversationToolNames } from "./conversation-tool-policy-pipeline.js";
-import { isToolAllowedByPolicyName } from "./tool-policy-match.js";
 
 describe("resolveConversationCapabilityProfile", () => {
+  it("intersects base and provider profile contributions from plugin manifests", () => {
+    const profile = resolveConversationCapabilityProfile({
+      config: {
+        tools: {
+          profile: "coding",
+          byProvider: { openai: { profile: "messaging" } },
+        },
+      },
+      modelProvider: "openai",
+      pluginMetadataSnapshot: {
+        plugins: [
+          {
+            contracts: { tools: ["coding_only", "messaging_only", "shared"] },
+            toolMetadata: {
+              coding_only: { profiles: ["coding"] },
+              messaging_only: { profiles: ["messaging"] },
+              shared: { profiles: ["coding", "messaging"] },
+            },
+          },
+        ],
+      } as never,
+    });
+
+    expect(
+      projectConversationToolNames({
+        capabilityProfile: profile,
+        toolNames: ["coding_only", "messaging_only", "shared"],
+        warn: () => undefined,
+      }),
+    ).toEqual(["shared"]);
+  });
+
   it("intersects a prepared direct policy with existing tool policy", () => {
     const profile = resolveConversationCapabilityProfile({
       config: { tools: { deny: ["write"] } },
@@ -461,12 +492,7 @@ describe("resolveConversationCapabilityProfile scheduled account authority", () 
     expect(scheduledProfile({ work: {} }).policy.groupPolicy).toEqual({ allow: ["read"] });
   });
 
-  it("denies every tool for a scheduled run after its owner account is removed", () => {
-    const groupPolicy = scheduledProfile({}).policy.groupPolicy;
-
-    expect(groupPolicy).toEqual({ allow: [], deny: ["*"] });
-    for (const toolName of ["read", "write", "exec", "apply_patch"]) {
-      expect(isToolAllowedByPolicyName(toolName, groupPolicy)).toBe(false);
-    }
+  it("rejects a scheduled run after its owner account is removed", () => {
+    expect(() => scheduledProfile({})).toThrow('Scheduled account "work" is unavailable');
   });
 });

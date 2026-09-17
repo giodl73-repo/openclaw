@@ -11,29 +11,19 @@ vi.mock("openclaw/plugin-sdk/text-utility-runtime", () => ({
   fetchWithTimeout: fetchWithTimeoutMock,
 }));
 
-vi.mock("openclaw/plugin-sdk/string-coerce-runtime", () => {
+vi.mock("openclaw/plugin-sdk/string-coerce-runtime", async (importOriginal) => {
+  const { normalizeOptionalString } =
+    await importOriginal<typeof import("openclaw/plugin-sdk/string-coerce-runtime")>();
   const isMockRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null;
-  const normalizeMockOptionalString = (value: unknown) => {
-    if (typeof value !== "string") {
-      return undefined;
-    }
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
-  };
   return {
     isRecord: isMockRecord,
-    normalizeOptionalString: normalizeMockOptionalString,
+    normalizeOptionalString,
   };
 });
 
 function mockGetChatMemberStatus(status: string) {
-  fetchWithTimeoutMock.mockResolvedValueOnce(
-    new Response(JSON.stringify({ ok: true, result: { status } }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
+  fetchWithTimeoutMock.mockResolvedValueOnce(Response.json({ ok: true, result: { status } }));
 }
 
 async function auditSingleGroup() {

@@ -6,14 +6,14 @@ import type { SessionPluginJsonValue } from "../../config/sessions/types.js";
 import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import type { LogLevel } from "../../logging/levels.js";
 import type { MediaUnderstandingRuntime } from "../../media-understanding/runtime-types.js";
-import type {
-  ListSpeechVoices,
-  PrepareTtsRequest,
-  TextToSpeech,
-  TextToSpeechStream,
-  TextToSpeechTelephony,
-} from "../../plugin-sdk/tts-runtime.types.js";
-import type { PluginRuntimeTaskFlows, PluginRuntimeTaskRuns } from "./runtime-tasks.types.js";
+import type { PluginRuntimeTasks } from "./runtime-tasks.types.js";
+
+type TtsRuntimeApi = typeof import("../../tts/runtime-api.js");
+type ListSpeechVoices = TtsRuntimeApi["listSpeechVoices"];
+type PrepareTtsRequest = TtsRuntimeApi["prepareTtsRequest"];
+type TextToSpeech = typeof import("../../tts/tts.js").textToSpeech;
+type TextToSpeechStream = TtsRuntimeApi["textToSpeechStream"];
+type TextToSpeechTelephony = TtsRuntimeApi["textToSpeechTelephony"];
 
 type RuntimeRequestHeartbeatOptions = Parameters<
   typeof import("../../infra/heartbeat-wake.js").requestHeartbeat
@@ -86,6 +86,10 @@ type RuntimeCreateSessionEntryResult = {
   sessionId: string;
   entry: RuntimeSessionEntry;
 };
+type RuntimeCreateSessionEntryContext = RuntimeCreateSessionEntryResult & {
+  /** Host creation authority; runtimes that cannot supply it must leave it absent. */
+  initialization?: import("../../sessions/session-initialization.js").SessionInitialization;
+};
 type RuntimeCreateSessionEntryFinalPatch = {
   pluginExtensions: RuntimeSessionPluginExtensions;
 };
@@ -94,7 +98,11 @@ type RuntimeCreateSessionEntryBaseParams = {
   key: string;
   agentId?: string;
   label?: string;
+  /** Create-only title snapshot: trimmed, capped at 500 UTF-16 units without splitting pairs; not a unique label. */
+  displayName?: string;
   spawnedCwd?: string;
+  sessionRoot?: string;
+  permissionMode?: RuntimeSessionEntry["permissionMode"];
   /** Bind the created session's CLI execution to this paired node. */
   execNode?: string;
   /** Working directory interpreted only by execNode. */
@@ -102,11 +110,13 @@ type RuntimeCreateSessionEntryBaseParams = {
   initialEntry:
     | {
         agentHarnessId: string;
+        color?: string;
         modelSelectionLocked?: true;
         pluginExtensions?: RuntimeSessionPluginExtensions;
       }
     | {
         cliBackendId: string;
+        color?: string;
         model: string;
         cliSessionBinding: import("../../config/sessions/types.js").CliSessionBinding;
         modelSelectionLocked: true;
@@ -116,6 +126,7 @@ type RuntimeCreateSessionEntryBaseParams = {
       }
     | {
         acpBackendId: string;
+        color?: string;
         acpSessionBinding: {
           acpAgentId: string;
           agentSessionId: string;
@@ -132,17 +143,19 @@ type RuntimeCreateSessionEntryParams = RuntimeCreateSessionEntryBaseParams &
         /** Retry an interrupted initializer only when persisted trusted state matches exactly. */
         recoverMatchingInitialEntry: true;
         afterCreate: (
-          created: RuntimeCreateSessionEntryResult,
+          created: RuntimeCreateSessionEntryContext,
         ) => Promise<RuntimeCreateSessionEntryFinalPatch>;
       }
     | {
         recoverMatchingInitialEntry?: never;
         afterCreate?: (
-          created: RuntimeCreateSessionEntryResult,
+          created: RuntimeCreateSessionEntryContext,
         ) => Promise<RuntimeCreateSessionEntryFinalPatch | void>;
       }
   );
 type RuntimeSessionStoreEntryPatchParams = RuntimeSessionStoreReadParams & {
+  /** Synchronous final ownership check executed inside the commit transaction. */
+  assertCommitAllowed?: () => void;
   fallbackEntry?: RuntimeSessionEntry;
   maintenanceConfig?: import("../../config/sessions/store-maintenance.js").ResolvedSessionMaintenanceConfigInput;
   preserveActivity?: boolean;
@@ -243,6 +256,10 @@ type LlmCompleteCommonParams = {
 
 type LlmDirectCompleteParams = LlmCompleteCommonParams & {
   messages: LlmCompleteMessage[];
+  /** Provider-native constrained-output request. Unsupported transports may ignore it. */
+  responseFormat?: Record<string, unknown>;
+  /** Fail before dispatch unless the exact selected credential has this host-resolved mode. */
+  requiredAuthMode?: "oauth";
   execution?: undefined;
 };
 
@@ -284,6 +301,10 @@ export type LlmCompleteResult = {
   text: string;
   provider: string;
   model: string;
+  /** Concrete model identity returned by the provider, when available. */
+  responseModel?: string;
+  /** Provider terminal reason for direct completions, when available. */
+  stopReason?: "stop" | "length" | "toolUse" | "error" | "aborted";
   agentId: string;
   usage: LlmCompleteUsage;
   execution: LlmCompleteExecution;
@@ -296,7 +317,7 @@ export type LlmCompleteResult = {
 
 type RuntimeRunEmbeddedAgentParams = Omit<
   import("../../agents/embedded-agent-runner/run/params.js").RunEmbeddedAgentParams,
-  "admittedRunContext" | "preparedRunAdmission" | "skillWorkshopCollectionReconcile"
+  "admittedRunContext" | "preparedRunAdmission"
 >;
 
 type RuntimeRunEmbeddedAgent = (
@@ -346,9 +367,12 @@ export type PluginRuntimeCore = {
     resolveThinkingPolicy: (
       params: PluginRuntimeThinkingPolicyRequest,
     ) => PluginRuntimeThinkingPolicy;
+    /** Admit a turn for this exact trusted channel plugin and its authenticated sender. */
+    runCommandFromIngress: (
+      opts: import("../../agents/command/types.js").AgentCommandIngressOpts,
+      runtime: import("../../runtime.js").RuntimeEnv,
+    ) => ReturnType<typeof import("../../agents/agent-command.js").agentCommandFromIngress>;
     runEmbeddedAgent: RuntimeRunEmbeddedAgent;
-    /** @deprecated Use runEmbeddedAgent. */
-    runEmbeddedPiAgent: RuntimeRunEmbeddedAgent;
     resolveAgentTimeoutMs: typeof import("../../agents/timeout.js").resolveAgentTimeoutMs;
     /**
      * Shares the embedded runner's CLI-backend dispatch eligibility (route,
@@ -378,6 +402,21 @@ export type PluginRuntimeCore = {
         params: RuntimeSessionStoreEntryUpdateParams,
       ) => Promise<RuntimeSessionEntry | null>;
     };
+  };
+  hooks: {
+    /** Dispatch untrusted external content through an isolated, contained hook agent turn. */
+    dispatchHookAgentTurn: (params: {
+      name: string;
+      agentId: string;
+      sessionKey: string;
+      message: string;
+      externalContentSource: "email";
+      deliver: boolean;
+      model?: string;
+      thinking?: import("../../auto-reply/thinking.js").ThinkLevel;
+      timeoutSeconds?: number;
+      idempotencyKey?: string;
+    }) => Promise<{ ok: true; runId: string } | { ok: false; reason: string }>;
   };
   system: {
     enqueueSystemEvent: typeof import("../../infra/system-events.js").enqueueSystemEvent;
@@ -412,6 +451,7 @@ export type PluginRuntimeCore = {
     listVoices: ListSpeechVoices;
   };
   mediaUnderstanding: {
+    resolveAudioInputBudget: MediaUnderstandingRuntime["resolveAudioInputBudget"];
     runFile: MediaUnderstandingRuntime["runMediaUnderstandingFile"];
     describeImageFile: MediaUnderstandingRuntime["describeImageFile"];
     describeImageFileWithModel: MediaUnderstandingRuntime["describeImageFileWithModel"];
@@ -470,6 +510,10 @@ export type PluginRuntimeCore = {
     openKeyedStore: <T>(
       options: import("../../plugin-state/plugin-state-store.types.js").OpenKeyedStoreOptions,
     ) => import("../../plugin-state/plugin-state-store.types.js").PluginStateKeyedStore<T>;
+    /**
+     * @deprecated Use openKeyedStore and await its operations. The synchronous
+     * compatibility adapter remains through the next Plugin SDK major.
+     */
     openSyncKeyedStore: <T>(
       options: import("../../plugin-state/plugin-state-store.types.js").OpenKeyedStoreOptions,
     ) => import("../../plugin-state/plugin-state-store.types.js").PluginStateSyncKeyedStore<T>;
@@ -495,11 +539,7 @@ export type PluginRuntimeCore = {
       },
     ) => import("../../channels/message/ingress-drain.js").ChannelIngressDrain;
   };
-  tasks: {
-    runs: PluginRuntimeTaskRuns;
-    flows: PluginRuntimeTaskFlows;
-    managedFlows: import("./runtime-taskflow.types.js").PluginRuntimeTaskFlow;
-  };
+  tasks: PluginRuntimeTasks;
   llm: {
     complete: (params: LlmCompleteParams) => Promise<LlmCompleteResult>;
     acquireLocalService: (
@@ -507,11 +547,25 @@ export type PluginRuntimeCore = {
         providerId: string;
         baseUrl: string;
         headers?: HeadersInit;
+        reconcile?: import("../provider-plugin.types.js").ProviderPlugin["reconcileLocalService"];
       },
       signal?: AbortSignal | null,
     ) => Promise<{ release: () => void } | undefined>;
   };
+  modelConfig: {
+    /** Read-only model selection; no session mutation or harness execution authority. */
+    resolveDefaultModelForAgent: typeof import("../../agents/model-selection-config.js").resolveDefaultModelForAgent;
+    resolveAllowedModelRef: typeof import("../../agents/model-selection-resolve.js").resolveAllowedModelRefCore;
+    /** Read authored model/provider runtime policy without projecting runtime availability. */
+    resolveModelRuntimePolicy: typeof import("../../agents/model-runtime-policy.js").resolveModelRuntimePolicy;
+  };
   modelAuth: {
+    /** Existing synchronous SDK operations, composed by the native host. */
+    resolveProviderIdForAuth: typeof import("../../agents/provider-auth-aliases.js").resolveProviderIdForAuth;
+    ensureAuthProfileStore: typeof import("../../agents/auth-profiles/store-runtime.js").ensureAuthProfileStore;
+    resolveAuthProfileOrder: typeof import("../../agents/auth-profiles/order.js").resolveAuthProfileOrder;
+    listProfilesForProvider: typeof import("../../agents/auth-profiles/profile-list.js").listProfilesForProvider;
+    isProviderApiKeyConfigured: typeof import("../provider-auth-availability.js").isProviderApiKeyConfigured;
     /** Resolve auth for a model. Only provider/model, optional cfg, and workspaceDir are used. */
     getApiKeyForModel: (params: {
       model: import("openclaw/plugin-sdk/llm").Model<import("openclaw/plugin-sdk/llm").Api>;

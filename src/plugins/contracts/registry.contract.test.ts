@@ -1,6 +1,6 @@
 // Registry contract tests cover plugin contract registry contents and lookup behavior.
+import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { describe, expect, it } from "vitest";
-import { uniqueSortedStrings } from "../../plugin-sdk/test-helpers/string-utils.js";
 import { loadPluginManifestRegistryCore, type PluginManifestRecord } from "../manifest-registry.js";
 import { resolveManifestContractPluginIds } from "../plugin-registry.js";
 import { BUNDLED_PLUGIN_CONTRACT_SNAPSHOTS } from "./inventory/bundled-capability-metadata.js";
@@ -20,7 +20,7 @@ describe("plugin contract registry", () => {
     actualPluginIds: readonly string[];
     predicate: (plugin: PluginManifestRecord) => boolean;
   }) {
-    expect(uniqueSortedStrings(params.actualPluginIds)).toEqual(
+    expect(sortUniqueStrings(params.actualPluginIds)).toEqual(
       resolveBundledManifestPluginIds(params.predicate),
     );
   }
@@ -129,6 +129,19 @@ describe("plugin contract registry", () => {
     expectUniqueIds(pluginRegistrationContractRegistry.flatMap((entry) => entry.speechProviderIds));
   });
 
+  it.each([
+    ["azure-speech", "speechProviderIds", ["azure-speech", "azure"]],
+    ["microsoft", "speechProviderIds", ["microsoft", "edge"]],
+    ["tts-local-cli", "speechProviderIds", ["tts-local-cli", "cli"]],
+    ["volcengine", "speechProviderIds", ["volcengine", "bytedance", "doubao"]],
+    ["xiaomi", "speechProviderIds", ["xiaomi", "mimo"]],
+    ["xai", "realtimeVoiceProviderIds", ["xai", "grok-voice", "xai-realtime-voice"]],
+  ] as const)("declares canonical-first %s %s aliases", (pluginId, contract, providerIds) => {
+    expect(
+      pluginRegistrationContractRegistry.find((entry) => entry.pluginId === pluginId)?.[contract],
+    ).toEqual(providerIds);
+  });
+
   it("covers every bundled worker provider plugin discovered from manifests", () => {
     expectRegistryPluginIds({
       actualPluginIds: pluginRegistrationContractRegistry
@@ -180,6 +193,8 @@ describe("plugin contract registry", () => {
         provider: "github-copilot",
         method: "device",
         appGuidedAuth: "device-code",
+        credentialOnly: true,
+        channelLogin: {},
         appGuidedSecret: true,
         choiceId: "github-copilot",
         choiceLabel: "GitHub Copilot",
@@ -197,6 +212,7 @@ describe("plugin contract registry", () => {
         provider: "github-copilot",
         method: "device-enterprise",
         appGuidedAuth: "device-code",
+        credentialOnly: true,
         choiceId: "github-copilot-enterprise",
         choiceLabel: "GitHub Copilot (Enterprise / data residency)",
         choiceHint: "Device login against your GitHub Enterprise (*.ghe.com) tenant",
@@ -257,7 +273,7 @@ describe("plugin contract registry", () => {
     });
 
     expect(
-      uniqueSortedStrings(
+      sortUniqueStrings(
         pluginRegistrationContractRegistry
           .filter((entry) => entry.webFetchProviderIds.length > 0)
           .map((entry) => entry.pluginId),
@@ -277,11 +293,11 @@ describe("plugin contract registry", () => {
         snapshotPluginIds.has(pluginId) &&
         !ACTIVATION_SCOPED_WEB_SEARCH_PLUGIN_ID_SET.has(pluginId),
     );
-    const expectedPluginIds = uniqueSortedStrings([
+    const expectedPluginIds = sortUniqueStrings([
       ...bundledWebSearchPluginIds,
       ...ACTIVATION_SCOPED_WEB_SEARCH_PLUGIN_IDS,
     ]);
-    const actualPluginIds = uniqueSortedStrings(
+    const actualPluginIds = sortUniqueStrings(
       pluginRegistrationContractRegistry
         .filter((entry) => entry.webSearchProviderIds.length > 0)
         .map((entry) => entry.pluginId),

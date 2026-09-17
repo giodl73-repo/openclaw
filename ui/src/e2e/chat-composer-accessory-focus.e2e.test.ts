@@ -1,6 +1,6 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, it } from "vitest";
+import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
 import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 
@@ -9,7 +9,7 @@ const suite = createControlUiE2eSuite({
 });
 
 suite.define(() => {
-  it("keeps focus in place when pointer-opening passive composer popovers", async () => {
+  it("routes focus by composer accessory purpose", async () => {
     await suite.withPage({ viewport: { width: 1440, height: 900 } }, async ({ page }) => {
       const gateway = await installMockGateway(page, {
         models: [{ id: "gpt-5.6", name: "GPT-5.6", provider: "openai" }],
@@ -70,9 +70,11 @@ suite.define(() => {
         await outside.focus();
         await trigger.click();
         expect(await outside.evaluate((element) => document.activeElement === element)).toBe(true);
-        const artifactDir = process.env.OPENCLAW_UI_E2E_ARTIFACT_DIR?.trim();
+        const artifactRoot = process.env.OPENCLAW_UI_E2E_ARTIFACT_DIR?.trim();
+        const artifactDir = artifactRoot
+          ? createControlUiE2eArtifactDir("chat-composer-accessory-focus", artifactRoot)
+          : undefined;
         if (artifactDir && triggerSelector.startsWith(".context-usage")) {
-          await fs.mkdir(artifactDir, { recursive: true });
           const composerBox = await composer.boundingBox();
           const popoverBox = await composer.locator(".context-usage__popover").boundingBox();
           if (!composerBox || !popoverBox) {
@@ -114,28 +116,32 @@ suite.define(() => {
         await trigger.press("Enter");
       }
 
-      for (const popover of [
-        {
-          focus: ".chat-controls__model-search",
-          trigger: ".chat-controls__model-picker > summary",
-        },
-        {
-          focus: ".agent-chat__attach-menu-option",
-          trigger: ".agent-chat__input-btn--attach",
-        },
-      ]) {
-        await outside.focus();
-        await composer.locator(popover.trigger).click();
-        await expect
-          .poll(() =>
-            page
-              .locator(popover.focus)
-              .first()
-              .evaluate((element) => document.activeElement === element),
-          )
-          .toBe(true);
-        await page.keyboard.press("Escape");
-      }
+      const modelTrigger = composer.locator(".chat-controls__model-picker > summary");
+      await outside.focus();
+      await modelTrigger.click();
+      expect(await modelTrigger.evaluate((element) => document.activeElement === element)).toBe(
+        true,
+      );
+      expect(
+        await page
+          .locator(".chat-controls__model-search")
+          .evaluate((element) => document.activeElement === element),
+      ).toBe(false);
+      await page.keyboard.press("Escape");
+
+      await outside.focus();
+      const attachTrigger = composer.locator(".agent-chat__input-btn--attach");
+      await attachTrigger.click();
+      await expect
+        .poll(() => attachTrigger.evaluate((element) => document.activeElement === element))
+        .toBe(true);
+      expect(
+        await page
+          .locator(".agent-chat__attach-menu-option")
+          .first()
+          .evaluate((element) => document.activeElement === element),
+      ).toBe(false);
+      await page.keyboard.press("Escape");
     });
   });
 });

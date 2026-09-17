@@ -294,6 +294,7 @@ function nextVisibilityOperation() {
 }
 let sendError = "";
 let gatewayState = "down";
+let gatewayGeneration = null;
 let gatewayNotice = "";
 let canvasSurfaceUrl = null;
 let canvasSurfaceObservedUrl = null;
@@ -343,25 +344,34 @@ function renderStatus() {
 }
 
 function setGatewayState(payload) {
+  if (!Number.isSafeInteger(payload?.gatewayGeneration) ||
+      (gatewayGeneration !== null && payload.gatewayGeneration < gatewayGeneration)) {
+    return;
+  }
+  const ownerChanged = gatewayGeneration !== payload.gatewayGeneration;
+  gatewayGeneration = payload.gatewayGeneration;
   const wasUp = gatewayState === "up";
   gatewayState = payload?.state || "down";
   gatewayNotice = typeof payload?.notice === "string" ? payload.notice : "";
+  if (typeof payload?.accent === "string") {
+    document.documentElement.style.setProperty("--accent", payload.accent);
+  } else {
+    document.documentElement.style.removeProperty("--accent");
+  }
   const nextCanvasSurfaceUrl =
     gatewayState === "up" && typeof payload?.canvasSurfaceUrl === "string"
       ? payload.canvasSurfaceUrl
       : null;
-  if (nextCanvasSurfaceUrl !== canvasSurfaceObservedUrl) {
+  if (ownerChanged || nextCanvasSurfaceUrl !== canvasSurfaceObservedUrl) {
     canvasSurfaceObservedUrl = nextCanvasSurfaceUrl;
     canvasSurfaceUrl = nextCanvasSurfaceUrl;
     canvasSurfaceRefreshedAt = nextCanvasSurfaceUrl ? Date.now() : 0;
     canvasSurfaceRetryAt = 0;
     window.clearTimeout(canvasSurfaceRetryTimer);
     canvasSurfaceRetryTimer = null;
-    if (!nextCanvasSurfaceUrl) {
-      canvasSurfaceRefreshPromise = null;
-    }
+    canvasSurfaceRefreshPromise = null;
   }
-  if (gatewayState !== "up") {
+  if (ownerChanged || gatewayState !== "up") {
     gatewayDisconnectSequence += 1;
     terminalizeDisconnectedReply();
   }
@@ -370,7 +380,7 @@ function setGatewayState(payload) {
   if (activeReply?.widgets.length) {
     renderReplyWidgets();
   }
-  if (gatewayState === "up" && !wasUp) {
+  if (gatewayState === "up" && (!wasUp || ownerChanged)) {
     void refreshAgents();
   }
 }
@@ -484,15 +494,23 @@ function refreshCanvasSurface() {
     return canvasSurfaceRefreshPromise;
   }
   const requestedObservedUrl = canvasSurfaceObservedUrl;
+  const requestedGeneration = gatewayGeneration;
   if (!requestedObservedUrl || Date.now() < canvasSurfaceRetryAt) {
     return Promise.resolve(canvasSurfaceUrl);
   }
-  canvasSurfaceRefreshPromise = invoke("quickchat_refresh_widget_surface")
+  const pending = invoke("quickchat_refresh_widget_surface", {
+    gatewayGeneration: requestedGeneration,
+    observedUrl: requestedObservedUrl,
+  })
     .then((refreshed) => {
-      if (canvasSurfaceObservedUrl !== requestedObservedUrl) {
+      if (gatewayGeneration !== requestedGeneration ||
+          canvasSurfaceObservedUrl !== requestedObservedUrl ||
+          canvasSurfaceRefreshPromise !== pending) {
         return canvasSurfaceUrl;
       }
-      const next = typeof refreshed === "string" && refreshed.trim() ? refreshed : null;
+      const next = refreshed?.gatewayGeneration === requestedGeneration &&
+        typeof refreshed.canvasSurfaceUrl === "string" && refreshed.canvasSurfaceUrl.trim()
+        ? refreshed.canvasSurfaceUrl : null;
       if (next) {
         canvasSurfaceObservedUrl = next;
         canvasSurfaceUrl = next;
@@ -505,13 +523,18 @@ function refreshCanvasSurface() {
       return canvasSurfaceUrl;
     })
     .catch(() => {
-      if (canvasSurfaceObservedUrl === requestedObservedUrl) {
+      if (gatewayGeneration === requestedGeneration &&
+          canvasSurfaceObservedUrl === requestedObservedUrl &&
+          canvasSurfaceRefreshPromise === pending) {
         canvasSurfaceUrl = null;
         canvasSurfaceRetryAt = Date.now() + CANVAS_SURFACE_REFRESH_RETRY_MS;
       }
       return canvasSurfaceUrl;
     })
     .finally(() => {
+      if (gatewayGeneration !== requestedGeneration || canvasSurfaceRefreshPromise !== pending) {
+        return;
+      }
       canvasSurfaceRefreshPromise = null;
       if (activeReply?.widgets.length) {
         renderReplyWidgets();
@@ -524,17 +547,63 @@ function refreshCanvasSurface() {
         scheduleCanvasSurfaceRetry();
       }
     });
+  canvasSurfaceRefreshPromise = pending;
   return canvasSurfaceRefreshPromise;
 }
 
 let widgetSyncScheduled = false;
-let widgetSyncPromise = Promise.resolve();
+let widgetSyncPromise = null;
+let pendingWidgetSync = null;
+let widgetSyncSequence = 0;
+
+function widgetSyncIsCurrent(snapshot) {
+  return !hiding &&
+    snapshot.generation === visibilitySequence &&
+    snapshot.sessionId === rendererSessionId &&
+    snapshot.rendererEpoch === rendererEpoch &&
+    snapshot.gatewayGeneration !== null &&
+    snapshot.gatewayGeneration === gatewayGeneration &&
+    snapshot.surfaceUrl === canvasSurfaceUrl;
+}
+
+function drainWidgetSync() {
+  if (widgetSyncPromise || !pendingWidgetSync) {
+    return;
+  }
+  const pending = (async () => {
+    while (pendingWidgetSync) {
+      const snapshot = pendingWidgetSync;
+      const sequence = widgetSyncSequence;
+      pendingWidgetSync = null;
+      if (!widgetSyncIsCurrent(snapshot)) {
+        continue;
+      }
+      try {
+        await invoke("quickchat_sync_widgets", snapshot);
+      } catch (error) {
+        if (sequence === widgetSyncSequence && widgetSyncIsCurrent(snapshot)) {
+          sendError = friendlyError(error, "Could not render the widget.");
+          renderStatus();
+        }
+      }
+    }
+  })();
+  widgetSyncPromise = pending;
+  void pending.finally(() => {
+    if (widgetSyncPromise === pending) {
+      widgetSyncPromise = null;
+      drainWidgetSync();
+    }
+  });
+}
 
 function scheduleWidgetSync() {
+  // An upcoming frame supersedes even a captured snapshot waiting behind native work.
+  widgetSyncSequence += 1;
+  pendingWidgetSync = null;
   if (widgetSyncScheduled) {
     return;
   }
-  const generation = visibilitySequence;
   widgetSyncScheduled = true;
   window.requestAnimationFrame(() => {
     widgetSyncScheduled = false;
@@ -543,9 +612,12 @@ function scheduleWidgetSync() {
     const host = elements.replyWidgets.querySelector(".inline-widget-host");
     const rect = host?.getBoundingClientRect();
     const layouts = [];
-    if (rect && rect.width > 0 && rect.height > 0) {
+    const owner = gatewayGeneration;
+    const surface = canvasSurfaceUrl;
+    if (activeReply?.gatewayGeneration === owner && gatewayState === "up" &&
+        rect && rect.width > 0 && rect.height > 0) {
       for (const widget of widgets) {
-        const url = resolveInlineWidgetUrl(canvasSurfaceUrl, widget.target);
+        const url = resolveInlineWidgetUrl(surface, widget.target);
         if (!url) {
           continue;
         }
@@ -561,22 +633,17 @@ function scheduleWidgetSync() {
         });
       }
     }
-    widgetSyncPromise = widgetSyncPromise
-      .catch(() => {})
-      .then(() =>
-        invoke("quickchat_sync_widgets", {
-          widgets: layouts,
-          hasWidgets: widgets.length > 0,
-          expanded: !elements.reply.hidden || Boolean(openPopover),
-          sessionId: rendererSessionId,
-          rendererEpoch,
-          generation,
-        }),
-      )
-      .catch(/** @param {unknown} error */ (error) => {
-        sendError = friendlyError(error, "Could not render the widget.");
-        renderStatus();
-      });
+    pendingWidgetSync = {
+      widgets: layouts,
+      hasWidgets: widgets.length > 0,
+      expanded: !elements.reply.hidden || Boolean(openPopover),
+      sessionId: rendererSessionId,
+      rendererEpoch,
+      generation: visibilitySequence,
+      gatewayGeneration: owner,
+      surfaceUrl: surface,
+    };
+    drainWidgetSync();
   });
 }
 
@@ -626,7 +693,8 @@ function renderReplyWidgets() {
   title.textContent = widget.title;
   card.append(title);
 
-  if (!resolveInlineWidgetUrl(canvasSurfaceUrl, widget.target)) {
+  if (activeReply.gatewayGeneration !== gatewayGeneration ||
+      !resolveInlineWidgetUrl(canvasSurfaceUrl, widget.target)) {
     const unavailable = document.createElement("div");
     unavailable.className = "inline-widget-unavailable";
     unavailable.textContent = "Widget unavailable until the Gateway reconnects.";
@@ -696,6 +764,7 @@ function replyTargetMatches(target, payload) {
 function startReply(target, identity, runId) {
   activeReply = {
     runId,
+    gatewayGeneration: target.gatewayGeneration,
     target: {
       sessionKey: target.sessionKey,
       agentId: typeof target.agentId === "string" ? target.agentId : null,
@@ -725,7 +794,9 @@ function applyChatEvent(payload) {
   }
   // The chat.send ACK owns this reply. Exact runId equality is primary; the routing target remains
   // a secondary guard so concurrent turns from other surfaces never enter this reply area.
-  if (payload?.runId !== activeReply.runId || !replyTargetMatches(activeReply.target, payload)) {
+  if (payload?.gatewayGeneration !== activeReply.gatewayGeneration ||
+      activeReply.gatewayGeneration !== gatewayGeneration ||
+      payload?.runId !== activeReply.runId || !replyTargetMatches(activeReply.target, payload)) {
     return;
   }
   if (activeReply.terminal) {
@@ -771,6 +842,29 @@ function applyChatEvent(payload) {
     scrollReplyToEnd();
   }
   updateSendButton();
+}
+
+function applyRecoveredReply(result) {
+  if (activeReply?.terminal || result.status !== "ok") return;
+  if (!Array.isArray(result.recoveredMessages) || result.recoveredMessages.length === 0) {
+    throw new Error("The completed reply could not be recovered.");
+  }
+  const content = [];
+  for (const message of result.recoveredMessages) {
+    const text = chatMessageText(message);
+    if (text) content.push({ type: "text", text });
+    if (Array.isArray(message.content)) {
+      content.push(...message.content.filter((block) => block?.type === "canvas"));
+    }
+  }
+  applyChatEvent({
+    gatewayGeneration: result.gatewayGeneration,
+    sessionKey: result.sessionKey,
+    agentId: result.agentId,
+    runId: result.runId,
+    state: "final",
+    message: { role: "assistant", content },
+  });
 }
 
 function handleChatEvent(payload) {
@@ -828,21 +922,26 @@ function renderAgentList() {
   }
 }
 
-async function refreshIdentity() {
+async function refreshIdentity(owner = gatewayGeneration) {
   try {
-    renderIdentity(await invoke("quickchat_identity"));
+    const identity = await invoke("quickchat_identity");
+    if (gatewayGeneration === owner) renderIdentity(identity);
   } catch {
-    renderIdentity({ id: "", name: "Agent", isDefault: true });
+    if (gatewayGeneration === owner) renderIdentity({ id: "", name: "Agent", isDefault: true });
   }
 }
 
 async function refreshAgents() {
+  const owner = gatewayGeneration;
   try {
-    agents = await invoke("quickchat_agents");
+    const next = await invoke("quickchat_agents");
+    if (gatewayGeneration !== owner) return;
+    agents = next;
   } catch {
+    if (gatewayGeneration !== owner) return;
     agents = [];
   }
-  await refreshIdentity();
+  await refreshIdentity(owner);
 }
 
 async function selectAgent(agentId) {
@@ -850,12 +949,16 @@ async function selectAgent(agentId) {
     return;
   }
   selectingAgent = true;
+  const owner = gatewayGeneration;
   updateSendButton();
   try {
     await invoke("quickchat_select_agent", { agentId });
-    await refreshIdentity();
+    if (gatewayGeneration !== owner) return;
+    await refreshIdentity(owner);
+    if (gatewayGeneration !== owner) return;
     closePopover();
   } catch (error) {
+    if (gatewayGeneration !== owner) return;
     sendError = friendlyError(error, "Could not select that agent.");
     renderStatus();
   } finally {
@@ -1094,6 +1197,7 @@ async function send(openDashboard) {
   sending = true;
   const sendDisconnectSequence = gatewayDisconnectSequence;
   const sendVisibilitySequence = visibilitySequence;
+  const sendGeneration = gatewayGeneration;
   clearReply();
   pendingChatEvents = [];
   void invoke("quickchat_set_expanded", { expanded: false });
@@ -1108,6 +1212,9 @@ async function send(openDashboard) {
     }
     if (typeof result.runId !== "string" || !result.runId) {
       throw new Error("Gateway accepted the message without a run ID.");
+    }
+    if (result.gatewayGeneration !== sendGeneration || gatewayGeneration !== sendGeneration) {
+      throw new Error("Gateway changed before the Quick Chat reply was accepted.");
     }
     sending = false;
     sendError = "";
@@ -1124,6 +1231,7 @@ async function send(openDashboard) {
     for (const payload of bufferedEvents) {
       applyChatEvent(payload);
     }
+    applyRecoveredReply(result);
     if (gatewayDisconnectSequence !== sendDisconnectSequence || gatewayState !== "up") {
       terminalizeDisconnectedReply();
     }

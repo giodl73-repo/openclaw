@@ -1,13 +1,15 @@
 // Commander registration for foreground node host and node service lifecycle commands.
-import type { Command } from "commander";
+import { Option, type Command } from "commander";
 import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
 import { loadNodeHostConfig } from "../../node-host/config.js";
 import { runNodeHost } from "../../node-host/runner.js";
 import { runNodeHostWorker } from "../../node-host/worker.js";
 import { defaultRuntime } from "../../runtime.js";
+import { inheritOptionFromParent } from "../command-options.js";
 import { formatInvalidPortOption } from "../error-format.js";
 import { formatHelpExamples } from "../help-format.js";
+import { addNodeCommandOptions } from "./command-options.js";
 import {
   runNodeDaemonInstall,
   runNodeDaemonRestart,
@@ -16,27 +18,23 @@ import {
   runNodeDaemonStop,
   runNodeDaemonUninstall,
 } from "./daemon.js";
-import { resolveNodeGatewayOptions } from "./gateway-options.js";
+import { resolveNodeGatewayOptions, resolveNodePairGatewayOptions } from "./gateway-options.js";
 import { runNodeIdentityShow } from "./identity.js";
 
 export function registerNodeCli(program: Command) {
-  const node = program
-    .command("node")
-    .description("Run and manage the headless node host service")
-    .addHelpText(
-      "after",
-      () =>
-        `\n${theme.heading("Examples:")}\n${formatHelpExamples([
-          [
-            "openclaw node run --host 127.0.0.1 --port 18789",
-            "Run the node host in the foreground.",
-          ],
-          ["openclaw node status", "Check node host service status."],
-          ["openclaw node install", "Install the node host service."],
-          ["openclaw node start", "Start the installed node host service."],
-          ["openclaw node restart", "Restart the installed node host service."],
-        ])}\n\n${theme.muted("Docs:")} ${formatDocsLink("/cli/node", "docs.openclaw.ai/cli/node")}\n`,
-    );
+  const node = addNodeCommandOptions(
+    program.command("node").description("Run and manage the headless node host service"),
+  ).addHelpText(
+    "after",
+    () =>
+      `\n${theme.heading("Examples:")}\n${formatHelpExamples([
+        ["openclaw node run --host 127.0.0.1 --port 18789", "Run the node host in the foreground."],
+        ["openclaw node status", "Check node host service status."],
+        ["openclaw node install", "Install the node host service."],
+        ["openclaw node start", "Start the installed node host service."],
+        ["openclaw node restart", "Restart the installed node host service."],
+      ])}\n\n${theme.muted("Docs:")} ${formatDocsLink("/cli/node", "docs.openclaw.ai/cli/node")}\n`,
+  );
 
   node
     .command("worker", { hidden: true })
@@ -45,9 +43,11 @@ export function registerNodeCli(program: Command) {
       await runNodeHostWorker();
     });
 
-  node
-    .command("run")
-    .description("Run the headless node host (foreground)")
+  addNodeCommandOptions(node.command("run").description("Run the headless node host (foreground)"))
+    .option(
+      "--pair <code-or-url>",
+      "Pair with a setup code or oc-pair URL; explicit gateway flags take precedence",
+    )
     .option("--host <host>", "Gateway host")
     .option("--port <port>", "Gateway port")
     .option("--context-path <path>", "Gateway WebSocket context path (e.g. /openclaw-gw)")
@@ -56,14 +56,23 @@ export function registerNodeCli(program: Command) {
     .option("--tls-fingerprint <sha256>", "Expected TLS certificate fingerprint (sha256)")
     .option("--node-id <id>", "Override the generated node instance id")
     .option("--display-name <name>", "Override node display name")
+    .addOption(new Option("--ephemeral").hideHelp())
     .option("--share-installed-apps", "Share installed macOS applications with the Gateway")
     .option("--no-share-installed-apps", "Disable installed application sharing")
-    .action(async (opts) => {
-      const existing = await loadNodeHostConfig();
-      const { host, port, contextPath, tls, tlsFingerprint } = resolveNodeGatewayOptions(
-        opts,
-        existing,
-      );
+    .action(async (opts, command: Command) => {
+      let pair;
+      let gatewayOptions;
+      try {
+        pair = opts.pair ? resolveNodePairGatewayOptions(opts.pair) : undefined;
+        const existing = await loadNodeHostConfig();
+        gatewayOptions = resolveNodeGatewayOptions(opts, existing, pair);
+      } catch (error) {
+        defaultRuntime.error(error instanceof Error ? error.message : String(error));
+        defaultRuntime.exit(1);
+        return;
+      }
+      const { host, port, contextPath, tls, tlsFingerprint, cloudflareAccess, gatewayCandidates } =
+        gatewayOptions;
       if (port === null) {
         defaultRuntime.error(formatInvalidPortOption("--port"));
         defaultRuntime.exit(1);
@@ -80,9 +89,16 @@ export function registerNodeCli(program: Command) {
         gatewayTls: tls,
         gatewayTlsFingerprint: tlsFingerprint,
         gatewayContextPath: contextPath,
+        gatewayCloudflareAccess: cloudflareAccess,
+        gatewayCandidates,
+        gatewayBootstrapToken: pair?.bootstrapToken,
+        preferGatewayBootstrapToken: pair !== undefined,
+        ...(opts.ephemeral === true ? { forceWorkerRuns: true, ephemeral: true } : {}),
         nodeId: opts.nodeId,
         displayName: opts.displayName,
         installedAppsSharing: opts.shareInstalledApps,
+        commands: opts.commands ?? inheritOptionFromParent<string[]>(command, "commands"),
+        allCommands: opts.allCommands ?? inheritOptionFromParent<boolean>(command, "allCommands"),
       });
     });
 
@@ -102,9 +118,9 @@ export function registerNodeCli(program: Command) {
       runNodeIdentityShow(opts);
     });
 
-  node
-    .command("install")
-    .description("Install the node host service (launchd/systemd/schtasks)")
+  addNodeCommandOptions(
+    node.command("install").description("Install the node host service (launchd/systemd/schtasks)"),
+  )
     .option("--host <host>", "Gateway host")
     .option("--port <port>", "Gateway port")
     .option("--context-path <path>", "Gateway WebSocket context path (e.g. /openclaw-gw)")
@@ -115,11 +131,16 @@ export function registerNodeCli(program: Command) {
     .option("--display-name <name>", "Override node display name")
     .option("--share-installed-apps", "Share installed macOS applications with the Gateway")
     .option("--no-share-installed-apps", "Disable installed application sharing")
-    .option("--runtime <runtime>", "Service runtime (node). Default: node")
+    .option("--runtime <runtime>", "Service runtime (node|bun). Default: node")
+    .option("--runtime-path <path>", "Pin an absolute Node/Bun executable path")
     .option("--force", "Reinstall/overwrite if already installed", false)
     .option("--json", "Output JSON", false)
-    .action(async (opts) => {
-      await runNodeDaemonInstall(opts);
+    .action(async (opts, command: Command) => {
+      await runNodeDaemonInstall({
+        ...opts,
+        commands: opts.commands ?? inheritOptionFromParent<string[]>(command, "commands"),
+        allCommands: opts.allCommands ?? inheritOptionFromParent<boolean>(command, "allCommands"),
+      });
     });
 
   for (const [name, action] of [

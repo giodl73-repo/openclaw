@@ -13,6 +13,7 @@ const refreshPreparedModelRuntimeSnapshotsMock = vi.fn(
       defaultWorkspaceDir?: string;
       catalogMode?: "live" | "static";
       allowGatewaySubagentBinding?: boolean;
+      isPublicationCurrent?: () => boolean;
     },
   ) => {},
 );
@@ -32,24 +33,18 @@ vi.mock("../agents/prepared-model-runtime.js", () => ({
       defaultWorkspaceDir?: string;
       catalogMode?: "live" | "static";
       allowGatewaySubagentBinding?: boolean;
+      isPublicationCurrent?: () => boolean;
     },
   ) => refreshPreparedModelRuntimeSnapshotsMock(cfg, options),
 }));
 
-let prewarmConfiguredPrimaryModel: typeof import("./server-startup-post-attach.js").testing.prewarmConfiguredPrimaryModel;
+let publishConfiguredModelRuntimeSnapshots: typeof import("./server-startup-post-attach.js").testing.publishConfiguredModelRuntimeSnapshots;
 let hydrateConfiguredExternalCliAuth: typeof import("./server-startup-post-attach.js").testing.hydrateConfiguredExternalCliAuth;
-let publishStartupModelRuntime: typeof import("./server-startup-post-attach.js").testing.publishStartupModelRuntime;
-let shouldSkipStartupModelPrewarm: typeof import("./server-startup-post-attach.js").testing.shouldSkipStartupModelPrewarm;
 
-describe("gateway startup primary model warmup", () => {
+describe("gateway startup model runtime publication", () => {
   beforeAll(async () => {
     ({
-      testing: {
-        prewarmConfiguredPrimaryModel,
-        hydrateConfiguredExternalCliAuth,
-        publishStartupModelRuntime,
-        shouldSkipStartupModelPrewarm,
-      },
+      testing: { publishConfiguredModelRuntimeSnapshots, hydrateConfiguredExternalCliAuth },
     } = await import("./server-startup-post-attach.js"));
   });
 
@@ -58,7 +53,7 @@ describe("gateway startup primary model warmup", () => {
     refreshPreparedModelRuntimeSnapshotsMock.mockClear();
   });
 
-  it("prewarms an explicit configured primary model", async () => {
+  it("publishes an explicit configured primary model", async () => {
     const cfg = {
       agents: {
         defaults: {
@@ -69,9 +64,8 @@ describe("gateway startup primary model warmup", () => {
       },
     } as OpenClawConfig;
 
-    await prewarmConfiguredPrimaryModel({
+    await publishConfiguredModelRuntimeSnapshots({
       cfg,
-      log: { warn: vi.fn() },
     });
 
     expect(refreshPreparedModelRuntimeSnapshotsMock).toHaveBeenCalledWith(cfg, {
@@ -86,7 +80,7 @@ describe("gateway startup primary model warmup", () => {
     const hydrate = vi.fn();
 
     await hydrateConfiguredExternalCliAuth({
-      cfg,
+      getConfig: () => cfg,
       log: { warn: vi.fn() },
       deps: {
         listAgentIds: () => ["main", "secondary"],
@@ -99,16 +93,15 @@ describe("gateway startup primary model warmup", () => {
     });
 
     expect(hydrate).toHaveBeenCalledTimes(2);
-    expect(hydrate).toHaveBeenCalledWith("/tmp/main", ["openai"]);
-    expect(hydrate).toHaveBeenCalledWith("/tmp/secondary", ["anthropic"]);
+    expect(hydrate).toHaveBeenCalledWith(cfg, "/tmp/main", ["openai"]);
+    expect(hydrate).toHaveBeenCalledWith(cfg, "/tmp/secondary", ["anthropic"]);
     expect(refreshPreparedModelRuntimeSnapshotsMock).not.toHaveBeenCalled();
   });
 
-  it("prewarms the default catalog when no explicit primary model is configured", async () => {
+  it("publishes the default catalog when no explicit primary model is configured", async () => {
     const cfg = {} as OpenClawConfig;
-    await prewarmConfiguredPrimaryModel({
+    await publishConfiguredModelRuntimeSnapshots({
       cfg,
-      log: { warn: vi.fn() },
     });
 
     expect(refreshPreparedModelRuntimeSnapshotsMock).toHaveBeenCalledWith(cfg, {
@@ -116,47 +109,6 @@ describe("gateway startup primary model warmup", () => {
       gatewayLifecycle: true,
       catalogMode: "static",
     });
-  });
-
-  it("honors the startup model prewarm skip env", () => {
-    expect(shouldSkipStartupModelPrewarm({})).toBe(false);
-    expect(
-      shouldSkipStartupModelPrewarm({
-        OPENCLAW_SKIP_STARTUP_MODEL_PREWARM: "1",
-      }),
-    ).toBe(true);
-    expect(
-      shouldSkipStartupModelPrewarm({
-        OPENCLAW_SKIP_STARTUP_MODEL_PREWARM: "true",
-      }),
-    ).toBe(true);
-  });
-
-  it("publishes required runtime snapshots when optional startup prewarm is skipped", async () => {
-    vi.stubEnv("OPENCLAW_SKIP_STARTUP_MODEL_PREWARM", "1");
-    const optionalPrewarm = vi.fn(async () => {});
-    try {
-      await publishStartupModelRuntime(
-        {
-          cfg: {} as OpenClawConfig,
-          workspaceDir: "/tmp/skip-explicit-workspace",
-          log: { warn: vi.fn() },
-        },
-        optionalPrewarm,
-      );
-
-      expect(refreshPreparedModelRuntimeSnapshotsMock).toHaveBeenCalledOnce();
-      expect(refreshPreparedModelRuntimeSnapshotsMock).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.objectContaining({
-          allowGatewaySubagentBinding: true,
-          defaultWorkspaceDir: "/tmp/skip-explicit-workspace",
-        }),
-      );
-      expect(optionalPrewarm).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllEnvs();
-    }
   });
 
   it("publishes lifecycle owners for configured CLI backends", async () => {
@@ -169,7 +121,7 @@ describe("gateway startup primary model warmup", () => {
         },
       },
     } as OpenClawConfig;
-    await prewarmConfiguredPrimaryModel({ cfg, log: { warn: vi.fn() } });
+    await publishConfiguredModelRuntimeSnapshots({ cfg });
 
     expect(refreshPreparedModelRuntimeSnapshotsMock).toHaveBeenCalledWith(cfg, {
       allowGatewaySubagentBinding: true,
@@ -180,10 +132,9 @@ describe("gateway startup primary model warmup", () => {
 
   it("preserves the explicit startup workspace in the published default owner", async () => {
     const cfg = {} as OpenClawConfig;
-    await prewarmConfiguredPrimaryModel({
+    await publishConfiguredModelRuntimeSnapshots({
       cfg,
       workspaceDir: "/tmp/explicit-workspace",
-      log: { warn: vi.fn() },
     });
 
     expect(refreshPreparedModelRuntimeSnapshotsMock).toHaveBeenCalledWith(cfg, {
@@ -199,7 +150,7 @@ describe("gateway startup primary model warmup", () => {
     refreshPreparedModelRuntimeSnapshotsMock.mockRejectedValueOnce(error);
 
     await expect(
-      prewarmConfiguredPrimaryModel({
+      publishConfiguredModelRuntimeSnapshots({
         cfg: {
           agents: {
             defaults: {
@@ -209,7 +160,6 @@ describe("gateway startup primary model warmup", () => {
             },
           },
         } as OpenClawConfig,
-        log: { warn: vi.fn() },
       }),
     ).rejects.toBe(error);
   });

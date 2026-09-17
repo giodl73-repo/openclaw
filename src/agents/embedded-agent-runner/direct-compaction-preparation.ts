@@ -17,12 +17,11 @@ import { resolveAgentDir, resolveSessionAgentIds } from "../agent-scope.js";
 import { describeFailoverError } from "../failover-error.js";
 import { ensureSelectedAgentHarnessPlugin } from "../harness/runtime-plugin.js";
 import { MissingProviderAuthError } from "../model-auth.js";
+import { projectModelThinkingCompat } from "../model-catalog-lookup.js";
 import type { PreparedModelRuntimeSnapshot } from "../prepared-model-runtime.js";
 import { applyPreparedRuntimeAuthToModel } from "../provider-request-config.js";
-import {
-  protectPreparedProviderRuntimeAuth,
-  unwrapSecretSentinelsForProviderEgress,
-} from "../provider-secret-egress.js";
+import { protectPreparedProviderRuntimeAuth } from "../provider-runtime-auth-protection.js";
+import { unwrapSecretSentinelsForProviderEgress } from "../provider-secret-egress.js";
 import { materializePreparedRuntimeModel } from "../runtime-plan/materialize-model.js";
 import {
   resolvePreparedRuntimeAuthAttempts,
@@ -30,6 +29,7 @@ import {
 } from "../runtime-plan/resolve-auth.js";
 import type { AgentRuntimeAuthPlan } from "../runtime-plan/types.js";
 import { resolveSandboxContext } from "../sandbox.js";
+import type { SandboxContext } from "../sandbox/types.js";
 import {
   classifyCompactionReason,
   formatUnknownCompactionReasonDetail,
@@ -42,12 +42,17 @@ import {
   resolveCompactionRuntimeSelection,
 } from "./compaction-runtime-preparation.js";
 import { log } from "./logger.js";
+import { resolveTieredModel } from "./model-resolution.js";
 import { resolveModelAsync } from "./model.js";
+import type { TranscriptByteCompactionPersistence } from "./transcript-byte-preflight-authority.js";
 import type { EmbeddedAgentCompactResult } from "./types.js";
 
 export type PreparedCompactEmbeddedAgentSessionParams = CompactEmbeddedAgentSessionRuntimeParams & {
   sessionFile: string;
   preparedModelRuntime: PreparedModelRuntimeSnapshot;
+  requestedRouteResolution?: "resolved";
+  transcriptBytePreflightAuthority?: true;
+  transcriptByteCompactionPersistence?: TranscriptByteCompactionPersistence;
 };
 
 export async function prepareDirectCompactionAttempt(
@@ -135,34 +140,31 @@ export async function prepareDirectCompactionAttempt(
     };
   };
   const preparedModelRuntime = params.preparedModelRuntime;
-  const modelResolutionOptions = {
-    ...preparedModelRuntime.createStores(),
-    preparedModelRuntime,
-    workspaceDir: resolvedWorkspace,
-  };
-  const { model, error, authStorage, modelRegistry } = await resolveModelAsync(
-    runtimeProvider,
+  const { resolution: modelResolution } = await resolveTieredModel({
+    provider: runtimeProvider,
     modelId,
+    requestedRouteResolution: params.requestedRouteResolution,
     agentDir,
-    params.config,
-    {
-      ...initialModelAuth,
-      ...modelResolutionOptions,
-    },
-  );
+    config: params.config,
+    workspaceDir: resolvedWorkspace,
+    ...initialModelAuth,
+    preparedModelRuntime,
+  });
+  const { model, error, authStorage, modelRegistry } = modelResolution;
   if (!model) {
     const reason = error ?? `Unknown model: ${runtimeProvider}/${modelId}`;
     return { ok: false as const, result: fail(reason) };
   }
+  const modelResolutionOptions = {
+    authStorage,
+    modelRegistry,
+    preparedModelRuntime,
+    workspaceDir: resolvedWorkspace,
+  };
   // Overrides stay unset when no bound/planned/explicit harness resolved so auth-aware
   // selection can pick the credential-owning harness (codex for ChatGPT OAuth); native
   // transcript compaction stays gated on the selected prepared harness.
-  const {
-    runtimeAuthProfileStore,
-    runtimeAuthPreparation,
-    selectedPreparedHarness,
-    providerUsesProfileScopedModelMetadata,
-  } = await prepareCompactionHarnessAuth({
+  const harnessAuth = await prepareCompactionHarnessAuth({
     ...params,
     provider,
     metadataProvider: runtimeProvider,
@@ -177,6 +179,19 @@ export async function prepareDirectCompactionAttempt(
     agentHarnessId: boundHarnessRuntime,
     agentHarnessRuntimeOverride: selectedHarnessRuntimeOverride,
   });
+  if (!harnessAuth.ok) {
+    params.abortSignal?.throwIfAborted();
+    return {
+      ok: false as const,
+      result: fail(formatErrorMessage(harnessAuth.error), harnessAuth.error),
+    };
+  }
+  const {
+    runtimeAuthProfileStore,
+    runtimeAuthPreparation,
+    selectedPreparedHarness,
+    providerUsesProfileScopedModelMetadata,
+  } = harnessAuth;
   const preparedHarnessRuntime = selectedPreparedHarness.id;
   const resolvePreparedModel = ({
     config,
@@ -187,9 +202,9 @@ export async function prepareDirectCompactionAttempt(
   >[0]) =>
     resolveModelAsync(runtimeProvider, modelId, agentDir, config, {
       ...modelResolutionOptions,
+      modelIdSource: params.requestedRouteResolution === "resolved" ? "selected" : "input",
       skipAgentDiscovery: true,
       allowBundledStaticCatalogFallback: true,
-      preferBundledStaticCatalogTransport: true,
       authProfileId: profileId,
       authProfileMode: resolvedAuthProfileMode,
     });
@@ -203,6 +218,8 @@ export async function prepareDirectCompactionAttempt(
       provider,
       modelId,
       config: params.config,
+      workspaceDir: resolvedWorkspace,
+      metadataSnapshot: preparedModelRuntime.metadataSnapshot,
       model: materializeParams.model,
       forceResolve: materializeParams.forceResolve,
       resolveModel: resolvePreparedModel,
@@ -236,7 +253,7 @@ export async function prepareDirectCompactionAttempt(
   } catch (err) {
     return { ok: false as const, result: fail(formatErrorMessage(err), err) };
   }
-  let runtimeModel = resolvedAuthAttempt.model;
+  let runtimeModel: ProviderRuntimeModel = resolvedAuthAttempt.model;
   const apiKeyInfo = resolvedAuthAttempt.auth;
   const resolvedRuntimeAuthPlan = resolvedAuthAttempt.plan;
   let hasRuntimeAuthExchange = false;
@@ -282,27 +299,13 @@ export async function prepareDirectCompactionAttempt(
     const reason = formatErrorMessage(err);
     return { ok: false as const, result: fail(reason, err) };
   }
-  const runtimeCompat =
-    runtimeModel.compat && typeof runtimeModel.compat === "object"
-      ? (runtimeModel.compat as Record<string, unknown>)
-      : undefined;
-  const thinkingFormat =
-    typeof runtimeCompat?.thinkingFormat === "string" ? runtimeCompat.thinkingFormat : undefined;
-  const supportedReasoningEfforts =
-    runtimeCompat?.supportedReasoningEfforts === null ||
-    (Array.isArray(runtimeCompat?.supportedReasoningEfforts) &&
-      runtimeCompat.supportedReasoningEfforts.every((effort) => typeof effort === "string"))
-      ? (runtimeCompat.supportedReasoningEfforts as readonly string[] | null)
-      : undefined;
-  const thinkingCompat =
-    thinkingFormat !== undefined || supportedReasoningEfforts !== undefined
-      ? { thinkingFormat, supportedReasoningEfforts }
-      : undefined;
+  const thinkingCompat = projectModelThinkingCompat(runtimeModel.compat);
   const thinkingCatalogEntry = {
     provider: runtimeModel.provider,
     id: runtimeModel.id,
     api: runtimeModel.api,
     reasoning: runtimeModel.reasoning,
+    ...(runtimeModel.thinkingLevelMap ? { thinkingLevelMap: runtimeModel.thinkingLevelMap } : {}),
     params: runtimeModel.params,
     ...(thinkingCompat ? { compat: thinkingCompat } : {}),
   } satisfies ThinkingCatalogEntry;
@@ -311,6 +314,7 @@ export async function prepareDirectCompactionAttempt(
     provider: runtimeModel.provider,
     modelId: runtimeModel.id,
     inheritedLevel: params.thinkLevel,
+    compactionThinkingDefault: runtimeModel.compactionThinkingDefault,
     catalog: [thinkingCatalogEntry],
     agentId: runtimePolicyAgentId,
     sessionKey: runtimePolicySessionKey,
@@ -318,14 +322,25 @@ export async function prepareDirectCompactionAttempt(
   });
 
   await fs.mkdir(resolvedWorkspace, { recursive: true });
-  const sandboxSessionKey =
-    params.sandboxSessionKey?.trim() || params.sessionKey?.trim() || params.sessionId;
-  const sandbox = await resolveSandboxContext({
-    config: params.config,
-    execOverrides: params.execOverrides,
-    sessionKey: sandboxSessionKey,
-    workspaceDir: resolvedWorkspace,
-  });
+  const sessionKey = params.sessionKey?.trim() || params.sessionId;
+  const sandboxSessionKey = params.sandboxSessionKey?.trim() || sessionKey;
+  const sandboxAgentId =
+    params.sandboxAgentId ??
+    (sandboxSessionKey === sessionKey ? earlyAgentIds.sessionAgentId : undefined);
+  const placementParams = params as typeof params & { sandbox?: SandboxContext | null };
+  const sandbox =
+    placementParams.sandbox === undefined
+      ? await resolveSandboxContext({
+          config: params.config,
+          agentId: sandboxAgentId,
+          execOverrides: params.execOverrides,
+          sessionKey: sandboxSessionKey,
+          workspaceDir: resolvedWorkspace,
+        })
+      : placementParams.sandbox;
+  if (params.requireWritableSandbox && sandbox?.enabled && sandbox.workspaceAccess !== "rw") {
+    throw new Error("sandbox workspace is not read-write; collection review skipped");
+  }
   const effectiveWorkspace = sandbox?.enabled
     ? sandbox.workspaceAccess === "rw"
       ? resolvedWorkspace
@@ -373,6 +388,7 @@ export async function prepareDirectCompactionAttempt(
       hasRuntimeAuthExchange,
       resolvedWorkspace,
       sandboxSessionKey,
+      sandboxAgentId,
       sandbox,
       effectiveWorkspace,
       effectiveCwd,

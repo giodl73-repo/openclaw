@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { getRestartRecoveryTerminalDeliveryEvidence } from "../config/sessions/restart-recovery-state.js";
 import {
   buildCurrentRunRestartRecoveryClaim,
   buildRestartRecoveryTerminalDeliveryEvidence,
   constrainRestartRecoveryDeliveryPayloads,
 } from "./agent-command-restart-recovery.js";
+import { hasMessagingToolDeliveryToSource } from "./subagents/announce/subagent-announce-completion-delivery.js";
 
 describe("buildCurrentRunRestartRecoveryClaim", () => {
   it("persists the complete generated-media policy, including an empty allowlist", () => {
@@ -73,19 +75,26 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
     });
   });
 
-  it("rejects a route change after recovery ownership is claimed", () => {
-    expect(() =>
+  it("preserves the claimed route when delivery preparation resolves an alias", () => {
+    expect(
       buildCurrentRunRestartRecoveryClaim({
-        deliveryContext: { channel: "discord", to: "channel:other" },
+        deliveryContext: {
+          channel: "telegram",
+          to: "telegram:-100123:topic:1",
+          threadId: 1,
+        },
         entry: {
           sessionId: "session-1",
           updatedAt: 1,
           restartRecoveryDeliveryRunId: "recovery-run",
-          restartRecoveryDeliveryContext: { channel: "discord", to: "channel:123" },
+          restartRecoveryDeliveryContext: { channel: "telegram", to: "-100123", threadId: 1 },
         },
         runId: "recovery-run",
       }),
-    ).toThrow("restart recovery delivery route changed after the run was claimed");
+    ).toMatchObject({
+      restartRecoveryDeliveryContext: { channel: "telegram", to: "-100123", threadId: 1 },
+      restartRecoveryDeliveryRunId: "recovery-run",
+    });
   });
 
   it("requires explicit ownership for a new source claim", () => {
@@ -202,6 +211,62 @@ describe("constrainRestartRecoveryDeliveryPayloads", () => {
 });
 
 describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
+  it.each([false, true])(
+    "retains the source final marker %s through durable projection",
+    (sourceReplyFinal) => {
+      const original = {
+        messagingToolSentTargets: [
+          {
+            provider: "discord",
+            to: "channel:123",
+            text: "reply",
+            sourceReplyFinal,
+          },
+        ],
+      };
+      const stored = getRestartRecoveryTerminalDeliveryEvidence(
+        {
+          sessionId: "session-1",
+          updatedAt: 1,
+          restartRecoveryTerminalDeliveryEvidence: [
+            { runId: "original", ...buildRestartRecoveryTerminalDeliveryEvidence(original) },
+          ],
+        },
+        "original",
+      );
+      expect(stored?.messagingToolSentTargets?.[0]?.sourceReplyFinal).toBe(sourceReplyFinal);
+      expect(
+        hasMessagingToolDeliveryToSource(
+          stored!,
+          { channel: "discord", to: "channel:123" },
+          { requireFinalReply: true },
+        ),
+      ).toBe(sourceReplyFinal);
+    },
+  );
+
+  it.each([0, 1, undefined])(
+    "preserves automatic result count %s without manufacturing a send",
+    (resultCount) => {
+      const stored = getRestartRecoveryTerminalDeliveryEvidence(
+        {
+          sessionId: "session-1",
+          updatedAt: 1,
+          restartRecoveryTerminalDeliveryEvidence: [
+            {
+              runId: "original",
+              ...buildRestartRecoveryTerminalDeliveryEvidence({
+                deliveryStatus: { status: "sent", resultCount },
+              }),
+            },
+          ],
+        },
+        "original",
+      );
+      expect(stored?.deliveryStatus?.resultCount).toBe(resultCount);
+    },
+  );
+
   it("marks an empty terminal result as captured", () => {
     expect(buildRestartRecoveryTerminalDeliveryEvidence({})).toEqual({ captured: true });
   });

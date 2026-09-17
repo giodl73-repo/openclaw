@@ -34,6 +34,7 @@ const ScreenToolSchema = Type.Object(
 
 type ScreenToolOptions = {
   agentSessionKey?: string;
+  agentId?: string;
   callGateway?: InProcessGatewayCaller;
 };
 
@@ -45,7 +46,7 @@ function resolveSessionKey(
   if (!sessionKey) {
     throw new ToolInputError("sessionKey required");
   }
-  return sessionKey;
+  return sessionKey === "current" && agentSessionKey?.trim() ? agentSessionKey.trim() : sessionKey;
 }
 
 function readDock(params: Record<string, unknown>): "bottom" | "right" | undefined {
@@ -101,7 +102,7 @@ export function createScreenTool(opts: ScreenToolOptions = {}): AnyAgentTool {
     label: "Screen",
     name: "screen",
     description:
-      "Drive operator web UI: split_right/split_down, close_pane, focus, navigate, panel toggles terminal_show/terminal_hide, browser_show/browser_hide, sidebar_show/sidebar_hide. Optional sessionKey targets another session. Needs connected web client.",
+      "Drive the requesting user's Control UI: browser_show/browser_hide open/hide the Browser side panel (browser sidebar); sidebar_show/sidebar_hide show/hide the session list. terminal_show/terminal_hide toggle the Terminal panel. Also supports split_right/split_down, close_pane, focus, navigate. Optional sessionKey selects what to open in their UI. Only the browser that requested this turn is changed; it must still be connected.",
     parameters: ScreenToolSchema,
     outputSchema: UiCommandResultSchema,
     requiredClientCaps: [GATEWAY_CLIENT_CAPS.UI_COMMANDS],
@@ -111,6 +112,7 @@ export function createScreenTool(opts: ScreenToolOptions = {}): AnyAgentTool {
       const payload: UiCommandParams = {
         command: commandForAction(action, params, opts.agentSessionKey),
         ...(opts.agentSessionKey ? { sessionKey: opts.agentSessionKey } : {}),
+        ...(opts.agentId ? { agentId: opts.agentId } : {}),
       };
       return jsonResult(await gatewayCall("ui.command", payload));
     },

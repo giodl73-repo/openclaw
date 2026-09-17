@@ -17,14 +17,22 @@ import {
 } from "./message-tool-schema-scoping.js";
 
 const AllMessageActions = CHANNEL_MESSAGE_ACTION_NAMES;
-function buildRoutingSchema() {
-  return {
+function buildRoutingSchema(options: { includeTeamId?: boolean }) {
+  const props: Record<string, TSchema> = {
     channel: Type.Optional(Type.String()),
     target: Type.Optional(channelTargetSchema()),
     targets: Type.Optional(channelTargetsSchema()),
     accountId: Type.Optional(Type.String()),
     dryRun: Type.Optional(Type.Boolean()),
   };
+  if (options.includeTeamId) {
+    props.teamId = Type.Optional(
+      Type.String({
+        description: "Team or workspace ID for channel-info, channel-list, or conversation-open.",
+      }),
+    );
+  }
+  return props;
 }
 
 const presentationCommandActionSchema = Type.Object({
@@ -129,6 +137,7 @@ const presentationMessageSchema = Type.Object(
 );
 
 function buildSendSchema(options: {
+  includeClawHub?: boolean;
   includePresentation: boolean;
   includeDeliveryPin: boolean;
   includeBestEffort: boolean;
@@ -170,7 +179,16 @@ function buildSendSchema(options: {
     ),
     replyTo: Type.Optional(Type.String()),
     threadId: Type.Optional(Type.String()),
-    asVoice: Type.Optional(Type.Boolean()),
+    asVoice: Type.Optional(
+      Type.Boolean({ description: "Send audio as a voice note; combines with voiceText." }),
+    ),
+    voiceText: Type.Optional(
+      Type.String({ description: "Text to synthesize; message remains visible." }),
+    ),
+    voiceProvider: Type.Optional(
+      Type.String({ description: "Per-send speech provider override." }),
+    ),
+    voiceId: Type.Optional(Type.String({ description: "Per-send speech voice override." })),
     silent: Type.Optional(Type.Boolean()),
     quoteText: Type.Optional(Type.String({ description: "Telegram reply quote text." })),
     gifPlayback: Type.Optional(Type.Boolean()),
@@ -185,6 +203,21 @@ function buildSendSchema(options: {
       }),
     ),
   };
+  if (options.includeClawHub) {
+    props.clawhub = Type.Optional(
+      Type.Object(
+        {
+          query: Type.String({ minLength: 1, maxLength: 160 }),
+          kind: Type.Optional(stringEnum(["plugin", "skill"])),
+        },
+        {
+          additionalProperties: false,
+          description:
+            "Search official ClawHub capabilities and show install or Installed cards in the current Control UI conversation. Omit kind to check plugins, then skills. This presents options; the user chooses installation.",
+        },
+      ),
+    );
+  }
   if (options.includePresentation) {
     props.presentation = Type.Optional(presentationMessageSchema);
   }
@@ -233,11 +266,13 @@ function buildReactionSchema() {
         description: "snake_case alias of messageId; same defaults.",
       }),
     ),
-    emoji: Type.Optional(Type.String()),
+    emoji: Type.Optional(
+      Type.String({ description: "Unicode emoji; channels may also support custom emoji." }),
+    ),
     remove: Type.Optional(Type.Boolean()),
     trackToolCalls: Type.Optional(
       Type.Boolean({
-        description: "Use reacted current message for tool-progress reactions.",
+        description: "Use the reacted message for this turn's status reaction lifecycle.",
       }),
     ),
     track_tool_calls: Type.Optional(
@@ -253,7 +288,7 @@ function buildReactionSchema() {
 
 function buildFetchSchema() {
   return {
-    limit: optionalPositiveIntegerSchema(),
+    limit: optionalPositiveIntegerSchema({ description: "Maximum number of results to return." }),
     pageSize: optionalPositiveIntegerSchema(),
     pageToken: Type.Optional(Type.String()),
     before: Type.Optional(Type.String()),
@@ -348,7 +383,7 @@ function buildChannelTargetSchema() {
 function buildStickerSchema() {
   return {
     fileId: Type.Optional(Type.String()),
-    emojiName: Type.Optional(Type.String()),
+    emojiName: Type.Optional(Type.String({ description: "Name for an uploaded custom emoji." })),
     stickerId: Type.Optional(Type.Array(Type.String())),
     stickerName: Type.Optional(Type.String()),
     stickerDesc: Type.Optional(Type.String()),
@@ -441,13 +476,14 @@ function buildChannelManagementSchema() {
 }
 
 function buildMessageToolSchemaProps(options: {
+  includeTeamId?: boolean;
   includePresentation: boolean;
   includeDeliveryPin: boolean;
   includeBestEffort: boolean;
   extraProperties?: Record<string, TSchema>;
 }) {
   return {
-    ...buildRoutingSchema(),
+    ...buildRoutingSchema(options),
     ...buildSendSchema(options),
     ...buildReactionSchema(),
     ...buildFetchSchema(),
@@ -468,7 +504,7 @@ function buildMessageToolSchemaProps(options: {
 export const MESSAGE_TOOL_SCHEMA_BUILDERS = {
   full: buildMessageToolSchemaProps,
   base: (options) => ({
-    ...buildRoutingSchema(),
+    ...buildRoutingSchema(options),
     ...buildSendSchema(options),
     ...buildGatewaySchema(),
   }),

@@ -14,6 +14,7 @@ import {
 import {
   claimAgentRunContext,
   getAgentRunContext,
+  getAgentRunContextOwnership,
   getAgentRunContextOwnerStatus,
   registerAgentRunContext,
   releaseAgentRunContext,
@@ -25,57 +26,29 @@ import {
   isDefinitiveWorkerTerminalEvent,
   prepareWorkerLiveEventData,
   recordWorkerLiveTrajectoryEvent,
-  type WorkerLiveTrajectoryRecorder,
 } from "./live-event-projection.js";
 import {
   isValidLiveSessionBinding,
   matchesSessionIdentityMutation,
   prepareBoundLiveSessionSafely,
   type BoundLiveSession,
-  type LiveEventTarget,
   type WorkerLiveSessionBinding,
 } from "./live-event-session-binding.js";
+import {
+  rotateWorkerLiveEventCredential,
+  type LiveEventWindow,
+  type OwnedLiveRun,
+  type PendingLiveEvent,
+  type WorkerLiveCredentialRotation,
+} from "./live-event-window.js";
+import { captureWorkerTurnFinishing } from "./placement-turn-claim-events.js";
+import { captureWorkerTurnDiagnosticRecorder } from "./worker-turn-run-owner.js";
 
 const DEFAULT_WINDOW_SIZE = 128;
 const DEFAULT_MAX_PENDING_BYTES = 512 * 1024;
 const DEFAULT_MAX_SESSIONS = 128;
 const DEFAULT_MAX_ACTIVE_RUNS = 32;
 const MAX_FENCED_ENVIRONMENTS = 4096;
-
-type PendingLiveEvent = {
-  request: WorkerLiveEventParams;
-  sizeBytes: number;
-};
-
-type OwnedLiveRun = {
-  claimId: string;
-  controlUiVisible: boolean;
-  emissionMode: "exclusive" | "shared";
-  lifecycleGeneration: string;
-  trajectoryRecorder: WorkerLiveTrajectoryRecorder;
-};
-
-type WorkerLiveCredentialRotation = Readonly<{
-  credentialHash: string;
-  environmentId: string;
-  newProcessTurn?: boolean;
-  previousCredentialHash: string;
-  runEpoch: number;
-  sessionId: string;
-}>;
-
-type LiveEventWindow = {
-  activeRuns: Map<string, OwnedLiveRun>;
-  ackedSeq: number;
-  credentialHash: string;
-  environmentId: string;
-  pending: Map<number, PendingLiveEvent>;
-  pendingBytes: number;
-  runEpoch: number;
-  sessionId: string;
-  target: LiveEventTarget;
-  terminalRuns: Map<string, number>;
-};
 
 export type WorkerLiveEventApplicationResult =
   | { ok: true; result: WorkerLiveEventResult }
@@ -153,41 +126,8 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
     }
   }
 
-  // Durable credential renewal keeps the same owner epoch and replay cursor.
-  const rotateCredential = (rotation: WorkerLiveCredentialRotation): boolean => {
-    if (
-      !rotation.credentialHash ||
-      !rotation.environmentId ||
-      !rotation.previousCredentialHash ||
-      !rotation.sessionId ||
-      !Number.isSafeInteger(rotation.runEpoch) ||
-      rotation.runEpoch < 0
-    ) {
-      return false;
-    }
-    const window = windows.get(rotation.sessionId);
-    if (
-      window?.credentialHash === rotation.previousCredentialHash &&
-      window.environmentId === rotation.environmentId &&
-      window.runEpoch === rotation.runEpoch
-    ) {
-      if (rotation.newProcessTurn === true) {
-        // A per-turn credential is an unforgeable process boundary. Retire only
-        // the prior process's transient run claims/fences while preserving the
-        // durable ACK cursor; cron may intentionally reuse its durable run id.
-        for (const [runId, owned] of window.activeRuns) {
-          releaseAgentRunContext(runId, owned.claimId);
-        }
-        window.activeRuns.clear();
-        window.pending.clear();
-        window.pendingBytes = 0;
-        window.terminalRuns.clear();
-      }
-      window.credentialHash = rotation.credentialHash;
-      return true;
-    }
-    return false;
-  };
+  const rotateCredential = (rotation: WorkerLiveCredentialRotation): boolean =>
+    rotateWorkerLiveEventCredential(windows.get(rotation.sessionId), rotation);
 
   const releaseRun = (window: LiveEventWindow, runId: string): void => {
     const owned = window.activeRuns.get(runId);
@@ -366,15 +306,36 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
         return resyncRequired(0);
       }
       if (windows.size >= maxSessions) {
-        return capacityExceeded();
+        // Evict the oldest settled, registry-quiescent window; it rebinds via
+        // resync. Stale activeRuns entries alone do not imply live ownership.
+        let evicted = false;
+        for (const candidate of windows.values()) {
+          const busy =
+            candidate.activeApplications > 0 ||
+            [...candidate.activeRuns.entries()].some(
+              ([runId, owned]) =>
+                getAgentRunContextOwnerStatus(runId, owned.claimId, owned.lifecycleGeneration) ===
+                "active",
+            );
+          if (!busy) {
+            clearWindow(candidate);
+            evicted = true;
+            break;
+          }
+        }
+        if (!evicted) {
+          return capacityExceeded();
+        }
       }
       window = {
+        activeApplications: 0,
         activeRuns: new Map(),
         ackedSeq: params.request.lastAckedSeq,
         credentialHash: params.identity.credentialHash,
         environmentId: params.identity.environmentId,
         pending: new Map(),
         pendingBytes: 0,
+        trajectoryWrites: new Set(),
         runEpoch: params.request.runEpoch,
         sessionId,
         target: binding.target,
@@ -383,12 +344,6 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
       windows.set(sessionId, window);
       // Seed one process-lost window; later windows for this owner start at zero.
       startupOwners.delete(params.identity.environmentId);
-    }
-    if (params.request.seq <= window.ackedSeq) {
-      return { ok: true, result: { ackedSeq: window.ackedSeq } };
-    }
-    if (params.request.lastAckedSeq > window.ackedSeq) {
-      return resyncWindow(window);
     }
     return window;
   };
@@ -491,13 +446,9 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
     }
     const lifecycleGeneration = getAgentEventLifecycleGeneration();
     const existingContext = getAgentRunContext(runId);
-    // A dispatch-owned turn context (e.g. a worker-routed turn) owns the run's
-    // Control UI visibility; adopt it so worker live events keep reaching the
-    // visible clients that started the turn. Identity still has to match, so a
-    // foreign run is rejected; only the visibility preference is inherited. With
-    // no pre-existing turn context we scope live events to this session.
+    // Existing dispatch contexts must admit their outer terminal. Ownerless contexts still need
+    // worker-owned cleanup so a definitive worker terminal cannot leave the session active.
     const controlUiVisible = existingContext?.isControlUiVisible ?? false;
-    const adoptExistingUnowned = existingContext !== undefined;
     if (
       existingContext &&
       (existingContext.sessionId !== window.sessionId ||
@@ -508,8 +459,10 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
     ) {
       return invalidEvent();
     }
-    let emissionMode: OwnedLiveRun["emissionMode"] = "exclusive";
-    let claimId = claimAgentRunContext(
+    const hasExistingTrackedOwner =
+      getAgentRunContextOwnership(runId)?.lifecycleGeneration === lifecycleGeneration;
+    const emissionMode: OwnedLiveRun["emissionMode"] = existingContext ? "shared" : "exclusive";
+    const claimId = claimAgentRunContext(
       runId,
       {
         ...(window.target.agentId ? { agentId: window.target.agentId } : {}),
@@ -520,44 +473,16 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
         sessionKey: window.target.sessionKey,
       },
       {
-        adoptExistingUnowned,
-        exclusive: true,
+        exclusive: existingContext === undefined,
         onClearRequested: (clearedClaimId) => {
           if (window.activeRuns.get(runId)?.claimId === clearedClaimId) {
             fenceReleasedRun(window, runId);
           }
         },
-        ownsContext: true,
+        ownsContext: !hasExistingTrackedOwner,
         trackOwner: true,
       },
     );
-    if (!claimId && existingContext) {
-      // Cron and other Gateway-owned handoffs retain a non-exclusive claim while the
-      // assigned worker runs. Share only that corroborated identity; exclusive owners
-      // still reject this claim and prevent a foreign execution from joining the run.
-      claimId = claimAgentRunContext(
-        runId,
-        {
-          ...(window.target.agentId ? { agentId: window.target.agentId } : {}),
-          isControlUiVisible: controlUiVisible,
-          lifecycleGeneration,
-          projectSessionActive: true,
-          sessionId: window.sessionId,
-          sessionKey: window.target.sessionKey,
-        },
-        {
-          exclusive: false,
-          onClearRequested: (clearedClaimId) => {
-            if (window.activeRuns.get(runId)?.claimId === clearedClaimId) {
-              fenceReleasedRun(window, runId);
-            }
-          },
-          ownsContext: false,
-          trackOwner: true,
-        },
-      );
-      emissionMode = "shared";
-    }
     if (!claimId) {
       return invalidEvent();
     }
@@ -576,6 +501,7 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
     window: LiveEventWindow,
     request: WorkerLiveEventParams,
     allowBufferedTerminalCapacity: boolean,
+    recordApplied: PendingLiveEvent["recordApplied"],
   ): WorkerLiveEventFailure | undefined => {
     const owned = claimRun(window, request.runId, allowBufferedTerminalCapacity);
     if ("ok" in owned) {
@@ -602,7 +528,12 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
     } else {
       emitAgentEventForOwner(event, owned.claimId);
     }
-    recordWorkerLiveTrajectoryEvent(owned.trajectoryRecorder, request.event);
+    const write = recordWorkerLiveTrajectoryEvent(owned.trajectoryRecorder, request.event);
+    if (write) {
+      window.trajectoryWrites.add(write);
+      void write.then(() => window.trajectoryWrites.delete(write));
+    }
+    recordApplied?.(request.event);
     // Gateway handler owns cleanup so detach can revoke deferred terminal delivery.
     return undefined;
   };
@@ -610,13 +541,15 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
   const drain = (
     window: LiveEventWindow,
     first: WorkerLiveEventParams,
+    firstApplied: PendingLiveEvent["recordApplied"],
     firstPending?: PendingLiveEvent,
   ): WorkerLiveEventApplicationResult => {
     let request: WorkerLiveEventParams | undefined = first;
     let buffered = firstPending;
+    let recordApplied = firstPending ? firstPending.recordApplied : firstApplied;
     let publishedPrefix = false;
     while (request) {
-      const failed = publish(window, request, buffered !== undefined);
+      const failed = publish(window, request, buffered !== undefined, recordApplied);
       if (failed) {
         if (failed.details.reason === "capacity-exceeded" && buffered) {
           // Keep the ordered tail retryable while the active prefix claim drains.
@@ -656,14 +589,52 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
       }
       request = next.request;
       buffered = next;
+      recordApplied = next.recordApplied;
     }
     return { ok: true, result: { ackedSeq: window.ackedSeq } };
   };
 
-  const apply = (params: {
+  const applyToWindow = (
+    window: LiveEventWindow,
+    params: { identity: WorkerConnectionIdentity; request: WorkerLiveEventParams },
+  ): WorkerLiveEventApplicationResult => {
+    if (params.request.seq <= window.ackedSeq) {
+      return { ok: true, result: { ackedSeq: window.ackedSeq } };
+    }
+    if (params.request.lastAckedSeq > window.ackedSeq) {
+      return resyncWindow(window);
+    }
+    const recordDiagnostic = captureWorkerTurnDiagnosticRecorder(params.identity);
+    const recordFinishing = captureWorkerTurnFinishing(params.identity, params.request);
+    const recordApplied: PendingLiveEvent["recordApplied"] = (event) => {
+      recordDiagnostic?.(event);
+      recordFinishing?.();
+    };
+    const { seq } = params.request;
+    const expectedSeq = window.ackedSeq + 1;
+    if (seq > window.ackedSeq + windowSize) {
+      return resyncWindow(window);
+    }
+    if (seq === expectedSeq) {
+      const pending = window.pending.get(seq);
+      return drain(window, pending?.request ?? params.request, recordApplied, pending);
+    }
+    if (window.pending.has(seq)) {
+      return { ok: true, result: { ackedSeq: window.ackedSeq } };
+    }
+    const sizeBytes = Buffer.byteLength(JSON.stringify(params.request.event), "utf8");
+    if (window.pendingBytes + sizeBytes > maxPendingBytes) {
+      return resyncWindow(window);
+    }
+    window.pending.set(seq, { request: params.request, sizeBytes, recordApplied });
+    window.pendingBytes += sizeBytes;
+    return { ok: true, result: { ackedSeq: window.ackedSeq } };
+  };
+
+  const apply = async (params: {
     identity: WorkerConnectionIdentity;
     request: WorkerLiveEventParams;
-  }): WorkerLiveEventApplicationResult => {
+  }): Promise<WorkerLiveEventApplicationResult> => {
     if (!params.identity.sessionId) {
       return { ok: false, details: { reason: "session-not-attached" } };
     }
@@ -680,25 +651,28 @@ export function createWorkerLiveEventReceiver(options: WorkerLiveEventReceiverOp
     if ("ok" in window) {
       return window;
     }
-    const { seq } = params.request;
-    const expectedSeq = window.ackedSeq + 1;
-    if (seq > window.ackedSeq + windowSize) {
-      return resyncWindow(window);
+    window.activeApplications += 1;
+    try {
+      let result: WorkerLiveEventApplicationResult;
+      try {
+        result = applyToWindow(window, params);
+      } finally {
+        // Snapshot this accepted prefix, including duplicate ACKs, even if a later
+        // callback throws. Later requests own their own writes.
+        await Promise.all(window.trajectoryWrites);
+      }
+      if (result.ok) {
+        if (windows.get(sessionId) !== window || staleSessions.has(sessionId)) {
+          return { ok: false, details: { reason: "session-not-attached" } };
+        }
+        if (window.credentialHash !== params.identity.credentialHash) {
+          return { ok: false, details: { reason: "epoch-mismatch" } };
+        }
+      }
+      return result;
+    } finally {
+      window.activeApplications -= 1;
     }
-    if (seq === expectedSeq) {
-      const pending = window.pending.get(seq);
-      return drain(window, pending?.request ?? params.request, pending);
-    }
-    if (window.pending.has(seq)) {
-      return { ok: true, result: { ackedSeq: window.ackedSeq } };
-    }
-    const sizeBytes = Buffer.byteLength(JSON.stringify(params.request.event), "utf8");
-    if (window.pendingBytes + sizeBytes > maxPendingBytes) {
-      return resyncWindow(window);
-    }
-    window.pending.set(seq, { request: params.request, sizeBytes });
-    window.pendingBytes += sizeBytes;
-    return { ok: true, result: { ackedSeq: window.ackedSeq } };
   };
 
   const clearEnvironment = (environmentId: string): void => {

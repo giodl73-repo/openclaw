@@ -27,6 +27,14 @@ type PendingContextEngineTurn = Readonly<{
   session_id: string;
 }>;
 
+/** Persist only resolved model facts, never live capabilities or credential-bearing config. */
+export type ContextEngineTurnRuntimeContext = Readonly<{
+  provider?: string;
+  modelId?: string;
+  modelContextWindow?: number;
+  tokenBudget?: number;
+}>;
+
 type AdmittedContextEngineTurnOutboxPayload = Readonly<{
   admission: TranscriptTurnAdmission;
   isHeartbeat: boolean;
@@ -37,6 +45,7 @@ type AcceptedContextEngineTurnOutboxPayload = Readonly<{
   boundary: TranscriptTurnBoundary;
   isHeartbeat: boolean;
   state: "accepted";
+  runtimeContext?: ContextEngineTurnRuntimeContext;
 }>;
 
 type ReadyContextEngineTurnOutboxPayload = Readonly<{
@@ -44,6 +53,7 @@ type ReadyContextEngineTurnOutboxPayload = Readonly<{
   isHeartbeat: boolean;
   messages: AgentMessage[];
   state: "ready";
+  runtimeContext?: ContextEngineTurnRuntimeContext;
 }>;
 
 type ContextEngineTurnReadFailureKind = Exclude<
@@ -73,6 +83,12 @@ function outboxEnqueueSequence() {
 
 function oldestOutboxEnqueueSequence() {
   return /* kysely-allow-raw: Aggregate the closed implicit-rowid expression used for enqueue order. */ sql<number>`MIN(context_engine_turn_outbox.rowid)`;
+}
+
+function outboxPayloadRequiresAdvancement() {
+  // Blocked rows are terminal audit evidence, not retryable work. Keep them
+  // inspectable without letting them hold later same-session turns behind them.
+  return /* kysely-allow-raw: Payload state is owned by the closed outbox union above. */ sql<boolean>`json_extract(context_engine_turn_outbox.payload_json, '$.state') IS NOT 'blocked'`;
 }
 
 export function isRetryableContextEngineTurnReadFailure(
@@ -195,6 +211,7 @@ export function acceptContextEngineTurnIntent(params: {
   engineId: string;
   isHeartbeat: boolean;
   ownerPluginId?: string;
+  runtimeContext?: ContextEngineTurnRuntimeContext;
 }): void {
   writeContextEngineTurnOutboxPayload({
     ...params,
@@ -202,6 +219,7 @@ export function acceptContextEngineTurnIntent(params: {
       boundary: params.boundary,
       isHeartbeat: params.isHeartbeat,
       state: "accepted",
+      runtimeContext: params.runtimeContext,
     },
   });
 }
@@ -327,6 +345,7 @@ export function recoverContextEngineTurnOutbox(params: {
         boundary: payload.boundary,
         isHeartbeat: payload.isHeartbeat,
         messages: closedTurn.messages,
+        runtimeContext: payload.runtimeContext,
       },
     });
   }
@@ -356,7 +375,8 @@ export async function drainContextEngineTurnOutbox(params: {
     // Use it instead of wall-clock timestamps, which can collide.
     .select(oldestOutboxEnqueueSequence().as("oldest_enqueue_sequence"))
     .where("engine_id", "=", params.engineId)
-    .where("owner_plugin_id", params.ownerPluginId ? "=" : "is", params.ownerPluginId ?? null);
+    .where("owner_plugin_id", params.ownerPluginId ? "=" : "is", params.ownerPluginId ?? null)
+    .where(outboxPayloadRequiresAdvancement());
   if (params.sessionId) {
     pendingSessionsQuery = pendingSessionsQuery.where("session_id", "=", params.sessionId);
   }
@@ -382,6 +402,7 @@ export async function drainContextEngineTurnOutbox(params: {
           .where("engine_id", "=", params.engineId)
           .where("owner_plugin_id", params.ownerPluginId ? "=" : "is", params.ownerPluginId ?? null)
           .where("session_id", "=", sessionId)
+          .where(outboxPayloadRequiresAdvancement())
           .orderBy(outboxEnqueueSequence(), "asc")
           .limit(1),
       );
@@ -409,7 +430,8 @@ function hasPendingContextEngineTurn(
     .selectFrom("context_engine_turn_outbox")
     .select("advancement_key")
     .where("engine_id", "=", params.engineId)
-    .where("owner_plugin_id", params.ownerPluginId ? "=" : "is", params.ownerPluginId ?? null);
+    .where("owner_plugin_id", params.ownerPluginId ? "=" : "is", params.ownerPluginId ?? null)
+    .where(outboxPayloadRequiresAdvancement());
   if (params.sessionId) {
     query = query.where("session_id", "=", params.sessionId);
   }
@@ -442,6 +464,7 @@ async function commitPendingContextEngineTurn(
         storePath: payload.boundary.admission.storePath,
       },
       isHeartbeat: payload.isHeartbeat,
+      ...(payload.runtimeContext ? { runtimeContext: payload.runtimeContext } : {}),
     };
     const result = await params.engine.commitTurn?.(commonParams);
     if (!result) {

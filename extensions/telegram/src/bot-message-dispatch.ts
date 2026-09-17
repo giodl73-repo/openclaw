@@ -5,7 +5,6 @@ import { resolveDispatchTelegramContext } from "./bot-message-dispatch-context.j
 import {
   createDeliveryState,
   deliverFallback,
-  deliverProgressCollapseSummary,
   finalizePendingAnswerBlockDraft,
 } from "./bot-message-dispatch-delivery.js";
 import {
@@ -199,22 +198,19 @@ async function prepareTelegramSticker(params: {
   const formattedDescription = `[Sticker${stickerContext ? ` ${stickerContext}` : ""}] ${description}`;
   sticker.cachedDescription = description;
   if (!stickerSupportsVision) {
-    const isCaptionlessSticker =
-      !context.ctxPayload.RawBody?.trim() && context.ctxPayload.StickerMediaIncluded === true;
     context.ctxPayload.Body = includeStickerDescription({
       body: context.ctxPayload.Body,
       formattedDescription,
     });
-    context.ctxPayload.BodyForAgent =
-      isCaptionlessSticker && !context.ctxPayload.BodyForAgent?.trim()
-        ? formattedDescription
-        : includeStickerDescription({
-            body: context.ctxPayload.BodyForAgent,
-            formattedDescription,
-          });
+    // Reply finalization projects BodyForAgent from the canonical agent text.
+    context.ctxPayload.agentText = includeStickerDescription({
+      body: context.ctxPayload.agentText ?? context.ctxPayload.BodyForAgent,
+      formattedDescription,
+    });
+    context.ctxPayload.BodyForAgent = context.ctxPayload.agentText;
     context.ctxPayload.SkipStickerMediaUnderstanding = true;
   }
-  cacheSticker({
+  await cacheSticker({
     fileId: sticker.fileId,
     fileUniqueId: sticker.fileUniqueId,
     emoji: sticker.emoji,
@@ -289,7 +285,6 @@ export const dispatchTelegramMessage = async (
     cfg,
     runtime,
     replyToMode,
-    streamMode,
     telegramCfg,
     telegramDeps: injectedTelegramDeps,
     retryDispatchErrors = false,
@@ -319,10 +314,12 @@ export const dispatchTelegramMessage = async (
   // Draft messages are provider-visible before final modifiers run. Suppress them when a hook
   // can rewrite or cancel, or the original payload can flash before the normal delivery gate.
   const hookRunner = getGlobalHookRunner();
-  const allowProviderPreview = !(
-    (hookRunner?.hasHooks("reply_payload_sending") ?? false) ||
-    (hookRunner?.hasHooks("message_sending") ?? false)
-  );
+  const allowProviderPreview =
+    !dispatchContext.ctxPayload.GroupThread &&
+    !(
+      (hookRunner?.hasHooks("reply_payload_sending") ?? false) ||
+      (hookRunner?.hasHooks("message_sending") ?? false)
+    );
   const isDispatchSuperseded = () => turnAdoptionLifecycle?.abortSignal?.aborted === true;
   const turnConfig = {
     ...dispatchParams,
@@ -348,7 +345,6 @@ export const dispatchTelegramMessage = async (
   const progressState = createProgressState(
     turnConfig,
     draftState,
-    () => turn,
     async () => await prepareAnswerLaneForToolProgress(turn),
   );
   const deliveryState = createDeliveryState({ ...turnConfig, lanes: draftState.lanes }, () => turn);
@@ -387,6 +383,13 @@ export const dispatchTelegramMessage = async (
       }
     }
     loadFreshSessionEntry.clear();
+    // Media hydration and other pre-dispatch work can outlive the durable
+    // ingress watchdog. Never enter the reply pipeline after that owner has
+    // already fenced this attempt; the canonical spool row will retry it.
+    if (isDispatchSuperseded()) {
+      status.finalizeInBackground({ outcome: "cancelled" }, "cancelled finalize");
+      return { kind: "completed" };
+    }
     if (status.controller && !isRoomEvent) {
       void status.controller.setThinking();
     }
@@ -396,8 +399,7 @@ export const dispatchTelegramMessage = async (
       turn.dispatchError = err;
       runtime.error?.(danger(`telegram dispatch failed: ${String(err)}`));
     } finally {
-      // Terminal order: stop producers, drain queued drafts, materialize accepted text,
-      // clean previews, then collapse the progress window.
+      // Stop producers before draining drafts, finalizing accepted text, and cleaning previews.
       turn.progressCompositor.cancel();
       await waitForDraftEvents(turn);
       try {
@@ -407,15 +409,6 @@ export const dispatchTelegramMessage = async (
         runtime.error?.(danger(`telegram terminal block delivery failed: ${String(err)}`));
       }
       await cleanupDrafts(turn, isDispatchSuperseded());
-      if (
-        streamMode === "progress" &&
-        turn.sawProgressFinal &&
-        !turn.dispatchError &&
-        !turn.hadErrorReplyFailureOrSkip &&
-        !isDispatchSuperseded()
-      ) {
-        await deliverProgressCollapseSummary(turn);
-      }
     }
   } finally {
     dispatchWasSuperseded = isDispatchSuperseded();
@@ -433,28 +426,33 @@ export const dispatchTelegramMessage = async (
 
   const deliverySummary = turn.deliveryState.snapshot();
   let sentFallback = false;
+  const terminalFailure = turn.dispatchError || turn.agentRunFailed;
   const shouldSendFailureFallback =
     !isRoomEvent &&
-    !suppressFailureFallback &&
+    turn.finalReplyOutcome !== "suppressed" &&
+    !turn.sendPolicyDenied &&
+    (!suppressFailureFallback || turn.agentRunFailed) &&
     !turn.finalAnswerDelivered &&
-    (turn.dispatchError ||
+    (terminalFailure ||
       deliverySummary.failedNonSilent > 0 ||
       (deliverySummary.skippedNonSilent > 0 && !turn.suppressSilentReplyFallback));
   if (shouldSendFailureFallback) {
-    const fallbackText = turn.dispatchError
+    const fallbackText = terminalFailure
       ? "Something went wrong while processing your request. Please try again."
       : EMPTY_RESPONSE_FALLBACK;
     const result = await deliverFallback(
       turn,
       [{ text: fallbackText }],
       telegramCfg.silentErrorReplies === true &&
-        (turn.dispatchError != null || turn.hadErrorReplyFailureOrSkip),
+        Boolean(terminalFailure || turn.hadErrorReplyFailureOrSkip),
     );
     sentFallback = result.delivered;
   }
 
   if (
     !sentFallback &&
+    turn.finalReplyOutcome !== "suppressed" &&
+    !turn.sendPolicyDenied &&
     !turn.dispatchError &&
     !deliverySummary.delivered &&
     !turn.suppressSilentReplyFallback &&
@@ -472,16 +470,19 @@ export const dispatchTelegramMessage = async (
   }
 
   const hasFinalResponse =
+    turn.finalReplyOutcome === "suppressed" ||
     turn.finalAnswerDelivered ||
     sentFallback ||
     turn.suppressSilentReplyFallback ||
     turn.queuedFinal;
   const hasVisibleResponse =
+    turn.finalReplyOutcome === "suppressed" ||
     deliverySummary.delivered ||
     sentFallback ||
     turn.suppressSilentReplyFallback ||
     turn.queuedFinal;
   const deliveryFailureWithoutFinalResponse =
+    turn.finalReplyOutcome !== "suppressed" &&
     !turn.finalAnswerDelivered &&
     (deliverySummary.skippedNonSilent > 0 || deliverySummary.failedNonSilent > 0);
   const retryableDispatchFailure =
@@ -517,7 +518,9 @@ export const dispatchTelegramMessage = async (
     status.finalizeInBackground(
       {
         outcome:
-          !turn.finalAnswerDelivered && (turn.dispatchError != null || sentFallback)
+          turn.agentRunFailed ||
+          turn.dispatchError != null ||
+          (!turn.finalAnswerDelivered && sentFallback)
             ? "error"
             : "done",
       },

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationContext } from "../../app/context.ts";
 import { createRuntimeConfigCapability } from "../../lib/config/runtime-config-capability.ts";
+import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import * as avatarImage from "./avatar-image.ts";
 import { resetIdentityDraft, saveIdentityDraft, selectIdentityAvatar } from "./identity-actions.ts";
 
@@ -67,7 +68,7 @@ describe("agent identity actions", () => {
     expect(state.identityDraft.avatar).toBeNull();
   });
 
-  it("flushes a pending config draft before agents.update and refreshes afterward", async () => {
+  it("config.set flushes a pending config draft before agents.update and refreshes afterward", async () => {
     vi.useFakeTimers();
     const order: string[] = [];
     let config: Record<string, unknown> = { pending: false };
@@ -88,7 +89,7 @@ describe("agent identity actions", () => {
         order.push(method);
         config = JSON.parse((params as { raw: string }).raw) as Record<string, unknown>;
         hash = "hash-2";
-        return { hash };
+        return { config, hash };
       }
       if (method === "agents.update") {
         order.push(method);
@@ -100,7 +101,12 @@ describe("agent identity actions", () => {
     });
     const client = { request } as unknown as GatewayBrowserClient;
     const runtimeConfig = createRuntimeConfigCapability({
-      snapshot: { client, phase: "connected", sessionKey: "main" },
+      snapshot: {
+        client,
+        phase: "connected",
+        sessionKey: "main",
+        hello: gatewayHelloForMethods(["config.set"]),
+      },
       subscribe: () => () => undefined,
     });
     await runtimeConfig.ensureLoaded();

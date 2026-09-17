@@ -1,6 +1,24 @@
 import { createHash } from "node:crypto";
-import type { WorkerDesktopApp, WorkerProfile } from "../../plugins/capability-provider.types.js";
-import type { WorkerSessionPlacementRecord } from "./placement-record.js";
+import type {
+  SessionPlacementMachine,
+  SessionsReclaimParams,
+} from "../../../packages/gateway-protocol/src/index.js";
+import type { DevicePlacementRequirement } from "../../agents/harness/types.js";
+import type {
+  WorkerDesktopApp,
+  WorkerMachineOption,
+  WorkerOperatingSystem,
+  WorkerProfile,
+} from "../../plugins/capability-provider.types.js";
+import type { DesktopObserveRequester } from "../desktop/observe-requester.js";
+import type {
+  WorkerPlacementMoveSource,
+  WorkerPlacementMoveTarget,
+} from "./placement-move-intent.js";
+import type {
+  WorkerSessionPlacementRecord,
+  WorkerPlacementExecutionMode,
+} from "./placement-record.js";
 import type { WorkerEnvironmentState } from "./state.js";
 import type {
   WorkerTunnelHandle,
@@ -23,7 +41,10 @@ export function deriveEnvironmentIntent(idempotencyKey: string): {
 export type WorkerEnvironmentServiceRecord = {
   environmentId: string;
   providerId: string;
+  profileId: string;
   leaseId: string | null;
+  nodeDeviceId?: string | null;
+  sharedHost: boolean | null;
   state: WorkerEnvironmentState;
   ownerEpoch: number;
   createdAtMs: number;
@@ -32,6 +53,7 @@ export type WorkerEnvironmentServiceRecord = {
   desktopAvailable: boolean;
   desktopApps: readonly WorkerDesktopApp["id"][];
   tunnelStatus: WorkerTunnelStatus;
+  preparation?: { purpose: "reserve" | "build"; key: string } | null;
   error?: string;
 };
 
@@ -40,6 +62,8 @@ export type WorkerDesktopObserveResult = {
   wsPath: string;
   expiresAtMs: number;
   control: boolean;
+  /** Provider permission to request resizing, not negotiated RFB support. */
+  canResize?: boolean;
   vncPassword?: string;
 };
 
@@ -52,12 +76,32 @@ export type WorkerDesktopLaunchResult = {
 export type WorkerEnvironmentServiceContract = {
   list(): WorkerEnvironmentServiceRecord[];
   get(environmentId: string): WorkerEnvironmentServiceRecord | undefined;
-  create(profileId: string, idempotencyKey: string): Promise<WorkerEnvironmentServiceRecord>;
+  inventoryVersion(): number;
+  readMachineShape(environmentId: string): SessionPlacementMachine | undefined;
+  machineShapeVersion(): number;
+  supportsExecutionMode(profileId: string, mode: WorkerPlacementExecutionMode): boolean;
+  listMachineOptions(profileId: string): Promise<readonly WorkerMachineOption[] | undefined>;
+  listOperatingSystems(profileId: string): Promise<readonly WorkerOperatingSystem[] | undefined>;
+  prepare(
+    request: { profileId: string; projectPath: string },
+    authorize?: () => void,
+  ): Promise<{ environmentId: string; preparationKey: string; reused: boolean }>;
+  create(
+    profileId: string,
+    idempotencyKey: string,
+    machineClass?: string,
+    executionMode?: WorkerPlacementExecutionMode,
+    projectPath?: string,
+    signal?: AbortSignal,
+    os?: string,
+    runSetupScript?: boolean,
+  ): Promise<WorkerEnvironmentServiceRecord>;
   destroy(environmentId: string): Promise<WorkerEnvironmentServiceRecord>;
   destroyUnattached(environmentId: string): Promise<WorkerEnvironmentServiceRecord>;
   observeDesktop(request: {
     environmentId: string;
     control: boolean;
+    requester?: DesktopObserveRequester;
   }): Promise<WorkerDesktopObserveResult>;
   launchDesktopApp(request: {
     environmentId: string;
@@ -72,27 +116,91 @@ export type WorkerPlacementDispatchRequest = {
   sessionKey: string;
   agentId: string;
   profileId: string;
+  executionMode: WorkerPlacementExecutionMode;
+  /** Current dispatch caller's setup authority; never inherited by a new caller. */
+  runSetupScript?: boolean;
+  devicePlacement?: DevicePlacementRequirement;
+  idempotencyKey?: string;
+  deviceId?: string;
+  machineClass?: string;
+  os?: string;
   inheritedProfile?: {
     providerId: string;
     profileSnapshot: WorkerProfile;
   };
 };
 
+export type WorkerPlacementDispatchAdmission = <T>(
+  request: Pick<WorkerPlacementDispatchRequest, "sessionId" | "sessionKey" | "agentId">,
+  run: (signal?: AbortSignal) => Promise<T>,
+  authorize?: () => void,
+  signal?: AbortSignal,
+) => Promise<T>;
+
+/** Canonical admission rejected the session owner, not a caller or process cancellation. */
+export class WorkerPlacementAdmissionTargetError extends Error {
+  readonly code = "invalid_state";
+}
+
+export type WorkerPlacementMoveDestination = Pick<
+  WorkerPlacementDispatchRequest,
+  | "profileId"
+  | "executionMode"
+  | "devicePlacement"
+  | "deviceId"
+  | "machineClass"
+  | "os"
+  | "inheritedProfile"
+>;
+
 export type WorkerPlacementReclaimRequest = {
   sessionId: string;
   sessionKey: string;
   agentId: string;
+  recoverToGateway?: SessionsReclaimParams["recoverToGateway"];
 };
+
+export type WorkerPlacementMoveRequest = Pick<
+  WorkerPlacementReclaimRequest,
+  "sessionId" | "sessionKey" | "agentId"
+> & {
+  source: WorkerPlacementMoveSource;
+  target: WorkerPlacementMoveTarget;
+  abandonSource?: true;
+};
+
+/** Closure-bound request authority; in-process only and never part of durable placement intent. */
+export type WorkerPlacementAuthorization = () => void;
+
+export type WorkerPlacementCancellationTarget = Readonly<
+  Pick<WorkerSessionPlacementRecord, "state" | "generation" | "environmentId" | "activeOwnerEpoch">
+>;
+
+/** Exact source eligibility may follow only transitions published by captured predecessors. */
+export type WorkerPlacementReclaimSourceCheck = (
+  predecessor?: WorkerPlacementCancellationTarget,
+) => void;
 
 // Leaf dispatch contract: GatewayRequestContext must not import the dispatch
 // runtime (it reaches agents/plugins and closes an import cycle through core).
 export type WorkerPlacementDispatchContract = {
+  getPendingDeviceDispatchCount?(deviceId: string, excludeSessionId?: string): number;
+  getAdmittedDeviceSessionCounts?(excludeSessionId?: string): ReadonlyMap<string, number>;
   dispatch(
     request: WorkerPlacementDispatchRequest,
+    onTransition?: (placement: WorkerSessionPlacementRecord) => void,
+    authorize?: WorkerPlacementAuthorization,
   ): Promise<Extract<WorkerSessionPlacementRecord, { state: "active" }>>;
+  move?(
+    request: WorkerPlacementMoveRequest,
+    onTransition?: (placement: WorkerSessionPlacementRecord) => void,
+    authorize?: WorkerPlacementAuthorization,
+  ): Promise<Extract<WorkerSessionPlacementRecord, { state: "local" | "active" }>>;
   reclaim?(
     request: WorkerPlacementReclaimRequest,
-  ): Promise<Extract<WorkerSessionPlacementRecord, { state: "reclaimed" }>>;
+    authorize?: WorkerPlacementAuthorization,
+    beforeDrain?: WorkerPlacementReclaimSourceCheck,
+  ): Promise<Extract<WorkerSessionPlacementRecord, { state: "local" | "reclaimed" }>>;
   forceDestroyEnvironment?(
     environmentId: string,
     onCleanupError?: (error: unknown) => void,

@@ -7,7 +7,7 @@ import {
   getGlobalHookRunner,
   getRuntimeConfig,
   hasInProcessGatewayContext,
-  loadPreparedModelCatalog,
+  prepareModelChoice,
   resolveContextEngine,
 } from "./subagent-spawn.runtime.js";
 
@@ -19,7 +19,7 @@ type SubagentSpawnDeps = {
   getRuntimeConfig: typeof getRuntimeConfig;
   hasInProcessGatewayContext: typeof hasInProcessGatewayContext;
   ensureContextEnginesInitialized: typeof ensureContextEnginesInitialized;
-  loadPreparedModelCatalog: typeof loadPreparedModelCatalog;
+  prepareModelChoice: typeof prepareModelChoice;
   resolveContextEngine: typeof resolveContextEngine;
 };
 
@@ -31,7 +31,7 @@ const defaultSubagentSpawnDeps: SubagentSpawnDeps = {
   getRuntimeConfig,
   hasInProcessGatewayContext,
   ensureContextEnginesInitialized,
-  loadPreparedModelCatalog,
+  prepareModelChoice,
   resolveContextEngine,
 };
 
