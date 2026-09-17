@@ -100,16 +100,21 @@ jobs:
           persist-credentials: false
 
       - name: Setup locked Node environment
-        uses: pnpm/action-setup@v4
+        uses: ./.github/actions/setup-node-env
         with:
-          run_install: false
+          node-version: 24.19.0
+          install-bun: "true"
+          install-deps: "true"
+          frozen-lockfile: "true"
+          cache-mode: "off"
 
-      - name: Install and build exact source
+      - name: Build exact source
         shell: pwsh
+        env:
+          OPENCLAW_CONTROL_UI_RELEASE_BUILD: "1"
         run: |
           node --version
           pnpm --version
-          pnpm install --frozen-lockfile
           pnpm build
 
       - name: Create sealed Windows runtime
