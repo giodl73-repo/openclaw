@@ -87,3 +87,53 @@ jobs:
           path: runtime-package
           if-no-files-found: error
           retention-days: 1
+
+  build-exact-windows-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact Responses-fix source
+        uses: actions/checkout@v6
+        with:
+          ref: 0a8d8b616033fc88c61263fb5130dfe9ca8799bb
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup locked Node environment
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install and build exact source
+        shell: pwsh
+        run: |
+          node --version
+          pnpm --version
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Create sealed Windows runtime
+        shell: pwsh
+        run: |
+          pnpm --filter openclaw deploy --prod --node-linker=hoisted runtime-deploy
+          node runtime-deploy/openclaw.mjs --version
+          New-Item -ItemType Directory -Path runtime-package | Out-Null
+          Compress-Archive -Path runtime-deploy/* -DestinationPath runtime-package/openclaw-0a8d8b6-windows-runtime.zip
+          Get-FileHash runtime-package/openclaw-0a8d8b6-windows-runtime.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  openclaw-0a8d8b6-windows-runtime.zip" } |
+            Set-Content -Encoding ascii runtime-package/SHA256SUMS
+          @(
+            "source=0a8d8b616033fc88c61263fb5130dfe9ca8799bb"
+            "node=$(node --version)"
+            "pnpm=$(pnpm --version)"
+            "platform=windows-latest"
+            "deployment=pnpm-deploy-prod-hoisted"
+          ) | Set-Content -Encoding ascii runtime-package/BUILD-IDENTITY.txt
+
+      - name: Upload sealed Windows runtime
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-0a8d8b6-windows-runtime
+          path: runtime-package
+          if-no-files-found: error
+          retention-days: 1
