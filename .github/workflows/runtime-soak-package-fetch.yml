@@ -35,3 +35,45 @@ jobs:
           path: openclaw-2026.9.4.tgz
           if-no-files-found: error
           retention-days: 1
+
+  build-exact-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact Responses-fix source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 0a8d8b616033fc88c61263fb5130dfe9ca8799bb
+          persist-credentials: false
+      - name: Setup locked Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: 24.19.0
+          install-bun: "true"
+          install-deps: "true"
+          frozen-lockfile: "true"
+          cache-mode: "off"
+      - name: Build exact source
+        env:
+          OPENCLAW_CONTROL_UI_RELEASE_BUILD: "1"
+        run: pnpm build
+      - name: Pack exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-package
+          npm pack --ignore-scripts --pack-destination runtime-package
+          test "$(find runtime-package -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+          sha256sum runtime-package/*.tgz | tee runtime-package/SHA256SUMS
+          printf '%s\n' \
+            'source=0a8d8b616033fc88c61263fb5130dfe9ca8799bb' \
+            'node=24.19.0' \
+            'packageManager=pnpm@12.3.4' \
+            > runtime-package/BUILD-IDENTITY.txt
+      - name: Upload exact source package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-0a8d8b6-source-package
+          path: runtime-package
+          if-no-files-found: error
+          retention-days: 1
