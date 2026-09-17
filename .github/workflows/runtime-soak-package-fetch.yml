@@ -61,9 +61,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p runtime-package
-          npm pack --ignore-scripts --pack-destination runtime-package
-          test "$(find runtime-package -maxdepth 1 -name '*.tgz' | wc -l)" -eq 1
+          output="$PWD/runtime-package"
+          mkdir -p "$output"
+          export OPENCLAW_PREPACK_PREPARED=1
+          pnpm --dir packages/ai pack --pack-destination "$output"
+          pnpm --dir packages/session-url-contract pack --pack-destination "$output"
+          pnpm --dir . pack --pack-destination "$output"
+          test "$(find runtime-package -maxdepth 1 -name '*.tgz' | wc -l)" -eq 3
+          for package in runtime-package/*.tgz; do
+            if tar -xOf "$package" package/package.json | grep -q 'workspace:'; then
+              echo "Unresolved workspace dependency in $package" >&2
+              exit 1
+            fi
+          done
           sha256sum runtime-package/*.tgz | tee runtime-package/SHA256SUMS
           printf '%s\n' \
             'source=0a8d8b616033fc88c61263fb5130dfe9ca8799bb' \
