@@ -1,12 +1,17 @@
-const DEFAULT_DEBOUNCE_MS = 200;
-const DEFAULT_MAX_WAIT_MS = 1_000;
+const DEFAULT_DEBOUNCE_MS = 5_000;
+const DEFAULT_MAX_WAIT_MS = 5_000;
+const DEFAULT_MIN_COOLDOWN_MS = 5_000;
+const DEFAULT_JITTER_RATIO = 0.2;
 
 export type SessionEventRefreshCoordinatorOptions = Readonly<{
   active: boolean;
-  refresh: () => Promise<void>;
+  refresh: (isCurrent: () => boolean) => Promise<void>;
   debounceMs?: number;
   maxWaitMs?: number;
+  minCooldownMs?: number;
+  jitterRatio?: number;
   now?: () => number;
+  random?: () => number;
 }>;
 
 /**
@@ -18,14 +23,18 @@ export function createSessionEventRefreshCoordinator({
   refresh,
   debounceMs = DEFAULT_DEBOUNCE_MS,
   maxWaitMs = DEFAULT_MAX_WAIT_MS,
+  minCooldownMs = DEFAULT_MIN_COOLDOWN_MS,
+  jitterRatio = DEFAULT_JITTER_RATIO,
   now = Date.now,
+  random = Math.random,
 }: SessionEventRefreshCoordinatorOptions) {
   let active = initialActive;
   let timer: ReturnType<typeof globalThis.setTimeout> | null = null;
-  let deadline: number | null = null;
-  let inFlight: Promise<void> | null = null;
+  let nextAllowed = 0;
+  let pending: object | null = null;
   let queued = false;
-  let trailing = false;
+  let retryAt: number | null = null;
+  let fallback: ReturnType<typeof globalThis.setTimeout> | null = null;
   let generation = 0;
   let disposed = false;
 
@@ -34,61 +43,102 @@ export function createSessionEventRefreshCoordinator({
       globalThis.clearTimeout(timer);
       timer = null;
     }
-    deadline = null;
+  };
+
+  const clearFallback = () => {
+    if (fallback !== null) {
+      globalThis.clearTimeout(fallback);
+      fallback = null;
+    }
   };
 
   const start = () => {
     clearTimer();
-    if (disposed) {
-      return;
-    }
-    if (!active) {
-      queued = true;
-      return;
-    }
-    if (inFlight) {
-      trailing = true;
+    if (disposed || !active || pending || !queued) {
       return;
     }
     queued = false;
-    const operationGeneration = generation;
-    const operation = refresh().catch(() => undefined);
-    const pending = operation.finally(() => {
-      if (generation !== operationGeneration || inFlight !== pending) {
-        return;
-      }
-      inFlight = null;
-      if (trailing) {
-        trailing = false;
-        start();
-      }
-    });
-    inFlight = pending;
+    retryAt = null;
+    const request = {};
+    pending = request;
+    const started = now();
+    const requestGeneration = generation;
+    let operation: Promise<void>;
+    try {
+      operation = refresh(() => pending === request && requestGeneration === generation);
+    } catch {
+      operation = Promise.resolve();
+    }
+    void operation
+      .catch(() => undefined)
+      .finally(() => {
+        if (pending !== request) {
+          return;
+        }
+        pending = null;
+        const completed = now();
+        nextAllowed =
+          completed + Math.min(15_000, Math.max(minCooldownMs, 3 * (completed - started)));
+        arm();
+      });
+  };
+
+  const arm = (debounce = true) => {
+    if (disposed || !active || pending || !queued || timer !== null) {
+      return;
+    }
+    const currentTime = now();
+    const draw = Math.min(1, Math.max(0, random()));
+    const collectionDelay = debounce
+      ? Math.min(maxWaitMs, debounceMs * (1 - jitterRatio * draw))
+      : 0;
+    const delay =
+      retryAt === null
+        ? Math.max(collectionDelay, nextAllowed - currentTime)
+        : Math.max(0, retryAt - currentTime);
+    timer = globalThis.setTimeout(start, delay);
   };
 
   const absorb = () => {
+    generation += 1;
+    clearFallback();
     clearTimer();
     queued = false;
-    trailing = false;
+    retryAt = null;
+  };
+
+  const reset = () => {
+    absorb();
+    pending = null;
+    nextAllowed = 0;
   };
 
   return {
+    scheduleFallback() {
+      if (disposed || fallback !== null) {
+        return;
+      }
+      fallback = globalThis.setTimeout(() => {
+        fallback = null;
+        queued = true;
+        arm();
+      }, 60_000);
+    },
+    scheduleRetry(delayMs: number) {
+      if (disposed) {
+        return;
+      }
+      retryAt = now() + delayMs;
+      queued = true;
+      clearTimer();
+      arm(false);
+    },
     schedule() {
       if (disposed) {
         return;
       }
-      if (!active) {
-        clearTimer();
-        queued = true;
-        return;
-      }
-      const currentTime = now();
-      deadline ??= currentTime + maxWaitMs;
-      if (timer !== null) {
-        globalThis.clearTimeout(timer);
-      }
-      const delay = Math.min(debounceMs, Math.max(0, deadline - currentTime));
-      timer = globalThis.setTimeout(start, delay);
+      queued = true;
+      arm();
     },
     flush() {
       if (timer === null) {
@@ -99,25 +149,16 @@ export function createSessionEventRefreshCoordinator({
     setActive(next: boolean, markDirty = false) {
       active = next;
       if (next) {
-        if (queued) {
-          start();
-        }
+        arm(false);
         return;
       }
-      queued ||= markDirty || timer !== null || inFlight !== null;
-      trailing = false;
+      queued ||= markDirty || timer !== null;
       clearTimer();
     },
     absorb,
-    reset() {
-      absorb();
-      inFlight = null;
-      generation += 1;
-    },
+    reset,
     dispose() {
-      absorb();
-      inFlight = null;
-      generation += 1;
+      reset();
       disposed = true;
     },
   };

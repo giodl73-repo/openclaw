@@ -1,4 +1,5 @@
 import type { SessionRow } from "@openclaw/gateway-protocol";
+import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { createSessionEventRefreshCoordinator } from "./session-event-refresh.js";
 
 export type DeepReadonly<T> = T extends (...args: infer _Args) => infer _Result
@@ -109,8 +110,7 @@ function normalizeBound(value: number | undefined, fallback: number): number {
 }
 
 function normalizeError(error: unknown): ControlModelError {
-  const record =
-    error !== null && typeof error === "object" ? (error as Record<string, unknown>) : undefined;
+  const record = asNullableRecord(error);
   const message =
     error instanceof Error
       ? error.message
@@ -134,6 +134,7 @@ function cloneAndFreeze<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   }
   const existing = seen.get(value);
   if (existing !== undefined) {
+    // SAFETY: the map stores only clones created for this exact input object.
     return existing as T;
   }
   if (Array.isArray(value)) {
@@ -142,6 +143,7 @@ function cloneAndFreeze<T>(value: T, seen = new WeakMap<object, unknown>()): T {
     for (const item of value) {
       clone.push(cloneAndFreeze(item, seen));
     }
+    // SAFETY: recursion preserves every array element's runtime shape.
     return Object.freeze(clone) as T;
   }
   const clone: Record<string, unknown> = {};
@@ -149,6 +151,7 @@ function cloneAndFreeze<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   for (const [key, item] of Object.entries(value)) {
     clone[key] = cloneAndFreeze(item, seen);
   }
+  // SAFETY: recursion preserves every enumerable property and its runtime shape.
   return Object.freeze(clone) as T;
 }
 
@@ -203,6 +206,10 @@ class ControlModelImpl implements ControlModel {
       active:
         this.#snapshot.lifecycle === "running" &&
         this.#gateway.getConnectionSnapshot().status === "connected",
+      debounceMs: 200,
+      maxWaitMs: 1_000,
+      minCooldownMs: 1_000,
+      jitterRatio: 0,
       refresh: async () => {
         try {
           await this.refreshSessions();
@@ -451,7 +458,7 @@ class ControlModelImpl implements ControlModel {
         return;
       }
       for (const subscriber of Array.from(this.#subscribers)) {
-        if (this.#snapshot.lifecycle === "disposed") {
+        if (this.getSnapshot().lifecycle === "disposed") {
           break;
         }
         try {

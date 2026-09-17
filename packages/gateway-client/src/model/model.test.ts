@@ -59,7 +59,14 @@ function createGatewayHarness(
       return () => connectionListeners.delete(listener);
     },
     subscribeSessionCatalogInvalidations: subscribeInvalidations,
-    request,
+    request<T>(
+      method: string,
+      params: Record<string, unknown>,
+      options?: ControlModelRequestOptions,
+    ) {
+      // SAFETY: this harness only services the session catalog's session.list request.
+      return request(method, params, options) as Promise<T>;
+    },
   };
   return {
     gateway,
@@ -150,7 +157,7 @@ describe("Control Model session catalog", () => {
 
     harness.emitInvalidation();
     harness.emitInvalidation();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(1_000);
     harness.setConnection({ status: "reconnecting", epoch: 2 });
     harness.setConnection({ status: "connected", epoch: 2 });
     harness.requests[0]?.resolve({
@@ -204,7 +211,7 @@ describe("Control Model session catalog", () => {
     });
 
     harness.emitInvalidation();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(1_000);
     harness.requests[1]?.resolve({
       sessions: [
         { key: "agent:main:one", kind: "direct", label: "Updated" },
@@ -216,7 +223,7 @@ describe("Control Model session catalog", () => {
     });
 
     harness.emitInvalidation();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(1_000);
     harness.requests[2]?.resolve({
       sessions: [{ key: "agent:main:two", kind: "direct" }],
     });
@@ -239,6 +246,7 @@ describe("Control Model session catalog", () => {
     harness.emitInvalidation();
     await vi.advanceTimersByTimeAsync(200);
     harness.requests[0]?.reject(new Error("first refresh failed"));
+    await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
       expect(harness.requests).toHaveLength(2);
     });

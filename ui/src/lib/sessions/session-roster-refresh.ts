@@ -1,5 +1,5 @@
-import { createDeferredCore } from "../../../../src/shared/deferred.js";
 import { createSessionEventRefreshCoordinator } from "@openclaw/gateway-client/model";
+import { createDeferredCore } from "../../../../src/shared/deferred.js";
 import type { GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
 import { formatUiError } from "../format-error.ts";
 import {
