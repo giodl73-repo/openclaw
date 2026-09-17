@@ -9436,6 +9436,24 @@ public struct NodeHostStatsPayload: Codable, Sendable {
     }
 }
 
+public struct NodeInvokeCancelEvent: Codable, Sendable {
+    public let invokeid: String
+    public let nodeid: String
+
+    public init(
+        invokeid: String,
+        nodeid: String)
+    {
+        self.invokeid = invokeid
+        self.nodeid = nodeid
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case invokeid = "invokeId"
+        case nodeid = "nodeId"
+    }
+}
+
 public struct NodeInvokeInputEvent: Codable, Sendable {
     public let id: String
     public let nodeid: String
