@@ -483,7 +483,9 @@ export function createSessionCapability(
       roster.reset();
       sessionEventSubscription.reset();
       sessionEventSubscriptionError = null;
-      retireOperationConnection(previousClient);
+      // A same-client reconnect keeps its live observers refcounted; only a
+      // replacement client retires the previous connection's leases.
+      retireOperationConnection(connected && previousClient === next.client ? null : previousClient);
       groups.invalidate();
       swarmActivity.clear();
       mutations.retireConnection();
