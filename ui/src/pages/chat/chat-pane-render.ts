@@ -30,6 +30,7 @@ import {
   resolveUiConfiguredMainKey,
 } from "../../lib/sessions/session-key.ts";
 import { showToast } from "../../lib/toast.ts";
+import { controlModelAgentIdForRoute } from "./chat-control-model.ts";
 import { controlModelChatInteractions } from "./chat-control-model-interactions.ts";
 import { mutateChatGoal, submitChatGoalDraft } from "./chat-goals.ts";
 import { clearChatHistory } from "./chat-history-actions.ts";
@@ -367,7 +368,11 @@ export class ChatPane extends ChatPaneLayoutRender {
     const mentionsUnsupported = Boolean(
       catalogKey || suggestionViewer || selectedSession?.incognito || !selfProfileId,
     );
-    const controlModelInteractions = controlModelChatInteractions(state, state.sessionKey);
+    const controlModelInteractions = controlModelChatInteractions(
+      state,
+      state.sessionKey,
+      controlModelAgentIdForRoute(state, state.sessionKey),
+    );
     const props: ChatProps = {
       transcript: this.transcript,
       paneId: this.presentationId,

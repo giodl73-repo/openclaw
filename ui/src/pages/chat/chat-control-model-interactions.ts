@@ -51,32 +51,21 @@ export function controlModelQuestionPromptCommand(
   };
 }
 
-export function controlModelRouteAgentId(
-  state: ChatControlModelConversationState,
-  sessionKey: string,
-): string | undefined {
-  return state.controlModelConversationSessionKey === sessionKey
-    ? (state.controlModelConversationAgentId ?? undefined)
-    : undefined;
-}
-
 /**
  * Adapter for the selected route's model conversation. The chat question action
  * owner keeps its lifecycle; this only supplies the optional model command and
- * the projected artifacts for the transcript.
+ * the projected artifacts for the transcript. The caller passes the currently
+ * selected agent so a stale conversation cannot answer a newer route.
  */
 export function controlModelChatInteractions(
   state: ChatControlModelConversationState,
   sessionKey: string,
+  agentId?: string,
 ): {
   controlModelArtifacts?: ControlModelConversationSnapshot["artifacts"];
   questionCommand: (id: string, action: "answer" | "cancel") => QuestionPromptCommand | undefined;
 } {
-  const conversation = selectedControlModelConversationForRoute(
-    state,
-    sessionKey,
-    controlModelRouteAgentId(state, sessionKey),
-  );
+  const conversation = selectedControlModelConversationForRoute(state, sessionKey, agentId);
   return {
     controlModelArtifacts: conversation?.getSnapshot().artifacts,
     questionCommand: (id, action) => controlModelQuestionPromptCommand(conversation, id, action),

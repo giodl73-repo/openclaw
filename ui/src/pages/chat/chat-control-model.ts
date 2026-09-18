@@ -1,4 +1,22 @@
 import type { ControlModelConversation } from "@openclaw/gateway-client/model";
+import {
+  isUiSelectedGlobalSessionKey,
+  resolveUiSelectedSessionAgentId,
+  type UiSessionDefaultsHost,
+} from "../../lib/sessions/session-key.ts";
+
+/**
+ * Agent identity the conversation owner records for a route: only globally
+ * scoped keys carry one, so a derived agent id cannot fence a direct session.
+ */
+export function controlModelAgentIdForRoute(
+  state: Pick<UiSessionDefaultsHost, "assistantAgentId" | "agentsList" | "hello">,
+  sessionKey: string,
+): string | undefined {
+  return isUiSelectedGlobalSessionKey(state, sessionKey)
+    ? resolveUiSelectedSessionAgentId(state, sessionKey)
+    : undefined;
+}
 
 /**
  * Route-fenced read of the conversation owned by `chat-history-control-model.ts`.

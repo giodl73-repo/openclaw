@@ -2,8 +2,8 @@
 import { DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS } from "@openclaw/gateway-client/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  controlModelChatInteractions,
   controlModelQuestionPromptCommand,
-  controlModelRouteAgentId,
 } from "./chat-control-model-interactions.ts";
 
 afterEach(() => vi.restoreAllMocks());
@@ -15,6 +15,7 @@ function conversation(status = "pending") {
     answerQuestion,
     cancelQuestion,
     getSnapshot: () => ({
+      artifacts: [{ id: "artifact-one" }],
       questions: [{ id: "question-1", status }],
       commandAvailability: {
         send: true,
@@ -75,33 +76,19 @@ describe("controlModelQuestionPromptCommand", () => {
     ).toBeUndefined();
   });
 
-  it("reuses the exact agent identity recorded for the selected conversation route", () => {
+  it("does not expose the previous global agent conversation after agent selection changes", () => {
+    const selected = conversation();
+    const state = {
+      controlModelConversation: selected,
+      controlModelConversationSessionKey: "global",
+      controlModelConversationAgentId: "main",
+    } as never;
+
     expect(
-      controlModelRouteAgentId(
-        {
-          controlModelConversationSessionKey: "agent:main:one",
-          controlModelConversationAgentId: null,
-        },
-        "agent:main:one",
-      ),
+      controlModelChatInteractions(state, "global", "work").controlModelArtifacts,
     ).toBeUndefined();
     expect(
-      controlModelRouteAgentId(
-        {
-          controlModelConversationSessionKey: "agent:work:main",
-          controlModelConversationAgentId: "work",
-        },
-        "agent:work:main",
-      ),
-    ).toBe("work");
-    expect(
-      controlModelRouteAgentId(
-        {
-          controlModelConversationSessionKey: "global",
-          controlModelConversationAgentId: "main",
-        },
-        "global",
-      ),
-    ).toBe("main");
+      controlModelChatInteractions(state, "global", "main").controlModelArtifacts,
+    ).toEqual([{ id: "artifact-one" }]);
   });
 });

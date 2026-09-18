@@ -772,6 +772,74 @@ describe("canonical history snapshot projection", () => {
     expect(state.currentSessionId).toBe("session-one");
   });
 
+  it("filters hidden transcript rows from Control Model history", async () => {
+    const hidden = message("assistant", "NO_REPLY", { id: "hidden-reply", seq: 1 });
+    const visible = message("assistant", "visible reply", { id: "visible-reply", seq: 2 });
+    const state = createState({ messages: [] });
+    const snapshot = {
+      sessionKey: "main",
+      status: "ready",
+      revision: 1,
+      historyRevision: 1,
+      connection: { status: "connected", epoch: 1 },
+      history: {
+        status: "ready",
+        hasMore: false,
+        nextOffset: null,
+        totalMessages: 2,
+        completeSnapshot: true,
+        window: "newest",
+        truncatedBefore: false,
+        truncatedAfter: false,
+        revision: 1,
+        error: null,
+      },
+      metadata: { sessionId: "session-one", sessionInfo: { key: "main", kind: "direct" } },
+      messages: [
+        { key: "hidden-reply", role: "assistant", sequence: 1, raw: hidden },
+        { key: "visible-reply", role: "assistant", sequence: 2, raw: visible },
+      ],
+      runs: [],
+      activeRun: null,
+      tools: [],
+      artifacts: [],
+      approvals: [],
+      questions: [],
+      partialReasons: [],
+      stale: false,
+      hasTransportGap: false,
+      commandAvailability: {
+        send: true,
+        abort: false,
+        resolveApproval: false,
+        answerQuestion: false,
+        cancelQuestion: false,
+        materializeView: false,
+      },
+      bounds: {
+        messagesTruncated: false,
+        runsTruncated: false,
+        toolsTruncated: false,
+        approvalsTruncated: false,
+        questionsTruncated: false,
+        artifactsTruncated: false,
+      },
+    } as unknown as ControlModelConversationSnapshot;
+    const conversation = {
+      getSnapshot: () => snapshot,
+      refreshHistory: vi.fn(async () => undefined),
+      loadMoreHistory: vi.fn(async () => undefined),
+    };
+    state.controlModel = {
+      conversation: vi.fn(() => conversation),
+      releaseConversation: vi.fn(async () => undefined),
+    } as unknown as ControlModel;
+
+    await loadChatHistory(state);
+
+    expect(state.chatMessages).toEqual([visible]);
+  });
+
   function message(role: "assistant" | "user", text: string, metadata?: Record<string, unknown>) {
     return {
       role,

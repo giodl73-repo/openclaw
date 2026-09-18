@@ -47,7 +47,11 @@ import {
   createSessionPrimaryWindows,
   subscribeManagedSessionList,
 } from "./session-primary-windows.ts";
-import { normalizeManagedSessionListQuery, requestSessionList } from "./session-requests.ts";
+import {
+  DEFAULT_SESSION_LIST_QUERY,
+  normalizeManagedSessionListQuery,
+  requestSessionList,
+} from "./session-requests.ts";
 import { createSessionRosterListReader } from "./session-roster-list-reader.ts";
 import { createSessionMutationRefresh } from "./session-roster-mutation-refresh.ts";
 import { createSessionRosterObservations } from "./session-roster-observations.ts";
@@ -73,6 +77,9 @@ type ControlModelListRead =
   | { status: "ready"; result: SessionsListResult }
   | { status: "unavailable" }
   | { status: "failed"; error: unknown };
+
+/** Upper bound the Control Model session catalog answers in one page read. */
+const CONTROL_MODEL_MAX_SESSION_PAGE_SIZE = 1_000;
 
 export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
   let gatewayAvailable = isGatewayAvailable(host.snapshot());
@@ -248,15 +255,16 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
   );
 
   /** The Gateway-owned catalog answers the primary active roster; archived views,
-   * filters the catalog query cannot express, and every adoption failure keep the
-   * raw `sessions.list` path. */
+   * filters the catalog query cannot express, reads larger than the model's page
+   * bound, and every adoption failure keep the raw `sessions.list` path. */
   const controlModelOwnsQuery = (options: SessionRefreshOptions) =>
     Boolean(controlModel || host.controlModelLoader) &&
     (!options.archivedFilter || options.archivedFilter === "active") &&
     options.ownerId === undefined &&
     options.ownerFirst === undefined &&
     options.involvingMe === undefined &&
-    options.hasBoard === undefined;
+    options.hasBoard === undefined &&
+    (options.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) <= CONTROL_MODEL_MAX_SESSION_PAGE_SIZE;
 
   const readControlModelList = async (
     options: SessionRefreshOptions,
