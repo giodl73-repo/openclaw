@@ -72,7 +72,11 @@ function controlModelConversationForState(state: ChatState): ControlModelConvers
     state.controlModelConversationSessionKey === state.sessionKey &&
     (state.controlModelConversationAgentId ?? null) === (agentId ?? null)
   ) {
-    return state.controlModelConversation;
+    // Reacquire from the owner: an evicted or recovered route hands back a live
+    // conversation, and the cached handle alone can be a retired instance.
+    const current = model.conversation(state.sessionKey, agentId ? { agentId } : {});
+    state.controlModelConversation = current;
+    return current;
   }
   releaseChatControlModelConversation(state);
   const conversation = model.conversation(state.sessionKey, agentId ? { agentId } : {});

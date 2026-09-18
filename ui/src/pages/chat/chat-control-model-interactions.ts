@@ -4,6 +4,8 @@ import type {
   ControlModelRequestOptions,
 } from "@openclaw/gateway-client/model";
 import type { QuestionPromptCommand } from "../../app/question-prompt-command.ts";
+import type { QuestionPrompt } from "../../app/question-prompt.ts";
+import { areUiSessionKeysEquivalent } from "../../lib/sessions/session-key.ts";
 import {
   selectedControlModelConversationForRoute,
   type ChatControlModelConversationState,
@@ -49,6 +51,26 @@ export function controlModelQuestionPromptCommand(
       ? conversation.answerQuestion(id, request.answers?.answers ?? {}, { timeoutMs })
       : conversation.cancelQuestion(id, { timeoutMs });
   };
+}
+
+/**
+ * Shared global question state carries every agent's prompts; the selected
+ * route only renders its own, plus legacy rows with no recorded agent.
+ */
+export function questionPromptsForRoute(
+  prompts: readonly QuestionPrompt[],
+  sessionKey: string,
+  agentId?: string,
+): QuestionPrompt[] {
+  const normalizedAgentId = agentId?.trim().toLowerCase();
+  return prompts.filter(
+    (prompt) =>
+      prompt.sessionKey !== undefined &&
+      areUiSessionKeysEquivalent(prompt.sessionKey, sessionKey) &&
+      (!normalizedAgentId ||
+        !prompt.agentId ||
+        prompt.agentId.trim().toLowerCase() === normalizedAgentId),
+  );
 }
 
 /**

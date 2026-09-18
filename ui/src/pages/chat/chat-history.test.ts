@@ -763,7 +763,7 @@ describe("canonical history snapshot projection", () => {
     releaseSecondRefresh();
     await Promise.all([explicit, concurrent]);
 
-    expect(model.conversation).toHaveBeenCalledOnce();
+    expect(model.conversation).toHaveBeenCalledTimes(2);
     expect(refreshHistory).toHaveBeenCalledTimes(2);
     expect(request).not.toHaveBeenCalledWith("chat.history", expect.anything(), expect.anything());
     expect(state.chatMessages).toEqual([
