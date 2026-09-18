@@ -33,12 +33,16 @@ export function selectedControlModelConversationForRoute(
   sessionKey: string,
   agentId?: string,
 ): ControlModelConversation | null {
+  const conversation = state.controlModelConversation;
   if (
-    !state.controlModelConversation ||
+    !conversation ||
+    // Bounds eviction and model disposal retire a handle the pane still caches;
+    // commands fall back to the Gateway instead of addressing a dead instance.
+    conversation.isDisposed ||
     state.controlModelConversationSessionKey !== sessionKey ||
     (state.controlModelConversationAgentId ?? null) !== (agentId ?? null)
   ) {
     return null;
   }
-  return state.controlModelConversation;
+  return conversation;
 }

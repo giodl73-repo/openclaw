@@ -83,6 +83,8 @@ export type ChatState = StreamCausalBoundaryState & {
   controlModelConversation?: ControlModelConversation;
   controlModelConversationSessionKey?: string | null;
   controlModelConversationAgentId?: string | null;
+  /** Per-pane lease identity at the model owner; duplicate panes share one session. */
+  controlModelConversationOwner?: string;
   chatSessionMessageSubscriptionRequestedKey?: string | null;
   chatSessionMessageSubscription?: SessionMessageSubscription | null;
   chatSessionApprovalQueue?: ExecApprovalRequest[];

@@ -7,6 +7,7 @@ import type { QuestionPromptCommand } from "../../app/question-prompt-command.ts
 import type { QuestionPrompt } from "../../app/question-prompt.ts";
 import {
   normalizeAgentId,
+  resolveUiConversationIdentity,
   uiConversationMatches,
   type UiSessionDefaultsHost,
 } from "../../lib/sessions/session-key.ts";
@@ -59,9 +60,12 @@ export function controlModelQuestionPromptCommand(
 
 /**
  * Shared global question state carries every agent's prompts; the selected
- * route only renders its own. Without a route agent only unscoped rows match,
- * so another agent's prompts cannot leak into a direct session. A prompt with
- * no session key is unscoped and stays visible on every route.
+ * route only renders its own, so the agent restriction uses the route's own
+ * conversation identity rather than the caller's optional agent. Only globally
+ * scoped keys record an agent for the route, while a direct session key already
+ * names one: reading it here keeps a normal `ask_user` prompt (session key plus
+ * agent id) visible instead of reducing the route to unscoped rows. A prompt
+ * with no session key is unscoped and belongs to whichever route reads it.
  *
  * Session identity is configuration-aware: a configured global alias such as
  * `agent:work:main` addresses the same conversation as a `global` prompt for
@@ -72,7 +76,9 @@ export function questionPromptsForRoute(
   prompts: readonly QuestionPrompt[],
   agentId?: string,
 ): QuestionPrompt[] {
-  const normalizedAgentId = agentId?.trim() ? normalizeAgentId(agentId) : undefined;
+  const routeAgentId = agentId?.trim()
+    ? normalizeAgentId(agentId)
+    : resolveUiConversationIdentity(host, host.sessionKey).agentId;
   return prompts.filter(
     (prompt) =>
       (prompt.sessionKey === undefined ||
@@ -85,8 +91,8 @@ export function questionPromptsForRoute(
           prompt.agentId ?? agentId,
           agentId,
         )) &&
-      (normalizedAgentId
-        ? !prompt.agentId || normalizeAgentId(prompt.agentId) === normalizedAgentId
+      (routeAgentId
+        ? !prompt.agentId || normalizeAgentId(prompt.agentId) === routeAgentId
         : !prompt.agentId),
   );
 }

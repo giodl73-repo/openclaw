@@ -78,18 +78,36 @@ export type ControlModelConversationModelOptions = Readonly<
   ControlModelOptions & { catalog: ControlModelCatalog }
 >;
 
+/**
+ * One session key plus agent addresses one shared conversation, so consumers
+ * that can outlive each other (duplicate chat panes on the same session) name
+ * themselves with `owner`. The model leases the shared instance per owner:
+ * re-acquiring under the same owner is idempotent, and only the final release
+ * disposes it. Consumers that omit `owner` share one implicit lease.
+ */
+export type ControlModelConversationOptions = Readonly<{ agentId?: string; owner?: string }>;
+
 export type ControlModel = Readonly<
   ControlModelCatalog & {
     conversation(
       sessionKey: string,
-      options?: Readonly<{ agentId?: string }>,
+      options?: ControlModelConversationOptions,
     ): ControlModelConversation;
     releaseConversation(
       sessionKey: string,
-      options?: Readonly<{ agentId?: string }>,
+      options?: ControlModelConversationOptions,
     ): Promise<void>;
   }
 >;
+
+/** Lease holder for a consumer that did not name itself. */
+const DEFAULT_CONVERSATION_OWNER = "";
+
+type ConversationEntry = {
+  readonly conversation: ControlModelConversation;
+  /** Live lease holders; the entry is disposed when the last one releases. */
+  readonly owners: Set<string>;
+};
 
 function normalizeBound(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : fallback;
@@ -104,7 +122,7 @@ class ControlModelImpl implements ControlModel {
   readonly #agentId: string | undefined;
   readonly #autoLoadConversationHistory: boolean;
   readonly #generateId: (prefix: string) => string;
-  readonly #conversations = new Map<string, ControlModelConversation>();
+  readonly #conversations = new Map<string, ConversationEntry>();
   readonly #now: () => number;
   readonly #onSubscriberError?: (error: unknown) => void;
   readonly #onBackgroundError?: (error: unknown) => void;
@@ -240,8 +258,8 @@ class ControlModelImpl implements ControlModel {
     this.#unsubscribeEvents?.();
     this.#unsubscribeConnection = null;
     this.#unsubscribeEvents = null;
-    for (const conversation of this.#conversations.values()) {
-      conversation.dispose();
+    for (const entry of this.#conversations.values()) {
+      entry.conversation.dispose();
     }
     this.#conversations.clear();
     if (this.#ownsCatalog) {
@@ -251,7 +269,7 @@ class ControlModelImpl implements ControlModel {
 
   conversation(
     sessionKey: string,
-    options: Readonly<{ agentId?: string }> = {},
+    options: ControlModelConversationOptions = {},
   ): ControlModelConversation {
     this.#assertActive();
     const key = sessionKey.trim();
@@ -264,16 +282,20 @@ class ControlModelImpl implements ControlModel {
       });
     }
     const agentId = options.agentId?.trim() || undefined;
+    const owner = options.owner?.trim() || DEFAULT_CONVERSATION_OWNER;
     const conversationId = `${agentId ?? ""}\u0000${key}`;
     const existing = this.#conversations.get(conversationId);
     if (existing) {
-      existing.startIfNeeded();
-      return existing;
+      existing.owners.add(owner);
+      existing.conversation.startIfNeeded();
+      return existing.conversation;
     }
+    // A lease orders disposal; it does not pin the handle. Inactive bounds still
+    // evict, and every consumer reacquires from this owner rather than caching.
     while (true) {
       const inactive = [...this.#conversations.values()]
-        .filter((conversation) => conversation.isEvictable)
-        .toSorted((left, right) => left.lastUsed - right.lastUsed);
+        .filter((entry) => entry.conversation.isEvictable)
+        .toSorted((left, right) => left.conversation.lastUsed - right.conversation.lastUsed);
       if (inactive.length < this.#maxInactiveConversations) {
         break;
       }
@@ -281,7 +303,7 @@ class ControlModelImpl implements ControlModel {
       if (!candidate) {
         break;
       }
-      candidate.dispose();
+      candidate.conversation.dispose();
       for (const [id, value] of this.#conversations) {
         if (value === candidate) {
           this.#conversations.delete(id);
@@ -299,8 +321,8 @@ class ControlModelImpl implements ControlModel {
         left === right || this.#gateway.sessionMessageKeysEquivalent?.(left, right) === true,
       getMessageSubscriptionCoordinator: () => this.#getMessageSubscriptionCoordinator(),
       onConversationReleased: async (conversation) => {
-        for (const [id, value] of this.#conversations) {
-          if (value === conversation) {
+        for (const [id, entry] of this.#conversations) {
+          if (entry.conversation === conversation) {
             conversation.dispose();
             this.#conversations.delete(id);
             return;
@@ -313,14 +335,14 @@ class ControlModelImpl implements ControlModel {
       reportBackgroundError: (error) => this.#reportBackgroundError(error),
     };
     const conversation = new ControlModelConversation(host, key);
-    this.#conversations.set(conversationId, conversation);
+    this.#conversations.set(conversationId, { conversation, owners: new Set([owner]) });
     conversation.startIfNeeded();
     return conversation;
   }
 
   async releaseConversation(
     sessionKey: string,
-    options: Readonly<{ agentId?: string }> = {},
+    options: ControlModelConversationOptions = {},
   ): Promise<void> {
     this.#assertActive();
     const key = sessionKey.trim();
@@ -332,11 +354,16 @@ class ControlModelImpl implements ControlModel {
         command: "releaseConversation",
       });
     }
-    const conversation = this.#conversations.get(`${options.agentId?.trim() || ""}\u0000${key}`);
-    if (!conversation) {
+    const entry = this.#conversations.get(`${options.agentId?.trim() || ""}\u0000${key}`);
+    if (!entry) {
       return;
     }
-    await conversation.release();
+    entry.owners.delete(options.owner?.trim() || DEFAULT_CONVERSATION_OWNER);
+    if (entry.owners.size > 0) {
+      // Another consumer still observes this shared conversation.
+      return;
+    }
+    await entry.conversation.release();
   }
 
   #readConnection(): void {
@@ -348,7 +375,7 @@ class ControlModelImpl implements ControlModel {
     this.#lastConnection = connection;
     if (connection.epoch !== previous.epoch || connection.status !== "connected") {
       this.#retireMessageSubscriptionCoordinator();
-      for (const conversation of this.#conversations.values()) {
+      for (const { conversation } of this.#conversations.values()) {
         if (connection.status === "connected") {
           conversation.onConnection(connection, this.#getMessageSubscriptionCoordinator());
         } else {
@@ -393,7 +420,7 @@ class ControlModelImpl implements ControlModel {
   }
 
   #startConversations(): void {
-    for (const conversation of this.#conversations.values()) {
+    for (const { conversation } of this.#conversations.values()) {
       conversation.startIfNeeded();
     }
   }
@@ -406,7 +433,7 @@ class ControlModelImpl implements ControlModel {
     if (connection.status !== "connected" || frame.connectionEpoch !== connection.epoch) {
       return;
     }
-    for (const conversation of this.#conversations.values()) {
+    for (const { conversation } of this.#conversations.values()) {
       conversation.handleEvent(frame);
     }
   }

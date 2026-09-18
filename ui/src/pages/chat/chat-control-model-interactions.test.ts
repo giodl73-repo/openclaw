@@ -101,6 +101,22 @@ describe("controlModelQuestionPromptCommand", () => {
     ]);
   });
 
+  it("does not route commands or artifacts through a retired cached conversation", () => {
+    // Bounds eviction or model disposal can retire the instance a pane cached
+    // while its route is unchanged; commands must fall back to the Gateway.
+    const retired = { ...conversation(), isDisposed: true };
+    const state = {
+      controlModelConversation: retired,
+      controlModelConversationSessionKey: "agent:main:one",
+      controlModelConversationAgentId: null,
+    } as never;
+
+    const interactions = controlModelChatInteractions(state, "agent:main:one");
+    expect(interactions.controlModelArtifacts).toBeUndefined();
+    expect(interactions.questionCommand("question-1", "answer")).toBeUndefined();
+    expect(retired.answerQuestion).not.toHaveBeenCalled();
+  });
+
   it("filters shared global question state by the selected agent", () => {
     const prompts = [
       { id: "main", sessionKey: "global", agentId: "main" },
@@ -131,6 +147,34 @@ describe("controlModelQuestionPromptCommand", () => {
     expect(
       questionPromptsForRoute(globalScopeHost, prompts, "work").map((prompt) => prompt.id),
     ).toEqual(["work", "legacy"]);
+  });
+
+  it("keeps a direct session's own agent-scoped prompts on its route", () => {
+    const host = {
+      assistantAgentId: "main",
+      agentsList: { defaultId: "main", mainKey: "main", scope: "agent" },
+      hello: null,
+      sessionKey: "agent:work:discord:123",
+    };
+    const prompts = [
+      // The shape `ask_user` publishes: the session key plus its owning agent.
+      { id: "direct", sessionKey: "agent:work:discord:123", agentId: "work" },
+      { id: "legacy", sessionKey: "agent:work:discord:123" },
+      { id: "unscoped", agentId: "work" },
+      { id: "other-agent-unscoped", agentId: "main" },
+      { id: "other-session", sessionKey: "agent:work:discord:456", agentId: "work" },
+      { id: "global", sessionKey: "global", agentId: "work" },
+    ] as never;
+
+    // A direct route records no agent (`controlModelAgentIdForRoute`), so the
+    // restriction has to read the agent named by the route's own session key.
+    expect(
+      questionPromptsForRoute(
+        host,
+        prompts,
+        controlModelAgentIdForRoute(host, host.sessionKey),
+      ).map((prompt) => prompt.id),
+    ).toEqual(["direct", "legacy", "unscoped"]);
   });
 
   it("uses agent identity only for global aliases, not channel-scoped session keys", () => {

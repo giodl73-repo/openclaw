@@ -81,6 +81,21 @@ type ControlModelListRead =
 /** Upper bound the Control Model session catalog answers in one page read. */
 const CONTROL_MODEL_MAX_SESSION_PAGE_SIZE = 1_000;
 
+/**
+ * Single owner of "can the Gateway-owned catalog answer this roster query?".
+ * Archived views, Gateway-owned membership filters the catalog query cannot
+ * express, and reads larger than the model's page bound stay on the raw
+ * `sessions.list` path — for the read itself, for event-driven refreshes, and
+ * for catalog-pushed publication, which must all agree on the same boundary.
+ */
+const controlModelAnswersQuery = (options: SessionListOptions): boolean =>
+  (!options.archivedFilter || options.archivedFilter === "active") &&
+  options.ownerId === undefined &&
+  options.ownerFirst === undefined &&
+  options.involvingMe === undefined &&
+  options.hasBoard === undefined &&
+  (options.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) <= CONTROL_MODEL_MAX_SESSION_PAGE_SIZE;
+
 export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
   let gatewayAvailable = isGatewayAvailable(host.snapshot());
   let requestRevision = 0;
@@ -140,12 +155,11 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       if (!controlModelAdapter || controlModelSyncing || inFlight) {
         return;
       }
-      // A roster wider than one catalog page is Gateway-owned; a pushed model
-      // snapshot must not truncate it back to the model's page bound.
-      if (
-        (lastListOptions.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) >
-        CONTROL_MODEL_MAX_SESSION_PAGE_SIZE
-      ) {
+      // A roster the catalog does not own stays Gateway-owned: a pushed model
+      // snapshot must not truncate a wider roster back to the model's page
+      // bound, nor replace a filtered or archived roster with the unrelated
+      // catalog query another consumer is driving.
+      if (!controlModelAnswersQuery(lastListOptions)) {
         return;
       }
       const catalog = model.getSnapshot().sessionCatalog;
@@ -262,17 +276,8 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
     () => primaryList,
   );
 
-  /** The Gateway-owned catalog answers the primary active roster; archived views,
-   * filters the catalog query cannot express, reads larger than the model's page
-   * bound, and every adoption failure keep the raw `sessions.list` path. */
   const controlModelOwnsQuery = (options: SessionRefreshOptions) =>
-    Boolean(controlModel || host.controlModelLoader) &&
-    (!options.archivedFilter || options.archivedFilter === "active") &&
-    options.ownerId === undefined &&
-    options.ownerFirst === undefined &&
-    options.involvingMe === undefined &&
-    options.hasBoard === undefined &&
-    (options.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) <= CONTROL_MODEL_MAX_SESSION_PAGE_SIZE;
+    Boolean(controlModel || host.controlModelLoader) && controlModelAnswersQuery(options);
 
   const readControlModelList = async (
     options: SessionRefreshOptions,
@@ -881,11 +886,11 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       primaryWindows.invalidate((entry) => matchesAgent(entry.scope.agentId), lastListOptions);
       // An adopted catalog refreshes itself from the same gateway events and
       // publishes through its subscription; a second roster read is redundant.
+      // Suppression therefore uses the same ownership predicate as the read: a
+      // query the catalog cannot answer still needs its authoritative refresh.
       const primaryUsesControlModel =
         Boolean(controlModel || (host.controlModelLoader && !controlModelUnavailable)) &&
-        (lastListOptions.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) <=
-          CONTROL_MODEL_MAX_SESSION_PAGE_SIZE &&
-        (!lastListOptions.archivedFilter || lastListOptions.archivedFilter === "active");
+        controlModelAnswersQuery(lastListOptions);
       if (
         !primaryUsesControlModel &&
         !options.primarySnapshotApplied &&

@@ -43,6 +43,18 @@ export async function ensureChatControlModel(state: ChatState): Promise<ControlM
   return state.controlModel;
 }
 
+let nextControlModelConversationOwner = 0;
+
+/**
+ * Stable lease identity for this pane. Two panes can show one session, so the
+ * model owner must know which consumer released: without a distinct owner the
+ * first teardown would dispose the conversation the other pane still reads.
+ */
+function controlModelConversationOwner(state: ChatState): string {
+  state.controlModelConversationOwner ??= `chat-pane-${(nextControlModelConversationOwner += 1)}`;
+  return state.controlModelConversationOwner;
+}
+
 export function releaseChatControlModelConversation(state: ChatState): void {
   const model = state.controlModel;
   const key = state.controlModelConversationSessionKey;
@@ -50,10 +62,13 @@ export function releaseChatControlModelConversation(state: ChatState): void {
     return;
   }
   const agentId = state.controlModelConversationAgentId;
+  const owner = controlModelConversationOwner(state);
   state.controlModelConversation = undefined;
   state.controlModelConversationSessionKey = null;
   state.controlModelConversationAgentId = null;
-  void model.releaseConversation(key, agentId ? { agentId } : {}).catch(() => undefined);
+  void model
+    .releaseConversation(key, { owner, ...(agentId ? { agentId } : {}) })
+    .catch(() => undefined);
 }
 
 function controlModelConversationForState(state: ChatState): ControlModelConversation | null {
@@ -62,6 +77,10 @@ function controlModelConversationForState(state: ChatState): ControlModelConvers
     return null;
   }
   const agentId = controlModelAgentIdForRoute(state, state.sessionKey);
+  const options = {
+    owner: controlModelConversationOwner(state),
+    ...(agentId ? { agentId } : {}),
+  };
   if (
     state.controlModelConversation &&
     state.controlModelConversationSessionKey === state.sessionKey &&
@@ -69,12 +88,13 @@ function controlModelConversationForState(state: ChatState): ControlModelConvers
   ) {
     // Reacquire from the owner: an evicted or recovered route hands back a live
     // conversation, and the cached handle alone can be a retired instance.
-    const current = model.conversation(state.sessionKey, agentId ? { agentId } : {});
+    // Reacquiring under the same owner renews one lease rather than adding one.
+    const current = model.conversation(state.sessionKey, options);
     state.controlModelConversation = current;
     return current;
   }
   releaseChatControlModelConversation(state);
-  const conversation = model.conversation(state.sessionKey, agentId ? { agentId } : {});
+  const conversation = model.conversation(state.sessionKey, options);
   state.controlModelConversation = conversation;
   state.controlModelConversationSessionKey = state.sessionKey;
   state.controlModelConversationAgentId = agentId ?? null;

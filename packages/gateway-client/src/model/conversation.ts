@@ -187,6 +187,10 @@ export class ControlModelConversation {
   get isEvictable(): boolean {
     return !this.#disposed && !this.hasSubscribers && !this.hasActiveOperations;
   }
+  /** True once this handle is retired; a cached reference must not be reused. */
+  get isDisposed(): boolean {
+    return this.#disposed;
+  }
 
   getSnapshot(): ControlModelConversationSnapshot {
     this.#lastUsed = this.#host.now();
@@ -460,6 +464,12 @@ export class ControlModelConversation {
     return this.#artifacts.materialize(input, options);
   }
 
+  /**
+   * Retires this handle at its owning model regardless of outstanding leases.
+   * Consumers that can share a session release through
+   * `ControlModel.releaseConversation` with their own `owner` instead, so a
+   * duplicate view cannot dispose a conversation another one still observes.
+   */
   async release(): Promise<void> {
     await this.#host.onConversationReleased(this);
   }

@@ -7,6 +7,7 @@ export {
 export type {
   ControlModel,
   ControlModelBounds,
+  ControlModelConversationOptions,
   ControlModelConversationModelOptions,
   ControlModelOptions,
 } from "./model.js";
