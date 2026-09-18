@@ -1,4 +1,5 @@
 import { cancelQuestionPrompt, submitQuestionPrompt } from "../../app/question-prompt.ts";
+import type { QuestionPromptCommand } from "../../app/question-prompt-command.ts";
 import type { ChatPageHost } from "./chat-state-host.ts";
 import type { ChatProps } from "./chat-view.ts";
 
@@ -7,6 +8,8 @@ type QuestionActionOptions = {
   questionState: Parameters<typeof submitQuestionPrompt>[0];
   canSend: boolean;
   isCurrent: () => boolean;
+  /** Control Model adapter; returns undefined whenever the raw path still owns the prompt. */
+  questionCommand?: (id: string, action: "answer" | "cancel") => QuestionPromptCommand | undefined;
 };
 
 export function createChatQuestionActions({
@@ -14,6 +17,7 @@ export function createChatQuestionActions({
   questionState,
   canSend,
   isCurrent,
+  questionCommand,
 }: QuestionActionOptions): Pick<
   ChatProps,
   | "onGatewayQuestionChange"
@@ -27,8 +31,10 @@ export function createChatQuestionActions({
     state.sessionKey === sessionKey && state.connectionEpoch === connectionEpoch && isCurrent();
   return {
     onGatewayQuestionChange: questionState.onChange,
-    onGatewayQuestionSubmit: (id, answers) => submitQuestionPrompt(questionState, id, answers),
-    onGatewayQuestionSkip: (id) => cancelQuestionPrompt(questionState, id),
+    onGatewayQuestionSubmit: (id, answers) =>
+      submitQuestionPrompt(questionState, id, answers, questionCommand?.(id, "answer")),
+    onGatewayQuestionSkip: (id) =>
+      cancelQuestionPrompt(questionState, id, questionCommand?.(id, "cancel")),
     onAsyncQuestionSubmit: canSend
       ? async (message) => {
           if (!ownsSubmission()) {

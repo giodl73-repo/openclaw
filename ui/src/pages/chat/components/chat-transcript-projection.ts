@@ -172,6 +172,7 @@ export function projectChatTranscript(
     runWorking: Boolean(props.runWorking),
     runActive: Boolean(props.runActive),
     questionPrompts: props.questionPrompts,
+    controlModelArtifacts: props.controlModelArtifacts,
     loading: props.loading,
     searchOpen: state.searchOpen,
     searchQuery: state.searchQuery,

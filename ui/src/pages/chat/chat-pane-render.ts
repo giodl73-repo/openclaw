@@ -30,6 +30,7 @@ import {
   resolveUiConfiguredMainKey,
 } from "../../lib/sessions/session-key.ts";
 import { showToast } from "../../lib/toast.ts";
+import { controlModelChatInteractions } from "./chat-control-model-interactions.ts";
 import { mutateChatGoal, submitChatGoalDraft } from "./chat-goals.ts";
 import { clearChatHistory } from "./chat-history-actions.ts";
 import { isInitialChatHistoryUnavailable } from "./chat-history-state.ts";
@@ -366,6 +367,7 @@ export class ChatPane extends ChatPaneLayoutRender {
     const mentionsUnsupported = Boolean(
       catalogKey || suggestionViewer || selectedSession?.incognito || !selfProfileId,
     );
+    const controlModelInteractions = controlModelChatInteractions(state, state.sessionKey);
     const props: ChatProps = {
       transcript: this.transcript,
       paneId: this.presentationId,
@@ -415,12 +417,14 @@ export class ChatPane extends ChatPaneLayoutRender {
         catalogKey || sessionParticipationBlocked
           ? this.emptyTranscriptItems
           : this.questionPrompts,
+      controlModelArtifacts: catalogKey ? undefined : controlModelInteractions.controlModelArtifacts,
       ...createChatQuestionActions({
         state,
         questionState: this.questionPromptState,
         canSend:
           composerAvailability.canSend && !catalogKey && !suggestionViewer && state.connected,
         isCurrent: () => this.state === state,
+        questionCommand: controlModelInteractions.questionCommand,
       }),
       messages: catalogKey ? this.catalogMessages : state.chatMessages,
       historyPagination:

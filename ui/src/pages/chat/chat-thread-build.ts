@@ -1,4 +1,5 @@
 import { readSessionMessageIdentity } from "@openclaw/gateway-client/browser";
+import type { ControlModelConversationSnapshot } from "@openclaw/gateway-client/model";
 import { asNullableRecord as asRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { ChatPendingInputsPage } from "../../../../packages/gateway-protocol/src/schema/logs-chat.js";
@@ -29,6 +30,11 @@ import {
 import type { CanvasToolPreview } from "../../lib/chat/tool-cards.ts";
 import { areUiSessionKeysEquivalent } from "../../lib/sessions/session-key.ts";
 import type { ChatMessageRecovery } from "./chat-message-recovery.ts";
+import {
+  controlModelArtifactPreviews,
+  controlModelArtifactSourceKeys,
+  mergeControlModelArtifactPreview,
+} from "./chat-control-model-artifacts.ts";
 import { buildPendingInputItems } from "./chat-pending-inputs.ts";
 import {
   buildCompactionDividerItem,
@@ -105,6 +111,7 @@ export type BuildChatItemsProps = {
   /** True while the current session has an abortable live run. */
   runActive?: boolean;
   questionPrompts?: readonly QuestionPrompt[];
+  controlModelArtifacts?: ControlModelConversationSnapshot["artifacts"];
   /** True while chat history is loading (initial load or background reload). */
   loading?: boolean;
   searchOpen?: boolean;
@@ -142,7 +149,53 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
         (props.persistCommentary !== false || !isKeyedAssistantStreamFallbackMessage(message)),
     ),
   );
+  // Model artifacts project the same canvas previews the raw tool rows carry.
+  // Each is claimed at most once so a projected view enriches its owning row
+  // instead of stacking a second widget beside it.
+  const remainingModelSources = controlModelArtifactPreviews(props.controlModelArtifacts ?? [], [
+    ...history,
+    ...tools,
+  ]).map((source) => ({
+    preview: source.preview,
+    text: source.text,
+    timestamp: source.timestamp,
+    message: {
+      role: "toolResult",
+      messageId: source.messageId,
+      toolCallId: source.toolCallId,
+      toolName: source.toolName,
+    } as Record<string, unknown>,
+  }));
+  const consumedPersistedSources: Array<{
+    fallbackKey: string;
+    timestamp: number | null;
+    rawBaseIdentity: string | null;
+  }> = [];
+  const takeModelSource = (message: unknown) => {
+    const keys = controlModelArtifactSourceKeys(message);
+    if (keys.length === 0) {
+      return undefined;
+    }
+    const canonicalKey = keys.length > 1 ? keys[0] : undefined;
+    const fallbackKey = keys.at(-1);
+    const index =
+      canonicalKey !== undefined
+        ? remainingModelSources.findIndex((source) =>
+            controlModelArtifactSourceKeys(source.message).includes(canonicalKey),
+          )
+        : remainingModelSources.findIndex((source) => {
+            const sourceKeys = controlModelArtifactSourceKeys(source.message);
+            return (
+              fallbackKey !== undefined && sourceKeys.length === 1 && sourceKeys[0] === fallbackKey
+            );
+          });
+    if (index === -1) {
+      return undefined;
+    }
+    return remainingModelSources.splice(index, 1)[0];
+  };
   const searchFiltering = props.searchOpen === true && Boolean(props.searchQuery?.trim());
+  const persistedCanvasSourceKeys = new Set<string>();
   const persistedCanvasIdentities = new Set<string>();
   const normalizedHistory = history.map(safeNormalizeMessage);
   const historyItems = buildMessageItems(history);
@@ -220,10 +273,41 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     }
 
     const isToolResult = normalized.role.toLowerCase() === "toolresult";
-    const persistedCanvasSource = isToolResult ? extractChatMessagePreview(msg) : null;
+    const rawPersistedCanvasSource = isToolResult ? extractChatMessagePreview(msg) : null;
+    const projectedPersistedCanvasSource = isToolResult ? takeModelSource(msg) : undefined;
+    if (projectedPersistedCanvasSource) {
+      const fallbackKey = controlModelArtifactSourceKeys(projectedPersistedCanvasSource.message).at(
+        -1,
+      );
+      if (fallbackKey) {
+        consumedPersistedSources.push({
+          fallbackKey,
+          timestamp: projectedPersistedCanvasSource.timestamp,
+          rawBaseIdentity: rawPersistedCanvasSource
+            ? canvasPreviewBaseIdentity(msg, rawPersistedCanvasSource)
+            : null,
+        });
+      }
+    }
+    const persistedCanvasSource =
+      rawPersistedCanvasSource && projectedPersistedCanvasSource
+        ? {
+            ...rawPersistedCanvasSource,
+            preview: mergeControlModelArtifactPreview(
+              rawPersistedCanvasSource.preview,
+              projectedPersistedCanvasSource.preview,
+            ),
+          }
+        : (rawPersistedCanvasSource ?? projectedPersistedCanvasSource ?? null);
     if (persistedCanvasSource) {
+      const sourceKeys = controlModelArtifactSourceKeys(msg);
+      if (sourceKeys.length > 1 && sourceKeys[0]) {
+        persistedCanvasSourceKeys.add(sourceKeys[0]);
+      }
       const identity = canvasPreviewBaseIdentity(msg, persistedCanvasSource);
       if (identity) {
+        // Compatibility previews can lack canonical message provenance, so retain
+        // the incumbent call+view identity as a secondary persisted/live fence.
         persistedCanvasIdentities.add(identity);
       }
     }
@@ -389,19 +473,67 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
   for (const queued of currentRunQueuedSends) {
     appendQueuedSend(queued);
   }
-  const currentTurnBounds = findCurrentTurnBounds(items);
-  const canvasRunBounds = createRunTurnLookup(items);
-  for (const { projection, preview } of toolItems) {
+  // Live tool rows and model artifacts can describe the same canvas. Claimed
+  // pairs merge; artifacts already rendered from history drop out here.
+  const liftedCanvasSources: {
+    message: unknown;
+    key: string;
+    runId?: string;
+    preview: NonNullable<ReturnType<typeof extractChatMessagePreview>>;
+  }[] = [];
+  for (const { projection, preview, runId } of toolItems) {
     if (!preview) {
       continue;
     }
-    const baseIdentity = canvasPreviewBaseIdentity(projection.item.message, preview);
-    if (baseIdentity && persistedCanvasIdentities.has(baseIdentity)) {
+    const message = projection.item.message;
+    const fallbackKey = controlModelArtifactSourceKeys(message).at(-1);
+    const baseIdentity = canvasPreviewBaseIdentity(message, preview);
+    const consumedIndex = consumedPersistedSources.findIndex(
+      (consumed) =>
+        consumed.fallbackKey === fallbackKey &&
+        ((consumed.timestamp !== null &&
+          preview.timestamp !== null &&
+          consumed.timestamp === preview.timestamp) ||
+          (consumed.rawBaseIdentity !== null && consumed.rawBaseIdentity === baseIdentity)),
+    );
+    if (consumedIndex !== -1) {
+      consumedPersistedSources.splice(consumedIndex, 1);
+      continue;
+    }
+    const projected = takeModelSource(message);
+    liftedCanvasSources.push({
+      message,
+      key: projection.item.key,
+      ...(runId ? { runId } : {}),
+      preview: projected
+        ? {
+            ...preview,
+            preview: mergeControlModelArtifactPreview(preview.preview, projected.preview),
+          }
+        : preview,
+    });
+  }
+  for (const source of remainingModelSources) {
+    liftedCanvasSources.push({
+      message: source.message,
+      key: `canvas:model:${String(source.message.toolCallId ?? source.message.messageId ?? "")}`,
+      preview: { preview: source.preview, text: source.text, timestamp: source.timestamp },
+    });
+  }
+  const currentTurnBounds = findCurrentTurnBounds(items);
+  const canvasRunBounds = createRunTurnLookup(items);
+  for (const { message, key, runId, preview } of liftedCanvasSources) {
+    const sourceKeys = controlModelArtifactSourceKeys(message);
+    const baseIdentity = canvasPreviewBaseIdentity(message, preview);
+    if (
+      (sourceKeys.length > 1 && sourceKeys[0] && persistedCanvasSourceKeys.has(sourceKeys[0])) ||
+      (baseIdentity && persistedCanvasIdentities.has(baseIdentity))
+    ) {
       continue;
     }
     const canvasBounds = resolveRunInsertionBounds(
       canvasRunBounds,
-      projection.item.message.runId,
+      runId,
       props.runId,
       currentTurnBounds,
     );
@@ -453,7 +585,7 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     // rather than being re-sorted with live stream/tool cards.
     items.splice(insertionIndex, 0, {
       kind: "message",
-      key: canvasAssistantItemKey(projection.item.message, preview, projection.item.key),
+      key: canvasAssistantItemKey(message, preview, key),
       message: createCanvasAssistantMessage(preview, timestamp),
     });
   }

@@ -33,6 +33,7 @@ export type ControlModelConnectionSnapshot = Readonly<{
 
 export type ControlModelRequestOptions = Readonly<{
   signal?: AbortSignal;
+  timeoutMs?: number;
 }>;
 
 /** Gateway-neutral query fields for the bounded session catalog snapshot. */

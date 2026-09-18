@@ -1,4 +1,5 @@
 // Pane-local search, context menus, selection actions, and presentation resets.
+import type { ControlModelConversationSnapshot } from "@openclaw/gateway-client/model";
 import { html, nothing, type TemplateResult } from "lit";
 import { ref } from "lit/directives/ref.js";
 import type { ChatPendingInputsPage } from "../../../../../packages/gateway-protocol/src/schema/logs-chat.js";
@@ -119,6 +120,8 @@ export type ChatThreadProps = ChatSendStatusActions & {
   startupLabel?: string;
   waitingApproval?: boolean;
   questionPrompts?: readonly QuestionPrompt[];
+  /** Model-owned artifact projection; the raw tool-card path stays authoritative without it. */
+  controlModelArtifacts?: ControlModelConversationSnapshot["artifacts"];
   onAsyncQuestionSubmit?: (message: string) => Promise<boolean>;
   sessions: SessionsListResult | null;
   /** Host context resolving global-alias session keys (scope=global fleets). */

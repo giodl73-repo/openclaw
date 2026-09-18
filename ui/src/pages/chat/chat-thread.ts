@@ -284,6 +284,7 @@ function sameChatItemsStructuralInput(
     previous.runWorking === next.runWorking &&
     previous.runActive === next.runActive &&
     previous.questionPrompts === next.questionPrompts &&
+    previous.controlModelArtifacts === next.controlModelArtifacts &&
     previous.loading === next.loading &&
     previous.searchOpen === next.searchOpen &&
     previous.searchQuery === next.searchQuery &&

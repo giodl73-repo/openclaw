@@ -1,0 +1,84 @@
+import { DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS } from "@openclaw/gateway-client/browser";
+import type {
+  ControlModelConversationSnapshot,
+  ControlModelRequestOptions,
+} from "@openclaw/gateway-client/model";
+import type { QuestionPromptCommand } from "../../app/question-prompt-command.ts";
+import {
+  selectedControlModelConversationForRoute,
+  type ChatControlModelConversationState,
+} from "./chat-control-model.ts";
+
+type QuestionConversation = {
+  getSnapshot(): Pick<ControlModelConversationSnapshot, "questions" | "commandAvailability">;
+  answerQuestion(
+    id: string,
+    answers: Readonly<Record<string, readonly string[]>>,
+    options?: ControlModelRequestOptions,
+  ): Promise<Readonly<Record<string, unknown>>>;
+  cancelQuestion(
+    id: string,
+    options?: ControlModelRequestOptions,
+  ): Promise<Readonly<Record<string, unknown>>>;
+};
+
+export function controlModelQuestionPromptCommand(
+  conversation: QuestionConversation | null,
+  id: string,
+  action: "answer" | "cancel",
+): QuestionPromptCommand | undefined {
+  const snapshot = conversation?.getSnapshot();
+  const available =
+    action === "answer"
+      ? snapshot?.commandAvailability.answerQuestion
+      : snapshot?.commandAvailability.cancelQuestion;
+  if (
+    !conversation ||
+    !snapshot ||
+    !available ||
+    !snapshot.questions.some((question) => question.id === id && question.status === "pending")
+  ) {
+    return undefined;
+  }
+  return async (request) => {
+    const timeoutMs = Math.min(
+      DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS,
+      Math.max(0, request.expiresAtMs - Date.now()),
+    );
+    return action === "answer"
+      ? conversation.answerQuestion(id, request.answers?.answers ?? {}, { timeoutMs })
+      : conversation.cancelQuestion(id, { timeoutMs });
+  };
+}
+
+export function controlModelRouteAgentId(
+  state: ChatControlModelConversationState,
+  sessionKey: string,
+): string | undefined {
+  return state.controlModelConversationSessionKey === sessionKey
+    ? (state.controlModelConversationAgentId ?? undefined)
+    : undefined;
+}
+
+/**
+ * Adapter for the selected route's model conversation. The chat question action
+ * owner keeps its lifecycle; this only supplies the optional model command and
+ * the projected artifacts for the transcript.
+ */
+export function controlModelChatInteractions(
+  state: ChatControlModelConversationState,
+  sessionKey: string,
+): {
+  controlModelArtifacts?: ControlModelConversationSnapshot["artifacts"];
+  questionCommand: (id: string, action: "answer" | "cancel") => QuestionPromptCommand | undefined;
+} {
+  const conversation = selectedControlModelConversationForRoute(
+    state,
+    sessionKey,
+    controlModelRouteAgentId(state, sessionKey),
+  );
+  return {
+    controlModelArtifacts: conversation?.getSnapshot().artifacts,
+    questionCommand: (id, action) => controlModelQuestionPromptCommand(conversation, id, action),
+  };
+}

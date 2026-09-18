@@ -1,3 +1,4 @@
+import type { ControlModelConversationSnapshot } from "@openclaw/gateway-client/model";
 import { html, nothing, type TemplateResult } from "lit";
 import { styleMap } from "lit/directives/style-map.js";
 import type {
@@ -91,6 +92,8 @@ export type ChatProps = Omit<
     thinkingLevel: string | null;
     startupStatus?: ChatRunStartupStatus | null;
     providerPolicyNotice?: ProviderPolicyNotice | null;
+    /** Model-owned artifact projection for the selected route's transcript. */
+    controlModelArtifacts?: ControlModelConversationSnapshot["artifacts"];
     error: string | null;
     diskSpace?: SessionPlacementDiskSpace;
     inlineApproval?: ExecApprovalRequest | null;
@@ -537,3 +540,5 @@ export function renderChat(props: ChatProps) {
     </section>
   `;
 }
+
+/* oxlint-disable max-lines -- This boundary-only view keeps the full chat prop contract together. */

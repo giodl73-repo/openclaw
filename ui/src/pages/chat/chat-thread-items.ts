@@ -259,7 +259,7 @@ export function findCanvasInsertionIndex(
   return maximumIndex;
 }
 
-function resolveMessageToolUseId(message: Record<string, unknown>): string | undefined {
+export function resolveMessageToolUseId(message: Record<string, unknown>): string | undefined {
   for (const field of ["tool_call_id", "toolCallId", "tool_use_id", "toolUseId"] as const) {
     const value = message[field];
     if (typeof value === "string" && value.trim()) {

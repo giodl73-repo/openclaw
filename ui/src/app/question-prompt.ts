@@ -20,6 +20,7 @@ import {
   type QuestionClient,
   type QuestionClientResolutionOwner,
 } from "./question-prompt-client.ts";
+import type { QuestionPromptCommand } from "./question-prompt-command.ts";
 import { parseQuestion } from "./question-prompt-parse.ts";
 import {
   clearSecretQuestionDrafts,
@@ -613,6 +614,7 @@ async function resolveQuestionPrompt(
   state: QuestionPromptState,
   id: string,
   resolution: { answers: QuestionAnswerValues } | { cancel: true },
+  command?: QuestionPromptCommand,
 ): Promise<void> {
   const prompt = state.prompts.get(id);
   const client = state.client;
@@ -638,12 +640,20 @@ async function resolveQuestionPrompt(
   prompt.revision = ++state.revision;
   state.onChange();
   try {
-    const result = await requestQuestionGateway(
-      client,
-      "question.resolve",
-      submission.requestParams,
-      prompt.expiresAtMs,
-    );
+    // Secret-store allowances are a Gateway-only question.resolve field; those
+    // submissions keep the raw contract instead of the Control Model command.
+    const params = submission.requestParams;
+    const modelCommand =
+      command && !("answers" in params && params.secretStoreAllowedHosts !== undefined)
+        ? command
+        : undefined;
+    const result = modelCommand
+      ? await modelCommand({
+          id,
+          expiresAtMs: prompt.expiresAtMs,
+          ...("answers" in params ? { answers: params.answers } : { cancel: true }),
+        })
+      : await requestQuestionGateway(client, "question.resolve", params, prompt.expiresAtMs);
     const resolved = parseQuestionSubmissionResult(result, parseQuestionAnswers);
     if (!resolved || resolved.status !== (submission.submittedAnswers ? "answered" : "cancelled")) {
       throw new Error("invalid question.resolve response");
@@ -684,12 +694,17 @@ export async function submitQuestionPrompt(
   state: QuestionPromptState,
   id: string,
   answers: QuestionAnswerValues,
+  command?: QuestionPromptCommand,
 ): Promise<void> {
-  await resolveQuestionPrompt(state, id, { answers });
+  await resolveQuestionPrompt(state, id, { answers }, command);
 }
 
-export async function cancelQuestionPrompt(state: QuestionPromptState, id: string): Promise<void> {
-  await resolveQuestionPrompt(state, id, { cancel: true });
+export async function cancelQuestionPrompt(
+  state: QuestionPromptState,
+  id: string,
+  command?: QuestionPromptCommand,
+): Promise<void> {
+  await resolveQuestionPrompt(state, id, { cancel: true }, command);
 }
 
 export function listQuestionPrompts(state: QuestionPromptState): QuestionPrompt[] {
