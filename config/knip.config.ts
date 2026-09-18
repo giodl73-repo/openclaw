@@ -84,6 +84,8 @@ const repositoryScriptEntries = [
   "scripts/e2e/lib/fleet-cache/prepare-podman-storage.mjs!",
   "scripts/e2e/lib/fleet-cache/probe-podman-cell.mjs!",
   "scripts/e2e/lib/fleet-cache/runtime-preflight.mjs!",
+  // test:e2e:node-auto-update runs the installed-package proof against a frozen tarball.
+  "scripts/e2e/lib/node-auto-update/scenario.mjs!",
   "scripts/e2e/lib/npm-telegram-live/prepare-package.mts!",
   "scripts/e2e/lib/onboard/assert-config.mjs!",
   "scripts/e2e/lib/onboard/write-config.mjs!",
@@ -248,7 +250,9 @@ const rootEntries = [
   "src/entry.ts!",
   // Built as the official image's Docker HEALTHCHECK entrypoint.
   "src/docker-healthcheck.ts!",
-  // Uploaded in the worker bundle and launched by rsync; no static host import exists.
+  // Deployed in the worker archive and launched by path, without a static host import.
+  "src/worker/worker-deploy-entry.ts!",
+  "src/worker/worker-deploy-image-processor.ts!",
   "src/worker/workspace-rsync-receiver.ts!",
   // v2026.9.1 Gateways lazy-import this stable dist entry after an in-place update.
   "src/gateway/plugin-channel-reload-targets.ts!",

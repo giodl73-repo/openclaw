@@ -10,10 +10,9 @@
   flex-direction: row;
 }
 
-/* Freshly submitted composer text flows up into the transcript. Applied only
-   to the locally pending bubble (see shouldAnimateUserTurnEntry); the bubble
-   keeps a stable key through the history handoff so this never replays. */
-@keyframes chat-user-turn-enter {
+/* The committed transcript opts new prompts and replies in once. Animate the
+   bubble only, not the virtual row positioning or measured layout dimensions. */
+@keyframes chat-message-enter {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -24,8 +23,10 @@
   }
 }
 
-.chat-bubble--user-turn-enter {
-  animation: chat-user-turn-enter var(--duration-normal) var(--ease-out) backwards;
+@media (prefers-reduced-motion: no-preference) {
+  .chat-bubble--enter {
+    animation: chat-message-enter 180ms var(--ease-out) backwards;
+  }
 }
 
 .chat-group.chat-group--with-footer {
@@ -344,7 +345,7 @@
 
 .chat-group-footer-actions button,
 .chat-group-footer .chat-send-status__action {
-  opacity: var(--chat-footer-action-opacity, var(--chat-footer-disclosure-opacity, 0));
+  opacity: var(--chat-footer-disclosure-opacity, 0);
   pointer-events: var(--chat-footer-disclosure-pointer-events, none);
 }
 
@@ -362,8 +363,15 @@
 }
 
 @media (hover: hover) {
-  .chat-group--latest-assistant {
-    --chat-footer-action-opacity: 0.6;
+  .chat-group:focus-within .chat-group-footer-actions button,
+  .chat-group:focus-within .chat-message-actions-row button {
+    opacity: 0.6;
+    pointer-events: auto;
+  }
+}
+
+@media (hover: none) {
+  .chat-group--latest-assistant > .chat-group-footer {
     --chat-footer-disclosure-opacity: 1;
     --chat-footer-disclosure-pointer-events: auto;
   }
@@ -630,8 +638,7 @@ img.chat-avatar.user {
   color: var(--muted);
 }
 
-.chat-avatar.other,
-.chat-avatar--forwarded {
+.chat-avatar.other {
   background: var(--secondary);
   color: var(--muted);
 }
@@ -1276,6 +1283,27 @@ img.chat-avatar {
 }
 
 @media (max-width: 768px), (max-width: 932px) and (max-height: 500px) and (orientation: landscape) {
+  .chat-thread
+    .chat-group.assistant:not(.chat-group--forwarded)
+    .chat-bubble:not(.chat-bubble--tool-shell):has(.chat-message-images) {
+    width: 100%;
+  }
+
+  .chat-thread
+    .chat-group.assistant.chat-group--forwarded
+    .chat-bubble:not(.chat-bubble--tool-shell),
+  .chat-thread
+    .chat-group.assistant:not(.chat-group--forwarded)
+    .chat-bubble:not(.chat-bubble--tool-shell)
+    :is(
+      .chat-assistant-attachments,
+      .chat-message-images,
+      openclaw-chat-async-question,
+      openclaw-chat-clawhub-card
+    ):not(.chat-assistant-attachments *) {
+    max-width: 90%;
+  }
+
   /* Peer names carry identity when narrow rows have no avatar column. */
   .chat-group.user.chat-group--peer {
     --chat-persistent-footer-opacity: 1;

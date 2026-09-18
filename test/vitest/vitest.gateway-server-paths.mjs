@@ -1,35 +1,54 @@
 // Plugin integration tests retain Gateway runtime setup outside core source.
 export const gatewayPluginTestFiles = ["test/plugins/codex-model-catalog.gateway.test.ts"];
 
-// Native database consumers retain the Gateway runner and setup in forked processes.
+// This curated cohort retains serial forks and the extended database-worker watchdog,
+// even though ordinary Gateway methods also use forks.
 export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/chat-display-projection.cron.test.ts",
   "src/gateway/config-reload.activation.integration.test.ts",
   "src/gateway/config-reload.test.ts",
   "src/gateway/config-reload.transcripts.test.ts",
+  "src/gateway/device-pairing-prune.test.ts",
   "src/gateway/gateway-code-mode-clock.test.ts",
   "src/gateway/gateway.chat-redaction.test.ts",
   "src/gateway/health/collector.queue-health.test.ts",
+  "src/gateway/internal-source-reply-persistence.test.ts",
+  "src/gateway/link-understanding.product.test.ts",
   "src/gateway/local-request-context.session-tools.test.ts",
   "src/gateway/local-request-context.test.ts",
+  "src/gateway/managed-image-attachments.sqlite-visibility.test.ts",
   "src/gateway/managed-image-attachments.test.ts",
+  "src/gateway/managed-image-record-store.test.ts",
+  "src/gateway/managed-outgoing-gc-availability.test.ts",
+  "src/gateway/server-methods/agent.create-event.test.ts",
+  "src/gateway/server-methods/chat-send-commentary-media.test.ts",
   "src/gateway/server-methods/chat-send-synthetic-repair.integration.test.ts",
+  "src/gateway/server-methods/chat.abort-live-proof.test.ts",
   "src/gateway/server-methods/cron.list-scoped.test.ts",
   "src/gateway/server-methods/cron.runs.test.ts",
   "src/gateway/server-methods/cron.scheduled-policy-adoption.integration.test.ts",
   "src/gateway/server-methods/cron.self-removal.test.ts",
   "src/gateway/server-methods/cron.validation.test.ts",
+  "src/gateway/server-methods/models-auth-api-key.integration.test.ts",
+  "src/gateway/server-methods/models-auth-login.catalog.integration.test.ts",
+  "src/gateway/server-methods/models-auth-refresh.catalog.integration.test.ts",
+  "src/gateway/server-methods/models-auth-refresh.integration.test.ts",
   "src/gateway/server-methods/models-auth-removal.integration.test.ts",
+  "src/gateway/server-methods/models-connect-publication.integration.test.ts",
   "src/gateway/server-methods/models-dispatch.catalog.integration.test.ts",
   "src/gateway/server-methods/models-dispatch.lifecycle.integration.test.ts",
+  "src/gateway/server-methods/models-list.discovery-lifecycle.integration.test.ts",
   "src/gateway/server-methods/models-list.freshness.integration.test.ts",
   "src/gateway/server-methods/models-list.membership.integration.test.ts",
   "src/gateway/server-methods/models-list.native-lifecycle.integration.test.ts",
+  "src/gateway/server-methods/models-list.worker-recovery.integration.test.ts",
   "src/gateway/server-methods/native-hook-relay.test.ts",
+  "src/gateway/server-methods/nodes.test.ts",
   "src/gateway/server-methods/projects.test.ts",
   "src/gateway/server-methods/requester-cron-authority.integration.test.ts",
   "src/gateway/server-methods/send.scheduled-reads.integration.test.ts",
   "src/gateway/server-methods/server-methods.test.ts",
+  "src/gateway/server-methods/session-catalog.performance.test.ts",
   "src/gateway/server-methods/session-creator-preparation.test.ts",
   "src/gateway/server-methods/sessions-create-thinking-claim.test.ts",
   "src/gateway/server-methods/sessions-create-worktree-base.test.ts",
@@ -75,6 +94,9 @@ export const gatewayServerBackedHttpTestFiles = [
 // Gateway methods needing native process state or a private module graph keep
 // the shared methods runner in isolated forks.
 export const gatewayMethodsIsolatedTestFiles = [
+  "src/gateway/server-methods/tasks.access.test.ts",
+  "src/gateway/server-methods/tasks.test.ts",
+  "src/gateway/server-methods/agent.task-runtime.test.ts",
   "src/gateway/server-methods/agent.test.ts",
   "src/gateway/server-methods/board.runtime-boundaries.test.ts",
   "src/gateway/server-methods/chat.reset-visible-yield.test.ts",
@@ -84,6 +106,7 @@ export const gatewayMethodsIsolatedTestFiles = [
   "src/gateway/server-methods/sessions.send-yield-resume.test.ts",
   "src/gateway/server-methods/system-agent-nested-inference.integration.test.ts",
   "src/gateway/server-methods/system-agent-setup-control-ui.test.ts",
+  "src/gateway/server-methods/transcripts.test.ts",
   "src/gateway/server-methods/users-preferences.test.ts",
   "src/gateway/server-methods/usage.test.ts",
   "src/gateway/server-methods/usage.sessions-usage.test.ts",
@@ -91,6 +114,8 @@ export const gatewayMethodsIsolatedTestFiles = [
 
 // Gateway server tests that need a private module graph and the plain Vitest runner.
 export const gatewayServerIsolatedTestFiles = [
+  // A failed native close permanently fences this process's metadata owner.
+  "src/gateway/server-close.agent-databases.test.ts",
   "src/gateway/server-chat.retired-projection.test.ts",
   "src/gateway/server-plugin-subagent-runtime.overrides.test.ts",
   // Loads the real plugin runtime that neighboring server tests replace with mocks.

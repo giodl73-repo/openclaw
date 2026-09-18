@@ -13,25 +13,34 @@ import {
 import { withSharedStateWriteCoordinator } from "../state/openclaw-state-db-write-coordination.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
 import { mapTaskFlowView } from "./task-domain-views.js";
-import { runManagedTaskInFlowInDatabase } from "./task-flow-managed-run-task.kernel.js";
-import type { RunTaskInFlowResult } from "./task-flow-managed-run-task.types.js";
+import {
+  runManagedTaskInFlowInDatabase,
+  type ManagedTaskInFlowReceipt,
+} from "./task-flow-managed-run-task.kernel.js";
 import { assertControllerId, normalizeRestoredFlowRecord } from "./task-flow-registry.records.js";
 import {
   bindTaskFlowRecord,
   listTaskFlowRecordsForOwnerReadInDatabase,
   readTaskFlowRecord,
+  readTaskFlowRegistrySnapshot,
   listTaskFlowViewRecordsForOwnerInDatabase,
   readTaskFlowViewRecordInDatabase,
   updateTaskFlowRecordInDatabase,
   upsertTaskFlowRowInDatabase,
 } from "./task-flow-registry.store.kernel.js";
 import { isTerminalTaskFlow, type TaskFlowRecord } from "./task-flow-registry.types.js";
+import { syncLiveTaskFlowInDatabase } from "./task-registry-live-flow.worker.js";
+import {
+  restoreTaskRegistryInDatabase,
+  syncTaskMirroredFlowInDatabase,
+} from "./task-registry-restore.worker.js";
 import {
   findTaskRecordByRunIdForViewInDatabase,
   listTaskRecordsForFlowReadInDatabase,
   listTaskRecordsForOwnerReadInDatabase,
   readTaskViewRecordInDatabase,
   readTaskRegistryMutationSnapshotInDatabase,
+  readTaskRegistrySnapshot,
   summarizeTaskRecordsForFlowInDatabase,
 } from "./task-registry.store.kernel.js";
 import { readTaskRegistryStatusSnapshot } from "./task-registry.store.status.js";
@@ -60,7 +69,7 @@ export function executeTaskRegistryCommand(
     return command.input.preserveSourceArtifacts ? withArtifactPreservingStateReads(read) : read();
   }
   if (command.type === "flows.runTask") {
-    let committed: RunTaskInFlowResult | undefined;
+    let committed: ManagedTaskInFlowReceipt | undefined;
     try {
       const database = open();
       return withSharedStateWriteCoordinator(
@@ -146,13 +155,28 @@ export function executeTaskRegistryCommand(
     }
   }
   const database = open();
+  if (command.type === "tasks.restore") {
+    return restoreTaskRegistryInDatabase(database);
+  }
+  if (command.type === "flows.syncMirroredTask") {
+    return syncTaskMirroredFlowInDatabase(database, command.input);
+  }
+  if (command.type === "flows.syncLiveMirroredTask") {
+    return syncLiveTaskFlowInDatabase(database, command.input);
+  }
   const { db } = database;
   return runSqliteDeferredTransactionSync(db, () => {
     switch (command.type) {
+      case "flows.snapshot":
+        return readTaskFlowRegistrySnapshot(db);
       case "tasks.mutationSnapshot":
-        return readTaskRegistryMutationSnapshotInDatabase(db, command.input);
+        return command.input === undefined
+          ? readTaskRegistrySnapshot(database)
+          : readTaskRegistryMutationSnapshotInDatabase(db, command.input);
       case "tasks.get":
         return readTaskViewRecordInDatabase(db, command.input.taskId);
+      case "tasks.findByRunId":
+        return findTaskRecordByRunIdForViewInDatabase(db, command.input.runId);
       case "tasks.list":
         return listTaskRecordsForOwnerReadInDatabase(db, command.input.ownerKey);
       case "tasks.resolve": {

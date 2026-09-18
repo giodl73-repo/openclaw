@@ -9,8 +9,8 @@ import {
   normalizeAgentId,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
-import { compareSessionEntryPairs } from "./session-list-order.js";
 import { resolveRequestedSessionAgentId } from "./session-request-agent.js";
+import { sort as sortSessionRows } from "./session-row-projection-record.js";
 import { createSessionRowProjection, type SessionRowProjection } from "./session-row-projection.js";
 import { resolveStoredSessionKeyForAgentStore } from "./session-store-key.js";
 import type { SessionListRowContext } from "./session-utils-contracts.js";
@@ -118,6 +118,28 @@ export function createSessionRowProjectionFixture(params: {
   for (const [key, entry] of Object.entries(store)) {
     setEntry(key, entry);
   }
+  const selectEntries = (options?: Parameters<SessionRowProjection["selectEntries"]>[0]) => {
+    const query = options ?? {};
+    const matchingKeys =
+      query.sessionIdOrKey &&
+      new Set(
+        [...rows.values()]
+          .filter(
+            (row) =>
+              row.key === query.sessionIdOrKey || row.entry.sessionId === query.sessionIdOrKey,
+          )
+          .map((row) => row.key),
+      );
+    const selected = [...rows.values()].filter(
+      (row) =>
+        (!query.agentId || row.agentId === query.agentId) &&
+        (!query.storePath || row.storeTarget.storePath === query.storePath) &&
+        (!query.key || row.key === query.key) &&
+        (!matchingKeys || matchingKeys.has(row.key)) &&
+        (!query.parentSessionKey || row.parents.has(query.parentSessionKey)),
+    );
+    return sortSessionRows(selected, query.sortBy);
+  };
   const projection: SessionRowProjection = {
     capture: describe,
     findBySessionId: (query) =>
@@ -130,6 +152,15 @@ export function createSessionRowProjectionFixture(params: {
           (!query.storePath || row.storeTarget.storePath === query.storePath),
       ),
     describe,
+    setArchivePageSize: () => {},
+    modelFacts: (row) => {
+      const source = describe(row)!.materialized.source;
+      return { ...source, catalogEntry: source.thinkingProjection.catalogEntry };
+    },
+    withPreparedExactRows: async (_queries, consume) => ({
+      kind: "complete",
+      value: consume(projection),
+    }),
     present: (record, options) => {
       const now = options?.now ?? Date.now();
       const row = presentSessionRow(record.materialized, {
@@ -165,20 +196,7 @@ export function createSessionRowProjectionFixture(params: {
       }),
     },
     isCurrent: (row) => rows.get(id(row))?.generation === row.generation,
-    select: (options?: Parameters<SessionRowProjection["select"]>[0]) => {
-      const query = options ?? {};
-      return [...rows.values()]
-        .filter(
-          (row) =>
-            (!query.agentId || row.agentId === query.agentId) &&
-            (!query.storePath || row.storeTarget.storePath === query.storePath) &&
-            (!query.key || row.key === query.key) &&
-            (!query.parentSessionKey || row.parents.has(query.parentSessionKey)),
-        )
-        .toSorted((a, b) =>
-          compareSessionEntryPairs([a.key, a.entry], [b.key, b.entry], query.sortBy),
-        );
-    },
+    selectEntries,
     snapshot: (query, options) => {
       const record = describe(query);
       return record

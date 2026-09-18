@@ -201,12 +201,7 @@ class OpenClawShell
       }
     });
   }
-  // Lazy: the critical-notice module stays out of the startup chunk (perf
-  // budget); loaded on the first session.observer digest after boot.
-  criticalNoticeRuntime: Promise<
-    typeof import("../pages/chat/critical-observer-notice.runtime.ts")
-  > | null = null;
-  // Lazy for the same reason: the pairing modal is opened from Settings, not at
+  // Lazy: the pairing modal is opened from Settings, not at
   // boot, so its template, icons, and strings stay off the startup chunk.
   @state() devicePairSetupRenderer:
     | typeof import("../pages/devices/view-pairing.runtime.ts").renderDevicePairSetup
@@ -402,6 +397,7 @@ class OpenClawShell
           this.observeDeletedSessions(sessions.state);
           this.recoverDeletedActiveSession(sessions.state);
         },
+        () => this.performUpdate(),
       )
       .watch(
         () => this.context?.runtimeConfig,
@@ -566,9 +562,9 @@ class OpenClawShell
     this.shellNavigation.navigate(routeId, options);
   }
 
-  recoverNotFoundRoute() {
+  readonly recoverNotFoundRoute = () => {
     return this.shellNavigation.recoverNotFoundRoute();
-  }
+  };
 
   recoverDeletedActiveSession(sessionState: ApplicationContext["sessions"]["state"]) {
     this.shellNavigation.recoverDeletedActiveSession(sessionState);

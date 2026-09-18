@@ -152,6 +152,8 @@ src/agents/agent-run-terminal-reply.ts
 src/agents/agent-runtime-id.ts
 src/agents/agent-scope-config.ts
 src/agents/agent-scope.ts
+src/agents/auth-profiles/sqlite-json.ts
+src/agents/auth-profiles/sqlite-read-pool.ts
 src/agents/configured-provider-fallback.ts
 src/agents/configured-provider-model.ts
 src/agents/defaults.ts
@@ -248,6 +250,7 @@ src/cli/parse-bytes.ts
 src/cli/parse-duration.ts
 src/cli/profile-utils.ts
 src/cli/program/command-descriptor-utils.ts
+src/cli/signal-exit-barrier.ts
 src/cli/wait.ts
 src/commands/doctor/shared/channel-legacy-config-migrate.ts
 src/commands/doctor/shared/codex-route-agent-entries.ts
@@ -285,6 +288,7 @@ src/commands/doctor/shared/legacy-config-migrations.runtime.skills.ts
 src/commands/doctor/shared/legacy-config-migrations.runtime.system-agent.ts
 src/commands/doctor/shared/legacy-config-migrations.runtime.tier-eval.ts
 src/commands/doctor/shared/legacy-config-migrations.runtime.tool-names.ts
+src/commands/doctor/shared/legacy-config-migrations.runtime.tool-policy-conflicts.ts
 src/commands/doctor/shared/legacy-config-migrations.runtime.ts
 src/commands/doctor/shared/legacy-config-migrations.runtime.tts.ts
 src/commands/doctor/shared/legacy-config-migrations.ts
@@ -295,6 +299,7 @@ src/commands/doctor/shared/legacy-models-add-metadata.ts
 src/commands/doctor/shared/legacy-runtime-model-policy.ts
 src/commands/doctor/shared/legacy-runtime-model-providers.ts
 src/commands/doctor/shared/legacy-tool-name-migration.ts
+src/commands/doctor/shared/legacy-tool-policy-scopes.ts
 src/commands/doctor/shared/legacy-web-tools-migrate.ts
 src/compat/legacy-names.ts
 src/config/agent-dirs.ts
@@ -337,6 +342,7 @@ src/config/io.health-state.ts
 src/config/io.invalid-config.ts
 src/config/io.load.ts
 src/config/io.meta.ts
+src/config/io.observe-recovery-effects.ts
 src/config/io.observe-recovery.ts
 src/config/io.observe-state.ts
 src/config/io.observe-suspicious.ts
@@ -395,6 +401,7 @@ src/config/plugins-allowlist.ts
 src/config/provider-policy.ts
 src/config/recovery-policy.ts
 src/config/redact-argv.ts
+src/config/redact-sentinel.ts
 src/config/redact-snapshot.raw.ts
 src/config/redact-snapshot.secret-ref.ts
 src/config/redact-snapshot.ts
@@ -511,6 +518,7 @@ src/infra/bun-sqlite-library.ts
 src/infra/clawhub-integrity.ts
 src/infra/clawhub-spec.ts
 src/infra/command-carriers.ts
+src/infra/config-dir.ts
 src/infra/container-env-file.ts
 src/infra/crypto-digest.ts
 src/infra/dedupe.ts
@@ -532,6 +540,7 @@ src/infra/diagnostics-timeline.ts
 src/infra/directory-durability.ts
 src/infra/disk-space.ts
 src/infra/dispatch-wrapper-resolution.ts
+src/infra/dotenv-global-core.ts
 src/infra/dotenv-global.ts
 src/infra/dotenv.ts
 src/infra/ed25519-signature.ts
@@ -607,6 +616,7 @@ src/infra/net/undici-error-diagnostics.ts
 src/infra/net/undici-family-policy.ts
 src/infra/net/undici-global-dispatcher.ts
 src/infra/net/undici-runtime.ts
+src/infra/node-compile-cache-env.ts
 src/infra/node-runner-inventory.ts
 src/infra/node-sqlite.ts
 src/infra/non-fatal-cleanup.ts
@@ -626,6 +636,7 @@ src/infra/prototype-keys.ts
 src/infra/regular-file.ts
 src/infra/replace-file.ts
 src/infra/runtime-process-entrypoints.ts
+src/infra/runtime-process-url.ts
 src/infra/runtime-worker-url.ts
 src/infra/safe-cwd.ts
 src/infra/sealed-runtime-registry.ts
@@ -647,10 +658,12 @@ src/infra/sqlite-integrity.ts
 src/infra/sqlite-number.ts
 src/infra/sqlite-post-commit.ts
 src/infra/sqlite-private-directory.ts
+src/infra/sqlite-readonly-auth-transfer.ts
 src/infra/sqlite-readonly-location-cleanup.ts
 src/infra/sqlite-readonly-location.ts
 src/infra/sqlite-readonly-location.worker.ts
 src/infra/sqlite-readonly-worker-protocol.ts
+src/infra/sqlite-readonly-worker-session.ts
 src/infra/sqlite-readonly-worker.ts
 src/infra/sqlite-runtime-version.ts
 src/infra/sqlite-schema-contract-assembly.ts
@@ -659,6 +672,7 @@ src/infra/sqlite-schema-header.ts
 src/infra/sqlite-schema-issues.ts
 src/infra/sqlite-schema-sql.ts
 src/infra/sqlite-snapshot-source.ts
+src/infra/sqlite-snapshot-staging.ts
 src/infra/sqlite-source-handle.ts
 src/infra/sqlite-strict.ts
 src/infra/sqlite-terminal-open-latch.ts
@@ -911,6 +925,9 @@ src/plugins/plugin-scope.ts
 src/plugins/plugin-sdk-native-resolver.ts
 src/plugins/plugin-setup-module.ts
 src/plugins/plugin-source-build.ts
+src/plugins/plugin-source-capture-context.ts
+src/plugins/plugin-source-capture-directory.ts
+src/plugins/plugin-source-capture-path.ts
 src/plugins/plugin-source-references.ts
 src/plugins/portable-icon-paths.ts
 src/plugins/provider-config-owner.ts
@@ -1008,6 +1025,7 @@ src/sessions/session-diff.runtime.ts
 src/sessions/session-key-utils.ts
 src/sessions/session-row-changes.ts
 src/shared/assistant-error-format.ts
+src/shared/async-work-scope.ts
 src/shared/avatar-limits.ts
 src/shared/avatar-policy.ts
 src/shared/dedupe-by-key.ts
@@ -1035,6 +1053,7 @@ src/skills/discovery/agent-filter.ts
 src/skills/discovery/filter.ts
 src/state/config-machine-state-write.ts
 src/state/config-machine-state.ts
+src/state/openclaw-agent-db-contract.ts
 src/state/openclaw-agent-db-metadata.ts
 src/state/openclaw-agent-db-migration-required.ts
 src/state/openclaw-agent-db.paths.ts
@@ -1047,6 +1066,7 @@ src/state/openclaw-state-db-cache.ts
 src/state/openclaw-state-db-contract.ts
 src/state/openclaw-state-db-delivery-queue-backfill.ts
 src/state/openclaw-state-db-doctor-schema.ts
+src/state/openclaw-state-db-existing-schema.ts
 src/state/openclaw-state-db-existing-write.ts
 src/state/openclaw-state-db-fast-path.ts
 src/state/openclaw-state-db-handle.ts
@@ -1060,9 +1080,12 @@ src/state/openclaw-state-db-readonly.ts
 src/state/openclaw-state-db-repair.ts
 src/state/openclaw-state-db-runtime-failure.ts
 src/state/openclaw-state-db-schema-additive.ts
+src/state/openclaw-state-db-schema-discovery.ts
 src/state/openclaw-state-db-schema-helpers.ts
 src/state/openclaw-state-db-schema-migration-required.ts
+src/state/openclaw-state-db-schema-policy.ts
 src/state/openclaw-state-db-schema-repair.ts
+src/state/openclaw-state-db-schema-runtime.ts
 src/state/openclaw-state-db-schema-v12-foldin.ts
 src/state/openclaw-state-db-schema-v13-widerow.ts
 src/state/openclaw-state-db-schema-version.ts
@@ -1084,6 +1107,8 @@ src/state/openclaw-state-lease-store.ts
 src/state/openclaw-state-lease-worker-owner.ts
 src/state/openclaw-state-lease.ts
 src/state/openclaw-state-ownership.ts
+src/state/openclaw-state-read-scope.ts
+src/state/openclaw-state-read-worker.ts
 src/state/openclaw-state-schema-compatibility.ts
 src/state/openclaw-state-schema-publication.ts
 src/state/openclaw-state-schema.sql

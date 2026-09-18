@@ -305,7 +305,6 @@ export const en: TranslationMap & {
   sessionProgressCard: {
     title: "Progress",
     composerTitle: "Task progress",
-    gestureHint: "Drag or scroll up on the header to open; move down to close. Click to toggle.",
     shortCount: "{completed} of {total}",
     noteLabel: "Progress note",
     dismiss: "Dismiss progress card",
@@ -675,6 +674,8 @@ export const en: TranslationMap & {
         "The update was not applied because gateway restarts are disabled. Enable restarts in config, then retry.",
       restartUnavailable:
         "This global install cannot be safely replaced while restarts are disabled and no supervisor is present.",
+      externalSupervisorUpdateRequired:
+        "This Gateway is managed by an external supervisor. Use your server or deployment's update workflow to update OpenClaw and restart the Gateway. The Control UI and `openclaw update` cannot update this installation. No package changes or Gateway restart were attempted.",
       restartUnhealthy:
         "The replacement process never became healthy. The previous process stayed up so you can recover.",
       restartRevisionMismatch:
@@ -2388,6 +2389,7 @@ export const en: TranslationMap & {
   cloudWorkersPage: {},
   portalsPage: {},
   modelSetup: {
+    discovery: {},
     missingAuth: "No provider credential is configured for this model. Set it up in Model Setup.",
     commandHint: "Try /models or /help.",
     heading: "Connect a verified AI model",
@@ -2625,6 +2627,12 @@ export const en: TranslationMap & {
     },
   },
   mcpServers: {
+    signIn: "Sign in",
+    authenticationSaved: "Authentication saved",
+    signInFailed: "Sign-in did not finish. Check the connector settings and try again.",
+    signInExpired: "This sign-in session ended. Close the dialog and sign in again.",
+    profileSignIn: "Sign in through the linked account in Models.",
+    requesterSignIn: "Each person signs in through this connector in chat.",
     add: "Add server",
     adding: "Adding…",
     nameLabel: "Name",
@@ -2740,6 +2748,7 @@ export const en: TranslationMap & {
       active: "{running} running · {queued} queued · {failed} failed or stopped",
       finished: "{done} completed · {failed} failed or stopped",
       completed: "{done} completed",
+      failedOrStopped: "Failed or stopped",
       childOutcome: "Child runs finished. Check the conversation for the final response.",
       childOutcomeProcessing: "Child runs finished. The parent is processing their results.",
       details: "Child details",
@@ -3388,6 +3397,11 @@ export const en: TranslationMap & {
     noResults: "No results",
     searchingSessions: "Searching sessions…",
     searchingCommands: "Searching commands…",
+    clearSearch: "Clear search",
+    escapeKey: "esc",
+    searchNotices: "Search notices ({count})",
+    filterLabel: "Filter search results",
+    filters: { all: "All", sessions: "Sessions", messages: "Messages" },
     searchFailed: "Chat search failed — check the gateway logs and retry",
     modelSearchFailed: "Model search unavailable. Change your search to retry.",
     searchPartial: "Transcript search unavailable — showing chat titles and metadata",
@@ -3396,6 +3410,7 @@ export const en: TranslationMap & {
       search: "Search",
       navigation: "Navigation",
       skills: "Skills",
+      messages: "In messages",
     },
     items: {
       apps: "Apps",
@@ -3570,6 +3585,7 @@ export const en: TranslationMap & {
       offline: "Offline",
       unavailable: "Could not load people. Try again.",
       limit: "You can mention up to 10 people per message.",
+      selectedLabel: "Will notify",
       selected: "Will notify: {names}",
       remove: "Remove mention",
       restoreFailed:
@@ -4416,6 +4432,9 @@ export const en: TranslationMap & {
       expandPanel: "Expand {panel}",
       restore: "Restore split",
       useViewAsDefault: "Use current view as default",
+      currentViewIsDefault: "This is the default view",
+      defaultViewDescription:
+        "Used when anyone opens this dashboard. Personal layout choices still apply.",
       savingDefault: "Saving default…",
       defaultSaved: "Dashboard default saved for future opens.",
       defaultSaveFailed:
@@ -4734,6 +4753,8 @@ export const en: TranslationMap & {
       skippedCount: "{count} skipped",
       running: "Running",
       completed: "Completed",
+      blocked: "Blocked",
+      outcomeUnknown: "Outcome unknown",
       exitCode: "Exit code {code}",
       failureCount: "{count} failed",
       noOutputFailed: "No output — tool failed.",

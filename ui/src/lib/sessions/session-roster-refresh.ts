@@ -22,7 +22,6 @@ import type {
   SessionState,
 } from "./session-capability.ts";
 import { normalizeAgentId } from "./session-key.ts";
-import { observeManagedSessionList } from "./session-list-observation.ts";
 import {
   coalesceSessionRefresh,
   completeSessionRefreshWaiters,
@@ -43,10 +42,7 @@ import {
   publishManagedList,
   type SessionListRefreshHost,
 } from "./session-managed-list-refresh.ts";
-import {
-  createSessionPrimaryWindows,
-  subscribeManagedSessionList,
-} from "./session-primary-windows.ts";
+import { createSessionPrimaryWindows } from "./session-primary-windows.ts";
 import {
   DEFAULT_SESSION_LIST_QUERY,
   normalizeManagedSessionListQuery,
@@ -225,11 +221,6 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
   );
   const retireWarmLists = (matches: (entry: ManagedSessionList) => boolean = () => true) =>
     primaryWindows.invalidate(matches, lastListOptions);
-  const subscribeManagedList = (
-    entry: ManagedSessionList,
-    listener: (snapshot: SessionListSnapshot) => void,
-  ) =>
-    subscribeManagedSessionList(entry, listener, managedLists, pageActive, primaryWindows.retire);
 
   const scheduleManagedLists = (
     matches: (entry: ManagedSessionList) => boolean,
@@ -783,17 +774,12 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       );
     },
     subscribeList(scope: SessionListScope, listener: (snapshot: SessionListSnapshot) => void) {
-      return subscribeManagedList(managedList(scope), listener);
+      return primaryWindows.subscribe(managedList(scope), listener, pageActive);
     },
     observeList: (scope: SessionListScope, listener: (snapshot: SessionListSnapshot) => void) => {
       const entry = managedList(scope);
-      return observeManagedSessionList(
-        entry,
-        listener,
-        () => subscribeManagedList(entry, listener),
-        () => managedLists.get(entry.key) === entry,
-        host.connection,
-        () => refreshManagedList(entry, { append: false, invalidated: true }),
+      return primaryWindows.observe(entry, listener, pageActive, host.connection, () =>
+        refreshManagedList(entry, { append: false, invalidated: true }),
       );
     },
     refreshList(options: SessionRefreshOptions = {}): Promise<void> {

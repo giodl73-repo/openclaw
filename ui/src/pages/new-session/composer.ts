@@ -16,11 +16,9 @@ import {
   renderChatAttachmentInputs,
 } from "../chat/components/chat-attachments.ts";
 import { adjustTextareaHeight, paneDomId } from "../chat/components/chat-composer-dom.ts";
-import {
-  renderSelectedHumanMentions,
-  type HumanMentionMenuHost,
-} from "../chat/components/chat-composer-mention-menu.ts";
+import type { HumanMentionMenuHost } from "../chat/components/chat-composer-mention-menu.ts";
 import { resolveComposerMenus } from "../chat/components/chat-composer-menus.ts";
+import { renderSelectedHumanMentions } from "../chat/components/chat-composer-selected-mentions.ts";
 import {
   handleSkillMenuKeydown,
   renderSkillMenu,
@@ -35,7 +33,6 @@ import {
   type SlashMenuHost,
   updateSlashMenu,
 } from "../chat/components/chat-composer-slash-menu.ts";
-import { ensureChatComposerPickerDismissal } from "../chat/components/chat-picker-overlay.ts";
 import {
   renderNewSessionDraftVisibility,
   renderNewSessionPlusMenu,
@@ -301,9 +298,6 @@ export function renderNewSessionComposer(options: NewSessionComposerOptions) {
     mentionMenu,
     emojiMenu,
   );
-  if (mentionMenu.open || emojiMenu.open) {
-    ensureChatComposerPickerDismissal();
-  }
   const menuAnnouncementId = paneDomId(skillMenuHost.paneId, "active-menu-announcement");
   const ordinaryShortcut = options.requiresModifier ? "Control+Enter Meta+Enter" : "Enter";
   const backgroundShortcut = options.requiresModifier
@@ -348,11 +342,11 @@ export function renderNewSessionComposer(options: NewSessionComposerOptions) {
         ${mentionMenu.render(mentionMenuHost, options.requestUpdate)}
         ${emojiMenu.render("new-session", options.textareaController.getTextarea(), options.requestUpdate)}
         ${options.nativeTerminal ? nothing : renderChatAttachmentInputs(attachmentProps)}
-        ${renderAttachmentPreview(attachmentProps)}
-        ${renderAttachmentReadStatus(options.pendingAttachmentReads)}
         ${renderSelectedHumanMentions(options.message, options.mentions, () =>
           options.onInput(options.message, []),
         )}
+        ${renderAttachmentPreview(attachmentProps)}
+        ${renderAttachmentReadStatus(options.pendingAttachmentReads)}
         <div class="agent-chat__composer-lede">${options.dictationStatus ?? nothing}</div>
         <div class="agent-chat__composer-input-row">
           <div class="agent-chat__composer-combobox">

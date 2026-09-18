@@ -5,8 +5,12 @@ import { isServiceInspectionReason } from "../daemon/service-inspection-error.js
 import { normalizeSupportDiagnosticErrorCode } from "../logging/diagnostic-support-redaction.js";
 import { CLAWHUB_INSTALL_ERROR_CODE } from "../plugins/clawhub-error-codes.js";
 import { PLUGIN_INSTALL_ERROR_CODE } from "../plugins/install-types.js";
-import { SKIPPED_UPDATE_OUTCOMES } from "../shared/update-outcome.js";
+import {
+  SKIPPED_UPDATE_OUTCOMES,
+  UPDATE_ENVIRONMENT_FAILURE_REASONS,
+} from "../shared/update-outcome.js";
 import type { UpdateFailureFact } from "./update-failure-facts.js";
+import { UPDATE_PREFLIGHT_DETAILS } from "./update-preflight-details.js";
 import { updateRecoverySchema } from "./update-recovery.js";
 
 type PublicFailureIdentifiers = Pick<UpdateFailureFact, "check" | "code" | "pluginId">;
@@ -20,6 +24,7 @@ const NATIVE_CHECKS = new Set<string>([
   "lint",
   "config-write",
   "preflight",
+  "installation-inspection",
   "targetConfigValidation",
   "configSnapshot",
   "targetConfigConvergence",
@@ -50,6 +55,7 @@ const NATIVE_CHECKS = new Set<string>([
 ]);
 
 const PUBLIC_CODES = new Set<string>([
+  ...Object.keys(UPDATE_PREFLIGHT_DETAILS),
   ...Object.keys(SKIPPED_UPDATE_OUTCOMES),
   ...Object.values(PLUGIN_INSTALL_ERROR_CODE),
   ...Object.values(CLAWHUB_INSTALL_ERROR_CODE),
@@ -69,6 +75,7 @@ const PUBLIC_CODES = new Set<string>([
   "command-failed",
   "doctor-failed",
   "global-install-failed",
+  ...UPDATE_ENVIRONMENT_FAILURE_REASONS,
   "already-current",
   "container-image-install",
   "unmanaged-package-install",
@@ -86,7 +93,6 @@ const PUBLIC_CODES = new Set<string>([
   "managed-service-preflight",
   "service-inspection-unavailable",
   "service-ownership-unverified",
-  "node-runtime-preflight",
   "database-schema-preflight",
   "update-ledger-busy",
   "invalid-git-directory",

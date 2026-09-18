@@ -38,7 +38,6 @@ import {
   defaultNativeSubagentMonitorRuntime,
 } from "./native-subagent-monitor-runtime.js";
 import type {
-  ChildAssistantMessages,
   ChildState,
   DirectSpawnEvidence,
   KnownChild,
@@ -618,7 +617,6 @@ class Monitor {
       this.turnObservation.emitChildTaskActivity(notification, childState);
     }
     if (!pendingNativeTurn) {
-      this.turnObservation.captureChildAssistantMessage(notification);
       await this.handleChildTurnCompletion(notification, childState);
     }
     if (
@@ -716,9 +714,6 @@ class Monitor {
         childState.childThreadId,
         "Codex child turn interrupted",
       );
-      if (turnId) {
-        childState.assistantMessagesByTurn.delete(turnId);
-      }
       this.settleResumableChild(childState);
       return;
     }
@@ -737,7 +732,6 @@ class Monitor {
       }
       this.releaseDirectChild(childState);
     }
-    this.turnObservation.captureChildTurnAssistantMessages(childState, turn);
     const completion = this.turnObservation.toChildTurnCompletion(childState, turn);
     if (!completion) {
       return;
@@ -976,30 +970,31 @@ class Monitor {
         this.settleResumableChild(childState);
         return false;
       }
-      const completion = recovery.completion;
+      const completion = this.processRecoveredCompletion(state, childState, recovery);
       if (!completion) {
-        if (recovery.fallbackCompletion) {
-          this.recovery.setRecoveryFallback(
-            childState,
-            recovery.fallbackCompletion,
-            recovery.fallbackCompletion.completedAt ?? this.now(),
-          );
-        }
         return false;
       }
-      if (isNoFinalCompletion(completion)) {
-        this.recovery.setRecoveryFallback(
-          childState,
-          completion,
-          completion.completedAt ?? this.now(),
-        );
-        return false;
-      }
-      await this.processCompletion(state, childState, completion, completion.completedAt);
+      await completion;
       return true;
     } finally {
       statusRead.release();
     }
+  }
+
+  private processRecoveredCompletion(
+    state: ParentState,
+    child: ChildState,
+    recovery: ThreadRecovery,
+  ): Promise<void> | undefined {
+    const completion = recovery.completion;
+    if (completion && !isNoFinalCompletion(completion)) {
+      return this.processCompletion(state, child, completion, completion.completedAt);
+    }
+    const fallback = completion ?? recovery.fallbackCompletion;
+    if (fallback) {
+      this.recovery.setRecoveryFallback(child, fallback, fallback.completedAt ?? this.now());
+    }
+    return undefined;
   }
 
   private recordRecoveredChildTurn(
@@ -1321,7 +1316,6 @@ class Monitor {
         parentThreadId,
         nativeParentThreadId: known?.nativeParentThreadId ?? parentThreadId,
         agentId: state.agentId,
-        assistantMessagesByTurn: new Map<string, ChildAssistantMessages>(),
         recoveryAttempt: 0,
         terminal: false,
         nativeCompletionDelivered: false,
@@ -1368,7 +1362,6 @@ class Monitor {
       childState.releaseDirectChild = claimDirectChild(childThreadId);
     }
     this.registerAgentPath(state, childThreadId, childThreadId);
-    state.mirror?.markAuthoritativeCompletionExpected(childThreadId);
     const agentPath = normalizeOptionalString(options.agentPath);
     if (agentPath) {
       this.registerAgentPath(state, childThreadId, agentPath);
@@ -2391,28 +2384,12 @@ class Monitor {
         this.settleResumableChild(childState);
         return;
       }
-      const completion = recovery.completion;
-      if (!completion) {
-        if (recovery.fallbackCompletion) {
-          this.recovery.setRecoveryFallback(
-            childState,
-            recovery.fallbackCompletion,
-            recovery.fallbackCompletion.completedAt ?? this.now(),
-          );
-          return;
-        }
+      const completion = this.processRecoveredCompletion(state, childState, recovery);
+      if (completion) {
+        await completion;
+      } else if (!recovery.completion && !recovery.fallbackCompletion) {
         this.recovery.scheduleRecoveryPoll(childState);
-        return;
       }
-      if (isNoFinalCompletion(completion)) {
-        this.recovery.setRecoveryFallback(
-          childState,
-          completion,
-          completion.completedAt ?? this.now(),
-        );
-        return;
-      }
-      await this.processCompletion(state, childState, completion, completion.completedAt);
     } finally {
       statusRead.release();
     }

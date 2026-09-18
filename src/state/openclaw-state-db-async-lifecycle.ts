@@ -12,7 +12,7 @@ import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 
 const STATE_DATABASE_READ_ADMISSION_INVALIDATED = "STATE_DATABASE_READ_ADMISSION_INVALIDATED";
 
-class StateDatabaseReadAdmissionInvalidatedError extends Error {
+export class StateDatabaseReadAdmissionInvalidatedError extends Error {
   readonly code = STATE_DATABASE_READ_ADMISSION_INVALIDATED;
 }
 
@@ -84,6 +84,11 @@ export function getOpenClawDatabaseMaintenanceScope():
   | OpenClawDatabaseMaintenanceScope
   | undefined {
   return maintenanceResources.current.getStore()?.scope;
+}
+
+/** Delayed work acquires its own resources instead of inheriting the completed scope. */
+export function runOutsideOpenClawDatabaseMaintenanceScope<T>(operation: () => T): T {
+  return maintenanceResources.current.exit(operation);
 }
 
 export function isOpenClawDatabaseMaintenanceResourceOwned(
@@ -283,7 +288,10 @@ export function createOpenClawStateDatabaseAsyncLifecycle() {
     const resolvedPath = path.resolve(pathname);
     const cached = known(resolvedPath);
     if (cached && (!preparedIdentity || cached.identity.key === preparedIdentity.key)) {
-      return cached;
+      // Resolve first creation without replacing an established file's admission.
+      return !preparedIdentity && cached.identity.key.startsWith("path:")
+        ? resolve(resolvedPath, readDatabasePathIdentitySync(resolvedPath))
+        : cached;
     }
     const identity = preparedIdentity ?? readDatabasePathIdentitySync(resolvedPath);
     let record = records.get(identity.key);
@@ -346,7 +354,7 @@ export function createOpenClawStateDatabaseAsyncLifecycle() {
     identity(pathname: string): DatabasePathIdentity | undefined {
       return known(pathname)?.identity ?? inspectDatabasePathIdentitySync(pathname);
     },
-    knownIdentity(pathname: string): DatabasePathIdentity | undefined {
+    knownIdentity(this: void, pathname: string): DatabasePathIdentity | undefined {
       return known(pathname)?.identity;
     },
     publish(pathname: string): DatabasePathIdentity {
@@ -388,7 +396,7 @@ export function createOpenClawStateDatabaseAsyncLifecycle() {
         resources.delete(resource);
       };
     },
-    capture(pathname: string): OpenClawStateDatabaseReadAdmission {
+    capture(this: void, pathname: string): OpenClawStateDatabaseReadAdmission {
       const databasePath = path.resolve(pathname);
       const record = resolve(databasePath);
       assertOpen(record);

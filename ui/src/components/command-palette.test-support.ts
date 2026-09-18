@@ -98,6 +98,8 @@ export function createContext(
       subscribe: () => () => undefined,
     }),
     agents: {
+      state: { agentsList: null },
+      subscribe: () => () => undefined,
       ensureList: async () => null,
     },
     sessions: {

@@ -3,7 +3,6 @@ import { asNonNegativeFiniteNumber } from "@openclaw/normalization-core/number-c
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { SESSION_PARTICIPANT_LIMIT } from "../../packages/gateway-protocol/src/schema/session-participant.js";
 import { resolveModelContextTokenProjection } from "../agents/context.js";
-import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { resolveFastModeState } from "../agents/fast-mode.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.js";
 import { resolveModelContextWindowProfile } from "../agents/model-context-window.js";
@@ -43,7 +42,6 @@ import { projectSessionDeliveryFields } from "../utils/delivery-context.shared.j
 import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel-constants.js";
 import { buildControlUiChannelAvatarUrl } from "./control-ui-contract.js";
 import { normalizeControlUiBasePath } from "./control-ui-shared.js";
-import { readPreparedGatewayModelCatalogMetadata } from "./server-model-catalog-view.js";
 import { sessionHasAutomation } from "./session-automation-index.js";
 import { sessionClassificationForRow } from "./session-classification.js";
 import {
@@ -52,7 +50,7 @@ import {
   projectSessionParticipants,
 } from "./session-identity-projection.js";
 import { isSessionPermissionChangePending } from "./session-permission-change.js";
-import { resolveStoredSessionKeyForAgentStore } from "./session-store-key.js";
+import { readSessionRowModelFacts } from "./session-row-model-facts.js";
 import { buildSessionSwarmSummary } from "./session-swarm-summary.js";
 import { readSessionTitleFieldsFromTranscript as readScopedSessionTitleFieldsFromTranscript } from "./session-transcript-title-reader.js";
 import type {
@@ -61,6 +59,7 @@ import type {
 } from "./session-utils-contracts.js";
 import {
   deriveSessionTitle,
+  prepareSessionTitleRead,
   resolveEstimatedSessionCostUsd,
   resolvePositiveNumber,
   buildStoreChildSessionLinksWork,
@@ -76,10 +75,6 @@ import {
 } from "./session-utils-display.js";
 import { resolveSessionSelectedModelRef } from "./session-utils-model-selection.js";
 import {
-  resolveGatewaySessionThinkingProjectionInternal,
-  resolveSessionDisplayModelIdentityRefCached,
-} from "./session-utils-model.js";
-import {
   buildSessionListRowMetadataContext,
   resolveTranscriptUsageFallbacks,
 } from "./session-utils-projection.js";
@@ -92,6 +87,8 @@ export function readSessionRowInputs(params: {
   storePath: string;
   storeAgentId?: string;
   active?: boolean;
+  /** A supplied resident model avoids transcript reads; null uses only stored model facts. */
+  activeModel?: { provider: string; model: string } | null;
   store: Record<string, SessionEntry>;
   modelSource?: GatewaySessionModelSource;
   key: string;
@@ -127,18 +124,17 @@ export function readSessionRowInputs(params: {
     participants.delete(JSON.stringify(owner.actor.identity));
   }
   const displayName = resolveGatewaySessionDisplayName(key, entry);
-  const preparedCatalog =
-    params.modelCatalog instanceof Map ? params.modelCatalog.get(agentId) : undefined;
-  const metadataSnapshot = readPreparedGatewayModelCatalogMetadata(preparedCatalog);
-  const selectedModel = resolveSessionSelectedModelRef({
-    cfg,
-    sessionKey: key,
-    source: params.modelSource ?? { entry, readSourceEntry: (parentKey) => store[parentKey] },
-    agentId,
-    rowContext,
-    allowPluginNormalization: !lightweight,
-    manifestPlugins: metadataSnapshot,
-  });
+  const { selectedModel, rowModelIdentity, thinkingProjection, catalogEntry } =
+    readSessionRowModelFacts({
+      cfg,
+      key,
+      entry,
+      source: params.modelSource ?? { entry, readSourceEntry: (parentKey) => store[parentKey] },
+      agentId,
+      rowContext,
+      modelCatalog: params.modelCatalog,
+      lightweightListRow: lightweight,
+    });
   const freshSessionTotalTokens = asNonNegativeFiniteNumber(resolveFreshSessionTotalTokens(entry));
   const usageByFallbackModel =
     params.skipTranscriptUsageFallback !== true
@@ -160,17 +156,11 @@ export function readSessionRowInputs(params: {
         })
       : undefined;
   const { provider, model } = selectedModel;
-  const rowModelIdentity = resolveSessionDisplayModelIdentityRefCached({
-    cfg,
-    provider,
-    model,
-    rowContext,
-  });
-
   // Display aliases do not change the selected route's catalog or runtime policy.
   const activeModel = resolveGatewaySessionActiveModel({
     cfg,
     active: params.active,
+    activeModel: params.activeModel,
     storeAgentId: params.storeAgentId,
     selectedModel,
     projectedAgentRuns: (rowContext.projectedAgentRuns ??= buildProjectedAgentRunIndex()),
@@ -181,9 +171,10 @@ export function readSessionRowInputs(params: {
     storePath,
   });
 
-  let derivedTitle: string | undefined;
+  const titleRead = prepareSessionTitleRead(entry, displayName, params);
+  let derivedTitle = titleRead?.derivedTitle;
   let lastMessagePreview: string | undefined;
-  if (entry?.sessionId && (params.includeDerivedTitles || params.includeLastMessage)) {
+  if (entry?.sessionId && titleRead?.needsTranscript) {
     const fields = readScopedSessionTitleFieldsFromTranscript({
       agentId: params.storeAgentId ?? agentId,
       sessionEntry: entry,
@@ -192,38 +183,11 @@ export function readSessionRowInputs(params: {
       storePath,
     });
     if (params.includeDerivedTitles) {
-      derivedTitle = deriveSessionTitle(entry, fields.firstUserMessage, displayName);
+      derivedTitle ??= deriveSessionTitle(entry, fields.firstUserMessage, displayName);
     }
     lastMessagePreview = (params.includeLastMessage && fields.lastMessagePreview) || undefined;
   }
 
-  // Entries and provider policy must stay bound to the same prepared agent owner;
-  // the Gateway startup registry can contain a different set of plugins.
-  const rowModelCatalog =
-    params.modelCatalog instanceof Map ? preparedCatalog?.entries : params.modelCatalog;
-
-  // Event/list rows must not rediscover plugin-backed configured catalog metadata.
-  // Lightweight projections may use an already-active provider policy, but must
-  // not fall through to public artifacts that reload the manifest registry.
-  const thinkingProjection = resolveGatewaySessionThinkingProjectionInternal({
-    cfg,
-    agentId,
-    provider: provider ?? DEFAULT_PROVIDER,
-    model: model ?? DEFAULT_MODEL,
-    sessionKey: resolveStoredSessionKeyForAgentStore({
-      cfg,
-      agentId,
-      sessionKey: key,
-    }),
-    entry,
-    modelCatalog: rowModelCatalog ?? (lightweight ? [] : undefined),
-    modelCatalogRouteVariants: preparedCatalog?.routeVariants,
-    metadataSnapshot,
-    rowContext,
-    providerPolicySource: preparedCatalog?.pluginRegistry ?? (lightweight ? "active" : undefined),
-  });
-  const catalogEntry =
-    rowModelCatalog && provider && model ? thinkingProjection.catalogEntry : undefined;
   const contextWindowProfile = resolveModelContextWindowProfile({
     catalogEntry,
     selected: entry?.contextWindow,
@@ -350,6 +314,7 @@ export function buildGatewaySessionRow(
 function resolveGatewaySessionActiveModel(params: {
   cfg: OpenClawConfig;
   active?: boolean;
+  activeModel?: { provider: string; model: string } | null;
   agentId?: string;
   storeAgentId?: string;
   sessionId?: string;
@@ -388,21 +353,26 @@ function resolveGatewaySessionActiveModel(params: {
     return undefined;
   }
 
+  const fallbackEntry =
+    params.activeModel === undefined
+      ? readSessionFallbackModel({
+          selectedProvider: selectedModel.provider,
+          selectedModel: selectedModel.model,
+          sessionEntry: params.entry,
+          config: params.cfg,
+          sessionScope: {
+            agentId: params.storeAgentId ?? params.agentId,
+            sessionKey: params.sessionKey,
+            storePath: params.storePath,
+          },
+        })
+      : params.activeModel
+        ? { modelProvider: params.activeModel.provider, model: params.activeModel.model }
+        : undefined;
   const { selected, active } = resolveSelectedAndActiveModel({
     selectedProvider: selectedModel.provider,
     selectedModel: selectedModel.model,
-    sessionEntry:
-      readSessionFallbackModel({
-        selectedProvider: selectedModel.provider,
-        selectedModel: selectedModel.model,
-        sessionEntry: params.entry,
-        config: params.cfg,
-        sessionScope: {
-          agentId: params.storeAgentId ?? params.agentId,
-          sessionKey: params.sessionKey,
-          storePath: params.storePath,
-        },
-      }) ?? params.entry,
+    sessionEntry: fallbackEntry ?? params.entry,
   });
   return resolveActiveFallbackState({
     selectedModelRef: selected.label,

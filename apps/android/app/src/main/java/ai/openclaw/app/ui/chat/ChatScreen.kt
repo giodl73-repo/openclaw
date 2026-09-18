@@ -374,7 +374,7 @@ internal fun ChatScreen(
   val thinkingLevel by viewModel.chatThinkingLevel.collectAsState()
   val thinkingLevelSelection by viewModel.chatThinkingLevelSelection.collectAsState()
   val streamingAssistantText by viewModel.chatStreamingAssistantText.collectAsState()
-  val pendingToolCalls by viewModel.chatPendingToolCalls.collectAsState()
+  val pendingToolCalls by viewModel.chatToolActivities.collectAsState()
   val subagentActivities by viewModel.chatSubagentActivities.collectAsState()
   val questions by viewModel.chatQuestions.collectAsState()
   val progressCard by viewModel.chatProgressCard.collectAsState()
@@ -2179,146 +2179,121 @@ internal fun ChatBubble(
       null
     }
 
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+  ChatBubbleContainer(
+    user = isUser,
+    speaker = speaker,
+    messageActions = { modifier, body ->
+      ChatMessageActionHost(
+        text = messageText,
+        onReply = onReplyMessage,
+        showSessionActions = isUser && entryId != null && sessionActionsEnabled,
+        onRewind = entryId?.let { value -> { onRewindMessage(value) } },
+        onFork = entryId?.let { value -> { onForkMessage(value) } },
+        enabled = !live,
+        listenActive = messageSpeech?.isActive == true,
+        onToggleListen = toggleListen,
+        modifier = modifier,
+        content = body,
+      )
+    },
   ) {
-    ChatMessageActionHost(
-      text = messageText,
-      onReply = onReplyMessage,
-      showSessionActions = isUser && entryId != null && sessionActionsEnabled,
-      onRewind = entryId?.let { value -> { onRewindMessage(value) } },
-      onFork = entryId?.let { value -> { onForkMessage(value) } },
-      enabled = !live,
-      listenActive = messageSpeech?.isActive == true,
-      onToggleListen = toggleListen,
-      modifier =
-        Modifier
-          .fillMaxWidth(chatBubbleWidthFraction(isUser))
-          .semantics(mergeDescendants = true) { contentDescription = speaker },
-    ) {
-      Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(if (isUser) CHAT_BUBBLE_CORNER_RADIUS_DP.dp else 0.dp),
-        color = if (isUser) ClawTheme.colors.userMessageSurface else Color.Transparent,
-        contentColor = ClawTheme.colors.text,
-        border = null,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-      ) {
-        Column(
-          modifier =
-            if (isUser) {
-              Modifier.padding(horizontal = 11.dp, vertical = 8.dp)
-            } else {
-              Modifier.padding(vertical = 4.dp)
-            },
-          verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-          caption?.let {
-            Text(
-              text = it,
-              style = ClawTheme.type.caption.copy(fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
-              color = ClawTheme.colors.textMuted,
-            )
-          }
-          if (collapsibleUserText && messageText.isNotBlank()) {
-            ChatUserMessageText(
-              textParts = displayableContent.mapNotNull { it.text },
-              plainText = messageText,
-              expanded = userMessageExpanded,
-              onExpandedChange = { userMessageExpanded = it },
-            )
-          }
-          displayableContent.forEach { part ->
-            when {
-              part.type == "text" && !collapsibleUserText -> {
-                ChatText(text = part.text.orEmpty(), textColor = ClawTheme.colors.text, isStreaming = live)
-              }
+    caption?.let {
+      Text(
+        text = it,
+        style = ClawTheme.type.caption.copy(fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
+        color = ClawTheme.colors.textMuted,
+      )
+    }
+    if (collapsibleUserText && messageText.isNotBlank()) {
+      ChatUserMessageText(
+        textParts = displayableContent.mapNotNull { it.text },
+        plainText = messageText,
+        expanded = userMessageExpanded,
+        onExpandedChange = { userMessageExpanded = it },
+      )
+    }
+    displayableContent.forEach { part ->
+      when {
+        part.type == "text" && !collapsibleUserText -> {
+          ChatText(text = part.text.orEmpty(), textColor = ClawTheme.colors.text, isStreaming = live)
+        }
 
-              part.type == "text" -> {}
+        part.type == "text" -> {}
 
-              part.isAudioAttachment() && part.hasPlayableMediaArtifact() -> {
-                ChatAudioPlayerCard(
-                  content = part,
-                  playbackBlocked = inlineMediaPlaybackBlocked,
-                  loadMedia = loadMediaArtifact,
-                )
-              }
+        part.isAudioAttachment() && part.hasPlayableMediaArtifact() -> {
+          ChatAudioPlayerCard(
+            content = part,
+            playbackBlocked = inlineMediaPlaybackBlocked,
+            loadMedia = loadMediaArtifact,
+          )
+        }
 
-              part.isVideoAttachment() && part.hasPlayableMediaArtifact() -> {
-                ChatVideoPlayerCard(
-                  content = part,
-                  playbackBlocked = inlineMediaPlaybackBlocked,
-                  loadMedia = loadMediaArtifact,
-                )
-              }
+        part.isVideoAttachment() && part.hasPlayableMediaArtifact() -> {
+          ChatVideoPlayerCard(
+            content = part,
+            playbackBlocked = inlineMediaPlaybackBlocked,
+            loadMedia = loadMediaArtifact,
+          )
+        }
 
-              part.isAudioAttachment() || part.isVideoAttachment() -> {
-                ChatMediaAttachmentLabel(content = part)
-              }
+        part.isAudioAttachment() || part.isVideoAttachment() -> {
+          ChatMediaAttachmentLabel(content = part)
+        }
 
-              part.type == "image" && !part.base64.isNullOrBlank() -> {
-                ChatBase64Image(base64 = part.base64, mimeType = part.mimeType)
-              }
+        part.type == "image" && !part.base64.isNullOrBlank() -> {
+          ChatBase64Image(base64 = part.base64, mimeType = part.mimeType)
+        }
 
-              part.type == "image" && !part.artifactId.isNullOrBlank() -> {
-                ChatManagedImage(
-                  artifactId = part.artifactId,
-                  label = part.alt?.takeIf(String::isNotBlank) ?: part.fileName ?: nativeString("Image"),
-                  resolverReady = inlineWidgetResolverReady,
-                  loadImage = loadImageArtifact,
-                )
-              }
+        part.type == "image" && !part.artifactId.isNullOrBlank() -> {
+          ChatManagedImage(
+            artifactId = part.artifactId,
+            label = part.alt?.takeIf(String::isNotBlank) ?: part.fileName ?: nativeString("Image"),
+            resolverReady = inlineWidgetResolverReady,
+            loadImage = loadImageArtifact,
+          )
+        }
 
-              part.type == "canvas" && normalizedRole == "assistant" -> {
-                ChatInlineWidget(
-                  preview = checkNotNull(part.widget),
-                  resolverReady = inlineWidgetResolverReady,
-                  resolveResource = resolveInlineWidgetResource,
-                )
-              }
+        part.type == "canvas" && normalizedRole == "assistant" -> {
+          ChatInlineWidget(
+            preview = checkNotNull(part.widget),
+            resolverReady = inlineWidgetResolverReady,
+            resolveResource = resolveInlineWidgetResource,
+          )
+        }
 
-              else -> {
-                Text(text = part.fileName ?: nativeString("Attachment"), style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
-              }
-            }
-          }
-          if (omittedImageCount > 0) {
-            Text(
-              text = nativeString("Additional images hidden: \${omittedImageCount}", omittedImageCount),
-              style = ClawTheme.type.caption,
-              color = ClawTheme.colors.textMuted,
-            )
-          }
-          if (messageId != null) {
-            ChatSourcePreviews(sourcePreviews, sourcePreviewConfig, loadSourceFavicon)
-            ChatMessageLinkPreview(messageId = messageId, role = normalizedRole, content = displayableContent, excludedUrls = sourcePreviews.flatMap { it.aliases }.toSet())
-          }
-          disclosure()
-          messageSpeech?.let { speech ->
-            FullChatSpeechIndicator(
-              phase = speech.phase,
-              onToggle = { onToggleListen(checkNotNull(messageId), messageText) },
-            )
-          }
-          timestampMs?.let {
-            Text(
-              text = formatChatTimestamp(it),
-              style = ClawTheme.type.caption.copy(fontSize = 11.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.Normal),
-              color = ClawTheme.colors.textSubtle,
-              modifier = Modifier.align(if (isUser) Alignment.End else Alignment.Start),
-            )
-          }
+        else -> {
+          Text(text = part.fileName ?: nativeString("Attachment"), style = ClawTheme.type.body, color = ClawTheme.colors.textMuted)
         }
       }
     }
+    if (omittedImageCount > 0) {
+      Text(
+        text = nativeString("Additional images hidden: \${omittedImageCount}", omittedImageCount),
+        style = ClawTheme.type.caption,
+        color = ClawTheme.colors.textMuted,
+      )
+    }
+    if (messageId != null) {
+      ChatSourcePreviews(sourcePreviews, sourcePreviewConfig, loadSourceFavicon)
+      ChatMessageLinkPreview(messageId = messageId, role = normalizedRole, content = displayableContent, excludedUrls = sourcePreviews.flatMap { it.aliases }.toSet())
+    }
+    disclosure()
+    messageSpeech?.let { speech ->
+      FullChatSpeechIndicator(
+        phase = speech.phase,
+        onToggle = { onToggleListen(checkNotNull(messageId), messageText) },
+      )
+    }
+    timestampMs?.let {
+      Text(
+        text = formatChatTimestamp(it),
+        style = ClawTheme.type.caption.copy(fontSize = 11.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.Normal),
+        color = ClawTheme.colors.textSubtle,
+        modifier = Modifier.align(if (isUser) Alignment.End else Alignment.Start),
+      )
+    }
   }
 }
-
-internal fun chatBubbleWidthFraction(isUser: Boolean): Float = if (isUser) 0.78f else 1f
-
-internal const val CHAT_BUBBLE_CORNER_RADIUS_DP = 24
 
 @Composable
 private fun FullChatSpeechIndicator(
@@ -2442,17 +2417,27 @@ private fun ChatText(
 private fun ToolBubble(toolCalls: List<ChatPendingToolCall>) {
   ClawPanel {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      ClawStatusPill(text = nativeString("Tools running"), status = ClawStatus.Warning)
-      toolCalls.take(4).forEach { tool ->
+      ClawStatusPill(text = nativeString("Tool activity"), status = ClawStatus.Warning)
+      toolCalls.filter { it.activity?.isVisible != false }.forEach { tool ->
         ClawListItem(
-          title = tool.name,
-          subtitle = nativeString("OpenClaw is working"),
+          title = tool.activity?.title ?: tool.name,
+          subtitle =
+            when (tool.activity?.status) {
+              "running" -> nativeString("OpenClaw is working")
+              "completed" -> nativeString("Finished")
+              "failed" -> nativeString("Failed")
+              "blocked" -> nativeString("Blocked")
+              else -> if (tool.activity == null && !tool.isComplete) nativeString("OpenClaw is working") else nativeString("No result")
+            },
           trailing = { tool.liveDiff?.let { DiffStatChips(it) } },
         )
       }
-      if (toolCalls.size > 4) {
-        Text(text = nativeString("+\${toolCalls.size - 4} more", toolCalls.size - 4), style = ClawTheme.type.caption, color = ClawTheme.colors.textSubtle)
-      }
+      CompletedToolActivity(
+        toolCalls.filter { it.activity?.isVisible == false }.map {
+          ChatToolActivity(it.toolCallId, it.name, null, null, it.isError == true, it.args, it.activity, true)
+        },
+        stableKey = "pending-tool-details",
+      )
     }
   }
 }
@@ -2463,7 +2448,7 @@ private fun CompletedToolActivity(
   stableKey: String,
 ) {
   if (tools.isEmpty()) return
-  if (tools.size == 1) {
+  if (tools.size == 1 && !tools.single().activityPrepared && tools.single().activity == null) {
     val tool = tools.single()
     CompletedToolActivityItem(
       tool = tool,
@@ -2472,15 +2457,10 @@ private fun CompletedToolActivity(
     )
     return
   }
-  if (tools.all { completedToolKind(it.name) == CompletedToolKind.Progress }) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-      tools.forEach { ProgressToolReceipt(it) }
-    }
-    return
-  }
   var expanded by rememberSaveable(stableKey) { mutableStateOf(false) }
   var showAll by rememberSaveable(stableKey) { mutableStateOf(false) }
   val summary = completedToolGroupSummary(tools)
+  val hasError = tools.any { it.isError }
   val state = if (expanded) nativeString("Expanded") else nativeString("Collapsed")
   // Remeasure disclosures immediately: nested size springs leave blank space
   // while the reverse-layout transcript readjusts its bottom anchor.
@@ -2509,11 +2489,14 @@ private fun CompletedToolActivity(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Icon(
-          imageVector = Icons.AutoMirrored.Filled.List,
+          imageVector = if (hasError) Icons.Default.Close else Icons.AutoMirrored.Filled.List,
           contentDescription = null,
           modifier = Modifier.size(16.dp),
-          tint = ClawTheme.colors.textMuted,
+          tint = if (hasError) ClawTheme.colors.danger else ClawTheme.colors.textMuted,
         )
+        if (hasError) {
+          Text(text = nativeString("Tool error"), style = ClawTheme.type.caption, color = ClawTheme.colors.danger)
+        }
         Text(
           text = summary,
           modifier = Modifier.weight(1f, fill = false),
@@ -2635,17 +2618,24 @@ private fun CompletedToolActivityItem(
       ) {
         Icon(
           imageVector =
-            when (kind) {
-              CompletedToolKind.Command -> Icons.Default.Terminal
-              CompletedToolKind.Read -> Icons.Default.Description
-              CompletedToolKind.Edit, CompletedToolKind.Write -> Icons.Default.Edit
-              CompletedToolKind.Search, CompletedToolKind.Fetch -> Icons.Default.Search
-              else -> Icons.AutoMirrored.Filled.List
+            if (tool.isError) {
+              Icons.Default.Close
+            } else {
+              when (kind) {
+                CompletedToolKind.Command -> Icons.Default.Terminal
+                CompletedToolKind.Read -> Icons.Default.Description
+                CompletedToolKind.Edit, CompletedToolKind.Write -> Icons.Default.Edit
+                CompletedToolKind.Search, CompletedToolKind.Fetch -> Icons.Default.Search
+                else -> Icons.AutoMirrored.Filled.List
+              }
             },
           contentDescription = null,
           modifier = Modifier.size(16.dp),
-          tint = ClawTheme.colors.textMuted,
+          tint = if (tool.isError) ClawTheme.colors.danger else ClawTheme.colors.textMuted,
         )
+        resultPresentation.outcome?.let { outcome ->
+          Text(text = outcome, style = ClawTheme.type.caption, color = ClawTheme.colors.danger)
+        }
         Row(
           modifier = Modifier.weight(1f),
           horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2945,7 +2935,7 @@ private fun ChatNotice(
       Box(modifier = Modifier.size(6.dp).background(ClawTheme.colors.warning, CircleShape))
       Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(text = title, style = ClawTheme.type.section, color = ClawTheme.colors.text)
-        Text(text = body, style = ClawTheme.type.caption, color = ClawTheme.colors.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text = body, style = ClawTheme.type.caption, color = ClawTheme.colors.textMuted)
       }
     }
   }
@@ -4732,9 +4722,13 @@ private fun AttachmentStrip(
   attachments: List<PendingAttachment>,
   onRemoveAttachment: (String) -> Unit,
 ) {
-  Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-    attachments.forEach { attachment ->
-      AttachmentChip(attachment = attachment, onRemove = { onRemoveAttachment(attachment.id) })
+  BoxWithConstraints(Modifier.fillMaxWidth()) {
+    // Capture the composer width before horizontal scrolling makes the row unbounded.
+    val chipMaxWidth = maxWidth
+    Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      attachments.forEach { attachment ->
+        AttachmentChip(attachment = attachment, maxWidth = chipMaxWidth, onRemove = { onRemoveAttachment(attachment.id) })
+      }
     }
   }
 }
@@ -4742,6 +4736,7 @@ private fun AttachmentStrip(
 @Composable
 private fun AttachmentChip(
   attachment: PendingAttachment,
+  maxWidth: Dp,
   onRemove: () -> Unit,
 ) {
   val videoThumbnail =
@@ -4749,6 +4744,7 @@ private fun AttachmentChip(
       attachment.videoThumbnailBase64?.let(::decodeBase64Bitmap)
     }
   Surface(
+    modifier = Modifier.widthIn(max = maxWidth),
     shape = RoundedCornerShape(ClawTheme.radii.pill),
     color = ClawTheme.colors.surfaceRaised,
     contentColor = ClawTheme.colors.text,
@@ -4777,13 +4773,14 @@ private fun AttachmentChip(
         text =
           attachment.durationMs?.let { duration -> nativeString("Voice note · \${formatVoiceNoteDuration(duration)}", formatVoiceNoteDuration(duration)) }
             ?: attachment.fileName,
+        modifier = Modifier.weight(1f, fill = false),
         style = ClawTheme.type.caption,
         color = ClawTheme.colors.textMuted,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
-      Surface(onClick = onRemove, modifier = Modifier.size(ClawTheme.spacing.touchTarget), shape = CircleShape, color = ClawTheme.colors.canvas, contentColor = ClawTheme.colors.text) {
-        Box(contentAlignment = Alignment.Center) {
+      Surface(onClick = onRemove, modifier = Modifier.size(ClawTheme.spacing.touchTarget), shape = CircleShape, color = Color.Transparent, contentColor = ClawTheme.colors.text) {
+        Box(modifier = Modifier.padding(8.dp).background(ClawTheme.colors.canvas, CircleShape), contentAlignment = Alignment.Center) {
           Icon(imageVector = Icons.Default.Close, contentDescription = nativeString("Remove attachment"), modifier = Modifier.size(13.dp))
         }
       }

@@ -254,6 +254,31 @@ describe("test runtime prerequisites", () => {
     }
   });
 
+  const catalogFile = "test/plugins/codex-model-catalog.gateway.test.ts";
+  const freshnessFile = "src/gateway/server-methods/models-list.freshness.integration.test.ts";
+  const scopedFreshnessFile = "server-methods/models-list.freshness.integration.test.ts";
+  it.each([
+    ["gateway-database-workers", [], "runtime"],
+    ["gateway-database-workers", [freshnessFile], "runtime"],
+    ["gateway-database-workers", [scopedFreshnessFile], "runtime"],
+    ["gateway-database-workers", [freshnessFile, "--exclude", scopedFreshnessFile], undefined],
+    ["gateway-methods", [catalogFile], "runtime"],
+    ["gateway-methods", [freshnessFile], undefined],
+    ["gateway-methods", ["--exclude", catalogFile], undefined],
+    ["gateway", [catalogFile], "runtime"],
+    ["gateway", [freshnessFile], "runtime"],
+    ["gateway", [freshnessFile, "--exclude", scopedFreshnessFile], undefined],
+    ["full-agentic", [freshnessFile, "--exclude", scopedFreshnessFile], undefined],
+    ["gateway", [catalogFile, "--exclude", catalogFile], undefined],
+  ] as const)("binds %s runtime prerequisites to their owner for %s", (project, args, expected) => {
+    const selections = resolveVitestRuntimeCliSelections(
+      `test/vitest/vitest.${project}.config.ts`,
+      ["run", ...args],
+      {},
+    );
+    expect(resolveVitestPretestBuildMode(selections)).toBe(expected);
+  });
+
   it.each([
     ["bundled", ["src/plugins/loader.test.ts"], undefined],
     ["unit-fast", ["src/plugins/*.test.ts"], undefined],
@@ -341,18 +366,27 @@ describe("test runtime prerequisites", () => {
     expect(resolveVitestPretestBuildMode(selections)).toBe(expected);
   });
 
-  it("projects invocation-owned include files when selecting prerequisites", () => {
+  it.each([
+    [
+      "gateway-server",
+      "src/gateway/server-request-context.test.ts",
+      "src/gateway/server-sidecar-retention.test.ts",
+    ],
+    ["gateway-database-workers", "src/gateway/server-methods/cron.runs.test.ts", freshnessFile],
+    ["gateway-methods", "src/gateway/server-methods/models.test.ts", catalogFile],
+    ["gateway", "src/gateway/server-request-context.test.ts", freshnessFile],
+  ])("projects invocation-owned include files under %s", (project, ordinaryFile, runtimeFile) => {
     const selections = resolveVitestRuntimeCliSelections(
-      "test/vitest/vitest.gateway-server.config.ts",
+      `test/vitest/vitest.${project}.config.ts`,
       ["run"],
       {},
     );
     for (const selection of selections) {
-      selection.includePatterns = ["src/gateway/server-request-context.test.ts"];
+      selection.includePatterns = [ordinaryFile];
     }
     expect(resolveVitestPretestBuildMode(selections)).toBeUndefined();
     for (const selection of selections) {
-      selection.includePatterns = ["src/gateway/server-sidecar-retention.test.ts"];
+      selection.includePatterns = [runtimeFile];
     }
     expect(resolveVitestPretestBuildMode(selections)).toBe("runtime");
   });
@@ -1158,6 +1192,7 @@ describe("scripts/test-projects changed-target routing", () => {
         "test/scripts/macos-native-test-launch.test.ts",
         "test/scripts/npm-prepared-bundle.test.ts",
         "test/scripts/openclaw-npm-extended-stable-release.test.ts",
+        "test/scripts/openclaw-npm-plugin-recovery-workflow.test.ts",
         "test/scripts/openclaw-npm-resume-run.test.ts",
         "test/scripts/package-acceptance-workflow.test.ts",
         "test/scripts/pr-crabbox-merge-bypass.test.ts",
@@ -1345,6 +1380,7 @@ describe("scripts/test-projects changed-target routing", () => {
         "test/scripts/authorized-beta-focused-evidence.test.ts",
         "test/scripts/frv.test.ts",
         "test/scripts/npm-prepared-bundle.test.ts",
+        "test/scripts/openclaw-npm-plugin-recovery-workflow.test.ts",
         "test/scripts/openclaw-npm-resume-run.test.ts",
         "test/scripts/release-candidate-checklist.test.ts",
         "test/scripts/verify-stable-main-closeout.test.ts",
@@ -2508,6 +2544,10 @@ describe("scripts/test-projects changed-target routing", () => {
       "src/plugins/doctor-contract-registry.load-paths.test.ts",
     ],
     ["test/vitest/vitest.plugin-sdk.config.ts", "src/plugin-sdk/provider-auth.test.ts"],
+    [
+      "test/vitest/vitest.unit-fast.config.ts",
+      "src/agents/embedded-agent-runner/run/model-setup.selected-model.test.ts",
+    ],
   ])("preserves whole-owner watch coverage for %s with %s", (config, file) => {
     const [plan] = buildVitestRunPlans(["--watch", config, file]);
     expect(plan).toMatchObject({
@@ -2650,28 +2690,52 @@ describe("scripts/test-projects changed-target routing", () => {
   });
 
   it.each([
-    [
-      "src/agents/embedded-agent-runner/run",
-      "test/vitest/vitest.agents-embedded-agent-run.config.ts",
-    ],
-    ["src/agents/runtime-plan", "test/vitest/vitest.agents-support.config.ts"],
-  ])("routes focused agent directory %s to its owning shard", (directory, config) => {
-    expect(buildVitestRunPlans([directory])).toEqual([
-      {
-        config,
-        forwardedArgs: [directory],
-        includePatterns: null,
-        watchMode: false,
-      },
-    ]);
-  });
+    {
+      directory: "src/agents/embedded-agent-runner/run",
+      config: "test/vitest/vitest.agents-embedded-agent-run.config.ts",
+      workerFiles: [
+        "src/agents/embedded-agent-runner/run/model-setup.ownership.test.ts",
+        "src/agents/embedded-agent-runner/run/model-setup.selected-model.test.ts",
+        "src/agents/embedded-agent-runner/run/runtime-preparation.thinking.test.ts",
+      ],
+    },
+    {
+      directory: "src/agents/runtime-plan",
+      config: "test/vitest/vitest.agents-support.config.ts",
+      workerFiles: [],
+    },
+  ])(
+    "routes focused agent directory $directory across its owners",
+    ({ directory, config, workerFiles }) => {
+      expect(buildVitestRunPlans([directory])).toEqual([
+        ...(workerFiles.length > 0
+          ? [
+              {
+                config: "test/vitest/vitest.infra.config.ts",
+                forwardedArgs: [],
+                includePatterns: workerFiles,
+                watchMode: false,
+              },
+            ]
+          : []),
+        {
+          config,
+          forwardedArgs: [directory],
+          includePatterns: null,
+          watchMode: false,
+        },
+      ]);
+    },
+  );
 
   it("splits the focused agent tools directory across its worker and tools owners", () => {
     expect(buildVitestRunPlans(["src/agents/tools"])).toEqual([
       {
         config: "test/vitest/vitest.infra.config.ts",
         forwardedArgs: [],
-        includePatterns: ["src/agents/tools/cron-tool.output-contract.test.ts"],
+        includePatterns: databaseWorkerCoreTestFiles.filter((file) =>
+          file.startsWith("src/agents/tools/"),
+        ),
         watchMode: false,
       },
       {
@@ -2683,12 +2747,22 @@ describe("scripts/test-projects changed-target routing", () => {
     ]);
   });
 
-  it("keeps shuffle options on the single owning embedded-run shard", () => {
+  it("keeps shuffle options on both embedded-run owners", () => {
     const directory = "src/agents/embedded-agent-runner/run";
 
     expect(
       buildVitestRunPlans([directory, "--", "--sequence.shuffle", "--sequence.seed", "3"]),
     ).toEqual([
+      {
+        config: "test/vitest/vitest.infra.config.ts",
+        forwardedArgs: ["--sequence.shuffle", "--sequence.seed", "3"],
+        includePatterns: [
+          "src/agents/embedded-agent-runner/run/model-setup.ownership.test.ts",
+          "src/agents/embedded-agent-runner/run/model-setup.selected-model.test.ts",
+          "src/agents/embedded-agent-runner/run/runtime-preparation.thinking.test.ts",
+        ],
+        watchMode: false,
+      },
       {
         config: "test/vitest/vitest.agents-embedded-agent-run.config.ts",
         forwardedArgs: ["--sequence.shuffle", "--sequence.seed", "3", directory],
@@ -5978,10 +6052,6 @@ describe("scripts/test-projects channel contract lane patterns", () => {
 });
 
 it.each([
-  ".github/workflows/openclaw-performance.yml",
-  "test/scripts/openclaw-performance-workflow.test.ts",
-  "test/scripts/openclaw-performance-workflow.test-support.ts",
-  "test/scripts/openclaw-performance-git-lifecycle.test.ts",
   "test/scripts/plugin-release-git-lifecycle.test.ts",
   "test/scripts/release-workflow-git-lifecycle.test.ts",
   ".github/workflows/plugin-clawhub-release.yml",
@@ -5990,15 +6060,10 @@ it.each([
   ".github/actions/publish-generated-pr/policy.py",
   ".github/workflows/maturity-scorecard.yml",
   "test/scripts/generated-publisher.test-support.ts",
-  "test/scripts/ci-git-owner.test-support.ts",
   "test/scripts/ci-checkout.test-support.ts",
   "test/scripts/ci-git-owner.test.ts",
   "test/scripts/ci-linux-git.test.ts",
   "test/scripts/ci-platform-checkout.test.ts",
-  "test/scripts/fixtures/ci-platform-checkout.mjs",
-  "test/scripts/ci-windows-process-census.test-support.ts",
-  "test/scripts/fixtures/ci-windows-process-census.mjs",
-  "test/scripts/fixtures/ci-windows-process-census.py",
 ])("routes shared Git ownership through all native tooling lanes: %s", (changedPath) => {
   const plan = resolveChangedTestTargetPlan([changedPath]);
   expect(plan.mode).toBe("targets");
@@ -6010,9 +6075,6 @@ it.each([
       "test/scripts/ci-workflow-guards.test.ts",
     ]),
   );
-  expect(
-    buildVitestRunPlans(["test/scripts/ci-git-owner.test.ts"]).map(({ config }) => config),
-  ).toEqual(["test/vitest/vitest.tooling.config.ts"]);
 });
 
 // Workflow policy and shared fixture changes must select both semantic and process proof.
@@ -6027,7 +6089,9 @@ it.each([
   "test/scripts/fixtures/ci-windows-process-census.mjs",
   "test/scripts/fixtures/ci-windows-process-census.py",
 ])("routes Performance lifecycle ownership: %s", (changedPath) => {
-  expect(resolveChangedTestTargetPlan([changedPath]).targets).toEqual(
+  const plan = resolveChangedTestTargetPlan([changedPath]);
+  expect(plan.mode).toBe("targets");
+  expect(plan.targets).toEqual(
     expect.arrayContaining([
       "test/scripts/ci-git-owner.test.ts",
       "test/scripts/ci-linux-git.test.ts",

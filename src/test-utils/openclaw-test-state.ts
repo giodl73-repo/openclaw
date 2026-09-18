@@ -2,10 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import {
-  closeAuthProfileReadPool,
-  resolveAuthProfileDatabasePath,
-} from "../agents/auth-profiles/sqlite.js";
+import { resolveAuthProfileDatabasePath } from "../agents/auth-profiles/sqlite.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import * as configRuntime from "../config/runtime-snapshot.js";
 import { GATEWAY_STARTUP_MUTATED_ENV_KEYS } from "../gateway/test-helpers.env.js";
@@ -377,8 +374,7 @@ export async function createOpenClawTestState(
       // including failure, so no concurrent caller can restore selectors early.
       restoreEnv: () =>
         (releasePromise ??= Promise.resolve().then(async () => {
-          await cleanupSessionStateForTest({ stateDir: paths.stateDir });
-          closeAuthProfileReadPool({ kind: "root", rootPath: paths.stateDir });
+          await cleanupSessionStateForTest({ stateDir: paths.stateDir, rootPath: root });
           restoreAppliedEnv();
         })),
       cleanup: () =>

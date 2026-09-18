@@ -1,4 +1,7 @@
-import type { SessionTranscriptUpdate } from "../../sessions/transcript-events.js";
+import type {
+  InternalSessionTranscriptUpdate,
+  SessionTranscriptUpdate,
+} from "../../sessions/transcript-events.js";
 import type { OpenClawConfig } from "../types.openclaw.js";
 import type {
   SessionTranscriptTurnMutation,
@@ -348,7 +351,8 @@ export type TranscriptMessageAppendResult<TMessage> = {
 };
 
 /** Transcript update fields supplied by callers; the target is resolved here. */
-export type TranscriptUpdatePayload = Partial<SessionTranscriptUpdate>;
+export type TranscriptUpdatePayload = Partial<SessionTranscriptUpdate> &
+  Pick<InternalSessionTranscriptUpdate, "lifecycleRevision">;
 
 export type LatestTranscriptAssistantText = {
   id?: string;
@@ -364,6 +368,8 @@ export type SessionTranscriptWriteLockAccessorContext = {
   appendMessageWithMessageSequence: <TMessage>(
     options: TranscriptMessageAppendOptions<TMessage>,
   ) => Promise<{
+    /** Unfenced imports omit ownership and retain canonical-history refresh. */
+    lifecycleRevision?: string;
     messageSeq?: number;
     result: TranscriptMessageAppendResult<TMessage> | undefined;
   }>;
@@ -436,7 +442,8 @@ export type SessionTranscriptTurnPersistOptions = {
   /** Exact run provenance persisted on output rows and emitted on terminal assistant updates. */
   runId?: string;
   /**
-   * Complete appended or matched committed messages before owner drain or publication.
+   * Complete appended or matched messages synchronously after guarded SQLite commit,
+   * before the write yields to cancellation, owner drain, or transcript publication.
    * The canonical result preserves replay bytes. Throws cannot roll back committed rows.
    */
   onMessageCommitted?: (result: TranscriptMessageAppendResult<unknown>) => void;
@@ -887,6 +894,10 @@ export type SessionEntryCreateWithTranscriptOptions = {
   requireWriteSuccess?: boolean;
   /** Synchronous caller-authority guard checked by the storage owner before commits. */
   commitGuard?: () => void;
+  /** Retain source authority around each final writer, after asynchronous preparation. */
+  withCommit?: <T>(run: (assertSourceCurrent: () => void) => Promise<T>) => Promise<T>;
+  /** Non-throwing notification after the entry's outer COMMIT, before publication or cleanup. */
+  onLifecycleCommitted?: (entry: SessionEntry) => void;
 };
 
 export type SessionPatchProjectionSnapshot = { store: Readonly<Record<string, SessionEntry>> };

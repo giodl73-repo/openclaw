@@ -1621,13 +1621,11 @@ describe("sessions tools", () => {
   ])(
     "records exactly one cross-agent contribution at the original prompt time only after admission (timeoutSeconds: $timeoutSeconds, admitted: $admitted)",
     async ({ timeoutSeconds, admitted }) => {
-      const storePath = path.join(
+      const storeTemplate = path.join(
         tempDirs.make("openclaw-session-send-participant-"),
-        "agents",
-        "research",
-        "agent",
-        "openclaw-agent.sqlite",
+        "agents/{agentId}/agent/openclaw-agent.sqlite",
       );
+      const storePath = resolveSessionStorePathCore(storeTemplate, { agentId: "research" });
       const scope = { agentId: "research", sessionKey: "agent:research:main", storePath };
       const sessionId = "participant-target";
       const promptedAt = 1_000;
@@ -1654,7 +1652,7 @@ describe("sessions tools", () => {
         const tool = createSessionsSendTool({
           agentSessionKey: "agent:main:main",
           expectedTargetSessionId: sessionId,
-          config: { ...TEST_CONFIG, session: { ...TEST_CONFIG.session, store: storePath } },
+          config: { ...TEST_CONFIG, session: { ...TEST_CONFIG.session, store: storeTemplate } },
           callGateway: callGatewayMock,
         });
         const result = await tool.execute("participant-send", {
@@ -1775,35 +1773,21 @@ describe("sessions tools", () => {
     const calls: Array<{ method?: string; params?: unknown }> = [];
     let agentCallCount = 0;
     const replyByRunId = new Map<string, string>();
-    const requesterKey = "discord:group:req";
-    const targetKey = "discord:group:target";
-    let sendParams: { to?: string; channel?: string; message?: string } = {};
+    const requesterKey = "agent:main:whatsapp:group:req";
+    const targetKey = "agent:director1:discord:group:target";
     callGatewayMock.mockImplementation(async (opts: unknown) => {
       const request = opts as { method?: string; params?: unknown };
       calls.push(request);
       if (request.method === "agent") {
         agentCallCount += 1;
         const runId = `run-${agentCallCount}`;
-        const params = request.params as
-          | {
-              message?: string;
-              sessionKey?: string;
-              extraSystemPrompt?: string;
-            }
-          | undefined;
+        const params = agentParams(request);
         let reply = "initial";
-        if (params?.extraSystemPrompt?.includes("Agent-to-agent reply step")) {
+        if (params.extraSystemPrompt?.includes("Agent-to-agent reply step")) {
           reply = params.sessionKey === requesterKey ? "pong-1" : "pong-2";
         }
-        if (params?.extraSystemPrompt?.includes("Agent-to-agent announce step")) {
-          reply = "announce now";
-        }
         replyByRunId.set(runId, reply);
-        return {
-          runId,
-          status: "accepted",
-          acceptedAt: 2000 + agentCallCount,
-        };
+        return { runId, status: "accepted" };
       }
       if (request.method === "agent.wait") {
         const params = request.params as { runId?: string } | undefined;
@@ -1813,17 +1797,6 @@ describe("sessions tools", () => {
           status: "ok",
           terminalReply: { disposition: "visible", text: replyByRunId.get(runId) },
         };
-      }
-      if (request.method === "send") {
-        const params = request.params as
-          | { to?: string; channel?: string; message?: string }
-          | undefined;
-        sendParams = {
-          to: params?.to,
-          channel: params?.channel,
-          message: params?.message,
-        };
-        return { messageId: "m-announce" };
       }
       return {};
     });
@@ -1836,7 +1809,7 @@ describe("sessions tools", () => {
 
     const tool = getSessionTool("sessions_send", {
       agentSessionKey: requesterKey,
-      agentChannel: "discord",
+      agentChannel: "whatsapp",
     });
 
     const waited = await tool.execute("call7", {
@@ -1847,12 +1820,7 @@ describe("sessions tools", () => {
     const waitedDetails = sessionsSendDetails(waited.details);
     expect(waitedDetails.status).toBe("ok");
     expect(waitedDetails.reply).toBe("initial");
-    await vi.waitFor(
-      () => {
-        expect(countMatching(calls, (call) => call.method === "agent")).toBe(6);
-      },
-      { timeout: 2_000, interval: 5 },
-    );
+    await waitForCalls(() => countMatching(calls, (call) => call.method === "send"), 1);
 
     const agentCalls = calls.filter((call) => call.method === "agent");
     expect(agentCalls).toHaveLength(6);
@@ -1861,20 +1829,47 @@ describe("sessions tools", () => {
       expect(params.lane).toMatch(/^nested(?::|$)/);
       expect(params.channel).toBe("webchat");
       expect(params.inputProvenance?.kind).toBe("inter_session");
+      expect(params.inputProvenance?.sourceRole).toBeUndefined();
     }
 
-    const replySteps = calls.filter(
-      (call) =>
-        call.method === "agent" &&
-        typeof (call.params as { extraSystemPrompt?: string })?.extraSystemPrompt === "string" &&
-        (call.params as { extraSystemPrompt?: string })?.extraSystemPrompt?.includes(
-          "Agent-to-agent reply step",
-        ),
+    const replySteps = agentCalls.filter((call) =>
+      agentParams(call).extraSystemPrompt?.includes("Agent-to-agent reply step"),
     );
     expect(replySteps).toHaveLength(5);
-    expect(sendParams.to).toBe("group:target");
-    expect(sendParams.channel).toBe("discord");
-    expect(sendParams.message).toBe("announce now");
+    const requesterStep = {
+      agentId: "main",
+      sessionKey: requesterKey,
+      inputProvenance: {
+        sourceSessionKey: targetKey,
+        sourceChannel: "discord",
+        sourceTool: "sessions_send",
+      },
+      extraSystemPrompt: expect.stringContaining("Current agent: Agent 1 (requester)."),
+    };
+    const targetStep = {
+      agentId: "director1",
+      sessionKey: targetKey,
+      inputProvenance: {
+        sourceSessionKey: requesterKey,
+        sourceChannel: "whatsapp",
+        sourceTool: "sessions_send",
+      },
+      extraSystemPrompt: expect.stringContaining("Current agent: Agent 2 (target)."),
+    };
+    expect(replySteps.map((step) => step.params)).toMatchObject([
+      { ...requesterStep, message: expect.stringContaining("initial") },
+      { ...targetStep, message: expect.stringContaining("pong-1") },
+      { ...requesterStep, message: expect.stringContaining("pong-2") },
+      { ...targetStep, message: expect.stringContaining("pong-1") },
+      { ...requesterStep, message: expect.stringContaining("pong-2") },
+    ]);
+    const announcements = calls.filter((call) => call.method === "send");
+    expect(announcements).toHaveLength(1);
+    expect(announcements[0]?.params).toMatchObject({
+      to: "group:target",
+      channel: "discord",
+      message: "announce now",
+    });
   });
 
   it.each<{

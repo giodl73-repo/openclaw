@@ -28,11 +28,21 @@ the snapshot is being built. Reconcile those events with the response and issue
 a trailing `sessions.list` refresh when needed, including when an event only
 invalidates the cached list. Reconnects require a new subscription and snapshot.
 
-The Gateway keeps materialized rows for every live durable session in memory.
-Committed owner changes refresh the affected rows; there is no completed-page
-cache or one-second staleness window. Newly admitted or replaced stores are
-hydrated once, and rows disappear when their store leaves the current topology.
-Each response applies the current viewer's visibility and current activity time.
+The Gateway keeps durable session metadata in memory and fills materialized rows
+incrementally. Committed owner changes refresh affected rows; there is no
+completed-page cache or one-second staleness window. Keyed descriptions,
+resolution, and chat startup prepare their requested row without waiting for the
+bulk refresh. Newly admitted or replaced stores load their metadata once, and
+rows disappear when their store leaves the current topology. Each response
+applies the current viewer's visibility and current activity time.
+
+Resident rows use stored titles and usage. Optional message previews and terminal
+fallback-model metadata fill in through bounded read-only background transcript
+reads; they can be absent from an early response. Foreground requests take priority.
+These reads do not restore cold archives, parse oversized messages, call a model,
+or change stored metadata or session activity ordering. Missing historical titles
+and legacy ACP keys are repaired only by `openclaw doctor --fix`. Missing usage
+remains absent until the normal usage writer records it.
 
 Both methods accept `activeOnly: true` to select currently running or queued sessions before pagination. Activity comes from the live runtime owners, not a stored status flag. Ordinary listing behavior is unchanged when the option is omitted or false. Active-only results include each visible agent-owned `global` and `unknown` session with its raw key and captured `agentId`; callers identify rows by agent, key, and `sessionId` together. Literal `agent:<id>:global` and `agent:<id>:unknown` sessions remain different rows. Active-only raw sentinel rows omit the optional `childSessions` and `hasActiveSubagentRun` fields; use `hasActiveRun` for direct activity. Normal permissions, archive/inclusion filters, and page limits still apply. Sessionless/internal runs are outside the session index.
 
@@ -78,8 +88,7 @@ count.
   The optional `sessionId` and opaque `lifecycleRevision` identify the session
   lifecycle; `lifecycleRevision` can be absent before the first reset. Revisions
   increase across runs within that lifecycle but can restart after a reset.
-  Critical notice history starts fresh when the identity pair changes, including
-  when `/clear` preserves `sessionId` and changes `lifecycleRevision`.
+  `/clear` preserves `sessionId` and changes `lifecycleRevision`.
   Clients show its headline or inspector link only while the digest's exact `runId`
   is present in `activeRunIds`.
 - `sessions.changed`: session index or metadata changed. Keyed changes carry the
@@ -89,7 +98,9 @@ count.
   and activity-summary enrichment enabled. This adds catalog-backed fields such
   as thinking options and replaces legacy model aliases with canonical model IDs
   in event rows. The Control UI applies these rows locally to existing roster
-  members, so their values match the list. Top-level lifecycle and capacity fields
+  members, so their values match the list. A `reason: "patch"` event that commits a
+  model, account, or runtime selection also carries `catalogChanged: true`; clients
+  may treat other patches as session-only and keep cached catalogs. Top-level lifecycle and capacity fields
   remain event receipts, including explicit clearing values. When a nested row
   omits an optional field, honor its top-level clearing tombstone; nested values
   take precedence when present. Merge an existing

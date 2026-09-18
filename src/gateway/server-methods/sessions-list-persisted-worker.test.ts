@@ -5,6 +5,7 @@ import {
   persistSubagentRunsToDiskOrThrow,
 } from "../../agents/subagents/registry/subagent-registry-state.js";
 import type { SubagentRunRecord } from "../../agents/subagents/registry/subagent-registry.types.js";
+import { createEmbeddedCallGateway } from "../../agents/tools/embedded-gateway-stub.js";
 import { setRuntimeConfigSnapshot } from "../../config/config.js";
 import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -13,6 +14,7 @@ import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-wo
 import { runOpenClawStateWorkerOperation } from "../../state/openclaw-state-worker-store.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { EmbeddedTuiBackend } from "../../tui/embedded-backend.js";
 import { getSessionRowProjection } from "../session-row-projection-access.js";
 import { sessionByKeyReadHandlers } from "./sessions-read-by-key.js";
 import {
@@ -41,7 +43,7 @@ function run(runId: string, overrides: Partial<SubagentRunRecord> = {}): Subagen
   };
 }
 it.each(["replaced", "made private"])(
-  "describes current session metadata after projection readiness while the session is %s",
+  "describes current session metadata without waiting for catalog readiness when the session is %s",
   async (change) => {
     await withOpenClawTestState(
       { scenario: "minimal", env: { OPENCLAW_TEST_READ_SUBAGENT_RUNS_FROM_SQLITE: "1" } },
@@ -90,6 +92,8 @@ it.each(["replaced", "made private"])(
         clearSubagentRunsReadCacheForTest();
         const context = requestContext(cfg);
         await initializeSessionReadContext(context);
+        const projection = getSessionRowProjection(context)!;
+        await projection.ensureMaterialized();
         const catalog = createDeferredCore();
         const reading = createDeferredCore();
         context.readPreparedGatewayModelCatalog = async () => {
@@ -99,30 +103,25 @@ it.each(["replaced", "made private"])(
         };
         notifyPreparedModelRuntimePublication({ phase: "catalog-published" });
         const respond = vi.fn<RespondFn>();
-        const request = sessionByKeyReadHandlers["sessions.describe"]!({
-          req: { type: "req", id: "describe-projection", method: "sessions.describe" },
-          params: { key: controller },
-          client: identifiedClient(viewerId),
-          context,
-          isWebchatConnect: () => false,
-          respond,
-        });
+        let request: Promise<void> | void = undefined;
         try {
-          expect(
-            await Promise.race([
-              reading.promise.then(() => "catalog"),
-              Promise.resolve(request).then(() => "response"),
-            ]),
-          ).toBe("catalog");
+          await reading.promise;
           await upsertSessionEntryCore(
             { agentId: "main", sessionKey: controller },
             change === "replaced"
               ? { sessionId: "replacement-session", label: "Current conversation" }
               : { visibility: "draft" },
           );
-          catalog.resolve();
-          await request;
+          request = sessionByKeyReadHandlers["sessions.describe"]!({
+            req: { type: "req", id: "describe-projection", method: "sessions.describe" },
+            params: { key: controller },
+            client: identifiedClient(viewerId),
+            context,
+            isWebchatConnect: () => false,
+            respond,
+          });
           expect(respond).toHaveBeenCalledTimes(1);
+          await request;
           expect(respond.mock.calls[0]?.[0]).toBe(true);
           const result = respond.mock.calls[0]?.[1];
           if (change === "made private") {
@@ -141,8 +140,8 @@ it.each(["replaced", "made private"])(
         } finally {
           vi.restoreAllMocks();
           catalog.resolve();
-          await Promise.allSettled([request]);
-          getSessionRowProjection(context)?.dispose();
+          await Promise.allSettled([request, projection.ensureMaterialized()]);
+          projection.dispose();
           clearSubagentRunsReadCacheForTest();
         }
       },
@@ -219,9 +218,6 @@ it("lists off-page controller links and deleted-collector totals while a sibling
           ],
         });
         expect(JSON.stringify(result)).not.toContain("retained synthetic");
-        const { createEmbeddedCallGateway } =
-          await import("../../agents/tools/embedded-gateway-stub.js");
-        const { EmbeddedTuiBackend } = await import("../../tui/embedded-backend.js");
         const backend = new EmbeddedTuiBackend();
         backend.start();
         try {

@@ -9,9 +9,11 @@ import {
   createRuntime,
   createRecordedRuntime,
   createTaskScope,
+  registerParent,
   notifyChildStarted,
   nativeCompletionNotification,
   childTurnCompletedNotification,
+  turnStartedNotification,
   threadRead,
   taskRecord,
   nativeHistoryOwner,
@@ -19,6 +21,57 @@ import {
 import type { CodexServerNotification } from "./protocol.js";
 
 describe("CodexNativeSubagentMonitor", () => {
+  it("does not accept parent commentary as a native child result or delivery receipt", async () => {
+    const client = createClient();
+    const runtime = createRuntime();
+    const monitor = new CodexNativeSubagentMonitor(client as never, runtime);
+    const parent = registerParent(monitor);
+    parent.bindTurn("parent-turn");
+    await notifyChildStarted(client);
+    await client.notify({
+      method: "rawResponseItem/completed",
+      params: {
+        threadId: "parent-thread",
+        turnId: "parent-turn",
+        item: {
+          type: "message",
+          role: "assistant",
+          phase: "commentary",
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({
+                author: "child-thread",
+                recipient: "/root",
+                content:
+                  '<subagent_notification>{"agent_path":"child-thread","status":{"completed":"child result"}}</subagent_notification>',
+                trigger_turn: false,
+              }),
+            },
+          ],
+        },
+      },
+    });
+
+    expect(runtime.finalizeTaskRunByRunId).not.toHaveBeenCalled();
+    expect(runtime.deliverAgentHarnessTaskCompletion).not.toHaveBeenCalled();
+
+    await client.notify(
+      childTurnCompletedNotification({
+        status: "completed",
+        items: [
+          { type: "agentMessage", id: "child-final", phase: "final_answer", text: "child result" },
+        ],
+      }),
+    );
+    await parent.unregister();
+
+    expect(runtime.deliverAgentHarnessTaskCompletion).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ result: "child result" }),
+    );
+    client.close();
+  });
+
   it.each(["v1", "v2"] as const)(
     "starts a distinct %s assignment while a completed predecessor is still recovering its result",
     async (version) => {
@@ -53,26 +106,14 @@ describe("CodexNativeSubagentMonitor", () => {
           item: directSpawnItem(version, "parent-thread", "child-thread"),
         },
       });
-      await client.notify({
-        method: "turn/started",
-        params: {
-          threadId: "child-thread",
-          turn: { id: "turn-previous", status: "inProgress", items: [], error: null },
-        },
-      });
+      await client.notify(turnStartedNotification("turn-previous", { error: null }));
       const firstCompletion = client.notify(
         childTurnCompletedNotification({ turnId: "turn-previous", status: "completed" }),
       );
       const history = threadRead({ previousResult: "first result", result: "second result" });
       try {
         await vi.waitFor(() => expect(client.request).toHaveBeenCalled());
-        await client.notify({
-          method: "turn/started",
-          params: {
-            threadId: "child-thread",
-            turn: { id: "turn-1", status: "inProgress", items: [], error: null },
-          },
-        });
+        await client.notify(turnStartedNotification("turn-1", { error: null }));
         expect(records.size).toBe(1);
         await client.notify({
           method: "item/completed",
@@ -205,13 +246,7 @@ describe("CodexNativeSubagentMonitor", () => {
       );
       const first = structuredClone(records.get(task.runId));
       if (liveFollowup) {
-        await client.notify({
-          method: "turn/started",
-          params: {
-            threadId: "child-thread",
-            turn: { id: "turn-previous", status: "inProgress", items: [] },
-          },
-        });
+        await client.notify(turnStartedNotification("turn-previous"));
         expect(records.get(task.runId)).toEqual(first);
         await client.notify({
           method: "item/completed",
@@ -226,13 +261,7 @@ describe("CodexNativeSubagentMonitor", () => {
             },
           },
         });
-        await client.notify({
-          method: "turn/started",
-          params: {
-            threadId: "child-thread",
-            turn: { id: "turn-1", status: "inProgress", items: [] },
-          },
-        });
+        await client.notify(turnStartedNotification("turn-1"));
         expect(records.get(task.runId)).toEqual(first);
         expect(records.get("codex-thread:child-thread:turn:turn-1")).toMatchObject({
           status: "running",

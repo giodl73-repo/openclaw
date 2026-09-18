@@ -85,12 +85,12 @@ import { listConfiguredMessageChannels } from "../infra/outbound/channel-selecti
 import { withSystemEventOwner } from "../infra/system-event-ownership.js";
 import { enqueueSystemEventWithReceipt } from "../infra/system-events.js";
 import { getChildLogger, getResolvedLoggerSettings, toPinoLikeLogger } from "../logging.js";
-import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import type {
   PluginHookCronChangedEvent,
   PluginHookGatewayCronService,
   PluginHookGatewayContext,
-} from "../plugins/hook-types.js";
+} from "../plugins/hook-gateway.types.js";
+import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import {
   getGatewaySuspendAdmissionPhase,
   runWithGatewayIndependentRootWorkAdmission,
@@ -1036,7 +1036,7 @@ export function buildGatewayCronService(params: {
     ),
     onEvent: (evt) => {
       // Any job/store change can alter session automation bindings, including
-      // in-place enable flips during runs; run/schedule events bump too (cheap).
+      // in-place enable flips during runs; the index publishes only binding deltas.
       invalidateSessionAutomationIndex();
       const jobSnapshot = evt.job ?? cron.getJob(evt.jobId);
       const scopedSessionKey =

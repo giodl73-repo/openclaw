@@ -1770,7 +1770,7 @@ jobs:
     if: (!inputs.prepare_only) && inputs.docker_lanes != ''
     continue-on-error: ${{ inputs.advisory }}
     runs-on: ${{ inputs.use_github_hosted_runners && 'ubuntu-24.04' || 'blacksmith-4vcpu-ubuntu-2404' }}
-    timeout-minutes: 5
+    timeout-minutes: 90
     outputs:
       groups_json: ${{ steps.groups.outputs.groups_json }}
     steps:
@@ -1781,6 +1781,12 @@ jobs:
           repository: ${{ needs.validate_selected_ref.outputs.workflow_repository }}
           ref: ${{ needs.validate_selected_ref.outputs.workflow_sha }}
           fetch-depth: 1
+
+      - name: Set up baseline probe Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
 
       - name: Build targeted Docker lane groups
         id: groups
@@ -1794,12 +1800,25 @@ jobs:
           OPENCLAW_UPGRADE_SURVIVOR_SCENARIOS: ${{ inputs.published_upgrade_survivor_scenarios }}
         run: |
           set -euo pipefail
-          groups_json="$(node scripts/plan-targeted-docker-lane-groups.mjs)"
+          echo "artifact_name=upgrade-baseline-checks-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(node -p 'crypto.randomUUID()')" >> "$GITHUB_OUTPUT"
+          groups_json="$(node scripts/plan-targeted-docker-lane-groups.mjs --check-baselines .artifacts/upgrade-baseline-checks)"
           echo "groups_json=${groups_json}" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize published baseline checks
+        if: always()
+        run: cat .artifacts/upgrade-baseline-checks/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload published baseline evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.groups.outputs.artifact_name }}
+          path: .artifacts/upgrade-baseline-checks/
+          if-no-files-found: error
 
   validate_docker_lanes:
     needs: [validate_selected_ref, prepare_docker_e2e_image, plan_docker_lane_groups]
-    if: (!inputs.prepare_only) && inputs.docker_lanes != ''
+    if: (!inputs.prepare_only) && inputs.docker_lanes != '' && needs.plan_docker_lane_groups.outputs.groups_json != '[]'
     name: Docker E2E targeted lanes (${{ matrix.group.label }})
     continue-on-error: ${{ inputs.advisory }}
     runs-on: ${{ inputs.use_github_hosted_runners && 'ubuntu-24.04' || 'blacksmith-32vcpu-ubuntu-2404' }}

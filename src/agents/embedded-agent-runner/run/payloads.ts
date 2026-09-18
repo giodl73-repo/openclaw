@@ -26,6 +26,7 @@ import {
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { hasReplyPayloadContent } from "../../../interactive/payload.js";
 import type { AssistantMessage } from "../../../llm/types.js";
+import { resolveRawAssistantAnswerText } from "../../../shared/assistant-answer-text.js";
 import { classifyOAuthRefreshFailure } from "../../auth-profiles/oauth-refresh-failure.js";
 import {
   formatAssistantErrorText,
@@ -47,7 +48,6 @@ import {
 import { isTimeoutErrorMessage } from "../../failover/classify.js";
 import type { PreparedProviderFailoverOwner } from "../../failover/provider-patterns.js";
 import type { ToolErrorSummary } from "../../tool-error-summary.js";
-import { resolveRawAssistantAnswerText } from "./assistant-answer.js";
 import { buildSourceReplyPayloadState } from "./source-reply-payloads.js";
 import { buildFailureWarning } from "./tool-error-warning.js";
 
@@ -337,12 +337,12 @@ export function buildEmbeddedRunPayloads(params: {
     assistantMessageIndex: params.assistantMessageIndex,
   });
   // A conversational NO_REPLY is an authored outcome, not a missing answer.
-  // For example, a rate-limited context read must not turn a reaction to
-  // "thank you" into a synthetic tool-error message. Keep failure reporting
-  // for missing answers, unknown/mutating actions, and scheduled work.
+  // Native shell calls are conservatively classified as mutating even when
+  // they only search files. That replay-safety classification must not replace
+  // a completed answer with a synthetic warning. Missing answers, interrupted
+  // runs, and scheduled work still retain their failure reporting.
   const respectIntentionalSilence =
     hasIntentionalSilentFinal &&
-    params.lastToolError?.mutatingAction === false &&
     !params.isCronTrigger &&
     !params.isHeartbeatTrigger &&
     !params.runAborted;

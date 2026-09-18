@@ -22,8 +22,10 @@ import { FreeBsdPkgOwnershipError } from "../../infra/update-freebsd-pkg-ownersh
 import { UpdateRequesterRevokedError } from "../../infra/update-requester-authority.js";
 import { UpdateRunAdmissionBusyError } from "../../infra/update-run-admission.js";
 import { getUpdateRun, recordUpdateRunPhase } from "../../infra/update-run-ledger.js";
-import type { UpdateRunResult } from "../../infra/update-runner.js";
+import type { UpdateRunResult, UpdateStepResult } from "../../infra/update-runner.js";
+import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { defaultRuntime } from "../../runtime.js";
+import type { UpdateRecoveryStep } from "../../shared/update-outcome.js";
 import type { OpenClawSchemaVersions } from "../../state/openclaw-schema-versions.js";
 import { exitCliAfterOutput } from "../one-shot-exit.js";
 import { printResult } from "./progress.js";
@@ -64,7 +66,7 @@ export type MutableUpdateExecutionResult = {
   activationConfig?: UpdateConfigSnapshot;
 };
 
-export function createUpdateCommandFailureResult(
+function createUpdateCommandFailureResult(
   params: Pick<UpdateRunResult, "mode" | "root" | "recovery" | "durationMs"> & {
     failure: { cause: unknown; detail?: string };
     admission?: true;
@@ -84,25 +86,48 @@ export function createUpdateCommandFailureResult(
         : admissionFailure
           ? "managed-service-preflight"
           : "update-failed";
+  const failedStep: UpdateStepResult = {
+    name: preMutationFailure || pkgOwnershipFailure || admissionFailure ? reason : "update",
+    command: "openclaw update",
+    cwd: result.root ?? process.cwd(),
+    durationMs: result.durationMs,
+    exitCode: 1,
+    ...(isAbortError(cause) ? { termination: "signal" as const } : {}),
+    ...(detail !== undefined ? { stderrTail: detail } : {}),
+    ...(preMutationFailure && cause.recoverySteps ? { recoverySteps: cause.recoverySteps } : {}),
+    // Recorded diagnostics do not change post-mutation recovery eligibility.
+    ...(preMutationFailure || cause instanceof GatewayServiceUpdateOwnershipError
+      ? { failureFacts: cause.failureFacts }
+      : {}),
+  };
+  return { ...result, status: "error", reason, failedStep, steps: [failedStep] };
+}
+
+/** Mutable exceptions cannot authorize recovery while command cleanup is unknown. */
+export async function resolveMutableUpdateFailure(params: {
+  cause: unknown;
+  durationMs: number;
+  mode: UpdateRunResult["mode"];
+  root: string;
+  originalRecovery: () => Promise<UpdateRunResult["recovery"]>;
+}): Promise<{ result: UpdateRunResult; failure: { cause: unknown; detail: string } }> {
+  if (hasCommandProcessCleanupError(params.cause)) {
+    throw params.cause;
+  }
+  const failure = { cause: params.cause, detail: formatErrorMessage(params.cause) };
+  defaultRuntime.error(failure.detail);
   return {
-    ...result,
-    status: "error",
-    reason,
-    steps: [
-      {
-        name: preMutationFailure || pkgOwnershipFailure || admissionFailure ? reason : "update",
-        command: "openclaw update",
-        cwd: result.root ?? process.cwd(),
-        durationMs: result.durationMs,
-        exitCode: 1,
-        ...(isAbortError(cause) ? { termination: "signal" as const } : {}),
-        ...(detail !== undefined ? { stderrTail: detail } : {}),
-        // Recorded diagnostics do not change post-mutation recovery eligibility.
-        ...(preMutationFailure || cause instanceof GatewayServiceUpdateOwnershipError
-          ? { failureFacts: cause.failureFacts }
-          : {}),
-      },
-    ],
+    failure,
+    result: createUpdateCommandFailureResult({
+      durationMs: params.durationMs,
+      mode: params.mode,
+      root: params.root,
+      recovery:
+        params.cause instanceof UpdatePreMutationError
+          ? await params.originalRecovery()
+          : { serviceRestartSafe: false, reason: "runtime-verification-failed" },
+      failure,
+    }),
   };
 }
 
@@ -300,6 +325,8 @@ export function resolveAutomaticUpdateTriage(
 }
 
 export type UpdateAdmissionReportParams = {
+  mode?: UpdateRunResult["mode"];
+  recoverySteps?: readonly UpdateRecoveryStep[];
   failureFacts?: readonly UpdateFailureFact[];
   root: string;
   installKind: "git" | "package" | "unknown";
@@ -313,6 +340,7 @@ export type RefuseUpdate = (
   reason: string,
   message?: string,
   failureFacts?: readonly UpdateFailureFact[],
+  recoverySteps?: readonly UpdateRecoveryStep[],
 ) => Promise<void>;
 
 /** A fresh admission decision is data until its staging and executor owners settle. */

@@ -23,9 +23,14 @@ import {
   resolveStorePath,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import {
+  closeOpenClawAgentDatabasesAsync,
+  closeOpenClawAgentDatabasesForTest,
+  closeOpenClawStateDatabaseAsync,
+  drainSessionDiskBudgetWorkers,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
-import { afterEach, beforeEach, expect, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, expect, vi } from "vitest";
 import { defaultCodexAppInventoryCache } from "./app-inventory-cache.js";
 import { CodexAppServerClient } from "./client.js";
 import {
@@ -215,6 +220,7 @@ export function runCodexAppServerAttempt(
   };
   const promise = runCodexAppServerAttemptImpl(trackedParams, {
     ...options,
+    startupTimeoutFloorMs: options.startupTimeoutFloorMs ?? 30_000,
     bindingStore: options.bindingStore ?? testCodexAppServerBindingStore,
     ...(clientFactory ? { clientFactory } : {}),
   }).finally(() => {
@@ -501,7 +507,7 @@ export function createAppServerHarness(
               method: "turn/completed",
               params: {
                 threadId,
-                turn: { id: turnId, status: "interrupted" },
+                turn: { id: turnId, status: "interrupted", items: [] },
               },
             });
           }
@@ -606,7 +612,7 @@ export function createAppServerHarness(
         params: {
           threadId: params.threadId,
           turnId: params.turnId,
-          turn: { id: params.turnId, status: "completed" },
+          turn: { id: params.turnId, status: "completed", items: [] },
         },
       });
     },
@@ -686,6 +692,8 @@ export function createRuntimeDynamicTool(name: string): RuntimeDynamicToolForTes
 }
 
 export function setupRunAttemptTestHooks(): void {
+  afterAll(drainSessionDiskBudgetWorkers);
+
   beforeEach(async () => {
     // Direct runtime tests supply the plugin root normally owned by loader registration.
     setManagedCodexPluginRoot(fileURLToPath(new URL("../../", import.meta.url)));
@@ -740,7 +748,9 @@ export function setupRunAttemptTestHooks(): void {
     for (const owner of seededSessionOwnersForTest.splice(0)) {
       await deleteSessionEntry(owner);
     }
+    await closeOpenClawAgentDatabasesAsync();
     closeOpenClawAgentDatabasesForTest();
+    await closeOpenClawStateDatabaseAsync();
     await fs.rm(tempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 }

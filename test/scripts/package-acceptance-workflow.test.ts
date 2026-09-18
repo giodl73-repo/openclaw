@@ -3119,6 +3119,11 @@ function runReleaseChecksShellStep(
   workdir = tempDirs.make("release-checks-shell-step-"),
 ) {
   const step = workflowStep(workflowJob(RELEASE_CHECKS_WORKFLOW, "resolve_target"), stepName);
+  mkdirSync(join(workdir, "workflow", "scripts"), { recursive: true });
+  copyFileSync(
+    "scripts/release-context-contains.sh",
+    join(workdir, "workflow", "scripts", "release-context-contains.sh"),
+  );
   const outputPath = resolve(workdir, "github-output");
   writeFileSync(outputPath, "", "utf8");
   const result = spawnSync("bash", ["-c", step.run ?? ""], {
@@ -3126,6 +3131,7 @@ function runReleaseChecksShellStep(
     encoding: "utf8",
     env: {
       ...env,
+      GITHUB_WORKSPACE: workdir,
       GITHUB_OUTPUT: outputPath,
       PATH: process.env.PATH,
     },
@@ -3328,128 +3334,10 @@ function runFullReleaseChildDispatch(
   const workdir = tempDirs.make("full-release-child-dispatch-");
   const ghPath = resolve(workdir, "gh");
   const sleepPath = resolve(workdir, "sleep");
-  const callsPath = resolve(workdir, "gh-calls.jsonl");
+  const callsPath = resolve(workdir, "gh-calls");
   const statusPath = resolve(workdir, "status-polls");
   writeFileSync(callsPath, "");
-  writeFileSync(
-    ghPath,
-    `#!${process.execPath}
-const fs = require("node:fs");
-const args = process.argv.slice(2);
-const env = process.env;
-fs.appendFileSync(env.MOCK_GH_CALLS, JSON.stringify({
-  args,
-  childWorkflowRef: env.CHILD_WORKFLOW_REF,
-  dispatchRunName: env.DISPATCH_RUN_NAME,
-}) + "\\n");
-const jobs = JSON.parse(env.MOCK_GH_JOBS);
-const conclusion = env.MOCK_GH_CONCLUSION;
-const url = "https://github.com/openclaw/openclaw/actions/runs/101";
-function nextRunObservation() {
-  const statuses = JSON.parse(env.MOCK_GH_STATUSES);
-  const titles = JSON.parse(env.MOCK_GH_RUN_TITLES);
-  let index = 0;
-  try { index = Number(fs.readFileSync(env.MOCK_GH_STATUS_POLLS, "utf8")); } catch {}
-  fs.writeFileSync(env.MOCK_GH_STATUS_POLLS, String(index + 1));
-  return {
-    status: statuses[Math.min(index, statuses.length - 1)],
-    title: titles.length > 0
-      ? titles[Math.min(index, titles.length - 1)]
-      : env.MOCK_GH_RUN_TITLE,
-  };
-}
-if (args[0] === "workflow" && args[1] === "run") {
-  if (env.MOCK_GH_DISPATCH_ERROR) {
-    console.error(env.MOCK_GH_DISPATCH_ERROR);
-    process.exit(1);
-  }
-  console.log(env.MOCK_GH_DISPATCH_OUTPUT);
-} else if (args[0] === "api" && args.some((value) => value.includes("/commits/"))) {
-  console.log(env.MOCK_GH_CURRENT_SHA);
-} else if (args[0] === "api" && args.some((value) => value.includes("/actions/workflows/") && value.endsWith("/runs"))) {
-  console.log(env.MOCK_GH_MATCHES);
-} else if (args[0] === "api" && args.some((value) => value.includes("/actions/workflows/"))) {
-  console.log(env.MOCK_GH_WORKFLOW_ID);
-} else if (args[0] === "api" && args.some((value) => value.includes("/jobs?"))) {
-  if (env.MOCK_GH_JOBS_ERROR) {
-    console.error(env.MOCK_GH_JOBS_ERROR);
-    process.exit(1);
-  }
-  jobs.forEach((job) => console.log(JSON.stringify(job)));
-} else if (args[0] === "api" && args.some((value) => value.includes("/actions/runs/"))) {
-  if (env.MOCK_GH_STATUS_ERROR && fs.existsSync(env.MOCK_GH_STATUS_POLLS)) {
-    console.error(env.MOCK_GH_STATUS_ERROR);
-    process.exit(1);
-  }
-  const observation = nextRunObservation();
-  console.log(JSON.stringify({
-    conclusion,
-    display_title: observation.title,
-    event: env.MOCK_GH_RUN_EVENT,
-    head_branch: env.MOCK_GH_RUN_HEAD_BRANCH,
-    head_sha: env.MOCK_GH_CHILD_SHA,
-    html_url: url,
-    id: Number(env.MOCK_GH_RUN_ID),
-    path: env.MOCK_GH_RUN_PATH,
-    run_attempt: Number(env.MOCK_GH_RUN_ATTEMPT),
-    status: observation.status,
-    workflow_id: Number(env.MOCK_GH_RUN_WORKFLOW_ID),
-  }));
-} else if (args[0] === "run" && args[1] === "view") {
-  const field = args[args.indexOf("--json") + 1];
-  if (field === "status" && env.MOCK_GH_STATUS_ERROR) {
-    console.error(env.MOCK_GH_STATUS_ERROR);
-    process.exit(1);
-  }
-  if (field === "jobs") {
-    if (env.MOCK_GH_JOBS_ERROR) {
-      console.error(env.MOCK_GH_JOBS_ERROR);
-      process.exit(1);
-    }
-    const query = args[args.indexOf("--jq") + 1];
-    if (query.startsWith("[.jobs")) {
-      console.log(JSON.stringify(jobs.filter((job) => job.status === "completed" && job.conclusion !== "success" && job.conclusion !== "skipped")));
-    } else {
-      jobs.forEach((job) => console.log(JSON.stringify(job)));
-    }
-  } else {
-    const status = field === "status" ? nextRunObservation().status : undefined;
-    console.log({
-      conclusion,
-      headSha: env.MOCK_GH_CHILD_SHA,
-      status,
-      url,
-    }[field]);
-  }
-} else if (args[0] !== "run" || args[1] !== "cancel") {
-  console.error("Unexpected mock gh invocation: " + JSON.stringify(args));
-  process.exit(2);
-}
-`,
-  );
-  chmodSync(ghPath, 0o755);
-  writeFileSync(
-    sleepPath,
-    `#!/bin/sh
-if [ -n "\${MOCK_SLEEP_SIGNAL:-}" ] && [ ! -e "\${MOCK_SLEEP_SIGNAL_SENT}" ]; then
-  : > "\${MOCK_SLEEP_SIGNAL_SENT}"
-  kill -"\${MOCK_SLEEP_SIGNAL}" "$PPID"
-fi
-exit 0
-`,
-  );
-  chmodSync(sleepPath, 0o755);
-
   const parentSha = "a".repeat(40);
-  const defaultJobs = [
-    {
-      conclusion: "success",
-      html_url: "https://github.com/openclaw/openclaw/actions/runs/101/job/201",
-      name: "Verify release checks",
-      status: "completed",
-      url: "https://github.com/openclaw/openclaw/actions/runs/101/job/201",
-    },
-  ];
   const stepValues: Record<string, string> = {
     ALLOW_UNRELEASED_CHANGELOG: "false",
     ARTIFACT_STAGE: child.kind.replace("artifact-", ""),
@@ -3497,57 +3385,114 @@ exit 0
       return [name, value];
     }),
   );
+  const env = {
+    ...stepEnv,
+    GH_TRANSIENT_SERVER_OR_NETWORK_PATTERN:
+      readWorkflow(FULL_RELEASE_VALIDATION_WORKFLOW).env?.GH_TRANSIENT_SERVER_OR_NETWORK_PATTERN ??
+      "HTTP 5[0-9][0-9]",
+    GITHUB_OUTPUT: resolve(workdir, "github-output"),
+    GITHUB_REPOSITORY: "openclaw/openclaw",
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_RUN_ID: "77",
+    GITHUB_STEP_SUMMARY: resolve(workdir, "github-summary"),
+    MOCK_GH_CALLS: callsPath,
+    MOCK_GH_CHILD_SHA: parentSha,
+    MOCK_GH_CONCLUSION: "success",
+    MOCK_GH_CURRENT_SHA: parentSha,
+    MOCK_GH_DISPATCH_OUTPUT: "Created workflow_dispatch event.",
+    MOCK_GH_MATCHES: "[101]",
+    MOCK_GH_RUN_EVENT: "workflow_dispatch",
+    MOCK_GH_RUN_HEAD_BRANCH:
+      overrides.MOCK_GH_RUN_HEAD_BRANCH ??
+      overrides.CHILD_WORKFLOW_REF ??
+      stepEnv.CHILD_WORKFLOW_REF,
+    MOCK_GH_RUN_ID: "101",
+    MOCK_GH_RUN_PATH: `.github/workflows/${child.workflow}`,
+    MOCK_GH_RUN_ATTEMPT: "1",
+    MOCK_GH_RUN_TITLE: `${child.runName} full-release-validation-77-2${child.nonceSuffix}`,
+    MOCK_GH_RUN_TITLES: "[]",
+    MOCK_GH_RUN_WORKFLOW_ID: "789",
+    MOCK_GH_STATUSES: '["completed"]',
+    MOCK_GH_STATUS_POLLS: statusPath,
+    MOCK_GH_WORKFLOW_ID: "789",
+    PATH: `${workdir}:${process.env.PATH}`,
+    ...overrides,
+  };
+  // Serialize responses once: title polling must not start a Node runtime per read.
+  const statuses = JSON.parse(env.MOCK_GH_STATUSES) as string[];
+  const titles = JSON.parse(env.MOCK_GH_RUN_TITLES) as string[];
+  const observations = Array.from(
+    { length: Math.max(statuses.length, titles.length, 1) },
+    (_, index) =>
+      JSON.stringify({
+        conclusion: env.MOCK_GH_CONCLUSION,
+        display_title:
+          titles.length > 0 ? titles[Math.min(index, titles.length - 1)] : env.MOCK_GH_RUN_TITLE,
+        event: env.MOCK_GH_RUN_EVENT,
+        head_branch: env.MOCK_GH_RUN_HEAD_BRANCH,
+        head_sha: env.MOCK_GH_CHILD_SHA,
+        html_url: "https://github.com/openclaw/openclaw/actions/runs/101",
+        id: Number(env.MOCK_GH_RUN_ID),
+        path: env.MOCK_GH_RUN_PATH,
+        run_attempt: Number(env.MOCK_GH_RUN_ATTEMPT),
+        status: statuses[Math.min(index, statuses.length - 1)],
+        workflow_id: Number(env.MOCK_GH_RUN_WORKFLOW_ID),
+      }),
+  );
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  writeFileSync(
+    ghPath,
+    `#!/bin/sh
+printf '%s\\0' "$#" "$CHILD_WORKFLOW_REF" "\${DISPATCH_RUN_NAME:-}" "$@" >> "$MOCK_GH_CALLS"
+if [ "$1" = workflow ] && [ "$2" = run ]; then
+  if [ -n "\${MOCK_GH_DISPATCH_ERROR:-}" ]; then
+    printf '%s\\n' "$MOCK_GH_DISPATCH_ERROR" >&2
+    exit 1
+  fi
+  printf '%s\\n' "$MOCK_GH_DISPATCH_OUTPUT"
+  exit 0
+fi
+if [ "$1" = api ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      */commits/*) printf '%s\\n' "$MOCK_GH_CURRENT_SHA"; exit 0 ;;
+      */actions/workflows/*/runs) printf '%s\\n' "$MOCK_GH_MATCHES"; exit 0 ;;
+      */actions/workflows/*) printf '%s\\n' "$MOCK_GH_WORKFLOW_ID"; exit 0 ;;
+      */actions/runs/*)
+        poll=0
+        if [ -f "$MOCK_GH_STATUS_POLLS" ]; then
+          read -r poll < "$MOCK_GH_STATUS_POLLS"
+        fi
+        printf '%s\\n' "$((poll + 1))" > "$MOCK_GH_STATUS_POLLS"
+        case "$poll" in
+${observations.map((json, index) => `          ${index === observations.length - 1 ? "*" : index}) printf '%s\\n' ${quote(json)} ;;`).join("\n")}
+        esac
+        exit 0 ;;
+    esac
+  done
+fi
+printf 'Unexpected mock gh invocation: %s\\n' "$*" >&2
+exit 2
+`,
+    { mode: 0o755 },
+  );
+  writeFileSync(sleepPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   const result = spawnSync("bash", ["-c", script], {
     cwd: workdir,
     encoding: "utf8",
-    env: {
-      ...stepEnv,
-      GH_TRANSIENT_SERVER_OR_NETWORK_PATTERN:
-        readWorkflow(FULL_RELEASE_VALIDATION_WORKFLOW).env
-          ?.GH_TRANSIENT_SERVER_OR_NETWORK_PATTERN ?? "HTTP 5[0-9][0-9]",
-      GITHUB_OUTPUT: resolve(workdir, "github-output"),
-      GITHUB_REPOSITORY: "openclaw/openclaw",
-      GITHUB_RUN_ATTEMPT: "2",
-      GITHUB_RUN_ID: "77",
-      GITHUB_STEP_SUMMARY: resolve(workdir, "github-summary"),
-      MOCK_GH_CALLS: callsPath,
-      MOCK_GH_CHILD_SHA: parentSha,
-      MOCK_GH_CONCLUSION: "success",
-      MOCK_GH_CURRENT_SHA: parentSha,
-      MOCK_GH_DISPATCH_OUTPUT: "Created workflow_dispatch event.",
-      MOCK_GH_JOBS: JSON.stringify(defaultJobs),
-      MOCK_GH_MATCHES: "[101]",
-      MOCK_GH_RUN_EVENT: "workflow_dispatch",
-      MOCK_GH_RUN_HEAD_BRANCH:
-        overrides.MOCK_GH_RUN_HEAD_BRANCH ??
-        overrides.CHILD_WORKFLOW_REF ??
-        stepEnv.CHILD_WORKFLOW_REF,
-      MOCK_GH_RUN_ID: "101",
-      MOCK_GH_RUN_PATH: `.github/workflows/${child.workflow}`,
-      MOCK_GH_RUN_ATTEMPT: "1",
-      MOCK_GH_RUN_TITLE: `${child.runName} full-release-validation-77-2${child.nonceSuffix}`,
-      MOCK_GH_RUN_TITLES: "[]",
-      MOCK_GH_RUN_WORKFLOW_ID: "789",
-      MOCK_GH_STATUSES: '["completed"]',
-      MOCK_GH_STATUS_POLLS: statusPath,
-      MOCK_GH_WORKFLOW_ID: "789",
-      MOCK_SLEEP_SIGNAL_SENT: resolve(workdir, "sleep-signal-sent"),
-      PATH: `${workdir}:${process.env.PATH}`,
-      ...overrides,
-    },
+    env,
     timeout: 10_000,
   });
-  const calls = readFileSync(callsPath, "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map(
-      (line) =>
-        JSON.parse(line) as {
-          args: string[];
-          childWorkflowRef: string;
-          dispatchRunName?: string;
-        },
-    );
+  // A count-prefixed NUL record preserves empty, quoted, and multiline arguments.
+  const fields = readFileSync(callsPath, "utf8").split("\0");
+  const calls: { args: string[]; childWorkflowRef: string; dispatchRunName?: string }[] = [];
+  for (let cursor = 0; cursor < fields.length - 1;) {
+    const argc = Number(fields[cursor++]);
+    const childWorkflowRef = fields[cursor++]!;
+    const dispatchRunName = fields[cursor++] || undefined;
+    calls.push({ args: fields.slice(cursor, cursor + argc), childWorkflowRef, dispatchRunName });
+    cursor += argc;
+  }
   return { calls, result };
 }
 
@@ -4072,7 +4017,7 @@ function runOpenClawNpmTrustedRefGuard(overrides: Record<string, string>) {
 
 function runPluginNpmPreflightToolingGuard(overrides: Record<string, string>) {
   const job = workflowJob(PLUGIN_NPM_RELEASE_WORKFLOW, "preview_plugins_npm");
-  const script = workflowStep(job, "Verify trusted preflight tooling identity").run;
+  const script = workflowStep(job, "Verify trusted preflight or recovery tooling identity").run;
   if (!script) {
     throw new Error("Expected plugin npm preflight tooling identity guard");
   }
@@ -5390,7 +5335,7 @@ const fs=require("node:fs");fs.writeFileSync("install-proof.json",JSON.stringify
   it("runs plugin npm preflight trust from the exact workflow tooling checkout", () => {
     const job = workflowJob(PLUGIN_NPM_RELEASE_WORKFLOW, "preview_plugins_npm");
     const checkout = workflowStep(job, "Checkout trusted planning tooling");
-    const identity = workflowStep(job, "Verify trusted preflight tooling identity");
+    const identity = workflowStep(job, "Verify trusted preflight or recovery tooling identity");
     const target = workflowStep(job, "Validate ref is on a trusted publish branch");
 
     expect(checkout.if).toBeUndefined();
@@ -5412,7 +5357,9 @@ const fs=require("node:fs");fs.writeFileSync("install-proof.json",JSON.stringify
       );
       expect(planner["working-directory"]).toBeUndefined();
     }
-    expect(identity.if).toBe("github.event_name == 'workflow_dispatch' && inputs.preflight_only");
+    expect(identity.if).toBe(
+      "github.event_name == 'workflow_dispatch' && (inputs.preflight_only || (inputs.npm_dist_tag == 'extended-stable' && github.ref == 'refs/heads/main'))",
+    );
     expect(identity.env).toMatchObject({
       GH_TOKEN: "${{ github.token }}",
       WORKFLOW_FULL_REF: "${{ github.ref }}",
@@ -5650,6 +5597,7 @@ const fs=require("node:fs");fs.writeFileSync("install-proof.json",JSON.stringify
       version: "2026.8.1-beta.3",
     },
   ])("carries the $name artifact owner without replacing publication authority", async (mode) => {
+    const stableSoakWaiver = mode.fullReleasePreflight ? "Soak infrastructure unavailable" : "";
     const producerRunId = mode.independentProducer ? "333" : "111";
     const fullReleaseRunId = mode.fullReleasePreflight ? "111" : "222";
     const qualifiedName = `openclaw-npm-preflight-${"a".repeat(40)}`;
@@ -5679,6 +5627,7 @@ const fs=require("node:fs");fs.writeFileSync("install-proof.json",JSON.stringify
     const target = workflowJob(RELEASE_PUBLISH_WORKFLOW, "resolve_release_target");
     const expressions: Record<string, string> = {
       "${{ inputs.preflight_run_id }}": "111",
+      "${{ inputs.stable_soak_waiver }}": stableSoakWaiver,
       "${{ inputs.full_release_validation_run_id }}": fullReleaseRunId,
     };
     for (const [name, value] of Object.entries(target.outputs ?? {})) {
@@ -5761,6 +5710,7 @@ render_github_release_notes() { cp "$2" "$1"; printf '%s\\n' '{"verificationIncl
       JSON.stringify({
         openclawNpmTarball: "https://example.invalid/openclaw.tgz",
         openclawNpmIntegrity: "sha512-fixture",
+        ...(stableSoakWaiver ? { stableSoakWaiver } : {}),
         ...(mode.fullReleasePreflight ? { telegramWaiver: `${mode.version}-owner-approved` } : {}),
       }),
     );
@@ -5789,6 +5739,7 @@ render_github_release_notes() { cp "$2" "$1"; printf '%s\\n' '{"verificationIncl
     expect(dispatched.status, dispatched.stderr).toBe(0);
     const dispatch = fixture.events().find((event) => event.startsWith("dispatch:"));
     expect(dispatch).toContain("-f preflight_run_id=111");
+    expect(dispatch).toContain(`-f stable_soak_waiver=${stableSoakWaiver}`);
     expect(dispatch).toContain(`-f full_release_validation_run_id=${fullReleaseRunId}`);
 
     const proof = fixture.run(
@@ -5802,6 +5753,12 @@ render_github_release_notes() { cp "$2" "$1"; printf '%s\\n' '{"verificationIncl
     );
     expect(proof.status, proof.stderr).toBe(0);
     const proofText = readFileSync(join(fixture.root, "release-verification.md"), "utf8");
+    expect(proofText.includes("Stable soak waived by operator:")).toBe(Boolean(stableSoakWaiver));
+    if (stableSoakWaiver) {
+      expect(proofText).toContain(
+        `Stable soak waived by operator: ${JSON.stringify(stableSoakWaiver)}`,
+      );
+    }
     expect(proofText).toContain(
       mode.fullReleasePreflight
         ? `Telegram integration checks: waived by the release owner for ${mode.version} (source QA, Package Acceptance, published-package E2E); not run.`
@@ -6189,9 +6146,12 @@ render_github_release_notes() { cp "$2" "$1"; printf '%s\\n' '{"verificationIncl
   it.each(["success", "binding", "assets"] as const)(
     "keeps verifier success separate from postpublish %s completion",
     (outcome) => {
-      const version = "2026.9.1-beta.1";
+      const version = "2026.9.1";
+      const stableSoakWaiver = "Soak infrastructure unavailable: 100% blocked\nOperator approved";
       const fixture = createReleasePublishFixture(
         {
+          RELEASE_TAG: `v${version}`,
+          STABLE_SOAK_WAIVER: stableSoakWaiver,
           PUBLISH_OPENCLAW_NPM: "false",
           CHILD_PLUGIN_CLAWHUB_RUN_ID: "",
           CHILD_PLUGIN_CLAWHUB_BOOTSTRAP_RUN_ID: "",
@@ -6288,6 +6248,7 @@ if (args[0] === "view") {
         expect(receipt).toMatchObject({
           version: 1,
           releasePublishRunId: "44",
+          stableSoakWaiver,
           workflowRuns: expect.arrayContaining([
             expect.objectContaining({
               id: "66",
@@ -8480,9 +8441,13 @@ test "$package_manager" = "pnpm@12.1.0"
 
   it("bounds title convergence without reposting the dispatch", () => {
     const child = fullReleaseChild("artifact-docker");
+    const nodeGuard = join(tempDirs.make("dispatch-node-guard-"), "reject-node.cjs");
+    writeFileSync(nodeGuard, 'throw new Error("dispatch fixture must not start Node");\n');
     const { calls, result } = runFullReleaseChildDispatch(child, {
       MOCK_GH_DISPATCH_OUTPUT: "https://github.com/openclaw/openclaw/actions/runs/101",
       MOCK_GH_RUN_TITLES: JSON.stringify([child.runName]),
+      // Guard the startup dependency directly instead of asserting elapsed time.
+      NODE_OPTIONS: `--require=${JSON.stringify(nodeGuard)}`,
     });
 
     expect(result.status).toBe(1);
@@ -8650,10 +8615,12 @@ test "$package_manager" = "pnpm@12.1.0"
     expect(planStep.run).toContain("candidateRequestInput: $candidateRequestInput");
     expect(planStep.run).not.toContain("candidateRequestInput: {");
     expect(planStep.run).toContain('--argjson trustedWorkflow "$TRUSTED_WORKFLOW_JSON"');
-    expect(planCache.uses).toBe(ACTIONS_CACHE_V6);
+    expect(planCache.uses).toBe(
+      ACTIONS_CACHE_V6.replace("actions/cache@", "actions/cache/restore@"),
+    );
     expect(planCache["continue-on-error"]).toBe(true);
     expect(planCache.with).toMatchObject({
-      key: "full-release-execution-plan-v1-${{ github.run_id }}",
+      key: "full-release-execution-plan-v2-${{ github.run_id }}",
     });
     expect(planCache.with).not.toHaveProperty("fail-on-cache-miss");
     expect(planRestore.if).toBe(
@@ -8740,7 +8707,7 @@ test "$package_manager" = "pnpm@12.1.0"
       [
         "Restore immutable release execution plan artifact",
         "full-release-execution-plan-${{ github.run_id }}",
-        "${{ runner.temp }}/full-release-execution-plan",
+        "${{ github.workspace }}/full-release-execution-plan",
       ],
       [
         "Download immutable publication admission",
@@ -12024,12 +11991,9 @@ printf '%s\\n' "$DEEPSEEK_API_KEY" "$DEEPINFRA_API_KEY"`,
     expect(eligibility.env?.TRUSTED_REPOSITORY_URL).toBe(
       "https://github.com/${{ github.repository }}.git",
     );
-    expect(eligibility.run).toContain('context_repo="$(mktemp -d)"');
-    expect(eligibility.run).toContain("git init --bare --quiet");
-    expect(eligibility.run).toContain("--filter=blob:none");
-    expect(eligibility.run).toContain("FETCH_HEAD^{commit}");
-    expect(eligibility.run).not.toContain("git checkout");
-    expect(eligibility.run).not.toContain("git worktree");
+    expect(resolveStepNames.indexOf("Checkout trusted workflow helper")).toBeLessThan(
+      resolveStepNames.indexOf("Validate trusted QA tooling eligibility"),
+    );
 
     for (const contextRef of [
       "release/2026.8.1",
@@ -12045,8 +12009,9 @@ printf '%s\\n' "$DEEPSEEK_API_KEY" "$DEEPINFRA_API_KEY"`,
         TARGET_REF: targetSha,
       });
       expect(result.status, `${contextRef}: ${result.stderr}`).toBe(0);
-      expect(output, contextRef).toContain(
-        `normalized_ref=${contextRef.replace(/^refs\/(heads|tags)\//u, "")}\n`,
+      const normalizedRef = contextRef.replace(/^refs\/(heads|tags)\//u, "");
+      expect(output, contextRef).toBe(
+        `fetch_ref=refs/${normalizedRef.startsWith("v") ? "tags" : "heads"}/${normalizedRef}\n`,
       );
     }
 
@@ -12103,9 +12068,7 @@ printf '%s\\n' "$DEEPSEEK_API_KEY" "$DEEPINFRA_API_KEY"`,
       const { output, result } = runReleaseChecksShellStep(
         "Validate trusted QA tooling eligibility",
         {
-          CONTEXT_KIND: contextKind,
           CONTEXT_FETCH_REF: fetchRef,
-          CONTEXT_REF: fetchRef.replace(/^refs\/(heads|tags)\//u, ""),
           TARGET_REF: targetRef,
           TRUSTED_REPOSITORY_URL: fixture.repoUrl,
         },

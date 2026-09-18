@@ -156,8 +156,8 @@ jobs:
               output.write(f"sha={head_sha}\n")
           PYTHON
 
-      - name: Verify trusted preflight tooling identity
-        if: github.event_name == 'workflow_dispatch' && inputs.preflight_only
+      - name: Verify trusted preflight or recovery tooling identity
+        if: github.event_name == 'workflow_dispatch' && (inputs.preflight_only || (inputs.npm_dist_tag == 'extended-stable' && github.ref == 'refs/heads/main'))
         env:
           GH_TOKEN: ${{ github.token }}
           WORKFLOW_FULL_REF: ${{ github.ref }}
@@ -276,14 +276,18 @@ jobs:
                   timeout=120,
                   reclaim_locks=True,
               )
-              if os.environ["WORKFLOW_REF"] == f"refs/heads/{extended_branch}" and exact_ref_match(
+              if not exact_ref_match(
                   "HEAD",
                   f"refs/remotes/origin/{extended_branch}",
               ):
+                  fail(f"Extended-stable plugin source must equal the exact {extended_branch} branch tip.")
+              # Main recovery runs trusted tooling without changing the frozen source.
+              # Its workflow SHA is verified against main before target code runs.
+              if os.environ["WORKFLOW_REF"] in (f"refs/heads/{extended_branch}", "refs/heads/main"):
                   raise SystemExit(0)
               fail(
-                  f"Extended-stable plugin npm publishes must run from {extended_branch} at "
-                  "its exact branch tip."
+                  f"Extended-stable plugin npm publishes must run from {extended_branch} "
+                  "or trusted main, targeting the exact canonical branch tip."
               )
 
           run_git(
@@ -1707,6 +1711,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TARBALL_PATH: ${{ steps.publication_evidence.outputs.tarball_path }}
+          PACKAGE_VERSION: ${{ steps.publication_evidence.outputs.package_version }}
+          RELEASE_TARGET_SHA: ${{ needs.preview_plugins_npm.outputs.ref_revision }}
           PUBLISH_TAG: ${{ steps.publication_evidence.outputs.publish_tag }}
           OPENCLAW_RELEASE_PUBLISH_RUN_ID: ${{ inputs.release_publish_run_id }}
           OPENCLAW_RELEASE_PUBLISH_RUN_ATTEMPT: ${{ inputs.release_publish_run_attempt }}
@@ -1735,6 +1741,16 @@ jobs:
             --release-publish-full-ref "$OPENCLAW_RELEASE_PUBLISH_FULL_REF" \
             --release-publish-parent-state-policy "$OPENCLAW_RELEASE_PUBLISH_PARENT_STATE_POLICY" \
             --allow-prevalidated-ref
+          if [[ "$PUBLISH_TAG" == "extended-stable" ]]; then
+            # Approval may outlive preview: recheck the source, not just main tooling.
+            candidate_branch="extended-stable/${PACKAGE_VERSION%.*}.33"
+            node scripts/release-tooling-identity.mjs verify \
+              --repository "$OPENCLAW_RELEASE_TOOLING_REPOSITORY" \
+              --workflow-ref "$candidate_branch" \
+              --workflow-full-ref "refs/heads/$candidate_branch" \
+              --workflow-sha "$RELEASE_TARGET_SHA" \
+              --allow-prevalidated-ref
+          fi
           NPM_CONFIG_USERCONFIG="$npmrc" \
             NPM_CONFIG_GLOBALCONFIG=/dev/null \
             NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \

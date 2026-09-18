@@ -3,7 +3,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { sleepWithAbort } from "../infra/backoff.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
-import type { PluginHookGatewayCronService } from "../plugins/hook-types.js";
+import type { PluginHookGatewayCronService } from "../plugins/hook-gateway.types.js";
 import { createHookRunner } from "../plugins/hooks.js";
 import {
   PluginHostCleanupTimeoutError,
@@ -17,6 +17,7 @@ import type { PluginRegistry } from "../plugins/registry-types.js";
 import { disposePluginRegistryInstances } from "../plugins/runtime.js";
 import {
   PLUGIN_SERVICE_REPLACEMENT_STOP_TIMEOUT_MS,
+  getPluginServiceCleanupSettlement,
   type PluginServicesHandle,
 } from "../plugins/services.js";
 import type { GatewayPluginReloadStatus } from "./server-plugin-runtime-generation.js";
@@ -43,6 +44,7 @@ export function createPluginReloadCleanup({
   recordCleanup: (result: PluginHostCleanupResult) => void;
   retainRetirement: (retire: () => Promise<PluginHostCleanupResult>) => void;
 }) {
+  let pendingServiceCleanup: ReturnType<typeof getPluginServiceCleanupSettlement>;
   const attempt = async (errors: unknown[], run: () => void | Promise<void>) => {
     try {
       await run();
@@ -190,14 +192,46 @@ export function createPluginReloadCleanup({
   };
   return {
     attempt,
-    assertResourceHandoff: (pluginIds: ReadonlySet<string>) => {
-      for (const record of previousRegistry.plugins) {
-        if (pluginIds.has(record.id) && getPluginInstance(record)?.hasActiveCall) {
-          throw new Error(
-            `Plugin ${record.id} cannot replace itself from its own active call; retry after the call finishes.`,
-          );
-        }
+    stopPreviousServices: async (services: PluginServicesHandle | null, strict: boolean) => {
+      try {
+        await services?.stop({
+          strict: true,
+          deadlineAtMs: Date.now() + PLUGIN_SERVICE_REPLACEMENT_STOP_TIMEOUT_MS,
+          pluginIds: changedPluginIds,
+        });
+      } catch (error) {
+        pendingServiceCleanup = strict ? getPluginServiceCleanupSettlement(error) : undefined;
+        throw error;
       }
+    },
+    isBlockingStopError: (error: unknown) =>
+      !pendingServiceCleanup || error !== pendingServiceCleanup.error,
+    rethrowServiceStopTimeout: () => {
+      if (pendingServiceCleanup) {
+        // Replacement failed its stop deadline. Only recovery can observe the
+        // original settlement before disposal and fresh resource acquisition.
+        throw pendingServiceCleanup.error;
+      }
+    },
+    includeServiceStopFailure: (error: unknown) =>
+      pendingServiceCleanup && pendingServiceCleanup.error !== error
+        ? new AggregateError([pendingServiceCleanup.error, error], "Previous plugin cleanup failed")
+        : error,
+    reserveResourceHandoff: (pluginIds: ReadonlySet<string>) => {
+      const releases: Array<() => void> = [];
+      const release = () => releases.splice(0).forEach((close) => close());
+      try {
+        for (const record of previousRegistry.plugins) {
+          const instance = pluginIds.has(record.id) && getPluginInstance(record);
+          if (instance) {
+            releases.push(instance.reserveReplacement());
+          }
+        }
+      } catch (error) {
+        release();
+        throw error;
+      }
+      return release;
     },
     drainInstances,
     drainForRecovery: async (
@@ -209,7 +243,8 @@ export function createPluginReloadCleanup({
         phase: "recovering",
         pluginIds: [...changedPluginIds],
         deadlineAtMs,
-        reason: "Waiting for admitted work before restoring the previous plugin runtime.",
+        reason:
+          "Waiting for cleanup and admitted work before restoring the previous plugin runtime.",
       });
       let backoffMs = 1_000;
       for (;;) {
@@ -217,7 +252,10 @@ export function createPluginReloadCleanup({
         try {
           await withPluginHostCleanupTimeout(
             "previous plugin recovery drain",
-            () => drainInstances(previousRegistry, changedPluginIds),
+            async () => {
+              await pendingServiceCleanup?.settled;
+              await drainInstances(previousRegistry, changedPluginIds);
+            },
             Math.max(0, Math.min(5_000, deadlineAtMs - Date.now())),
           );
           return;
@@ -231,7 +269,7 @@ export function createPluginReloadCleanup({
               cause: error,
             });
           }
-          // Retry only observation of admitted work; never repeat resource cleanup
+          // Retry only settlement observation; never repeat resource cleanup
           // or acquire a replacement while the previous writer still owns it.
           await sleepWithAbort(Math.min(backoffMs, remainingMs), signal);
           backoffMs = Math.min(backoffMs * 2, 4_000);

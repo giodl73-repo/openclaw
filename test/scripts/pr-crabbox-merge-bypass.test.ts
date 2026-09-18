@@ -366,6 +366,8 @@ const pr = {id:"fixture-pr",number:131091,url:repo.url+"/pull/131091",state:"OPE
   autoMergeRequest:null,isInMergeQueue:false,isMergeQueueEnabled:false};
 if (args.some(arg => /\\{(?:owner|repo)\\}/u.test(arg))) fail("unresolved repository placeholder");
 const endpoint = args.find(arg => /^(?:repos\\/|orgs\\/|user$|graphql$)/u.test(arg));
+if (args[0] === "api" && args.includes("repos/openclaw/openclaw") &&
+    JSON.stringify(args) !== JSON.stringify(["api", "--hostname", "github.com", "repos/openclaw/openclaw", "-H", "Cache-Control: max-age=0"])) fail("unexpected repository authority request");
 if (endpoint && endpoint === process.env.FAKE_DENIED) fail("protected refusal");
 if (args[0] === "repo" && args[1] === "view") out(args.includes("--jq") ? repo.nameWithOwner : repo);
 else if (args[0] === "pr" && args[1] === "checks" && args.includes("--required")) {
@@ -393,7 +395,10 @@ else if (endpoint === "graphql" && args.includes("query=query { viewer { login }
     if (!args.includes("--paginate") || !args.includes("--slurp")) fail("missing pagination");
   }
   const prefix = "repos/openclaw/openclaw/";
-  if (endpoint === "repos/openclaw/openclaw") out({id:repo.id,node_id:repoNodeId,full_name:repo.nameWithOwner,html_url:repo.url});
+  if (endpoint === "repos/openclaw/openclaw") {
+    if (JSON.stringify(args) !== JSON.stringify(["api", "--hostname", "github.com", endpoint, "-H", "Cache-Control: max-age=0"])) fail("unexpected repository identity request");
+    out({id:repo.id,node_id:repoNodeId,full_name:repo.nameWithOwner,html_url:repo.url});
+  }
   else if (endpoint === prefix + "pulls/131091") out(value.pullRequest);
   else if (endpoint === prefix + "commits/" + value.headSha && args.includes("--jq")) out({name:"Fixture Contributor",email:"fixture@example.com",user:{login:"fixture-contributor",type:"User"}});
   else if (endpoint === prefix + "issues/131091/comments?per_page=100") out(reviewComments);

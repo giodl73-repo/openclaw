@@ -253,6 +253,14 @@ gh workflow run plugin-npm-release.yml \
 The workflow covers all `all-publishable` packages, including unchanged ones,
 and verifies every exact version and selector. Reruns reuse published versions.
 
+For a plugin workflow-only recovery, use the same command with `--ref main`.
+The trusted workflow still requires `ref` to equal the canonical monthly branch
+tip and runs its tooling against that frozen source. This retains validated
+dependency pins when the candidate's older tooling rejects later npm `latest`
+drift. Save the successful recovery run ID and use the trusted-main core
+recovery command below; it verifies the plugin workflow's main ancestry and
+exact candidate-bound run identity.
+
 Then publish the prepared core tarball with all three saved run identities:
 
 ```bash
@@ -477,7 +485,7 @@ Stable publication is not complete until `main` carries the actual shipped relea
 5. Run `pnpm release:generated:check`, `pnpm deps:npm-lock:check`, and `OPENCLAW_TESTBOX=1 pnpm check:changed`. Push, then verify `origin/main` contains the shipped version and changelog before calling the stable release done.
 6. Keep the repository variables `RELEASE_ROLLBACK_DRILL_ID` and `RELEASE_ROLLBACK_DRILL_DATE` current after each private rollback drill.
 
-`OpenClaw Stable Main Closeout` starts from the `main` push that carries the shipped version and changelog after stable publication; apps may still be pending. Include the appcast once macOS publishes. It reads immutable postpublish evidence to bind the shipped tag to its Full Release Validation and Publish runs, then verifies the stable main state, release, mandatory stable soak, and blocking performance evidence. It attaches an immutable closeout manifest and checksum to the GitHub release. The manifest records `appPlatforms` with `macos`, `windows`, and `android` each `pending` or `attached`; aggregate `apps` is `attached` only when every required platform asset has a lowercase `sha256:<64hex>` digest. At the first closeout, `appcast` is `pending` unless the full macOS zip/DMG/dSYM asset set is attached with canonical digests; a complete macOS set requires appcast verification and records `verified`. Replay preserves the initial app snapshot and requires every recorded asset name and digest to match exactly. Later canonical app attachments are allowed, while changed or deleted recorded assets and unrelated additions remain errors. Recorded app, recovery, and asset fields remain byte-identical while authoritative release fields are recomputed. When macOS attaches after closeout, replay also checks its entry in the current main appcast; it preserves an appcast already verified at the original closeout. The automatic push trigger skips legacy releases that predate immutable postpublish evidence and never treats that skip as a completed closeout.
+`OpenClaw Stable Main Closeout` starts from the `main` push that carries the shipped version and changelog after stable publication; apps may still be pending. Include the appcast once macOS publishes. It reads immutable postpublish evidence to bind the shipped tag to its Full Release Validation and Publish runs, then verifies the stable main state, release, stable soak or its recorded operator waiver, and blocking performance evidence. It attaches an immutable closeout manifest and checksum to the GitHub release. The manifest records `appPlatforms` with `macos`, `windows`, and `android` each `pending` or `attached`; aggregate `apps` is `attached` only when every required platform asset has a lowercase `sha256:<64hex>` digest. At the first closeout, `appcast` is `pending` unless the full macOS zip/DMG/dSYM asset set is attached with canonical digests; a complete macOS set requires appcast verification and records `verified`. Replay preserves the initial app snapshot and requires every recorded asset name and digest to match exactly. Later canonical app attachments are allowed, while changed or deleted recorded assets and unrelated additions remain errors. Recorded app, recovery, and asset fields remain byte-identical while authoritative release fields are recomputed. When macOS attaches after closeout, replay also checks its entry in the current main appcast; it preserves an appcast already verified at the original closeout. The automatic push trigger skips legacy releases that predate immutable postpublish evidence and never treats that skip as a completed closeout.
 
 A complete closeout requires the closeout manifest asset and its matching checksum. A partial manifest replays its recorded `main` SHA and rollback drill to regenerate identical bytes, then attaches the missing checksum; an invalid pair, or a checksum without a manifest, stays blocking. A push-triggered run without rollback drill repository variables skips without completing closeout; a missing or more-than-90-day-old drill record still blocks manual evidence-backed closeout. Private recovery commands remain in the maintainer-only runbook. Use manual dispatch only to repair or replay an evidence-backed stable closeout.
 
@@ -1230,7 +1238,7 @@ selector. Recovery builds the canonical versioned images without republishing
 npm packages or plugins, dispatching native releases, or finalizing the GitHub
 release. Existing approval and provenance checks still apply.
 
-Stable publish to the default beta dist-tag:
+Stable publication requires Full Release Validation with `runReleaseSoak=true` unless the operator supplies a non-empty `stable_soak_waiver` reason; the reason is recorded in postpublish evidence and the release verification tail, and all other evidence checks remain required. Leave the input empty to require soak:
 
 ```bash
 gh workflow run openclaw-release-publish.yml \
@@ -1240,7 +1248,8 @@ gh workflow run openclaw-release-publish.yml \
   -f full_release_validation_run_id=<successful-full-release-validation-run-id> \
   -f full_release_validation_run_attempt=<successful-full-release-validation-run-attempt> \
   -f plugin_sdk_api_acknowledgement=<reviewed-8-character-digest> \
-  -f npm_dist_tag=beta
+  -f npm_dist_tag=beta \
+  -f stable_soak_waiver=""
 ```
 
 Both Windows inputs are optional. To schedule detached promotion after GitHub publication, add `windows_node_tag` and `windows_node_installer_digests` together; the candidate helper records the digest map when given `--windows-node-tag`.
@@ -1367,7 +1376,7 @@ SHA-256, and npm integrity. A mismatch requires a new package version.
 - `full_release_validation_run_id`: successful `Full Release Validation` run id for this tag/SHA, required for real publish. Beta publishes may proceed on preflight alone with a warning, but stable/`latest` promotion still requires it.
 - `full_release_validation_run_attempt`: exact positive run attempt paired with `full_release_validation_run_id`; required whenever the run id is provided so reruns cannot change the authorization evidence during publish.
 - `release_publish_run_id`: approved `OpenClaw Release Publish` run id; required when this workflow is dispatched by that parent (bot-actor real-publish calls)
-- `plugin_npm_run_id`: successful exact-head `Plugin NPM Release` run id; required for a real `extended-stable` core publish
+- `plugin_npm_run_id`: successful exact-candidate `Plugin NPM Release` run id; required for a real `extended-stable` core publish. Trusted-main core recovery also accepts a trusted-main plugin recovery run bound to that same candidate.
 - `npm_dist_tag`: npm target tag for the publish path; accepts `alpha`, `beta`, `latest`, or `extended-stable` and defaults to `beta`. Final patch `33` and later must use `extended-stable`; by default, `extended-stable` rejects earlier patches, and it always rejects non-final tags.
 - `bypass_extended_stable_guard`: testing-only boolean, default `false`; with `npm_dist_tag=extended-stable`, bypasses monthly extended-stable eligibility, including the trailing-completed-month rule, while preserving release identity, artifact, approval, and readback checks.
 
@@ -1375,7 +1384,8 @@ SHA-256, and npm integrity. A mismatch requires a new package version.
 behavior or `npm_dist_tag=extended-stable` for the guarded monthly path. The
 extended-stable option requires `publish_scope=all-publishable`, an empty
 `plugins` input, a final patch at or above `33`, and the canonical
-`extended-stable/YYYY.M.33` branch at its exact tip. It never moves plugin
+`extended-stable/YYYY.M.33` branch at its exact tip. The workflow may run from
+that branch or trusted `main` for workflow-only recovery. It never moves plugin
 `latest` or `beta`. New package versions receive `extended-stable` atomically
 through OIDC trusted publication (`npm publish --tag extended-stable`); this
 source workflow does not use token-authenticated `npm dist-tag add`. Retries

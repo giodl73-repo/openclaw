@@ -94,7 +94,7 @@ import {
   assertGatewayServiceManagementAllowedForUpdate,
   gatewayServiceCommandUsesRoot,
   isGatewayServiceManagementAllowedForUpdate,
-  readManagedGatewayServiceCommandForUpdate,
+  readManagedGatewayServiceForUpdate,
   resolveManagedServicePackageUpdatePlan,
 } from "./update-command-service-plan.js";
 
@@ -122,7 +122,7 @@ export async function resolveUpdateCommandAdmissionEnv(params: {
     !env[UPDATE_RUN_ID_ENV] &&
     isGatewayServiceManagementAllowedForUpdate(env)
   ) {
-    const command = await readManagedGatewayServiceCommandForUpdate(env);
+    const command = (await readManagedGatewayServiceForUpdate(env))?.command ?? null;
     if (command) {
       const usesRoot = await gatewayServiceCommandUsesRoot({ root: params.root, command });
       if (usesRoot) {
@@ -528,8 +528,11 @@ export async function prepareUpdateCommand(opts: UpdateCommandOptions) {
   }
   // The shim can move during preparation; the loaded module owns the executing generation.
   const executingRoot = resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url });
-  const discoveredRoot = await resolveUpdateRoot();
+  const discoveredRoot = opts.sourceUpdate?.root ?? (await resolveUpdateRoot());
   const installKind = await resolveUpdateInstallKind(discoveredRoot, { timeoutMs });
+  if (opts.sourceUpdate && installKind !== "git") {
+    throw new Error("Doctor source update requires the accepted Git checkout.");
+  }
   const pkgOwnership = createFreeBsdPkgOwnershipInspection(timeoutMs ?? UPDATE_RUNNER_TIMEOUT_MS);
   // Inspect the invoking installation before a service can redirect its root,
   // runtime or state. This also covers package-to-Git and preview requests.

@@ -318,7 +318,10 @@ export type LlmCompleteResult = {
 type RuntimeRunEmbeddedAgentParams = Omit<
   import("../../agents/embedded-agent-runner/run/params.js").RunEmbeddedAgentParams,
   "admittedRunContext" | "preparedRunAdmission"
->;
+> & {
+  /** @deprecated Ignored; the host derives availability. Retained until the next Plugin SDK major. */
+  githubPublicationAvailable?: boolean;
+};
 
 type RuntimeRunEmbeddedAgent = (
   params: RuntimeRunEmbeddedAgentParams,
@@ -419,7 +422,7 @@ export type PluginRuntimeCore = {
     }) => Promise<{ ok: true; runId: string } | { ok: false; reason: string }>;
   };
   system: {
-    enqueueSystemEvent: typeof import("../../infra/system-events.js").enqueueSystemEvent;
+    enqueueSystemEvent: typeof import("./system-events.js").enqueueSystemEventFromSdk;
     requestHeartbeat: typeof import("../../infra/heartbeat-wake.js").requestHeartbeat;
     /**
      * @deprecated Use `requestHeartbeat({ source, intent, reason })` so wake producers declare

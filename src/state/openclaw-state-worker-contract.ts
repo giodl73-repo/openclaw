@@ -1,3 +1,4 @@
+import type { AuthProfileRowRead, UserModelAuthProfile } from "../agents/auth-profiles/types.js";
 import type { NativeHookRelayStoreWorkerOperations } from "../agents/harness/native-hook-relay-store.worker-contract.js";
 import type { ClawInstallSchemaVersionRow } from "../claws/provenance-runtime-read.kernel.js";
 import type { readSqliteDatabaseBloat } from "../commands/doctor-db-bloat.read.js";
@@ -8,13 +9,20 @@ import type {
 } from "../config/io.health-state.types.js";
 import type { CronStoreWorkerOperations } from "../cron/store/load-worker.types.js";
 import type { CronStoreSaveWorkerOperations } from "../cron/store/save-worker.types.js";
+import type { FleetRegistryWriteOperations } from "../fleet/registry.types.js";
+import type {
+  ManagedImageRecord,
+  ManagedImageRecordEntry,
+} from "../gateway/managed-image-record-store.types.js";
 import type { DeferredPluginMigration } from "../infra/deferred-plugin-migrations.js";
 import type { DeliveryQueueWorkerOperations } from "../infra/delivery-queue.worker-contract.js";
 import type { PreparedPromotionClaim } from "../infra/promotions-feed.kernel.js";
+import type { ApnsRegistration } from "../infra/push-apns-store.types.js";
 import type { WebPushWorkerOperations } from "../infra/push-web-store.worker-contract.js";
 import type { SessionDeliveryWorkerOperations } from "../infra/session-delivery-queue.worker-contract.js";
 import type { PreparedSqliteAuditRecord } from "../infra/sqlite-audit-record.kernel.js";
 import type { SqliteFileGeneration } from "../infra/sqlite-file-generation.js";
+import type { TelemetryWorkerOperations } from "../infra/telemetry-worker-contract.js";
 import type { readRemoteModelCatalog } from "../model-catalog/remote-store.js";
 import type { PluginStateWorkerOperations } from "../plugin-state/plugin-state-worker-contract.js";
 import type { PluginBindingApprovalEntry } from "../plugins/conversation-binding-state.types.js";
@@ -29,7 +37,10 @@ import type {
   SessionStateEventInput,
   SessionStateNotice,
 } from "../sessions/session-state-events.kernel.js";
+import type { SessionUpstreamLink } from "../sessions/session-upstream-links.kernel.js";
+import type { DeviceAuthEntry } from "../shared/device-auth.js";
 import type { TaskRegistryWorkerOperations } from "../tasks/task-registry.worker-contract.js";
+import type { TranscriptReadOperations } from "../transcripts/store-worker-contract.js";
 import type { AgentProvenance } from "./agent-provenance.types.js";
 import type { PreparedBackupRunRecord } from "./backup-run-records.kernel.js";
 import type { OpenClawStateLeaseIdentity } from "./openclaw-state-lease-store.js";
@@ -38,17 +49,29 @@ import type { UserPreferenceWorkerOperations } from "./user-preferences.types.js
 /** Commands share one physical shared-state actor; bindings belong to commands, not open input. */
 export type OpenClawStateWorkerOperations = WebPushWorkerOperations &
   NativeHookRelayStoreWorkerOperations &
+  TelemetryWorkerOperations &
   HostedCatalogSnapshotWorkerOperations &
   PluginStateWorkerOperations &
   UserPreferenceWorkerOperations &
   CronStoreWorkerOperations &
   CronStoreSaveWorkerOperations &
+  FleetRegistryWriteOperations &
   SessionDeliveryWorkerOperations &
   DeliveryQueueWorkerOperations &
+  TranscriptReadOperations &
   TaskRegistryWorkerOperations & {
-    "agentProvenance.read": {
-      input: { agentId: string };
-      output: AgentProvenance | undefined;
+    "deviceAuth.list": { input: { deviceId: string }; output: DeviceAuthEntry[] };
+    "apns.registration.read": { input: string; output: ApnsRegistration | null };
+    "apns.registrations.read": { input: readonly string[]; output: Map<string, ApnsRegistration> };
+    "authProfiles.read": { input: { artifactPreserving: boolean }; output: AuthProfileRowRead };
+    "authProfiles.sharedOwnership": { input: { artifactPreserving: boolean }; output: unknown };
+    "authProfiles.personal": {
+      input: { profileId: string; artifactPreserving: boolean };
+      output: UserModelAuthProfile | undefined;
+    };
+    "agentProvenance.readBatch": {
+      input: { agentIds: readonly string[] };
+      output: AgentProvenance[];
     };
     "agentProvenance.list": { input: undefined; output: AgentProvenance[] };
     "promotions.markNotified": { input: { slugs: string[]; now: number }; output: true };
@@ -58,13 +81,18 @@ export type OpenClawStateWorkerOperations = WebPushWorkerOperations &
       output: SessionStateNotice[];
     };
     "sessionState.prune": { input: { now: number }; output: void };
+    "managedImages.read": { input: { attachmentId: string }; output: ManagedImageRecord | null };
+    "managedImages.entries": { input: { sessionKey?: string }; output: ManagedImageRecordEntry[] };
+    "managedImages.originalMediaIds": { input: undefined; output: string[] };
     "doctor.databaseBloat": {
       input: undefined;
       output: ReturnType<typeof readSqliteDatabaseBloat>;
     };
+    "sessionUpstream.listWatched": { input: undefined; output: SessionUpstreamLink[] };
     "backup.recordOutcome": { input: PreparedBackupRunRecord; output: void };
     "projects.findRoot": { input: { repoRoot: string }; output: string | undefined };
     "projects.list": { input: undefined; output: ProjectRegistryRecord[] };
+    "projects.resolve": { input: { id: string }; output: ProjectRegistryRecord | undefined };
     "projects.insert": {
       input: { project: ProjectRegistryInsert; lease: OpenClawStateLeaseIdentity };
       output: ProjectRegistryRecord;

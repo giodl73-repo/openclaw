@@ -1,4 +1,5 @@
 import { execFile, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
@@ -7,6 +8,7 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { mockNodeBuiltinModule } from "../plugin-sdk/test-helpers/node-builtin-mocks.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { requireNodeSqlite } from "./node-sqlite.js";
+import { SQLITE_READONLY_CHILD_ARG } from "./runtime-process-entrypoints.js";
 import {
   resolveAggregateSqliteInspectionTimeoutMs,
   resolveSqliteInspectionBudget,
@@ -19,6 +21,7 @@ import {
   prepareSqliteReadOnlyLocation,
   prepareSqliteReadOnlyLocationSync,
 } from "./sqlite-snapshot-source.js";
+import { readDatabasePathIdentitySync } from "./sqlite-worker-identity.js";
 import { acquireStateDatabaseHandleExclusion } from "./state-database-coordinator.js";
 
 const logs = vi.hoisted(() => ({ debug: vi.fn() }));
@@ -79,6 +82,70 @@ function createDatabase(paddingBytes: number | null): string {
   return source;
 }
 
+it("reads complete oversized auth rows and joins the child before returning", async () => {
+  const source = createDatabase(null);
+  const store = {
+    version: 1,
+    profiles: {
+      "fixture:default": {
+        type: "api_key",
+        provider: "fixture",
+        key: `${"synthetic".repeat(1_200_000)}🌊`,
+      },
+    },
+  };
+  const state = { lastGood: { fixture: "fixture:default" } };
+  const database = new (requireNodeSqlite().DatabaseSync)(source);
+  try {
+    database.exec(`
+      CREATE TABLE auth_profile_store (store_key TEXT PRIMARY KEY, store_json TEXT);
+      CREATE TABLE auth_profile_state (state_key TEXT PRIMARY KEY, state_json TEXT);
+    `);
+    database
+      .prepare("INSERT INTO auth_profile_store VALUES (?, ?)")
+      .run("primary", JSON.stringify(store));
+    database
+      .prepare("INSERT INTO auth_profile_state VALUES (?, ?)")
+      .run("primary", JSON.stringify(state));
+  } finally {
+    database.close();
+  }
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  let closed = false;
+  let stdoutBytes = 0;
+  vi.mocked(spawn).mockImplementationOnce((...args) => {
+    const child = actual.spawn(...args);
+    child.once("close", () => {
+      closed = true;
+    });
+    child.stdout?.on("data", (data: Buffer) => {
+      stdoutBytes += data.length;
+    });
+    return child;
+  });
+  const rows = await runSqliteReadOnlyWorker(source, {
+    mode: "auth-profile-rows",
+    expectedIdentity: readDatabasePathIdentitySync(source).key,
+    env: { ...process.env },
+    coordinatorRuntime: {
+      directory: tempDirs.make("openclaw-auth-read-coordinator-"),
+      keepAlive: false,
+    },
+  });
+  const expected = JSON.stringify({
+    store: { status: "readable", raw: store },
+    state: { status: "readable", raw: state },
+  });
+  const received = JSON.stringify(rows);
+  expect(received.length).toBe(expected.length);
+  const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+  expect(digest(received)).toBe(digest(expected));
+  expect(closed).toBe(true);
+  expect(vi.mocked(spawn).mock.results[0]?.value.exitCode).toBe(0);
+  expect(vi.mocked(spawn).mock.results[0]?.value.connected).toBe(false);
+  expect(stdoutBytes).toBe(0);
+});
+
 describe.each(["sync", "async", "schema-header", "scoped"] as const)(
   "SQLite child compile cache (%s)",
   (mode) => {
@@ -120,7 +187,8 @@ describe.each(["sync", "async", "schema-header", "scoped"] as const)(
           if (mode === "sync") {
             expect(fs.readFileSync(prepared.location)).toEqual(before);
           }
-          const snapshot = new (requireNodeSqlite().DatabaseSync)(prepared.location, {
+          const { openNodeSqliteDatabase } = await import("./node-sqlite.js");
+          const snapshot = openNodeSqliteDatabase(prepared.location, {
             readOnly: true,
           });
           try {
@@ -244,7 +312,20 @@ describe("scoped SQLite read-only children", () => {
         }
       });
       expect(spawn).toHaveBeenCalledTimes(1);
-      expect(execFile).toHaveBeenCalledTimes(2);
+      const children = vi.mocked(execFile).mock.calls.flatMap(([, args], index) => {
+        const marker = args?.indexOf(SQLITE_READONLY_CHILD_ARG) ?? -1;
+        return marker < 0
+          ? []
+          : [{ mode: args?.[marker + 1], child: vi.mocked(execFile).mock.results[index]?.value }];
+      });
+      expect(children.filter(({ mode }) => mode !== "reclaim").map(({ mode }) => mode)).toEqual([
+        "async",
+        "schema-header",
+      ]);
+      for (const { child } of children) {
+        expect(child?.exitCode).toBe(0);
+        expect(child?.connected).toBe(false);
+      }
       expect(vi.mocked(spawn).mock.results[0]?.value.exitCode).toBe(0);
     } finally {
       writer.close();

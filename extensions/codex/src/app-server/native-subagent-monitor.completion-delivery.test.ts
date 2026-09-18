@@ -21,6 +21,7 @@ import {
   nativeHistoryOwner,
   deliveredNativeCompletion,
   childTurnCompletedNotification,
+  turnStartedNotification,
   threadRead,
   taskRecord,
 } from "./native-subagent-monitor.test-support.js";
@@ -69,7 +70,7 @@ describe("CodexNativeSubagentMonitor", () => {
         const terminal = () =>
           client.notify(
             childStatus === "shutdown"
-              ? nativeCompletionNotification({ statusLabel: "shutdown", result: "child result" })
+              ? nativeCompletionNotification({ statusLabel: "shutdown", turnId: "parent-turn" })
               : childTurnCompletedNotification({
                   status: childStatus === "completed" ? "completed" : "failed",
                   ...(childStatus === "errored" ? { error: "child result" } : {}),
@@ -98,7 +99,12 @@ describe("CodexNativeSubagentMonitor", () => {
               status: childStatus === "errored" ? "failed" : "completed",
               senderThreadId: "parent-thread",
               receiverThreadIds: ["child-thread"],
-              agentsStates: { "child-thread": { status: childStatus, message: "child result" } },
+              agentsStates: {
+                "child-thread": {
+                  status: childStatus,
+                  message: childStatus === "shutdown" ? null : "child result",
+                },
+              },
             },
           },
         });
@@ -261,13 +267,7 @@ describe("CodexNativeSubagentMonitor", () => {
       const monitor = new CodexNativeSubagentMonitor(client as never, runtime);
       const owner = registerParent(monitor);
       try {
-        await client.notify({
-          method: "turn/started",
-          params: {
-            threadId: "parent-thread",
-            turn: { id: "parent-turn", status: "inProgress", items: [] },
-          },
-        });
+        await client.notify(turnStartedNotification("parent-turn", { threadId: "parent-thread" }));
         await notifyChildStarted(client, "parent-thread", "child-thread", "/root/worker");
         await client.notify(completedChild());
         expect(runtime.deliverAgentHarnessTaskCompletion).not.toHaveBeenCalled();
@@ -793,13 +793,7 @@ describe("CodexNativeSubagentMonitor", () => {
       owner.bindTurn("parent-turn");
       await notifyChildStarted(client);
       await client.notify(completedChild());
-      await client.notify({
-        method: "turn/started",
-        params: {
-          threadId: "child-thread",
-          turn: { id: "next-turn", status: "inProgress", items: [], error: null },
-        },
-      });
+      await client.notify(turnStartedNotification("next-turn", { error: null }));
       await client.notify({
         method: "item/completed",
         params: {

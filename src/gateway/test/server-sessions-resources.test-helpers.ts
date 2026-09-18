@@ -2,7 +2,8 @@ import { existsSync, realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach } from "vitest";
+import { afterEach, expect } from "vitest";
+import { withTestTimeout } from "../../../test/helpers/promise.js";
 import { runQaGatewayFixture } from "../../../test/helpers/qa-gateway-cleanup.js";
 import { createTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import {
@@ -11,9 +12,11 @@ import {
 } from "../../config/runtime-snapshot.js";
 import { waitForSessionTranscriptIndexReconcilesInStateDir } from "../../config/sessions/session-transcript-reconcile.js";
 import { isPathInside } from "../../infra/path-guards.js";
+import { getActiveGatewayRootWorkCount } from "../../process/gateway-work-admission.js";
 import {
   collectActiveSessionWorkAdmissions,
   getSessionWorkAdmissionRelease,
+  SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS,
 } from "../../sessions/session-lifecycle-admission.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { unregisterOpenClawAgentDatabase } from "../../state/openclaw-agent-db-registry.js";
@@ -22,8 +25,13 @@ import {
   listOpenClawRegisteredAgentDatabases,
   closeOpenClawAgentDatabasesForTest,
 } from "../../state/openclaw-agent-db.js";
+import {
+  closeOpenClawStateDatabaseByPathAsync,
+  registerOpenClawStateDatabaseLifecycleListener,
+} from "../../state/openclaw-state-db.js";
 import { gatewayFixtureLifetime } from "../gateway-fixture-lifetime.test-support.js";
 import type { GatewayServerHarness } from "../server.e2e-ws-harness.js";
+import { removeSessionFixtureDirectory } from "../session-fixture-directory.test-support.js";
 import { testState } from "../test-helpers.runtime-state.js";
 import { installGatewayTestHooks } from "../test-helpers.server.js";
 
@@ -33,6 +41,13 @@ const getGatewayServerHarnessModule = createLazyRuntimeModule(
 
 /** Deselect before disposal so topology publication cannot reopen a fixture store. */
 export async function releaseGatewaySessionStoreFixture(dir: string) {
+  // Transcript observers retain RPC work after the session admission releases.
+  // Join them before changing config or a delayed reader can reopen this store.
+  await expect
+    .poll(() => getActiveGatewayRootWorkCount({ excludeCurrent: true }), {
+      timeout: SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS,
+    })
+    .toBe(0);
   const root = existsSync(dir) ? realpathSync(dir) : path.resolve(dir);
   const ownsPath = (candidate: string) =>
     isPathInside(root, candidate) || isPathInside(path.resolve(dir), candidate);
@@ -64,6 +79,22 @@ export async function releaseGatewaySessionStoreFixture(dir: string) {
     }
   }
   await closeOpenClawAgentDatabasesAsync(root);
+
+  // Client identity fixtures use shared-state SQLite, even with legacy .json names.
+  // The lifecycle subscription replays the owner's recorded open paths synchronously.
+  const sharedDatabasePaths = new Set<string>();
+  registerOpenClawStateDatabaseLifecycleListener((event) => {
+    if (event.kind === "opened" && ownsPath(event.database.path)) {
+      sharedDatabasePaths.add(event.database.path);
+    }
+  })();
+  for (const databasePath of sharedDatabasePaths) {
+    await withTestTimeout(
+      closeOpenClawStateDatabaseByPathAsync(databasePath),
+      SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS,
+      `Timed out closing shared-state fixture database ${JSON.stringify(databasePath)} after ${SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS}ms; retaining fixture directory ${JSON.stringify(dir)}`,
+    );
+  }
 }
 
 export type GatewaySessionsSuiteSetup = (makeTempDir: (prefix: string) => string) => Promise<void>;
@@ -113,7 +144,7 @@ export function installGatewaySessionsTestResources(
       return;
     }
     await releaseGatewaySessionStoreFixture(sharedSessionStoreDir);
-    await fs.rm(sharedSessionStoreDir, { recursive: true, force: true });
+    await removeSessionFixtureDirectory(sharedSessionStoreDir);
   });
 
   const requireHarness = () => {
