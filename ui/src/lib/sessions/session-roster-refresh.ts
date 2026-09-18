@@ -140,6 +140,14 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       if (!controlModelAdapter || controlModelSyncing || inFlight) {
         return;
       }
+      // A roster wider than one catalog page is Gateway-owned; a pushed model
+      // snapshot must not truncate it back to the model's page bound.
+      if (
+        (lastListOptions.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) >
+        CONTROL_MODEL_MAX_SESSION_PAGE_SIZE
+      ) {
+        return;
+      }
       const catalog = model.getSnapshot().sessionCatalog;
       if (catalog.status !== "loading") {
         publishControlModelSnapshot(catalog);
@@ -388,7 +396,6 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       host.connection.isCurrent(scope) && publicationGeneration === foregroundPublicationGeneration;
     const { append = false, force: _force, backgroundHydrate = false, ...requestOptions } = options;
     const durableListOptions: SessionListOptions = { ...requestOptions };
-    // Pagination is request-local; replacements retain filters but restart at page one.
     delete durableListOptions.offset;
     if (!backgroundHydrate) {
       lastListOptions = durableListOptions;
@@ -876,6 +883,8 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
       // publishes through its subscription; a second roster read is redundant.
       const primaryUsesControlModel =
         Boolean(controlModel || (host.controlModelLoader && !controlModelUnavailable)) &&
+        (lastListOptions.limit ?? DEFAULT_SESSION_LIST_QUERY.limit) <=
+          CONTROL_MODEL_MAX_SESSION_PAGE_SIZE &&
         (!lastListOptions.archivedFilter || lastListOptions.archivedFilter === "active");
       if (
         !primaryUsesControlModel &&
