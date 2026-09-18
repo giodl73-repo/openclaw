@@ -905,6 +905,8 @@ export function createSessionRosterRefresh(host: SessionRosterRefreshHost) {
     reset() {
       retireForegroundRefresh();
       primaryList = { scope: primaryList.scope };
+      // A reconnect retries adoption: a chunk-load failure is connection-local.
+      controlModelUnavailable = false;
       eventRefreshCoordinator.reset();
       for (const entry of managedLists.values()) {
         entry.coordinator.reset();

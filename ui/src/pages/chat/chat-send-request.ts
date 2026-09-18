@@ -10,12 +10,14 @@ import { GatewayRequestError } from "../../api/gateway.ts";
 import type { ChatAttachment, HumanMention } from "../../lib/chat/chat-types.ts";
 import {
   isUiGlobalSessionKey,
-  isUiSelectedGlobalSessionKey,
   normalizeAgentId,
   resolveUiSelectedSessionAgentId,
 } from "../../lib/sessions/session-key.ts";
 import { buildChatApiAttachments } from "./attachment-api.ts";
-import { selectedControlModelConversationForRoute } from "./chat-control-model.ts";
+import {
+  controlModelAgentIdForRoute,
+  selectedControlModelConversationForRoute,
+} from "./chat-control-model.ts";
 import { isInitialChatHistoryUnavailable } from "./chat-history-state.ts";
 import { normalizeChatSendAck, type ChatSendAck } from "./chat-send-ack.ts";
 import type { ChatState } from "./chat-state-contract.ts";
@@ -42,21 +44,20 @@ export async function requestChatSend(
     !params.intent && sessionId && state.reconnectResumeSessionId === sessionId,
   );
   const attachments = buildChatApiAttachments(params.attachments);
+  const routeAgentId = controlModelAgentIdForRoute(state, routing.sessionKey);
   // Mentions, typed send intents, steer, and reconnect resume carry Gateway-only
   // request fields the Control Model send contract does not express.
+  // An explicit agent override only matches when it names this route's agent.
   const conversation =
     !controlUiReconnectResume &&
     params.queueMode !== "steer" &&
     !params.intent &&
-    !params.mentions?.length
+    !params.mentions?.length &&
+    (params.agentId === undefined || normalizeAgentId(params.agentId) === routeAgentId)
       ? selectedControlModelConversationForRoute(
           state,
           routing.sessionKey,
-          // Mirror the conversation owner's identity: only globally scoped
-          // routes carry an agent id on the cached Control Model conversation.
-          isUiSelectedGlobalSessionKey(state, routing.sessionKey)
-            ? routing.selectedAgentId
-            : undefined,
+          routeAgentId,
         )
       : null;
   let payload: unknown;

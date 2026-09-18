@@ -10,11 +10,8 @@ import type { GatewaySessionRow, GatewaySessionsDefaults } from "../../api/types
 import type { ChatMetadataResult } from "../../lib/chat/chat-metadata-cache.ts";
 import { extractText } from "../../lib/chat/message-extract.ts";
 import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
-import {
-  areUiSessionKeysEquivalent,
-  isUiSelectedGlobalSessionKey,
-  resolveUiSelectedSessionAgentId,
-} from "../../lib/sessions/session-key.ts";
+import { areUiSessionKeysEquivalent } from "../../lib/sessions/session-key.ts";
+import { controlModelAgentIdForRoute } from "./chat-control-model.ts";
 import { CHAT_HISTORY_STARTUP_RETRY_TIMEOUT_MS } from "./chat-history-request.ts";
 import {
   isRetryableStartupUnavailable,
@@ -64,9 +61,7 @@ function controlModelConversationForState(state: ChatState): ControlModelConvers
   if (!model || !state.sessionKey.trim()) {
     return null;
   }
-  const agentId = isUiSelectedGlobalSessionKey(state, state.sessionKey)
-    ? resolveUiSelectedSessionAgentId(state)
-    : undefined;
+  const agentId = controlModelAgentIdForRoute(state, state.sessionKey);
   if (
     state.controlModelConversation &&
     state.controlModelConversationSessionKey === state.sessionKey &&

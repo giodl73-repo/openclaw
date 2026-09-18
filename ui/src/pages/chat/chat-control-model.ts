@@ -6,8 +6,18 @@ import {
 } from "../../lib/sessions/session-key.ts";
 
 /**
- * Agent identity the conversation owner records for a route: only globally
- * scoped keys carry one, so a derived agent id cannot fence a direct session.
+ * Route-fenced read of the conversation owned by `chat-history-control-model.ts`.
+ * Command callers never create or replace it; a stale route falls back to Gateway.
+ */
+export type ChatControlModelConversationState = {
+  controlModelConversation?: ControlModelConversation;
+  controlModelConversationSessionKey?: string | null;
+  controlModelConversationAgentId?: string | null;
+};
+
+/**
+ * Single owner of the agent identity recorded for a route: only globally scoped
+ * keys carry one, so a derived agent id cannot fence a direct session.
  */
 export function controlModelAgentIdForRoute(
   state: Pick<UiSessionDefaultsHost, "assistantAgentId" | "agentsList" | "hello">,
@@ -17,16 +27,6 @@ export function controlModelAgentIdForRoute(
     ? resolveUiSelectedSessionAgentId(state, sessionKey)
     : undefined;
 }
-
-/**
- * Route-fenced read of the conversation owned by `chat-history-control-model.ts`.
- * Command callers never create or replace it; a stale route falls back to Gateway.
- */
-export type ChatControlModelConversationState = {
-  controlModelConversation?: ControlModelConversation;
-  controlModelConversationSessionKey?: string | null;
-  controlModelConversationAgentId?: string | null;
-};
 
 export function selectedControlModelConversationForRoute(
   state: ChatControlModelConversationState,
