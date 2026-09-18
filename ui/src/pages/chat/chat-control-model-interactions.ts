@@ -56,7 +56,8 @@ export function controlModelQuestionPromptCommand(
 /**
  * Shared global question state carries every agent's prompts; the selected
  * route only renders its own. Without a route agent only unscoped rows match,
- * so another agent's prompts cannot leak into a direct session.
+ * so another agent's prompts cannot leak into a direct session. A prompt with
+ * no session key is unscoped and stays visible on every route.
  */
 export function questionPromptsForRoute(
   prompts: readonly QuestionPrompt[],
@@ -66,8 +67,8 @@ export function questionPromptsForRoute(
   const normalizedAgentId = agentId?.trim().toLowerCase();
   return prompts.filter(
     (prompt) =>
-      prompt.sessionKey !== undefined &&
-      areUiSessionKeysEquivalent(prompt.sessionKey, sessionKey) &&
+      (prompt.sessionKey === undefined ||
+        areUiSessionKeysEquivalent(prompt.sessionKey, sessionKey)) &&
       (normalizedAgentId
         ? !prompt.agentId || prompt.agentId.trim().toLowerCase() === normalizedAgentId
         : !prompt.agentId),
