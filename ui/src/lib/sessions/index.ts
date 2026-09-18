@@ -11,7 +11,12 @@ import { createSessionDeletions } from "./session-deletions.ts";
 import { createSessionEventSubscriptionOwner } from "./session-event-subscription.ts";
 import { createSessionGitHubPublication } from "./session-github-publication.ts";
 import { createSessionGroupCatalog } from "./session-group-catalog.ts";
-import { normalizeAgentId, parseAgentSessionKey, uiSessionEventMatches } from "./session-key.ts";
+import {
+  normalizeAgentId,
+  parseAgentSessionKey,
+  uiGatewaySessionKeyMatcher,
+  uiSessionEventMatches,
+} from "./session-key.ts";
 import { createSessionMutations } from "./session-mutations.ts";
 import { createSessionPermissionProjection } from "./session-permission-projection.ts";
 import { createSessionReconciliation } from "./session-reconciliation.ts";
@@ -328,13 +333,15 @@ export function createSessionCapability(
 
   const {
     dispose: disposeOperations,
-    retireConnection: retireOperationConnection,
+    retireConnection: retireObservers,
     ...operations
   } = createSessionScopedOperations({
     connection,
     reconcileMutation: roster.reconcileMutation,
     notifyCreated,
     reportError: (error) => publish({ ...state, error: formatUiError(error) }, "operation"),
+    // Shared with the Control Model: one matcher owns this connection's leases.
+    sessionMessageKeysEquivalent: uiGatewaySessionKeyMatcher(gateway),
   });
 
   const pullRequestSummary = (key: string) => pullRequestSummaries.get(key.trim());
@@ -485,7 +492,7 @@ export function createSessionCapability(
       sessionEventSubscriptionError = null;
       // A same-client reconnect keeps its live observers refcounted; only a
       // replacement client retires the previous connection's leases.
-      retireOperationConnection(connected && previousClient === next.client ? null : previousClient);
+      retireObservers(connected && previousClient === next.client ? null : previousClient);
       groups.invalidate();
       swarmActivity.clear();
       mutations.retireConnection();

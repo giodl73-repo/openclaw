@@ -1,4 +1,5 @@
 import { expect, vi } from "vitest";
+import { resetGatewaySessionMessageSubscriptionCoordinator } from "../browser.js";
 import {
   createControlModel,
   type ControlModelConnectionSnapshot,
@@ -85,6 +86,8 @@ export function createHarness(
     history?: unknown;
     materialize?: boolean;
     sessionMessageKeysEquivalent?: (left: string, right: string) => boolean;
+    /** Set false to prove the model never retires a coordinator it borrows. */
+    hostRetiresObservers?: boolean;
   } = {},
 ) {
   let connection = initial;
@@ -202,6 +205,11 @@ export function createHarness(
     calls,
     request,
     materializeArtifactView,
+    // The host owns this connection's observer lifecycle, exactly as the Control
+    // UI session capability does when it retires a replaced Gateway connection.
+    retireSubscriptionCoordinator() {
+      resetGatewaySessionMessageSubscriptionCoordinator(subscriptionClient);
+    },
     queue(method: string, value: unknown) {
       const queue = responses.get(method) ?? [];
       queue.push(value);
@@ -223,6 +231,12 @@ export function createHarness(
       return calls.filter((call) => call.method === method);
     },
     setConnection(next: ControlModelConnectionSnapshot, times = 1) {
+      if (
+        options.hostRetiresObservers !== false &&
+        (next.epoch !== connection.epoch || next.status !== "connected")
+      ) {
+        resetGatewaySessionMessageSubscriptionCoordinator(subscriptionClient);
+      }
       connection = next;
       for (let index = 0; index < times; index += 1) {
         for (const listener of connectionListeners) {

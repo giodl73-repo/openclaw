@@ -29,12 +29,12 @@ import {
 } from "../../lib/chat/message-normalizer.ts";
 import type { CanvasToolPreview } from "../../lib/chat/tool-cards.ts";
 import { areUiSessionKeysEquivalent } from "../../lib/sessions/session-key.ts";
-import type { ChatMessageRecovery } from "./chat-message-recovery.ts";
 import {
   controlModelArtifactPreviews,
   controlModelArtifactSourceKeys,
   mergeControlModelArtifactPreview,
 } from "./chat-control-model-artifacts.ts";
+import type { ChatMessageRecovery } from "./chat-message-recovery.ts";
 import { buildPendingInputItems } from "./chat-pending-inputs.ts";
 import {
   buildCompactionDividerItem,
@@ -164,7 +164,7 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
       messageId: source.messageId,
       toolCallId: source.toolCallId,
       toolName: source.toolName,
-    } as Record<string, unknown>,
+    },
   }));
   const consumedPersistedSources: Array<{
     fallbackKey: string;
@@ -516,7 +516,7 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
   for (const source of remainingModelSources) {
     liftedCanvasSources.push({
       message: source.message,
-      key: `canvas:model:${String(source.message.toolCallId ?? source.message.messageId ?? "")}`,
+      key: `canvas:model:${source.message.toolCallId ?? source.message.messageId ?? ""}`,
       preview: { preview: source.preview, text: source.text, timestamp: source.timestamp },
     });
   }

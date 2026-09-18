@@ -289,6 +289,7 @@ describe("createSessionCapability message subscriptions", () => {
     const operations = createSessionScopedOperations({
       notifyCreated: vi.fn(),
       reportError: vi.fn(),
+      sessionMessageKeysEquivalent: (left, right) => left === right,
       connection: {
         capture: () => ({ client, epoch: 0 }),
         isCurrent: () => current,

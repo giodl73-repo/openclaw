@@ -1,6 +1,8 @@
 import {
   getGatewaySessionMessageSubscriptionCoordinator,
   resetGatewaySessionMessageSubscriptionCoordinator,
+  type GatewaySessionMessageRequestClient,
+  type GatewaySessionMessageSubscriptionCoordinator,
 } from "../browser.js";
 import {
   ControlModelCatalogImpl,
@@ -108,12 +110,10 @@ class ControlModelImpl implements ControlModel {
   readonly #onBackgroundError?: (error: unknown) => void;
   #unsubscribeConnection: (() => void) | null = null;
   #unsubscribeEvents: (() => void) | null = null;
-  #messageSubscriptionCoordinator: ReturnType<
-    typeof getGatewaySessionMessageSubscriptionCoordinator
-  > | null = null;
-  #messageSubscriptionClient:
-    | Parameters<typeof getGatewaySessionMessageSubscriptionCoordinator>[0]
-    | null = null;
+  #messageSubscriptionCoordinator: GatewaySessionMessageSubscriptionCoordinator | null = null;
+  #messageSubscriptionClient: GatewaySessionMessageRequestClient | null = null;
+  /** False while the coordinator is borrowed from the host that owns the connection. */
+  #ownsMessageSubscriptionCoordinator = false;
   #lastConnection: ControlModelConnectionSnapshot;
   #running = false;
   #disposed = false;
@@ -347,14 +347,7 @@ class ControlModelImpl implements ControlModel {
     const previous = this.#lastConnection;
     this.#lastConnection = connection;
     if (connection.epoch !== previous.epoch || connection.status !== "connected") {
-      if (this.#messageSubscriptionCoordinator) {
-        resetGatewaySessionMessageSubscriptionCoordinator(
-          this.#messageSubscriptionClient ?? this.#gateway,
-          this.#messageSubscriptionCoordinator,
-        );
-        this.#messageSubscriptionCoordinator = null;
-        this.#messageSubscriptionClient = null;
-      }
+      this.#retireMessageSubscriptionCoordinator();
       for (const conversation of this.#conversations.values()) {
         if (connection.status === "connected") {
           conversation.onConnection(connection, this.#getMessageSubscriptionCoordinator());
@@ -368,16 +361,35 @@ class ControlModelImpl implements ControlModel {
     }
   }
 
-  #getMessageSubscriptionCoordinator() {
-    if (!this.#messageSubscriptionCoordinator) {
-      this.#messageSubscriptionClient =
-        this.#gateway.getSessionMessageSubscriptionClient?.() ?? this.#gateway;
-      this.#messageSubscriptionCoordinator = getGatewaySessionMessageSubscriptionCoordinator(
-        this.#messageSubscriptionClient,
-        { keysEquivalent: this.#gateway.sessionMessageKeysEquivalent },
-      );
+  #getMessageSubscriptionCoordinator(): GatewaySessionMessageSubscriptionCoordinator {
+    // A host that exposes its raw request client owns the observer lifecycle for
+    // that connection: the coordinator is shared with its other owners, so this
+    // model only leases and releases its own handles. Without that hook the
+    // binding keys a model-owned coordinator this model retires on reconnect.
+    const borrowed = this.#gateway.getSessionMessageSubscriptionClient?.() ?? null;
+    const client: GatewaySessionMessageRequestClient = borrowed ?? this.#gateway;
+    if (this.#messageSubscriptionCoordinator && this.#messageSubscriptionClient === client) {
+      return this.#messageSubscriptionCoordinator;
     }
+    this.#retireMessageSubscriptionCoordinator();
+    this.#messageSubscriptionClient = client;
+    this.#ownsMessageSubscriptionCoordinator = borrowed === null;
+    this.#messageSubscriptionCoordinator = getGatewaySessionMessageSubscriptionCoordinator(client, {
+      keysEquivalent: this.#gateway.sessionMessageKeysEquivalent,
+    });
     return this.#messageSubscriptionCoordinator;
+  }
+
+  #retireMessageSubscriptionCoordinator(): void {
+    const coordinator = this.#messageSubscriptionCoordinator;
+    const client = this.#messageSubscriptionClient;
+    const owned = this.#ownsMessageSubscriptionCoordinator;
+    this.#messageSubscriptionCoordinator = null;
+    this.#messageSubscriptionClient = null;
+    this.#ownsMessageSubscriptionCoordinator = false;
+    if (owned && coordinator && client) {
+      resetGatewaySessionMessageSubscriptionCoordinator(client, coordinator);
+    }
   }
 
   #startConversations(): void {

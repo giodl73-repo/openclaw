@@ -1,6 +1,6 @@
+import { ControlModelCommandError } from "@openclaw/gateway-client/model";
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { ControlModelCommandError } from "@openclaw/gateway-client/model";
 import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
 import { isActiveLeafChangedError, requestChatSend } from "./chat-send-request.ts";
 import type { ChatState } from "./chat-state-contract.ts";
@@ -64,6 +64,32 @@ describe("requestChatSend", () => {
       expectedLeafEntryId: "leaf-one",
     });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("preserves the terminal restart acknowledgment durable delivery retries on", async () => {
+    const send = vi.fn(async () => ({
+      runId: "run-restart",
+      status: "timeout",
+      idempotencyKey: "send-restart",
+      stopReason: "restart",
+      messageSeq: 4,
+      serverTiming: { receivedToAckMs: 21, loadSessionMs: 8 },
+    }));
+    const state = makeState({
+      controlModelConversation: { send } as unknown as ChatState["controlModelConversation"],
+      controlModelConversationSessionKey: "agent:main",
+      controlModelConversationAgentId: null,
+    });
+
+    await expect(
+      requestChatSend(state, { message: "restarted", runId: "send-restart" }),
+    ).resolves.toEqual({
+      runId: "run-restart",
+      status: "timeout",
+      stopReason: "restart",
+      messageSeq: 4,
+      serverTiming: { receivedToAckMs: 21, loadSessionMs: 8 },
+    });
   });
 
   it("maps model command rejections into the incumbent send error contract", async () => {

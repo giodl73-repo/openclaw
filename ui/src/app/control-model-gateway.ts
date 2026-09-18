@@ -122,6 +122,10 @@ export function createControlModelGatewayBridge(options: {
 
   const bridge: ControlModelGatewayBridge = {
     binding: {
+      // The session capability owns this connection's observer lifecycle, so the
+      // Control Model must lease from the same client-keyed coordinator instead
+      // of opening a second observer over the one socket.
+      getSessionMessageSubscriptionClient: () => options.getClient(),
       sessionMessageKeysEquivalent: options.sessionMessageKeysEquivalent,
       getConnectionSnapshot: readConnectionSnapshot,
       subscribeConnection(listener) {

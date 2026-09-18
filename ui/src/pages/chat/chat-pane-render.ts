@@ -30,11 +30,11 @@ import {
   resolveUiConfiguredMainKey,
 } from "../../lib/sessions/session-key.ts";
 import { showToast } from "../../lib/toast.ts";
-import { controlModelAgentIdForRoute } from "./chat-control-model.ts";
 import {
   controlModelChatInteractions,
   questionPromptsForRoute,
 } from "./chat-control-model-interactions.ts";
+import { controlModelAgentIdForRoute } from "./chat-control-model.ts";
 import { mutateChatGoal, submitChatGoalDraft } from "./chat-goals.ts";
 import { clearChatHistory } from "./chat-history-actions.ts";
 import { isInitialChatHistoryUnavailable } from "./chat-history-state.ts";
@@ -425,12 +425,10 @@ export class ChatPane extends ChatPaneLayoutRender {
       gatewayQuestionPrompts:
         catalogKey || sessionParticipationBlocked
           ? this.emptyTranscriptItems
-          : questionPromptsForRoute(
-              this.questionPrompts,
-              state.sessionKey,
-              controlModelRouteAgentId,
-            ),
-      controlModelArtifacts: catalogKey ? undefined : controlModelInteractions.controlModelArtifacts,
+          : questionPromptsForRoute(state, this.questionPrompts, controlModelRouteAgentId),
+      controlModelArtifacts: catalogKey
+        ? undefined
+        : controlModelInteractions.controlModelArtifacts,
       ...createChatQuestionActions({
         state,
         questionState: this.questionPromptState,

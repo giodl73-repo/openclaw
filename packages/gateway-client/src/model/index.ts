@@ -48,6 +48,7 @@ export type {
   ControlModelMaterializeViewInput,
   ControlModelSendInput,
   ControlModelSendResult,
+  ControlModelSendServerTiming,
   ControlModelToolStatus,
 } from "./conversation.js";
 export type {

@@ -3,7 +3,6 @@ import {
   reduceSessionProjection,
   reduceSessionProjectionRunEvent,
   releaseGatewaySessionMessageSubscription,
-  type GatewaySessionMessageSubscription,
   type GatewaySessionMessageSubscriptionCoordinator,
   type SessionProjectionGatewayRunEvent,
   type SessionProjectionState,
@@ -21,6 +20,7 @@ import {
   ControlModelCommandError,
   type ControlModelConversationHistoryMethod,
   type ControlModelConversationHost,
+  type ControlModelConversationLeases,
   type ControlModelConversationSnapshot,
   type ControlModelConversationStatus,
   type ControlModelConversationSubscriber,
@@ -62,6 +62,7 @@ export type {
   ControlModelConversationTool,
   ControlModelSendInput,
   ControlModelSendResult,
+  ControlModelSendServerTiming,
   ControlModelToolStatus,
   ControlModelMaterializedView,
   ControlModelMaterializeViewInput,
@@ -83,10 +84,7 @@ export class ControlModelConversation {
   #status: ControlModelConversationStatus = "idle";
   #revision = 0;
   #partialReasons = new Set<string>();
-  #leases: {
-    plain: GatewaySessionMessageSubscription | null;
-    approvals: GatewaySessionMessageSubscription | null;
-  } = { plain: null, approvals: null };
+  #leases: ControlModelConversationLeases = { plain: null, approvals: null, epoch: null };
   #activationEpoch: number | null = null;
   #activationGeneration = 0;
   #activation: Promise<void> | null = null;
@@ -235,7 +233,8 @@ export class ControlModelConversation {
     if (this.#activationEpoch === connection.epoch) {
       return;
     }
-    this.#releaseLeases();
+    // Only a same-generation retry owns a real release; see the lease contract.
+    this.#releaseLeases(this.#leases.epoch !== null && this.#leases.epoch !== connection.epoch);
     this.#canonicalSessionKey = this.#sessionKey;
     this.#activationGeneration += 1;
     const generation = this.#activationGeneration;
@@ -256,7 +255,7 @@ export class ControlModelConversation {
           void releaseGatewaySessionMessageSubscription(plain);
           return;
         }
-        this.#leases.plain = plain;
+        this.#leases = { ...this.#leases, plain, epoch: connection.epoch };
         this.#canonicalSessionKey = plain.key;
         try {
           const approvals = await coordinator.acquire(this.#sessionKey, {
@@ -267,7 +266,7 @@ export class ControlModelConversation {
             void releaseGatewaySessionMessageSubscription(approvals);
             return;
           }
-          this.#leases.approvals = approvals;
+          this.#leases = { ...this.#leases, approvals };
           this.#partialReasons.delete("approvals-unavailable");
           this.#interactions.applyApprovalReplay(approvals.approvalReplay);
         } catch (error) {
@@ -398,7 +397,7 @@ export class ControlModelConversation {
     this.#activationGeneration += 1;
     this.#activationEpoch = null;
     this.#activation = null;
-    this.#releaseLeases();
+    this.#releaseLeases(true);
     this.#artifacts.retireMaterializedViews();
     this.#status = "stale";
     this.#partialReasons.add("disconnected");
@@ -596,18 +595,15 @@ export class ControlModelConversation {
         ?.runId ?? null
     );
   }
-  #releaseLeases(): void {
+  #releaseLeases(discard = false): void {
     const leases = this.#leases;
-    this.#leases = { plain: null, approvals: null };
-    if (leases.approvals) {
-      void releaseGatewaySessionMessageSubscription(leases.approvals).catch((error: unknown) =>
-        this.#host.reportBackgroundError(error),
-      );
-    }
-    if (leases.plain) {
-      void releaseGatewaySessionMessageSubscription(leases.plain).catch((error: unknown) =>
-        this.#host.reportBackgroundError(error),
-      );
+    this.#leases = { plain: null, approvals: null, epoch: null };
+    for (const lease of discard ? [] : [leases.approvals, leases.plain]) {
+      if (lease) {
+        void releaseGatewaySessionMessageSubscription(lease).catch((error: unknown) =>
+          this.#host.reportBackgroundError(error),
+        );
+      }
     }
   }
 

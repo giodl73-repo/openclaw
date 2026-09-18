@@ -1,5 +1,8 @@
 import type { UiArtifact, UiArtifactViewOffer } from "@openclaw/gateway-protocol";
-import type { GatewaySessionMessageSubscriptionCoordinator } from "../browser.js";
+import type {
+  GatewaySessionMessageSubscription,
+  GatewaySessionMessageSubscriptionCoordinator,
+} from "../browser.js";
 import type { ControlModelConversation } from "./conversation.js";
 import type {
   ControlModelConnectionSnapshot,
@@ -118,6 +121,17 @@ export type ControlModelConversationBounds = Readonly<{
   maxArtifactViews: number;
 }>;
 export type ControlModelConversationHistoryMethod = "chat.history" | "chat.startup";
+/**
+ * Session message observer handles held for one connection generation. A
+ * replaced generation has no wire observer left, so its handles are dropped
+ * instead of released: unsubscribing would remove the shared observer another
+ * owner on the same client re-acquired.
+ */
+export type ControlModelConversationLeases = Readonly<{
+  plain: GatewaySessionMessageSubscription | null;
+  approvals: GatewaySessionMessageSubscription | null;
+  epoch: number | null;
+}>;
 /** Bounded startup/history envelope fields retained beside the message projection. */
 export type ControlModelConversationMetadata = Readonly<{
   sessionId?: string;
@@ -196,10 +210,21 @@ export type ControlModelSendInput =
       expectedRunId?: string;
       suppressCommandInterpretation?: boolean;
     }>;
+/** Gateway-reported chat.send acknowledgment timings retained for delivery telemetry. */
+export type ControlModelSendServerTiming = Readonly<{
+  receivedToAckMs?: number;
+  loadSessionMs?: number;
+  prepareAttachmentsMs?: number;
+}>;
 export type ControlModelSendResult = Readonly<{
   runId: string | null;
   status: string;
   idempotencyKey: string;
+  /** Terminal acknowledgment detail; "restart" keeps the input durably retryable. */
+  stopReason?: string;
+  /** Recorder-attested transcript position proving the input was durably admitted. */
+  messageSeq?: number;
+  serverTiming?: ControlModelSendServerTiming;
 }>;
 export type ControlModelMaterializeViewInput = Readonly<{
   artifactId: string;

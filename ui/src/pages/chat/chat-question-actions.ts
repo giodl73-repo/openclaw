@@ -1,5 +1,5 @@
-import { cancelQuestionPrompt, submitQuestionPrompt } from "../../app/question-prompt.ts";
 import type { QuestionPromptCommand } from "../../app/question-prompt-command.ts";
+import { cancelQuestionPrompt, submitQuestionPrompt } from "../../app/question-prompt.ts";
 import type { ChatPageHost } from "./chat-state-host.ts";
 import type { ChatProps } from "./chat-view.ts";
 

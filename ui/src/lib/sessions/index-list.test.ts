@@ -602,7 +602,7 @@ describe("session list requests", () => {
       conversation: vi.fn(),
       releaseConversation: vi.fn(async () => undefined),
       dispose: vi.fn(),
-    } as unknown as ControlModel;
+    } as unknown as ControlModelCatalog;
     const request = vi.fn(async (_method: string, params?: ListParams) => {
       const limit = params?.limit ?? 50;
       return listResult(Array.from({ length: limit }, (_, index) => `agent:main:gateway-${index}`));
@@ -673,7 +673,7 @@ describe("session list requests", () => {
       assistantAgentId: "main",
       hello: null,
     };
-    let connectionListener: ((snapshot: typeof snapshot) => void) | undefined;
+    let connectionListener: ((next: SessionGateway["snapshot"]) => void) | undefined;
     const sessions = createTestSessionCapability({
       snapshot,
       loadControlModelCatalog: async () => {

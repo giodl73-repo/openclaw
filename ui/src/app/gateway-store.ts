@@ -31,7 +31,7 @@ import { readConnectionAuthReason } from "../lib/connection-hints.ts";
 import { formatUiError, formatUiExternalText } from "../lib/format-error.ts";
 import { setAvatarGatewayOrigin } from "../lib/identity-avatar-context.ts";
 import { resolveSessionKey } from "../lib/sessions/index.ts";
-import { readSessionDefaults, uiConversationMatches } from "../lib/sessions/session-key.ts";
+import { readSessionDefaults, uiGatewaySessionKeyMatcher } from "../lib/sessions/session-key.ts";
 import { generateUUID } from "../lib/uuid.ts";
 import { clearWarmBootState } from "./bootstrap-warm-boot.ts";
 import type {
@@ -714,8 +714,8 @@ export function createApplicationGateway(
           getConnectionEpoch: () => connectionEpoch,
           getClient: () => client,
           isCurrentClient,
-          sessionMessageKeysEquivalent: (left, right) =>
-            uiConversationMatches(snapshot, left, right),
+          // Every owner of this connection's observers shares one identity policy.
+          sessionMessageKeysEquivalent: uiGatewaySessionKeyMatcher(gateway),
         });
         if (disposed) {
           runtime.dispose();

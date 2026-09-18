@@ -1,4 +1,5 @@
 import { expect, vi } from "vitest";
+import { resetGatewaySessionMessageSubscriptionCoordinator } from "../browser.js";
 import {
   createControlModel,
   type ControlModelConnectionSnapshot,
@@ -181,6 +182,10 @@ export function createHarness(
       return calls.filter((call) => call.method === method);
     },
     setConnection(next: ControlModelConnectionSnapshot, times = 1) {
+      // The host owns observer retirement for a replaced connection generation.
+      if (next.epoch !== connection.epoch || next.status !== "connected") {
+        resetGatewaySessionMessageSubscriptionCoordinator(subscriptionClient);
+      }
       connection = next;
       for (let index = 0; index < times; index += 1) {
         for (const listener of connectionListeners) {

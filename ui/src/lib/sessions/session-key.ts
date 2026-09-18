@@ -308,6 +308,27 @@ export function uiSessionEventMatches(
   );
 }
 
+const gatewaySessionKeyMatchers = new WeakMap<object, (left: string, right: string) => boolean>();
+
+/**
+ * One canonical session-key identity per Gateway connection owner. Every owner
+ * leasing from that connection's shared message-subscription coordinator must
+ * pass this exact function: the coordinator refuses a second matcher once a
+ * lease exists, and two policies would split wire ownership of one observer.
+ */
+export function uiGatewaySessionKeyMatcher(gateway: {
+  readonly snapshot: UiSessionDefaultsHost;
+}): (left: string, right: string) => boolean {
+  const existing = gatewaySessionKeyMatchers.get(gateway);
+  if (existing) {
+    return existing;
+  }
+  const matcher = (left: string, right: string) =>
+    uiConversationMatches(gateway.snapshot, left, right);
+  gatewaySessionKeyMatchers.set(gateway, matcher);
+  return matcher;
+}
+
 export function isUiSelectedGlobalSessionKey(
   host: Pick<UiSessionDefaultsHost, "agentsList" | "hello">,
   sessionKey: string | undefined | null,

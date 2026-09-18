@@ -54,11 +54,7 @@ export async function requestChatSend(
     !params.intent &&
     !params.mentions?.length &&
     (params.agentId === undefined || normalizeAgentId(params.agentId) === routeAgentId)
-      ? selectedControlModelConversationForRoute(
-          state,
-          routing.sessionKey,
-          routeAgentId,
-        )
+      ? selectedControlModelConversationForRoute(state, routing.sessionKey, routeAgentId)
       : null;
   let payload: unknown;
   if (conversation) {

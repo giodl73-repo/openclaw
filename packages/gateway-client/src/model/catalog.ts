@@ -63,6 +63,14 @@ export type ControlModelGatewayEventFrame = Readonly<{
 }>;
 
 export type ControlModelGatewayBinding = Readonly<{
+  /**
+   * Raw request client shared with the host's other owners on this connection.
+   * Supplying it transfers session-observer lifecycle ownership to the host:
+   * the model borrows the client's coordinator, leases and releases only its
+   * own handles, and never retires or reconfigures it. The host must retire
+   * that coordinator when its connection generation is replaced. Without this
+   * hook the binding keys a model-owned coordinator retired on every reconnect.
+   */
   getSessionMessageSubscriptionClient?(): GatewaySessionMessageRequestClient | null;
   sessionMessageKeysEquivalent?(left: string, right: string): boolean;
   getConnectionSnapshot(): ControlModelConnectionSnapshot;

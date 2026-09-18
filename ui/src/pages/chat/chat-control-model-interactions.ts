@@ -5,7 +5,11 @@ import type {
 } from "@openclaw/gateway-client/model";
 import type { QuestionPromptCommand } from "../../app/question-prompt-command.ts";
 import type { QuestionPrompt } from "../../app/question-prompt.ts";
-import { areUiSessionKeysEquivalent } from "../../lib/sessions/session-key.ts";
+import {
+  normalizeAgentId,
+  uiConversationMatches,
+  type UiSessionDefaultsHost,
+} from "../../lib/sessions/session-key.ts";
 import {
   selectedControlModelConversationForRoute,
   type ChatControlModelConversationState,
@@ -58,19 +62,31 @@ export function controlModelQuestionPromptCommand(
  * route only renders its own. Without a route agent only unscoped rows match,
  * so another agent's prompts cannot leak into a direct session. A prompt with
  * no session key is unscoped and stays visible on every route.
+ *
+ * Session identity is configuration-aware: a configured global alias such as
+ * `agent:work:main` addresses the same conversation as a `global` prompt for
+ * that agent, which a literal key comparison would drop.
  */
 export function questionPromptsForRoute(
+  host: UiSessionDefaultsHost & { sessionKey: string },
   prompts: readonly QuestionPrompt[],
-  sessionKey: string,
   agentId?: string,
 ): QuestionPrompt[] {
-  const normalizedAgentId = agentId?.trim().toLowerCase();
+  const normalizedAgentId = agentId?.trim() ? normalizeAgentId(agentId) : undefined;
   return prompts.filter(
     (prompt) =>
       (prompt.sessionKey === undefined ||
-        areUiSessionKeysEquivalent(prompt.sessionKey, sessionKey)) &&
+        // An agent-less prompt belongs to whichever route reads it, so it is
+        // compared under that route's agent rather than the default agent.
+        uiConversationMatches(
+          host,
+          host.sessionKey,
+          prompt.sessionKey,
+          prompt.agentId ?? agentId,
+          agentId,
+        )) &&
       (normalizedAgentId
-        ? !prompt.agentId || prompt.agentId.trim().toLowerCase() === normalizedAgentId
+        ? !prompt.agentId || normalizeAgentId(prompt.agentId) === normalizedAgentId
         : !prompt.agentId),
   );
 }

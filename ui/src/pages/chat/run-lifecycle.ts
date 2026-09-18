@@ -371,8 +371,7 @@ async function abortChatRun(state: ChatAbortRunState): Promise<void> {
   const intent = currentChatAbortIntent(state, client);
   // Session-wide stops and recovered embedded runs stay Gateway-owned: only an
   // exact chat.abort-eligible run matches the Control Model command contract.
-  const exactRun =
-    intent.runId !== null && intent.sessionAbortable !== true ? intent : null;
+  const exactRun = intent.runId !== null && intent.sessionAbortable !== true ? intent : null;
   const conversation = exactRun
     ? selectedControlModelConversationForRoute(state, exactRun.sessionKey, exactRun.agentId)
     : null;
@@ -381,8 +380,7 @@ async function abortChatRun(state: ChatAbortRunState): Promise<void> {
       ? await conversation
           .abort(exactRun.runId)
           .then(
-            (response) =>
-              ({ ok: true, noActiveRun: readNoActiveRunResponse(response) }) as const,
+            (response) => ({ ok: true, noActiveRun: readNoActiveRunResponse(response) }) as const,
           )
           .catch((error: unknown) => ({ ok: false, error }) as const)
       : await requestChatAbort(client, intent);

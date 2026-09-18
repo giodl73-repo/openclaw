@@ -10,6 +10,13 @@ import { controlModelAgentIdForRoute } from "./chat-control-model.ts";
 
 afterEach(() => vi.restoreAllMocks());
 
+const globalScopeHost = {
+  assistantAgentId: "main",
+  agentsList: { defaultId: "main", mainKey: "main", scope: "global" },
+  hello: null,
+  sessionKey: "agent:work:main",
+};
+
 function conversation(status = "pending") {
   const answerQuestion = vi.fn(async () => ({ status: "answered" }));
   const cancelQuestion = vi.fn(async () => ({ status: "cancelled" }));
@@ -89,9 +96,9 @@ describe("controlModelQuestionPromptCommand", () => {
     expect(
       controlModelChatInteractions(state, "global", "work").controlModelArtifacts,
     ).toBeUndefined();
-    expect(
-      controlModelChatInteractions(state, "global", "main").controlModelArtifacts,
-    ).toEqual([{ id: "artifact-one" }]);
+    expect(controlModelChatInteractions(state, "global", "main").controlModelArtifacts).toEqual([
+      { id: "artifact-one" },
+    ]);
   });
 
   it("filters shared global question state by the selected agent", () => {
@@ -103,14 +110,27 @@ describe("controlModelQuestionPromptCommand", () => {
       { id: "other", sessionKey: "agent:main:other", agentId: "main" },
     ] as never;
 
-    expect(questionPromptsForRoute(prompts, "global", "work").map((prompt) => prompt.id)).toEqual([
-      "work",
-      "legacy",
-      "unscoped",
-    ]);
-    expect(questionPromptsForRoute(prompts, "global").map((prompt) => prompt.id)).toEqual([
-      "legacy",
-    ]);
+    expect(
+      questionPromptsForRoute({ sessionKey: "global" }, prompts, "work").map((prompt) => prompt.id),
+    ).toEqual(["work", "legacy", "unscoped"]);
+    expect(
+      questionPromptsForRoute({ sessionKey: "global" }, prompts).map((prompt) => prompt.id),
+    ).toEqual(["legacy"]);
+  });
+
+  it("matches a configured global alias route against its global prompts", () => {
+    const prompts = [
+      { id: "work", sessionKey: "global", agentId: "work" },
+      { id: "main", sessionKey: "global", agentId: "main" },
+      { id: "legacy", sessionKey: "global" },
+      { id: "direct", sessionKey: "agent:work:discord:123", agentId: "work" },
+    ] as never;
+
+    // `agent:work:main` routes to the configured global stream, so its prompts
+    // arrive under the `global` session key.
+    expect(
+      questionPromptsForRoute(globalScopeHost, prompts, "work").map((prompt) => prompt.id),
+    ).toEqual(["work", "legacy"]);
   });
 
   it("uses agent identity only for global aliases, not channel-scoped session keys", () => {

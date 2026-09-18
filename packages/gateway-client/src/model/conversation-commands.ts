@@ -1,3 +1,4 @@
+import { asNonNegativeFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import type { reduceSessionProjection } from "../browser.js";
 import type { ConversationInteractionStore } from "./conversation-interactions.js";
 import type {
@@ -5,6 +6,7 @@ import type {
   ControlModelConversationMetadata,
   ControlModelSendInput,
   ControlModelSendResult,
+  ControlModelSendServerTiming,
 } from "./conversation-types.js";
 import {
   cloneAndFreeze,
@@ -12,6 +14,7 @@ import {
   normalizeGatewayError,
   normalizeStatus,
   record,
+  safeInteger,
   text,
 } from "./conversation-utils.js";
 import type { ControlModelRequestOptions } from "./model.js";
@@ -85,14 +88,27 @@ export class ConversationCommandController {
         options,
       );
       this.#options.assertEpoch(epoch, "chat.send");
-      const runId = text(response?.runId) ?? null;
+      const result = projectSendResult(response, idempotencyKey);
+      if (isTerminalSendFailure(result)) {
+        // A terminal failure never admitted this input, so it is not an
+        // acknowledgment. Only a restart keeps the pending entry retryable
+        // under the same idempotency key.
+        if (result.stopReason !== "restart") {
+          this.#options.applyProjection({
+            type: "sendFailed",
+            runId: idempotencyKey,
+            scope: { sessionKey: this.#options.sessionKey },
+          });
+        }
+        return result;
+      }
       this.#options.applyProjection({
         type: "sendAcknowledged",
-        idempotencyKey: runId ?? idempotencyKey,
+        idempotencyKey: result.runId ?? idempotencyKey,
         previousRunId: idempotencyKey,
         scope: { sessionKey: this.#options.sessionKey },
       });
-      return Object.freeze({ runId, status: text(response?.status) ?? "accepted", idempotencyKey });
+      return result;
     } catch (error) {
       const commandError = this.#asCommandErrorForEpoch(error, "chat.send", epoch);
       if (commandError.category !== "stale") {
@@ -299,6 +315,49 @@ export class ConversationCommandController {
     }
     return normalizeGatewayError(error, command);
   }
+}
+
+/** Statuses the Gateway uses for an input it did not admit for dispatch. */
+function isTerminalSendFailure(result: ControlModelSendResult): boolean {
+  return result.status === "timeout" || result.status === "error";
+}
+
+function projectSendServerTiming(value: unknown): ControlModelSendServerTiming | undefined {
+  const source = record(value);
+  if (!source) {
+    return undefined;
+  }
+  const receivedToAckMs = asNonNegativeFiniteNumber(source.receivedToAckMs);
+  const loadSessionMs = asNonNegativeFiniteNumber(source.loadSessionMs);
+  const prepareAttachmentsMs = asNonNegativeFiniteNumber(source.prepareAttachmentsMs);
+  const timing: ControlModelSendServerTiming = {
+    ...(receivedToAckMs !== undefined ? { receivedToAckMs } : {}),
+    ...(loadSessionMs !== undefined ? { loadSessionMs } : {}),
+    ...(prepareAttachmentsMs !== undefined ? { prepareAttachmentsMs } : {}),
+  };
+  return Object.keys(timing).length > 0 ? Object.freeze(timing) : undefined;
+}
+
+/**
+ * Retains the acknowledgment facts delivery owners need: the terminal stop
+ * reason that keeps a send retryable, the admitted transcript position, and
+ * the Gateway's own timings. Dropping them would strand durable outboxes.
+ */
+function projectSendResult(
+  response: Record<string, unknown> | null | undefined,
+  idempotencyKey: string,
+): ControlModelSendResult {
+  const stopReason = text(response?.stopReason);
+  const messageSeq = safeInteger(response?.messageSeq);
+  const serverTiming = projectSendServerTiming(response?.serverTiming);
+  return Object.freeze({
+    runId: text(response?.runId) ?? null,
+    status: text(response?.status) ?? "accepted",
+    idempotencyKey,
+    ...(stopReason ? { stopReason } : {}),
+    ...(messageSeq !== null && messageSeq > 0 ? { messageSeq } : {}),
+    ...(serverTiming ? { serverTiming } : {}),
+  });
 }
 
 function normalizeSendInput(input: ControlModelSendInput): Record<string, unknown> & {

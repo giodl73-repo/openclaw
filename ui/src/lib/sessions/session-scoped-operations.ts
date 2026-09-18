@@ -25,7 +25,7 @@ import type {
   SessionMessageSubscription,
   SessionRefreshOutcome,
 } from "./session-capability.ts";
-import { areUiSessionKeysEquivalent, normalizeAgentId } from "./session-key.ts";
+import { normalizeAgentId } from "./session-key.ts";
 import {
   requestSessionBranchSwitch,
   requestSessionBranches,
@@ -45,6 +45,12 @@ type SessionScopedOperationsHost = {
   reconcileMutation: (agentId?: string | null) => Promise<SessionRefreshOutcome>;
   notifyCreated: (key: string) => void;
   reportError: (error: unknown) => void;
+  /**
+   * Connection-wide canonical session-key identity. The Control Model leases
+   * from the same client-keyed coordinator, which refuses a second matcher, so
+   * this must be the Gateway store's single policy instance.
+   */
+  sessionMessageKeysEquivalent: (left: string, right: string) => boolean;
 };
 
 const retiredFailedSubscriptionRecoveries = new WeakSet<AggregateError>();
@@ -143,7 +149,7 @@ export function createSessionScopedOperations(host: SessionScopedOperationsHost)
     const normalizedKey = key.trim();
     const agentId = options.agentId?.trim() ? normalizeAgentId(options.agentId) : null;
     const subscription = await getGatewaySessionMessageSubscriptionCoordinator(scope.client, {
-      keysEquivalent: areUiSessionKeysEquivalent,
+      keysEquivalent: host.sessionMessageKeysEquivalent,
     })
       .acquire(normalizedKey, {
         agentId,
