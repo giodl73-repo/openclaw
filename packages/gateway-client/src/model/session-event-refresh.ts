@@ -47,7 +47,13 @@ export function createSessionEventRefreshCoordinator({
     pending = request;
     const started = now();
     const requestGeneration = generation;
-    void refresh(() => pending === request && requestGeneration === generation)
+    let operation: Promise<void>;
+    try {
+      operation = refresh(() => pending === request && requestGeneration === generation);
+    } catch {
+      operation = Promise.resolve();
+    }
+    void operation
       .catch(() => undefined)
       .finally(() => {
         if (pending !== request) {

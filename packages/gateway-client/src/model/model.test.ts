@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GatewaySessionMessageSubscriptionCoordinator } from "../browser.js";
 import {
   ControlModelDisposedError,
   ControlModelSubscriberLimitError,
   createControlModel,
   type ControlModelConnectionSnapshot,
+  type ControlModelGatewayEventFrame,
   type ControlModelGatewayBinding,
   type ControlModelRequestOptions,
 } from "./index.js";
@@ -30,6 +32,7 @@ function createGatewayHarness(
   let connection = initial;
   const connectionListeners = new Set<() => void>();
   const invalidationListeners = new Set<() => void>();
+  const eventListeners = new Set<(frame: ControlModelGatewayEventFrame) => void>();
   const unsubscribeInvalidations = vi.fn();
   const subscribeInvalidations = vi.fn((listener: () => void) => {
     invalidationListeners.add(listener);
@@ -52,6 +55,15 @@ function createGatewayHarness(
       return pending.promise;
     },
   );
+  const gatewayRequest: ControlModelGatewayBinding["request"] = <T>(
+    method: string,
+    params: Record<string, unknown>,
+    options?: ControlModelRequestOptions,
+  ) => {
+    // SAFETY: this harness only services the session catalog's session.list request.
+    return request(method, params, options) as Promise<T>;
+  };
+  const coordinator = new GatewaySessionMessageSubscriptionCoordinator({ request: gatewayRequest });
   const gateway: ControlModelGatewayBinding = {
     getConnectionSnapshot: () => connection,
     subscribeConnection(listener) {
@@ -59,14 +71,14 @@ function createGatewayHarness(
       return () => connectionListeners.delete(listener);
     },
     subscribeSessionCatalogInvalidations: subscribeInvalidations,
-    request<T>(
-      method: string,
-      params: Record<string, unknown>,
-      options?: ControlModelRequestOptions,
-    ) {
-      // SAFETY: this harness only services the session catalog's session.list request.
-      return request(method, params, options) as Promise<T>;
+    subscribeEvents(listener) {
+      eventListeners.add(listener);
+      return () => eventListeners.delete(listener);
     },
+    getMessageSubscriptionCoordinator() {
+      return coordinator;
+    },
+    request: gatewayRequest,
   };
   return {
     gateway,
@@ -84,6 +96,17 @@ function createGatewayHarness(
     emitInvalidation() {
       for (const listener of invalidationListeners) {
         listener();
+      }
+    },
+    emitEvent(frame: {
+      event: string;
+      payload?: unknown;
+      connectionEpoch?: number;
+      seq?: number;
+      gap?: boolean;
+    }) {
+      for (const listener of eventListeners) {
+        listener({ type: "event", connectionEpoch: connection.epoch, ...frame });
       }
     },
   };
