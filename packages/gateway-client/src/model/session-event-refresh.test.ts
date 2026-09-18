@@ -72,7 +72,9 @@ describe("session event refresh coordinator", () => {
     coordinator.schedule();
     await vi.advanceTimersByTimeAsync(200);
     coordinator.schedule();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
