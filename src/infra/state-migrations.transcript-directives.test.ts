@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,8 +15,10 @@ import {
 } from "../state/openclaw-agent-db-lease.js";
 import {
   closeOpenClawAgentDatabasesForTest,
+  OPENCLAW_AGENT_SCHEMA_VERSION,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
+import { removeCanonicalValidationFromHistoricalAgentFixture } from "../state/openclaw-agent-db.test-support.js";
 import { withLegacySessionParticipantsSchema } from "../state/openclaw-agent-participants-migration.js";
 import { sessionParticipantsSchemaSql } from "../state/openclaw-agent-session-participants-schema.js";
 import {
@@ -500,6 +503,7 @@ describe("historical transcript directive migration", () => {
     const env = { OPENCLAW_STATE_DIR: stateDir };
     const opened = openOpenClawAgentDatabase({ agentId: "main", env });
     const databasePath = opened.path;
+    removeCanonicalValidationFromHistoricalAgentFixture(opened.db);
     opened.db.exec(`
       DROP TABLE session_participants;
       ${withLegacySessionParticipantsSchema(sessionParticipantsSchemaSql())}
@@ -513,7 +517,9 @@ describe("historical transcript directive migration", () => {
     expect(result.warnings).toEqual([]);
     const migrated = openNodeSqliteDatabase(databasePath, { readOnly: true });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(19);
+      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(
+        OPENCLAW_AGENT_SCHEMA_VERSION,
+      );
     } finally {
       migrated.close();
     }
@@ -525,14 +531,13 @@ describe("historical transcript directive migration", () => {
     const opened = openOpenClawAgentDatabase({ agentId: "main", env });
     const databasePath = opened.path;
     opened.db.exec(`
-      DROP TRIGGER session_nodes_entry_valid_after_insert;
-      DROP TRIGGER session_nodes_entry_valid_after_entry_update;
-      DROP TRIGGER session_nodes_entry_valid_after_identity_update;
-      DROP INDEX idx_agent_session_nodes_entry_valid_pending;
-      ALTER TABLE session_nodes DROP COLUMN entry_valid;
+      DROP TRIGGER session_conversations_route_context_invalidate_after_update;
+      ALTER TABLE session_conversations DROP COLUMN route_context_json;
     `);
     closeOpenClawAgentDatabasesForTest();
 
+    // Capture the competing task before entering maintenance, without inheriting its authority.
+    const claimCompetingLease = AsyncResource.bind(claimOpenClawAgentDatabaseLease);
     let competingLeaseId: string | undefined;
     const agentDatabaseLease = await import("../state/openclaw-agent-db-lease.js");
     const originalAssert = agentDatabaseLease.assertAgentDatabaseMaintenanceAuthorityIfPresent;
@@ -546,7 +551,7 @@ describe("historical transcript directive migration", () => {
             AGENT_DATABASE_MAINTENANCE_LEASE.scope,
             AGENT_DATABASE_MAINTENANCE_LEASE.key,
           );
-        competingLeaseId = claimOpenClawAgentDatabaseLease({
+        competingLeaseId = claimCompetingLease({
           agentId: "competitor",
           path: path.join(stateDir, "competitor.sqlite"),
           env,
@@ -564,7 +569,19 @@ describe("historical transcript directive migration", () => {
     try {
       expect(
         rolledBack
-          .prepare("SELECT 1 FROM pragma_table_info('session_nodes') WHERE name = 'entry_valid'")
+          .prepare(
+            "SELECT 1 FROM pragma_table_info('session_conversations') WHERE name = 'route_context_json'",
+          )
+          .get(),
+      ).toBeUndefined();
+      expect(rolledBack.prepare("PRAGMA user_version").get()).toEqual({
+        user_version: OPENCLAW_AGENT_SCHEMA_VERSION,
+      });
+      expect(
+        rolledBack
+          .prepare(
+            "SELECT name FROM sqlite_schema WHERE name = 'session_conversations_route_context_invalidate_after_update'",
+          )
           .get(),
       ).toBeUndefined();
     } finally {
@@ -669,6 +686,7 @@ describe("historical transcript directive migration", () => {
     const unreadablePath = path.join(stateDir, "unreadable", "agent.sqlite");
     fs.mkdirSync(path.dirname(unreadablePath), { recursive: true });
     fs.writeFileSync(unreadablePath, "not a sqlite database");
+    removeCanonicalValidationFromHistoricalAgentFixture(opened.db);
     opened.db.exec(`
       DROP TABLE session_participants;
       ${withLegacySessionParticipantsSchema(sessionParticipantsSchemaSql())}
@@ -688,7 +706,9 @@ describe("historical transcript directive migration", () => {
     expect(result.warnings.some((warning) => warning.includes("preflight"))).toBe(true);
     const migrated = openNodeSqliteDatabase(databasePath, { readOnly: true });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(19);
+      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(
+        OPENCLAW_AGENT_SCHEMA_VERSION,
+      );
     } finally {
       migrated.close();
     }
@@ -735,6 +755,8 @@ describe("historical transcript directive migration", () => {
     const originalEventJson = readEventJson(opened.path, "session-expired", 0);
     closeOpenClawAgentDatabasesForTest();
 
+    // Capture the competing task before entering maintenance, without inheriting its authority.
+    const claimCompetingLease = AsyncResource.bind(claimOpenClawAgentDatabaseLease);
     let competingLeaseId: string | undefined;
     const originalAssert = assertAgentDatabaseMaintenanceAuthority;
     const agentDatabaseLease = await import("../state/openclaw-agent-db-lease.js");
@@ -752,7 +774,7 @@ describe("historical transcript directive migration", () => {
             AGENT_DATABASE_MAINTENANCE_LEASE.scope,
             AGENT_DATABASE_MAINTENANCE_LEASE.key,
           );
-        competingLeaseId = claimOpenClawAgentDatabaseLease({
+        competingLeaseId = claimCompetingLease({
           agentId: "competitor",
           path: path.join(stateDir, "competitor.sqlite"),
           env,
@@ -839,6 +861,8 @@ describe("historical transcript directive migration", () => {
     fs.writeFileSync(archivePath, archiveBytes);
     closeOpenClawAgentDatabasesForTest();
 
+    // Capture the competing task before entering maintenance, without inheriting its authority.
+    const claimCompetingLease = AsyncResource.bind(claimOpenClawAgentDatabaseLease);
     let competingLeaseId: string | undefined;
     const originalAssert = assertAgentDatabaseMaintenanceAuthority;
     const agentDatabaseLease = await import("../state/openclaw-agent-db-lease.js");
@@ -853,7 +877,7 @@ describe("historical transcript directive migration", () => {
               AGENT_DATABASE_MAINTENANCE_LEASE.scope,
               AGENT_DATABASE_MAINTENANCE_LEASE.key,
             );
-          competingLeaseId = claimOpenClawAgentDatabaseLease({
+          competingLeaseId = claimCompetingLease({
             agentId: "competitor",
             path: path.join(stateDir, "competitor.sqlite"),
             env,
@@ -903,6 +927,7 @@ describe("historical transcript directive migration", () => {
         sessionId: sessionIdAt(index),
       });
     }
+    removeCanonicalValidationFromHistoricalAgentFixture(opened.db);
     opened.db.exec(`
       DROP TABLE session_participants;
       ${withLegacySessionParticipantsSchema(sessionParticipantsSchemaSql())}
@@ -935,6 +960,8 @@ describe("historical transcript directive migration", () => {
     });
 
     let competingWriterError: unknown;
+    // Capture the competing task before entering maintenance, without inheriting its authority.
+    const claimCompetingLease = AsyncResource.bind(claimOpenClawAgentDatabaseLease);
     let competingLeaseId: string | undefined;
     let cursorAtCompetition: unknown;
     let competedAt = 0;
@@ -944,7 +971,7 @@ describe("historical transcript directive migration", () => {
         cursorAtCompetition = readMigrationCursor(opened.path);
         competedAt = Date.now();
         try {
-          competingLeaseId = claimOpenClawAgentDatabaseLease({
+          competingLeaseId = claimCompetingLease({
             agentId: "competitor",
             path: path.join(stateDir, "competitor.sqlite"),
             env,
@@ -976,7 +1003,9 @@ describe("historical transcript directive migration", () => {
     });
     const migrated = openNodeSqliteDatabase(opened.path, { readOnly: true });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(19);
+      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(
+        OPENCLAW_AGENT_SCHEMA_VERSION,
+      );
     } finally {
       migrated.close();
     }

@@ -13,6 +13,7 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
   prepareSqliteQuerySync,
+  sqliteStringSet,
 } from "../../infra/kysely-sync.js";
 import type { DB as OpenClawAgentKyselyDatabase } from "../../state/openclaw-agent-db.generated.js";
 import {
@@ -95,15 +96,22 @@ export function shouldRebuildSessionTranscriptIndexSynchronously(
   if (events.length > SYNC_REBUILD_MAX_ROWS) {
     return false;
   }
+  const kysely = getIndexKysely(db);
   const stored = executeSqliteQueryTakeFirstSync(
     db,
-    getIndexKysely(db)
-      .selectFrom("transcript_events")
+    kysely
+      .selectFrom(
+        kysely
+          .selectFrom("transcript_events")
+          .select((eb) => eb.fn<number>("octet_length", ["event_json"]).as("event_bytes"))
+          .where("session_id", "=", sessionId)
+          .limit(SYNC_REBUILD_MAX_ROWS - events.length + 1)
+          .as("stored"),
+      )
       .select((eb) => [
         eb.fn.countAll<number>().as("event_count"),
-        eb.fn.sum<number>(eb.fn<number>("octet_length", ["event_json"])).as("event_bytes"),
-      ])
-      .where("session_id", "=", sessionId),
+        eb.fn.sum<number>("stored.event_bytes").as("event_bytes"),
+      ]),
   );
   if ((stored?.event_count ?? 0) + events.length > SYNC_REBUILD_MAX_ROWS) {
     return false;
@@ -150,8 +158,8 @@ function readSessionTranscriptProjectionState(
   };
 }
 
-export function sessionTranscriptIndexNeedsReconcile(db: DatabaseSync, sessionId: string): boolean {
-  const latest = executeSqliteQueryTakeFirstSync(
+function readLatestTranscriptSequence(db: DatabaseSync, sessionId: string): number | undefined {
+  return executeSqliteQueryTakeFirstSync(
     db,
     getIndexKysely(db)
       .selectFrom("transcript_events")
@@ -159,15 +167,26 @@ export function sessionTranscriptIndexNeedsReconcile(db: DatabaseSync, sessionId
       .where("session_id", "=", sessionId)
       .orderBy("seq", "desc")
       .limit(1),
+  )?.seq;
+}
+
+export function sessionTranscriptIndexNeedsReconcile(db: DatabaseSync, sessionId: string): boolean {
+  const latestSeq = readLatestTranscriptSequence(db, sessionId);
+  return (
+    latestSeq !== undefined && sessionTranscriptProjectionNeedsReconcile(db, sessionId, latestSeq)
   );
-  if (!latest) {
-    return false;
-  }
+}
+
+function sessionTranscriptProjectionNeedsReconcile(
+  db: DatabaseSync,
+  sessionId: string,
+  latestSeq: number,
+): boolean {
   const state = readSessionTranscriptProjectionState(db, sessionId);
   return (
     !state ||
     state.needsRebuild ||
-    state.indexedSeq !== latest.seq ||
+    state.indexedSeq !== latestSeq ||
     hasUnclassifiedSessionTranscriptEvents(db, sessionId)
   );
 }
@@ -465,13 +484,18 @@ export function replaceSessionTranscriptIndexSuffixInTransaction(
             .flatMap((row) => (row.ftsEntry ? [row.ftsEntry.messageId] : [])),
         ),
       ];
-  for (let offset = 0; offset < removedMessageIds.length; offset += 400) {
+  if (removedMessageIds.length > 0) {
+    // FTS metadata is unindexed; bind larger sets once instead of rescanning every 400 IDs.
     executeSqliteQuerySync(
       db,
       kysely
         .deleteFrom("session_transcript_fts")
         .where("session_id", "=", sessionId)
-        .where("message_id", "in", removedMessageIds.slice(offset, offset + 400)),
+        .where(
+          "message_id",
+          "in",
+          removedMessageIds.length <= 400 ? removedMessageIds : sqliteStringSet(removedMessageIds),
+        ),
     );
   }
   executeSqliteQuerySync(
@@ -537,35 +561,21 @@ export function reconcileSessionTranscriptIndexInTransaction(
   db: DatabaseSync,
   sessionId: string,
 ): boolean {
-  const latest = executeSqliteQueryTakeFirstSync(
-    db,
-    getIndexKysely(db)
-      .selectFrom("transcript_events")
-      .select("seq")
-      .where("session_id", "=", sessionId)
-      .orderBy("seq", "desc")
-      .limit(1),
-  );
-  if (!latest) {
+  const latestSeq = readLatestTranscriptSequence(db, sessionId);
+  if (latestSeq === undefined) {
     deleteSessionTranscriptIndexInTransaction(db, sessionId);
     return false;
   }
-  if (!sessionTranscriptIndexNeedsReconcile(db, sessionId)) {
+  if (!sessionTranscriptProjectionNeedsReconcile(db, sessionId, latestSeq)) {
     return false;
   }
   rebuildSessionTranscriptIndexInTransaction(db, sessionId);
   return true;
 }
 
-/**
- * Sessions whose index needs reconcile work: flagged rebuilds, transcripts
- * that gained rows without index state (doctor imports), and watermarks
- * behind the newest row. Ordered for deterministic reconcile passes.
- */
-export function listSessionsNeedingTranscriptIndexReconcile(db: DatabaseSync): string[] {
+function selectSessionsNeedingTranscriptIndexReconcile(db: DatabaseSync) {
   const kysely = getIndexKysely(db);
-  const rows = executeSqliteQuerySync(
-    db,
+  return (
     kysely
       .selectFrom("session_windows")
       .innerJoin("transcript_events as latest", (join) =>
@@ -594,53 +604,90 @@ export function listSessionsNeedingTranscriptIndexReconcile(db: DatabaseSync): s
         eb.or([
           eb(eb.fn.coalesce("st.needs_rebuild", eb.val(1)), "!=", 0),
           eb("latest.seq", ">", eb.fn.coalesce("st.indexed_seq", eb.val(-1))),
-          eb.exists(
-            eb
-              .selectFrom("session_transcript_active_events as pending")
-              .select("pending.session_id")
-              .whereRef("pending.session_id", "=", "session_windows.session_id")
-              .where("pending.context_eligible", "is", null),
-          ),
+          eb.and([
+            // A clean store has no pending rows; check once before per-session probes.
+            eb.exists(
+              eb
+                .selectFrom("session_transcript_active_events as any_pending")
+                .select("any_pending.session_id")
+                .where("any_pending.context_eligible", "is", null)
+                .limit(1),
+            ),
+            eb.exists(
+              eb
+                .selectFrom("session_transcript_active_events as pending")
+                .select("pending.session_id")
+                .whereRef("pending.session_id", "=", "session_windows.session_id")
+                .where("pending.context_eligible", "is", null),
+            ),
+          ]),
         ]),
       )
-      // The transcript PK makes the correlated latest-row lookup one index seek per session.
-      // Grouping transcript_events here made every healthy search rescan the entire history.
-      .orderBy("session_windows.session_id"),
-  ).rows;
+      // Ordering keeps the session-window scan and one latest-row index seek per session.
+      // Without it, SQLite can scan every transcript row even for an existence check.
+      .orderBy("session_windows.session_id")
+  );
+}
+
+/** Search needs only one pending session; the reconcile owner selects its complete work list. */
+export function hasSessionsNeedingTranscriptIndexReconcile(db: DatabaseSync): boolean {
+  return (
+    executeSqliteQueryTakeFirstSync(
+      db,
+      selectSessionsNeedingTranscriptIndexReconcile(db).limit(1),
+    ) !== undefined
+  );
+}
+
+/**
+ * Sessions whose index needs reconcile work: flagged rebuilds, transcripts
+ * that gained rows without index state (doctor imports), and watermarks
+ * behind the newest row. Ordered for deterministic reconcile passes.
+ */
+export function listSessionsNeedingTranscriptIndexReconcile(db: DatabaseSync): string[] {
+  const rows = executeSqliteQuerySync(db, selectSessionsNeedingTranscriptIndexReconcile(db)).rows;
   return rows.flatMap((row) => (typeof row.session_id === "string" ? [row.session_id] : []));
+}
+
+const transcriptIndexTables = [
+  "session_transcript_active_events",
+  "session_transcript_fts",
+  "session_transcript_index_state",
+] as const;
+
+/** Orphan-only cleanup is independent of live sessions' projection watermarks. */
+export function hasOrphanedTranscriptIndexRows(db: DatabaseSync): boolean {
+  const kysely = getIndexKysely(db);
+  return transcriptIndexTables.some(
+    (table) =>
+      executeSqliteQueryTakeFirstSync(
+        db,
+        kysely
+          .selectFrom(table)
+          .select("session_id")
+          .where(
+            "session_id",
+            "not in",
+            kysely.selectFrom("transcript_events").select("session_id").distinct(),
+          )
+          .limit(1),
+      ) !== undefined,
+  );
 }
 
 /** Drops index rows for sessions whose transcript rows are gone. */
 export function deleteOrphanedTranscriptIndexRowsInTransaction(db: DatabaseSync): void {
   const kysely = getIndexKysely(db);
-  executeSqliteQuerySync(
-    db,
-    kysely
-      .deleteFrom("session_transcript_active_events")
-      .where(
-        "session_id",
-        "not in",
-        kysely.selectFrom("transcript_events").select("session_id").distinct(),
-      ),
-  );
-  executeSqliteQuerySync(
-    db,
-    kysely
-      .deleteFrom("session_transcript_fts")
-      .where(
-        "session_id",
-        "not in",
-        kysely.selectFrom("transcript_events").select("session_id").distinct(),
-      ),
-  );
-  executeSqliteQuerySync(
-    db,
-    kysely
-      .deleteFrom("session_transcript_index_state")
-      .where(
-        "session_id",
-        "not in",
-        kysely.selectFrom("transcript_events").select("session_id").distinct(),
-      ),
-  );
+  for (const table of transcriptIndexTables) {
+    executeSqliteQuerySync(
+      db,
+      kysely
+        .deleteFrom(table)
+        .where(
+          "session_id",
+          "not in",
+          kysely.selectFrom("transcript_events").select("session_id").distinct(),
+        ),
+    );
+  }
 }

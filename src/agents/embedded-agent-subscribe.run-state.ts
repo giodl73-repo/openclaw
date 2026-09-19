@@ -13,6 +13,7 @@ export function createEmbeddedAgentSubscribeState(
   const initialPendingToolMedia = collectAgentInternalEventMedia(params.internalEvents);
   return {
     assistantTexts: [],
+    answerSegments: [],
     toolMetas: [],
     acceptedSessionSpawns: [],
     toolMetaById: new Map(),
@@ -82,10 +83,7 @@ export function createEmbeddedAgentSubscribeState(
     messagingToolSentMediaUrls: [],
     messagingToolSourceReplyPayloads: [],
     messageToolOnlySourceReplyDelivered: false,
-    pendingMessagingTexts: new Map(),
-    pendingMessagingTargets: new Map(),
     successfulCronAdds: 0,
-    pendingMessagingMediaUrls: new Map(),
     pendingToolMediaUrls: initialPendingToolMedia.mediaUrls,
     pendingToolMediaAttachments: initialPendingToolMedia.attachments,
     pendingToolMediaTrustByUrl: initialPendingToolMedia.trustByUrl,

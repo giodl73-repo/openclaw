@@ -40,6 +40,12 @@ user-space Node runtime and the matching `openclaw` CLI under `~/.openclaw`,
 then installs and starts the per-user launchd service. This path needs no
 Terminal, Homebrew, or administrator access.
 
+The installer uses a private temporary directory for downloads and build tools.
+If the app's inherited temporary directory is inaccessible, setup automatically
+uses a private directory under `/tmp` and removes it when the installer exits.
+This also avoids macOS temporary-directory permission errors without installing
+the CLI as root.
+
 Gateway setup still needs an internet connection to download its separate
 runtime and matching OpenClaw package. The bundled installer owns that setup;
 the private worker is not a replacement for a CLI or Gateway installation.
@@ -53,6 +59,10 @@ An unreadable service ownership record blocks automatic installation instead
 of being treated as a missing service; check the LaunchAgent and retry.
 
 ## Manual recovery
+
+Read the version to install from the app: choose **About OpenClaw** in the
+menu bar, or run `openclaw-mac status --json`, which reports the app version
+and build.
 
 For a manual install, use Node 26 (recommended) or another supported release:
 Node 24.16+ or Node 26.1+. Install `openclaw` globally:
@@ -86,6 +96,8 @@ Behavior:
 - Quitting the app does **not** stop the Gateway (launchd keeps it alive).
 - If a Gateway is already running on the configured port, the app attaches to
   it instead of starting a new one.
+- If service inspection is inconclusive, the app defers installation and uses
+  its existing readiness checks. A service confirmed absent can still be installed.
 
 Use the CLI for lifecycle checks and recovery:
 
@@ -93,6 +105,11 @@ Use the CLI for lifecycle checks and recovery:
 openclaw gateway status --deep
 openclaw gateway restart
 ```
+
+When **Also run a Gateway on this Mac** is enabled with a remote primary, the
+managed launch agent includes `--allow-unconfigured` so it can run while
+`gateway.mode` remains `remote`. Switching the primary to local removes that
+argument. See [local hosting alongside a remote primary](/platforms/mac/remote#run-a-local-gateway-alongside-a-remote-primary).
 
 Launchd provides auto-start at login, crash restarts, and one predictable log
 location without tying the Gateway lifetime to the app process.
@@ -159,11 +176,18 @@ Launching the app directly with `--attach-only` or `--no-launchd` has the same
 effect. The override persists in `~/.openclaw/disable-launchagent`; remove that
 file to restore app-managed launchd behavior.
 
+Named profiles still require the listener to belong to that profile's Gateway
+service. Attach-only mode does not permit attaching another process or profile.
+If a port ownership conflict occurs, automatic recovery preserves the failure
+instead of repeatedly reopening the dashboard. Resolve the conflict, then
+relaunch the app.
+
 Logging:
 
 - launchd stdout: `~/Library/Logs/openclaw/gateway.log` (profiles use
   `gateway-<profile>.log`)
-- launchd stderr: suppressed
+- launchd stderr: merged into the same `gateway.log` file, so startup failures
+  that happen before the logger starts are still recorded
 - If the host loops with repeated `EADDRINUSE` or fast restarts, check for
   duplicate `ai.openclaw.gateway` / `ai.openclaw.node` LaunchAgents and the
   launchd-marker workaround in

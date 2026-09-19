@@ -8,12 +8,12 @@ import { createSuiteTempRootTracker } from "../test-helpers/temp-dir.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { withMockedWindowsPlatform } from "../test-utils/vitest-spies.js";
 import { pathExists } from "../utils.js";
+import * as container from "./container-environment.js";
 import { resolveStableNodePath } from "./stable-node-path.js";
 import type { UpdateChannel } from "./update-channels.js";
 import type { DevUpdateTarget } from "./update-dev-target.js";
-import { buildUpdateDoctorEnv } from "./update-runner-doctor.js";
+import { renderUpdateRunReport, updateRunReportInputFromResult } from "./update-run-report.js";
 import {
-  resolveUpdateDoctorExecutionPolicy,
   resolveUpdateInstallSurface,
   runGatewayUpdate,
   runGatewayUpdatePreflight,
@@ -54,86 +54,6 @@ function createRunner(responses: Record<string, CommandResponse>) {
   return { runner, calls };
 }
 
-describe("resolveUpdateDoctorExecutionPolicy", () => {
-  it("keeps fix mode when service repair is authorized", () => {
-    expect(
-      resolveUpdateDoctorExecutionPolicy({
-        targetVersion: "2026.4.1",
-        allowGatewayServiceRepair: true,
-      }),
-    ).toEqual({ fix: true });
-  });
-
-  it("uses the external policy for targets that support it", () => {
-    for (const targetVersion of ["2026.4.25-beta.1", "2026.4.25-beta.11", "2026.4.25"]) {
-      expect(
-        resolveUpdateDoctorExecutionPolicy({
-          targetVersion,
-          allowGatewayServiceRepair: false,
-        }),
-      ).toEqual({ fix: true, serviceRepairPolicy: "external" });
-    }
-  });
-
-  it("does not run fix mode on older targets that cannot honor ownership", () => {
-    expect(
-      resolveUpdateDoctorExecutionPolicy({
-        targetVersion: "2026.4.24",
-        allowGatewayServiceRepair: false,
-      }),
-    ).toEqual({ fix: false });
-  });
-
-  it.each([
-    {
-      name: "authorized service repair",
-      targetVersion: "2026.4.1",
-      allowGatewayServiceRepair: true,
-      expectedPolicy: null,
-    },
-    {
-      name: "an older target without service repair",
-      targetVersion: "2026.4.24",
-      allowGatewayServiceRepair: false,
-      expectedPolicy: null,
-    },
-    {
-      name: "a supported target without service repair",
-      targetVersion: "2026.4.25",
-      allowGatewayServiceRepair: false,
-      expectedPolicy: "external",
-    },
-  ])(
-    "passes the selected Doctor policy to a real child for $name",
-    async ({ targetVersion, allowGatewayServiceRepair, expectedPolicy }) => {
-      const policy = resolveUpdateDoctorExecutionPolicy({
-        targetVersion,
-        allowGatewayServiceRepair,
-      });
-      const result = await withEnvAsync({ OPENCLAW_SERVICE_REPAIR_POLICY: "external" }, () =>
-        runCommandWithTimeout(
-          [
-            process.execPath,
-            "-e",
-            "process.stdout.write(JSON.stringify(process.env.OPENCLAW_SERVICE_REPAIR_POLICY ?? null))",
-          ],
-          {
-            timeoutMs: 5000,
-            env: buildUpdateDoctorEnv({
-              allowGatewayServiceRepair,
-              allowGatewayActivation: false,
-              serviceRepairPolicy: policy.serviceRepairPolicy,
-            }),
-          },
-        ),
-      );
-
-      expect(result.code).toBe(0);
-      expect(result.stdout).toBe(JSON.stringify(expectedPolicy));
-    },
-  );
-});
-
 describe("runGatewayUpdate", () => {
   const preflightPrefixPattern = /(?:openclaw-update-preflight-|ocu-pf-)/;
 
@@ -152,6 +72,22 @@ describe("runGatewayUpdate", () => {
     tempDir = await fixtureRootTracker.make("case");
     await fs.writeFile(path.join(tempDir, "openclaw.mjs"), "export {};\n", "utf-8");
   });
+
+  async function withWindowsPackageManagerSimulation<T>(run: () => Promise<T>): Promise<T> {
+    const bunVersion = Object.getOwnPropertyDescriptor(process.versions, "bun");
+    if (bunVersion) {
+      // These cases simulate Windows command selection on a non-Windows host. Keep
+      // Bun's real system-Node probe from searching for a Windows executable here.
+      Object.defineProperty(process.versions, "bun", { ...bunVersion, value: undefined });
+    }
+    try {
+      return await withMockedWindowsPlatform(run);
+    } finally {
+      if (bunVersion) {
+        Object.defineProperty(process.versions, "bun", bunVersion);
+      }
+    }
+  }
 
   async function createStableTagRunner(params: {
     stableTag: string;
@@ -450,6 +386,7 @@ describe("runGatewayUpdate", () => {
   type TestCommandOptions = {
     env?: NodeJS.ProcessEnv;
     cwd?: string;
+    input?: string | Uint8Array;
     timeoutMs?: number;
   };
 
@@ -659,6 +596,7 @@ describe("runGatewayUpdate", () => {
         }
         return await runCommandWithTimeout(argv, {
           cwd: options.cwd,
+          input: options.input,
           env: options.env,
           timeoutMs: options.timeoutMs ?? 5000,
         });
@@ -768,6 +706,7 @@ describe("runGatewayUpdate", () => {
       tag?: string;
       cwd?: string;
       devTarget?: DevUpdateTarget;
+      progress?: NonNullable<Parameters<typeof runGatewayUpdate>[0]>["progress"];
       deferConfiguredPluginInstallRepair?: boolean;
       allowGatewayServiceRepair?: boolean;
       allowGatewayActivation?: boolean;
@@ -825,6 +764,7 @@ describe("runGatewayUpdate", () => {
         : { allowGatewayServiceRepair: options.allowGatewayServiceRepair }),
       ...(options?.allowGatewayActivation ? { allowGatewayActivation: true } : {}),
       ...(options?.beforeGitMutation ? { beforeGitMutation: options.beforeGitMutation } : {}),
+      ...(options?.progress ? { progress: options.progress } : {}),
     });
   }
 
@@ -857,7 +797,7 @@ describe("runGatewayUpdate", () => {
       code: 0,
       stdout: " M README.md",
       stderr: "",
-      status: "skipped",
+      status: "error",
       reason: "dirty",
     },
     {
@@ -886,7 +826,11 @@ describe("runGatewayUpdate", () => {
         [`git -C ${tempDir} status --porcelain -- :!dist/control-ui/`]: { code, stdout, stderr },
       });
 
-      const result = await runWithRunner(runner, { beforeGitMutation });
+      const onStepComplete = vi.fn();
+      const result = await runWithCommand(runner, {
+        beforeGitMutation,
+        progress: { onStepComplete },
+      });
 
       expect(result.status).toBe(status);
       expect(result.reason).toBe(reason);
@@ -898,11 +842,16 @@ describe("runGatewayUpdate", () => {
       expect(result.steps).toMatchObject([
         {
           name: "clean check",
-          exitCode: code,
+          exitCode: reason === "dirty" ? 1 : code,
           stdoutTail: stdout || null,
-          stderrTail: stderr || null,
+          stderrTail:
+            reason === "dirty" ? expect.stringContaining("local changes") : stderr || null,
         },
       ]);
+      expect(onStepComplete).toHaveBeenCalledOnce();
+      expect(onStepComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ exitCode: reason === "dirty" ? 1 : code }),
+      );
       expect(beforeGitMutation).not.toHaveBeenCalled();
       expect(calls.some((call) => call.includes(" fetch "))).toBe(false);
       expect(calls.filter((call) => call.includes("rebase"))).toEqual([]);
@@ -1152,7 +1101,8 @@ describe("runGatewayUpdate", () => {
       "refused by caller",
     );
     expect(beforeGitMutation).toHaveBeenCalledWith({
-      metadataUnreadable: expect.stringContaining("exited 128"),
+      sha: upstreamSha,
+      metadataUnreadable: `git show ${upstreamSha}:package.json exited 128`,
     });
   });
 
@@ -1271,78 +1221,106 @@ describe("runGatewayUpdate", () => {
     );
   });
 
-  it("rolls back when upstream setup fails after creating local main", async () => {
-    await setupGitPackageManagerFixture();
+  it.each([false, true])(
+    "finishes with a recorded warning when upstream setup fails after creating local main (interrupted=%s)",
+    async (interrupted) => {
+      await setupGitPackageManagerFixture();
 
-    const selectedSha = "upstream123";
-    const calls: string[] = [];
-    const beforeGitMutation = vi.fn(async () => {
-      calls.push("beforeGitMutation");
-    });
-    const runCommand = async (argv: string[]) => {
-      const key = argv.join(" ");
-      calls.push(key);
-      const responses = buildGitWorktreeProbeResponses({ branch: "feature" });
-      const response = responses[key];
-      if (response) {
-        return toCommandResult(response);
-      }
-      if (key === `git -C ${tempDir} rev-parse --symbolic-full-name main@{upstream}`) {
-        return {
-          stdout: "",
-          stderr: "no upstream configured for branch 'main'",
-          code: 1,
-        };
-      }
-      if (key === `git -C ${tempDir} remote`) {
-        return { stdout: "origin\n", stderr: "", code: 0 };
-      }
-      if (key === `git -C ${tempDir} rev-parse refs/remotes/origin/main`) {
-        return { stdout: selectedSha, stderr: "", code: 0 };
-      }
-      if (key === `git -C ${tempDir} rev-list --max-count=10 ${selectedSha}`) {
-        return { stdout: `${selectedSha}\n`, stderr: "", code: 0 };
-      }
-      if (
-        key.startsWith(`git -C ${tempDir} worktree add --detach `) &&
-        key.endsWith(` ${selectedSha}`) &&
-        preflightPrefixPattern.test(key)
-      ) {
-        await writePreflightPackageManagerFixtureFromWorktreeAdd(key);
-        return { stdout: `HEAD is now at ${selectedSha}`, stderr: "", code: 0 };
-      }
-      if (key === "pnpm --version") {
-        return { stdout: PNPM_VERSION, stderr: "", code: 0 };
-      }
-      if (key === `git -C ${tempDir} show-ref --verify refs/heads/main`) {
-        return { stdout: "", stderr: "", code: 1 };
-      }
-      if (key === `git -C ${tempDir} branch --set-upstream-to origin/main main`) {
-        return { stdout: "", stderr: "requested upstream does not exist", code: 1 };
-      }
-      return { stdout: "", stderr: "", code: 0 };
-    };
+      const selectedSha = "upstream123";
+      const calls: string[] = [];
+      const beforeGitMutation = vi.fn(async () => {
+        calls.push("beforeGitMutation");
+      });
+      const runCommand = async (argv: string[]) => {
+        const key = argv.join(" ");
+        calls.push(key);
+        const responses = buildGitWorktreeProbeResponses({ branch: "feature" });
+        const response = responses[key];
+        if (response) {
+          return toCommandResult(response);
+        }
+        if (key === `git -C ${tempDir} rev-parse --symbolic-full-name main@{upstream}`) {
+          return {
+            stdout: "",
+            stderr: "no upstream configured for branch 'main'",
+            code: 1,
+          };
+        }
+        if (key === `git -C ${tempDir} remote`) {
+          return { stdout: "origin\n", stderr: "", code: 0 };
+        }
+        if (key === `git -C ${tempDir} rev-parse refs/remotes/origin/main`) {
+          return { stdout: selectedSha, stderr: "", code: 0 };
+        }
+        if (key === `git -C ${tempDir} rev-list --max-count=10 ${selectedSha}`) {
+          return { stdout: `${selectedSha}\n`, stderr: "", code: 0 };
+        }
+        if (
+          key.startsWith(`git -C ${tempDir} worktree add --detach `) &&
+          key.endsWith(` ${selectedSha}`) &&
+          preflightPrefixPattern.test(key)
+        ) {
+          await writePreflightPackageManagerFixtureFromWorktreeAdd(key);
+          return { stdout: `HEAD is now at ${selectedSha}`, stderr: "", code: 0 };
+        }
+        if (key === "pnpm --version") {
+          return { stdout: PNPM_VERSION, stderr: "", code: 0 };
+        }
+        if (key === `git -C ${tempDir} show-ref --verify refs/heads/main`) {
+          return { stdout: "", stderr: "", code: 1 };
+        }
+        if (key === `git -C ${tempDir} branch --set-upstream-to origin/main main`) {
+          if (interrupted) {
+            return {
+              stdout: "",
+              stderr: "interrupted",
+              code: 143,
+              signal: "SIGTERM" as const,
+              termination: "signal" as const,
+            };
+          }
+          return { stdout: "", stderr: "requested upstream does not exist", code: 1 };
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      };
 
-    const result = await runWithCommand(runCommand, { channel: "dev", beforeGitMutation });
+      const onStepComplete = vi.fn();
+      const result = await runWithCommand(runCommand, {
+        channel: "dev",
+        beforeGitMutation,
+        progress: { onStepComplete },
+      });
 
-    expect(result.status).toBe("error");
-    expect(result.reason).toBe("checkout-failed");
-    expect(calls).toContain(`git -C ${tempDir} checkout -B main ${selectedSha}`);
-    expect(calls).toContain(`git -C ${tempDir} branch --set-upstream-to origin/main main`);
-    expect(calls).toContain(`git -C ${tempDir} reset --hard`);
-    expect(calls).toContain(`git -C ${tempDir} checkout --force feature`);
-    expect(calls).toContain(`git -C ${tempDir} reset --hard abc123`);
-    expect(calls).toContain(`git -C ${tempDir} branch -D main`);
-    expect(calls.indexOf("beforeGitMutation")).toBeLessThan(
-      calls.indexOf(`git -C ${tempDir} checkout -B main ${selectedSha}`),
-    );
-    expect(
-      calls.indexOf(`git -C ${tempDir} branch --set-upstream-to origin/main main`),
-    ).toBeLessThan(calls.indexOf(`git -C ${tempDir} reset --hard`));
-    expect(calls.indexOf(`git -C ${tempDir} reset --hard abc123`)).toBeLessThan(
-      calls.indexOf(`git -C ${tempDir} branch -D main`),
-    );
-  });
+      if (interrupted) {
+        expect(result.status).toBe("error");
+        expect(result.reason).toBe("checkout-failed");
+        expect(
+          result.steps.find((step) => step.name.startsWith("git branch --set-upstream-to"))
+            ?.advisory,
+        ).toBeUndefined();
+        expect(calls).toContain(`git -C ${tempDir} checkout --force feature`);
+        return;
+      }
+
+      expect(result.status).toBe("ok");
+      expect(calls).toContain(`git -C ${tempDir} checkout -B main ${selectedSha}`);
+      expect(calls).toContain(`git -C ${tempDir} branch --set-upstream-to origin/main main`);
+      expect(calls).not.toContain(`git -C ${tempDir} reset --hard`);
+      expect(calls).not.toContain(`git -C ${tempDir} checkout --force feature`);
+      expect(calls).not.toContain(`git -C ${tempDir} branch -D main`);
+      expect(calls.indexOf("beforeGitMutation")).toBeLessThan(
+        calls.indexOf(`git -C ${tempDir} checkout -B main ${selectedSha}`),
+      );
+      const report = renderUpdateRunReport(updateRunReportInputFromResult(result));
+      expect(onStepComplete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          advisory: expect.objectContaining({ kind: "recoverable-maintenance" }),
+        }),
+      );
+      expect(report.markdown).toContain("requested upstream does not exist");
+      expect(report.markdown).toContain("branch --set-upstream-to origin/main main");
+    },
+  );
 
   it("fetches only the requested tag for explicit dev tag target refs", async () => {
     await setupGitPackageManagerFixture();
@@ -1770,7 +1748,7 @@ describe("runGatewayUpdate", () => {
       },
     });
 
-    const result = await withMockedWindowsPlatform(() =>
+    const result = await withWindowsPackageManagerSimulation(() =>
       runWithCommand(runCommand, { channel: "dev" }),
     );
 
@@ -1821,7 +1799,8 @@ describe("runGatewayUpdate", () => {
         PNPM_CONFIG_PREFER_OFFLINE: "false",
         pnpm_config_prefer_offline: undefined,
       },
-      () => withMockedWindowsPlatform(() => runWithCommand(runCommand, { channel: "dev" })),
+      () =>
+        withWindowsPackageManagerSimulation(() => runWithCommand(runCommand, { channel: "dev" })),
     );
 
     expect(result.status).toBe("ok");
@@ -1967,13 +1946,13 @@ describe("runGatewayUpdate", () => {
   );
 
   it.each([
-    { operation: "mkdir", code: "ENOSPC", reason: "preflight-insufficient-space" },
-    { operation: "mkdtemp", code: "ENOSPC", reason: "preflight-insufficient-space" },
-    { operation: "mkdir", code: "EACCES", reason: "preflight-worktree-failed" },
-    { operation: "mkdtemp", code: "EROFS", reason: "preflight-worktree-failed" },
+    ["mkdir", "ENOSPC", "preflight-insufficient-space"],
+    ["mkdtemp", "ENOSPC", "preflight-insufficient-space"],
+    ["mkdir", "EACCES", "preflight-worktree-failed"],
+    ["mkdtemp", "EROFS", "preflight-worktree-failed"],
   ] as const)(
-    "returns a structured preflight failure when $operation rejects with $code",
-    async ({ operation, code, reason }) => {
+    "returns a structured preflight failure when %s rejects with %s",
+    async (operation, code, reason) => {
       await setupGitPackageManagerFixture();
       const beforeGitMutation = vi.fn<() => Promise<void>>();
       const allocator = vi.spyOn(fs, operation);
@@ -2000,66 +1979,39 @@ describe("runGatewayUpdate", () => {
   );
 
   it.each([
-    {
-      command: "pnpm install",
-      stdout: "[ENOSPC] ENOSPC: no space left on device, write",
-      stderr: "",
-      capacity: true,
-    },
-    {
-      command: "pnpm install",
-      stdout:
-        "[ERR_PNPM_ENOSPC] [importPackage /checkout/node_modules/package] ENOSPC: no space left on device, copyfile 'store' -> 'package'",
-      stderr: "",
-      capacity: true,
-    },
-    {
-      command: "pnpm build",
-      stdout: "",
-      stderr: "Error: ENOSPC: no space left on device, write",
-      capacity: true,
-    },
-    {
-      command: "pnpm install",
-      stdout: "",
-      stderr:
-        "\u001b[31m[ERR_PNPM_ENOSPC]\u001b[0m ENOSPC: no space left on device, copyfile 'store' -> 'package'",
-      capacity: true,
-    },
-    {
-      command: "pnpm install",
-      stdout: "[ERR_SQLITE_ERROR] disk I/O error",
-      stderr: "",
-      capacity: false,
-    },
-    {
-      command: "pnpm build",
-      stdout: "",
-      stderr: "Error: ENOSPC: System limit for number of file watchers reached, watch 'src'",
-      capacity: false,
-    },
-    { command: "pnpm install", stdout: "", stderr: "ERR_PNPM_NETWORK", capacity: false },
-    {
-      command: "pnpm build",
-      stdout: "",
-      stderr: "test expected ENOSPC or disk full",
-      capacity: false,
-    },
-    {
-      command: "pnpm build",
-      stdout: "",
-      stderr: "test expected fatal: unable to create file: No space left on device",
-      capacity: false,
-    },
-    {
-      command: "pnpm build",
-      stdout: "",
-      stderr: "fatal: unable to create file: No space left on device (expected)",
-      capacity: false,
-    },
+    ["pnpm install", "[ENOSPC] ENOSPC: no space left on device, write", "", true],
+    [
+      "pnpm install",
+      "[ERR_PNPM_ENOSPC] [importPackage /checkout/node_modules/package] ENOSPC: no space left on device, copyfile 'store' -> 'package'",
+      "",
+      true,
+    ],
+    ["pnpm build", "", "Error: ENOSPC: no space left on device, write", true],
+    [
+      "pnpm install",
+      "",
+      "\u001b[31m[ERR_PNPM_ENOSPC]\u001b[0m ENOSPC: no space left on device, copyfile 'store' -> 'package'",
+      true,
+    ],
+    ["pnpm install", "[ERR_SQLITE_ERROR] disk I/O error", "", false],
+    [
+      "pnpm build",
+      "",
+      "Error: ENOSPC: System limit for number of file watchers reached, watch 'src'",
+      false,
+    ],
+    ["pnpm install", "", "ERR_PNPM_NETWORK", false],
+    ["pnpm build", "", "test expected ENOSPC or disk full", false],
+    [
+      "pnpm build",
+      "",
+      "test expected fatal: unable to create file: No space left on device",
+      false,
+    ],
+    ["pnpm build", "", "fatal: unable to create file: No space left on device (expected)", false],
   ])(
-    "handles dev preflight failure without misclassifying capacity: $command $stdout $stderr",
-    async ({ command, stdout, stderr, capacity }) => {
+    "handles dev preflight failure without misclassifying capacity: %s %s %s",
+    async (command, stdout, stderr, capacity) => {
       await setupGitPackageManagerFixture();
       let failed = false;
       const { runCommand, calls } = createDevGitRunner({
@@ -2102,25 +2054,19 @@ describe("runGatewayUpdate", () => {
   );
 
   it.each([
-    {
-      stderr: "fatal: unable to create file: No space left on device",
-      reason: "preflight-insufficient-space",
-    },
-    {
-      stderr: "error: cannot create directory at 'src': No space left on device",
-      reason: "preflight-insufficient-space",
-    },
-    {
-      stderr: "fatal: could not create leading directories of 'worktree': No space left on device",
-      reason: "preflight-insufficient-space",
-    },
-    {
-      stderr: "fatal: unable to create file: Permission denied",
-      reason: "preflight-worktree-failed",
-    },
+    ["fatal: unable to create file: No space left on device", "preflight-insufficient-space"],
+    [
+      "error: cannot create directory at 'src': No space left on device",
+      "preflight-insufficient-space",
+    ],
+    [
+      "fatal: could not create leading directories of 'worktree': No space left on device",
+      "preflight-insufficient-space",
+    ],
+    ["fatal: unable to create file: Permission denied", "preflight-worktree-failed"],
   ])(
-    "classifies preflight worktree creation failure and removes partial staging: $stderr",
-    async ({ stderr, reason }) => {
+    "classifies preflight worktree creation failure and removes partial staging: %s",
+    async (stderr, reason) => {
       await setupGitPackageManagerFixture();
       const roots: string[] = [];
       const { runCommand } = createDevGitRunner({
@@ -2329,7 +2275,7 @@ describe("runGatewayUpdate", () => {
     expect(result).toMatchObject({ status: "error", reason: "preflight-no-good-commit" });
     expect(result.steps).toContainEqual(
       expect.objectContaining({
-        name: "preflight candidate clean check (upstream)",
+        name: "preflight update clean check (upstream)",
         exitCode: 1,
         stdoutTail: diagnostic,
       }),
@@ -2604,7 +2550,7 @@ describe("runGatewayUpdate", () => {
       },
     });
 
-    await withMockedWindowsPlatform(async () => {
+    await withWindowsPackageManagerSimulation(async () => {
       const result = await runWithCommand(runCommand, { channel: "dev" });
 
       expect(result.status).toBe("ok");
@@ -2639,7 +2585,7 @@ describe("runGatewayUpdate", () => {
       },
     });
 
-    await withMockedWindowsPlatform(async () => {
+    await withWindowsPackageManagerSimulation(async () => {
       const result = await runWithCommand(runCommand, { channel: "dev" });
 
       expect(result.status).toBe("ok");
@@ -2677,7 +2623,7 @@ describe("runGatewayUpdate", () => {
     expect(cleanupStep?.stderrTail ?? "").toContain("fallback cleanup removed preflight tree");
   });
 
-  it("stops before live mutation when preflight cleanup fails", async () => {
+  it("finishes with a recorded warning when preflight cleanup fails", async () => {
     await setupGitPackageManagerFixture();
     const remove = fs.rm.bind(fs);
     let preflightRoot: string | undefined;
@@ -2699,25 +2645,34 @@ describe("runGatewayUpdate", () => {
       },
     });
     try {
-      const result = await runWithCommand(runCommand, { channel: "dev" });
-      expect(result.status).toBe("error");
-      expect(result.reason).toBe("preflight-cleanup-failed");
-      // This checkout fixture has no built runtime identity; no mutation is not activation proof.
-      expect(result.recovery).toEqual({
-        serviceRestartSafe: false,
-        reason: "runtime-verification-failed",
+      const onStepComplete = vi.fn();
+      const result = await runWithCommand(runCommand, {
+        channel: "dev",
+        progress: { onStepComplete },
       });
-      expect(calls).not.toContain(`git -C ${tempDir} rebase upstream123`);
-      expect(result.steps).not.toContainEqual(expect.objectContaining({ name: "deps install" }));
+      expect(result.status).toBe("ok");
+      expect(calls).toContain(`git -C ${tempDir} checkout -B main upstream123`);
       expect(result.steps).toContainEqual(
         expect.objectContaining({
           name: "preflight cleanup",
           exitCode: 1,
           stderrTail: "error: failed to delete worktree: Permission denied",
+          advisory: expect.objectContaining({
+            message: expect.stringContaining("Permission denied"),
+          }),
         }),
       );
       expect(calls).toContain(`git -C ${tempDir} worktree prune`);
       expect(preflightRoot && (await pathExists(preflightRoot))).toBe(true);
+      expect(onStepComplete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "preflight cleanup",
+          advisory: expect.objectContaining({ kind: "recoverable-maintenance" }),
+        }),
+      );
+      expect(renderUpdateRunReport(updateRunReportInputFromResult(result)).markdown).toContain(
+        "cleanup",
+      );
     } finally {
       rmSpy.mockRestore();
       if (preflightRoot) {
@@ -3016,6 +2971,7 @@ describe("runGatewayUpdate", () => {
   });
 
   it("skips update when no git root", async () => {
+    vi.spyOn(container, "isContainerEnvironment").mockReturnValueOnce(false);
     await fs.writeFile(
       path.join(tempDir, "package.json"),
       JSON.stringify({ name: "openclaw", packageManager: PNPM_PACKAGE_MANAGER }),
@@ -3031,7 +2987,8 @@ describe("runGatewayUpdate", () => {
     const result = await runWithRunner(runner);
 
     expect(result.status).toBe("skipped");
-    expect(result.reason).toBe("not-git-install");
+    expect(result.reason).toBe("unmanaged-package-install");
+    expect(result.recovery).toBeUndefined();
     const pnpmGlobalInstallCalls = calls.filter((call) => call.startsWith("pnpm add -g"));
     const npmGlobalInstallCalls = calls.filter((call) => call.startsWith("npm i -g"));
     expect(pnpmGlobalInstallCalls).toStrictEqual([]);
@@ -3056,9 +3013,9 @@ describe("runGatewayUpdate", () => {
 
     expect(result).toMatchObject({
       status: "skipped",
-      mode: "unknown",
+      mode: "npm",
       root: pkgRoot,
-      reason: "not-git-install",
+      reason: "package-update-requires-cli",
       before: { version: "1.0.0" },
       steps: [],
     });
@@ -3135,7 +3092,12 @@ describe("runGatewayUpdate", () => {
             doctorRan = true;
             await fs.writeFile(stateFile, "candidate-migrated-state");
             if (failure === "doctor-throw") {
-              throw new Error("doctor crashed after migration");
+              throw Object.assign(
+                new Error(
+                  "EACCES: permission denied, open '/home/update-user/private/config.json' token=synthetic-update-secret\nsecond-line-private-detail",
+                ),
+                { code: "EACCES" },
+              );
             }
             if (failure === "doctor-error") {
               return { code: 1, stderr: "doctor failed after migration" };
@@ -3155,6 +3117,22 @@ describe("runGatewayUpdate", () => {
               : "head-verification-failed",
         recovery: { serviceRestartSafe: false, reason: "state-migration-started" },
       });
+      if (failure === "doctor-throw") {
+        const doctor = result.steps.find((step) => step.name === "openclaw doctor");
+        expect(doctor).toMatchObject({
+          exitCode: 1,
+          failureFacts: [
+            {
+              check: "openclaw doctor",
+              code: "EACCES",
+              message: expect.stringContaining("permission denied, open [redacted-path]"),
+            },
+          ],
+        });
+        expect(JSON.stringify(doctor?.failureFacts)).not.toMatch(
+          /update-user|private\/config|synthetic-update-secret|second-line-private-detail/,
+        );
+      }
       expect(await fs.readFile(stateFile, "utf8")).toBe("candidate-migrated-state");
       expect(
         JSON.parse(await fs.readFile(path.join(tempDir, "dist", "build-info.json"), "utf8")),

@@ -79,7 +79,7 @@ export async function runDiskSpaceHealth(): Promise<void> {
 
 export async function runDatabaseBloatHealth(): Promise<void> {
   const { noteSqliteDatabaseBloat } = await import("../commands/doctor-db-bloat.js");
-  noteSqliteDatabaseBloat();
+  await noteSqliteDatabaseBloat();
 }
 
 export async function runAgentMemorySchemaHealth(ctx: DoctorHealthFlowContext): Promise<void> {
@@ -97,11 +97,21 @@ export async function runChannelIngressDeadLettersHealth(): Promise<void> {
 }
 
 export async function runStateIntegrityHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  const { noteDoctorAgentDatabasePathHealth } =
+    await import("../commands/doctor-agent-database-paths.js");
+  const warnings = noteDoctorAgentDatabasePathHealth({
+    env: ctx.env ?? process.env,
+    shouldRepair: ctx.prompter.shouldRepair,
+  });
+  if (warnings.length > 0) {
+    ctx.updateWarnings ??= [];
+    ctx.updateWarnings.push(...warnings);
+  }
   const { noteStateIntegrity } = await loadDoctorStateIntegrityModule();
   await noteStateIntegrity(ctx.cfg, ctx.prompter, ctx.configPath, {
     stateDirExistedAtStart: ctx.stateDirExistedAtStart,
   });
-  noteBackupDoctorHint(ctx.env ?? process.env);
+  await noteBackupDoctorHint(ctx.env ?? process.env);
 }
 
 export async function runCodexSessionRouteHealth(ctx: DoctorHealthFlowContext): Promise<void> {
@@ -119,7 +129,10 @@ export async function runCodexSessionRouteHealth(ctx: DoctorHealthFlowContext): 
       ? { blockedModelIdentities: new Set(ctx.configResult.blockedCodexModelIdentities) }
       : {}),
     ...(ctx.configResult.openAICodexAuthProfileIdMap?.size
-      ? { authProfileIdMap: ctx.configResult.openAICodexAuthProfileIdMap }
+      ? {
+          authProfileIdMap: ctx.configResult.openAICodexAuthProfileIdMap,
+          ...(!ctx.prompter.shouldRepair ? { authProfileOnly: true } : {}),
+        }
       : {}),
   });
   if (result.changes.length > 0) {

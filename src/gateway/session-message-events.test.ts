@@ -31,7 +31,6 @@ import { emitAgentEvent } from "../infra/agent-events.js";
 import { claimAgentRunContext, clearAgentRunContext } from "../infra/agent-run-registry.js";
 import * as secureRandom from "../infra/secure-random.js";
 import { emitSessionLifecycleEvent } from "../sessions/session-lifecycle-events.js";
-import * as transcriptEvents from "../sessions/transcript-events.js";
 import { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { persistUserTurnTranscript } from "../sessions/user-turn-transcript.test-support.js";
 import {
@@ -45,6 +44,8 @@ import {
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
 import { resolveCurrentUserProfileDisplay } from "./current-user-profile-display.js";
+import { seedCompletedSessionTranscript } from "./session-row-fixtures.test-support.js";
+import { removeSessionTestDirectories } from "./session-test-directories.test-support.js";
 import { testState } from "./test-helpers.runtime-state.js";
 import {
   connectOk,
@@ -95,9 +96,7 @@ afterEach(async () => {
   for (const state of cleanupTestStates.splice(0).toReversed()) {
     await state.cleanup();
   }
-  await Promise.all(
-    cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
-  );
+  await removeSessionTestDirectories(cleanupDirs.splice(0));
 });
 
 async function createSessionStoreFile(): Promise<string> {
@@ -305,7 +304,7 @@ describe("session.message websocket events", () => {
       const declaredEvent = await declaredPresence;
       const declaredEntry = findWatchedEntry(declaredEvent);
       expect(declaredEntry?.watchedSessions).toEqual(declaredKeys);
-      const ownerProfile = listProfiles().find((profile) => profile.emails.length === 0);
+      const ownerProfile = (await listProfiles()).find((profile) => profile.emails.length === 0);
       expect(ownerProfile).toBeDefined();
       expect(declaredEntry?.user).toEqual({
         id: ownerProfile!.id,
@@ -682,6 +681,7 @@ describe("session.message websocket events", () => {
       persistOrThrow: vi.fn(),
       clearPendingLifecycleError: vi.fn(),
       countPendingDescendantRuns: () => 0,
+      getLatestRunForChildSession: () => null,
       suppressAnnounceForSteerRestart: () => false,
       resolveSubagentTask: () => ({ lookup: "available" }),
       shouldEmitEndedHookForRun: () => false,
@@ -1038,7 +1038,6 @@ describe("session.message websocket events", () => {
       };
       const liveEventPromise = waitForSessionMessageEvent(webWs, sessionKey);
       const dispatched = await dispatchCronDelivery({
-        cfg: { session: { store: storePath } },
         cfgWithAgentDefaults: { session: { store: storePath } },
         deps: {},
         job,
@@ -1054,7 +1053,6 @@ describe("session.message websocket events", () => {
         lifecycleRevision: "detached-cron-revision",
         sessionUpdatedAt: 3_000,
         runStartedAt: 3_000,
-        runEndedAt: 3_001,
         timeoutMs: 30_000,
         resolvedDelivery: {
           ok: false,
@@ -1080,11 +1078,6 @@ describe("session.message websocket events", () => {
         outputText: "The detached cron finished without another user message.",
         isAborted: () => false,
         abortReason: () => "aborted",
-        withRunSession: (result) => ({
-          ...result,
-          sessionId: "detached-cron-session",
-          sessionKey: "cron:job-webchat:run:3000",
-        }),
       });
       expect(dispatched).toMatchObject({ delivered: true, deliveryAttempted: true });
 
@@ -1666,47 +1659,44 @@ describe("session.message websocket events", () => {
       storePath,
     });
 
-    const emitSpy = vi.spyOn(transcriptEvents, "emitSessionTranscriptUpdate");
-    try {
-      const appended = await appendAssistantMessageToSessionTranscript({
-        sessionKey: "agent:main:main",
-        text: "live websocket message",
-        storePath,
-      });
-      expect(appended.ok).toBe(true);
-      if (!appended.ok) {
-        throw new Error(`append failed: ${appended.reason}`);
-      }
-      const emitParams = requireRecord(emitSpy.mock.calls.at(0)?.[0], "transcript update params");
-      expect(emitParams.sessionKey).toBe("agent:main:main");
-      expect(emitParams.target).toMatchObject({
+    const delivered = withOperatorSessionSubscriber((ws) =>
+      waitForSessionMessageEvent(ws, "agent:main:main"),
+    );
+    const appended = await appendAssistantMessageToSessionTranscript({
+      sessionKey: "agent:main:main",
+      text: "live websocket message",
+      storePath,
+    });
+    expect(appended.ok).toBe(true);
+    if (!appended.ok) {
+      throw new Error(`append failed: ${appended.reason}`);
+    }
+    const payload = requireRecord((await delivered).payload, "transcript message event");
+    expectRecordFields(payload, {
+      agentId: "main",
+      sessionId: "sess-main",
+      sessionKey: "agent:main:main",
+      messageId: appended.messageId,
+    });
+    expectRecordFields(payload.message, {
+      role: "assistant",
+      content: [{ type: "text", text: "live websocket message" }],
+    });
+    await expect(
+      loadTranscriptEvents({
         agentId: "main",
         sessionId: "sess-main",
         sessionKey: "agent:main:main",
-      });
-      expect(emitParams.messageId).toBe(appended.messageId);
-      expectRecordFields(emitParams.message, {
-        role: "assistant",
-        content: [{ type: "text", text: "live websocket message" }],
-      });
-      await expect(
-        loadTranscriptEvents({
-          agentId: "main",
-          sessionId: "sess-main",
-          sessionKey: "agent:main:main",
-          storePath,
+        storePath,
+      }),
+    ).resolves.toContainEqual(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          content: [{ type: "text", text: "live websocket message" }],
         }),
-      ).resolves.toContainEqual(
-        expect.objectContaining({
-          message: expect.objectContaining({
-            content: [{ type: "text", text: "live websocket message" }],
-          }),
-          type: "message",
-        }),
-      );
-    } finally {
-      emitSpy.mockRestore();
-    }
+        type: "message",
+      }),
+    );
   });
 
   test("strips blocked original content from live session.message events", async () => {
@@ -1943,7 +1933,10 @@ describe("session.message websocket events", () => {
 
   test("includes live usage metadata on session.message transcript events", async () => {
     const storePath = await createSessionStoreFile();
-    await writeSessionStore({
+    const transcriptMessage = await seedCompletedSessionTranscript({
+      storePath,
+      sessionId: "sess-main",
+      sessionKey: "agent:main:main",
       entries: {
         main: {
           sessionId: "sess-main",
@@ -1959,34 +1952,21 @@ describe("session.message websocket events", () => {
           totalTokensFresh: false,
         },
       },
-      storePath,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "usage snapshot" }],
+        provider: "openai",
+        model: "gpt-5.4",
+        usage: {
+          input: 2_000,
+          output: 400,
+          cacheRead: 300,
+          cacheWrite: 100,
+          cost: { total: 0.0042 },
+        },
+        timestamp: Date.now(),
+      },
     });
-    const transcriptMessage = {
-      role: "assistant",
-      content: [{ type: "text", text: "usage snapshot" }],
-      provider: "openai",
-      model: "gpt-5.4",
-      usage: {
-        input: 2_000,
-        output: 400,
-        cacheRead: 300,
-        cacheWrite: 100,
-        cost: { total: 0.0042 },
-      },
-      timestamp: Date.now(),
-    };
-    await persistSessionTranscriptTurn(
-      {
-        agentId: "main",
-        sessionId: "sess-main",
-        sessionKey: "agent:main:main",
-        storePath,
-      },
-      {
-        messages: [{ message: transcriptMessage }],
-        updateMode: "none",
-      },
-    );
 
     await withOperatorSessionSubscriber(async (ws) => {
       const { messageEvent } = await emitTranscriptUpdateAndCollectMessageEvent({
@@ -2854,14 +2834,16 @@ describe("session.message websocket events", () => {
         waitForChat("worker"),
         expectNoMessageWithin({
           watch: (timeoutMs) => waitForSessionMessageEvent(ws, sessionKey, timeoutMs),
-          action: () => expect(push().ok).toBe(true),
+          action: async () => {
+            expect((await push()).ok).toBe(true);
+          },
         }),
       ]);
       const workerChat = requireRecord(workerEvent.payload, "worker chat");
       await expectNoMessageWithin({
         watch: (timeoutMs) => waitForChat("worker", timeoutMs),
-        action: () => {
-          expect(push()).toEqual({ ok: true, result: { ackedSeq: 1 } });
+        action: async () => {
+          expect(await push()).toEqual({ ok: true, result: { ackedSeq: 1 } });
         },
       });
       expect(workerChats).toHaveLength(1);
@@ -2886,7 +2868,9 @@ describe("session.message websocket events", () => {
       expect(workerChat).toEqual(localChat);
       await expectNoMessageWithin({
         watch: (timeoutMs) => waitForChat("stale", timeoutMs),
-        action: () => expect(push(3, "stale").ok).toBe(false),
+        action: async () => {
+          expect((await push(3, "stale")).ok).toBe(false);
+        },
       });
     } finally {
       receiver.clear();

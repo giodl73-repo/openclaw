@@ -26,7 +26,8 @@ export const runPluginEmbeddedAgent: PluginRuntime["agent"]["runEmbeddedAgent"] 
     "onCompactionAccounting" in params ||
     "onContextAccountingEvent" in params ||
     "onDeferredLifecycleOwner" in params ||
-    "onDeferredLifecycleAbort" in params
+    "onDeferredLifecycleAbort" in params ||
+    "onRetryWait" in params
   ) {
     throw new Error("Plugin embedded-agent execution cannot supply host run authority.");
   }
@@ -78,7 +79,8 @@ export const runPluginEmbeddedAgent: PluginRuntime["agent"]["runEmbeddedAgent"] 
   params.abortSignal?.addEventListener("abort", close, { once: true });
   try {
     params.abortSignal?.throwIfAborted();
-    const result = await runEmbeddedAgentCore({ ...params, config, preparedRunAdmission });
+    const { githubPublicationAvailable: _, ...runParams } = params;
+    const result = await runEmbeddedAgentCore({ ...runParams, config, preparedRunAdmission });
     if (admittedRunContext && getAdmittedRunDelegatedAuthority(admittedRunContext)) {
       recordRuntimeActionDecision({
         token: admittedRunContext.executionIdentityToken,

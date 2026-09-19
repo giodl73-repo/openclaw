@@ -6,7 +6,7 @@ import { createMockPluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtim
 import { patchSessionEntry, upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { describe, expect, it, vi } from "vitest";
 import * as appServerPolicy from "./app-server-policy.js";
-import { applyCodexAppServerAuthProfile } from "./auth-bridge.js";
+import { applyCodexAppServerAuthProfile, bridgeCodexAppServerStartOptions } from "./auth-bridge.js";
 import * as bindingConnection from "./binding-connection.js";
 import * as codexRequirements from "./config-requirements.js";
 import { resolveCodexAppServerRuntimeOptions } from "./config.js";
@@ -35,6 +35,67 @@ import { withCodexThreadLifecycleBinding } from "./thread-lifecycle-adoption.js"
 setupRunAttemptTestHooks();
 
 describe("prepareCodexAttemptConnection", () => {
+  it.each(["websocket", "stdio-proxy", "env-stdio-proxy", "local-stdio"])(
+    "keeps ordinary %s sessions isolated when deferred auth omits homeScope",
+    async (connectionType) => {
+      vi.stubEnv(
+        "OPENCLAW_CODEX_APP_SERVER_ARGS",
+        connectionType === "env-stdio-proxy"
+          ? "app-server proxy --sock /fixture/server.sock"
+          : undefined,
+      );
+      const sessionFile = path.join(tempDir, `deferred-${connectionType}.jsonl`);
+      const params = createParams(
+        sessionFile,
+        path.join(tempDir, `deferred-${connectionType}-workspace`),
+      );
+      const runtimePlan = createCodexRuntimePlanFixture();
+      params.runtimePlan = {
+        ...runtimePlan,
+        auth: {
+          ...runtimePlan.auth,
+          deferredRouteSupport: {
+            requestTransportOverrides: "none",
+            runtimePolicy: { compatibleIds: ["openclaw", "codex"] },
+          },
+        },
+      };
+      registerCodexTestSessionIdentity(sessionFile, params.sessionId, params.sessionKey);
+      const connection = await prepareCodexAttemptConnection({
+        params,
+        options: {
+          bindingStore: testCodexAppServerBindingStore,
+          pluginConfig: {
+            appServer:
+              connectionType === "websocket"
+                ? { transport: "websocket", url: "ws://127.0.0.1:19400" }
+                : {
+                    transport: "stdio",
+                    ...(connectionType === "stdio-proxy"
+                      ? { args: ["app-server", "proxy", "--sock", "/fixture/server.sock"] }
+                      : {}),
+                  },
+          },
+        },
+      });
+      expect(connection.appServer.start.transport).toBe(
+        connectionType === "websocket" ? "websocket" : "stdio",
+      );
+      expect(connection.appServer.start.homeScope).toBe("agent");
+      if (connectionType === "local-stdio") {
+        vi.stubEnv("CODEX_HOME", path.join(tempDir, "personal-codex"));
+        const start = await bridgeCodexAppServerStartOptions({
+          startOptions: connection.appServer.start,
+          agentDir: connection.agentDir,
+          authProfileId: connection.startupClientAuthProfileId,
+          authProfileStore: params.authProfileStore,
+        });
+        expect(start.env?.CODEX_HOME).toBe(path.join(connection.agentDir, "codex-home"));
+        expect(start.env?.CODEX_HOME).not.toBe(process.env.CODEX_HOME);
+      }
+    },
+  );
+
   it("retains the recovered generation fence after connection preparation", async () => {
     const workspaceDir = path.join(tempDir, "recovered-workspace");
     const params = createParams(path.join(tempDir, "recovered.jsonl"), workspaceDir);
@@ -97,7 +158,7 @@ describe("prepareCodexAttemptConnection", () => {
       const reclaim = vi.spyOn(testCodexAppServerBindingStore, "prepareSessionGenerationReclaim");
       const connect = vi
         .spyOn(bindingConnection, "resolveCodexBindingAppServerConnection")
-        .mockImplementation(() => {
+        .mockImplementation(async () => {
           throw new Error("invalid ownership reached connection preparation");
         });
 

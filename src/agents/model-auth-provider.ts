@@ -87,6 +87,8 @@ export function resolveScopedAuthProfileStore(params: {
   preferredProfile?: string;
 }): AuthProfileStore {
   return ensureAuthProfileStore(params.agentDir, {
+    migrationProvider: params.provider,
+    config: params.cfg,
     profileId: params.profileId,
     externalCli: externalCliDiscoveryForProviderAuth(params),
   });
@@ -97,9 +99,9 @@ function assertProviderAuthReady(params: {
   cfg?: OpenClawConfig;
   agentDir?: string;
 }): void {
-  // Pending credential files own this agent's auth route until Doctor commits
+  // Pending credential files own their providers' auth routes until Doctor commits
   // and archives them; do not fall through to env/config credentials.
-  assertAuthProfileMigrationReady(params.agentDir);
+  assertAuthProfileMigrationReady(params.agentDir, undefined, params.provider, params.cfg);
   // A failed explicit ref owns the provider. Stop before profile/env discovery so requests cannot
   // silently switch credentials while this configured owner is cold.
   assertRuntimeProviderSecretOwnerAvailable({ cfg: params.cfg, provider: params.provider });
@@ -247,6 +249,9 @@ export async function resolveApiKeyForProviderCore(input: {
       throw new Error(`No credentials found for profile "${profileId}".`);
     }
     const resolvedProfileId = resolved.profileId ?? profileId;
+    if (params.lockedProfile && resolvedProfileId !== profileId) {
+      throw new Error("Locked auth profile resolution returned a different profile.");
+    }
     const credential = store.profiles[resolvedProfileId];
     if (
       changedAuthProvider &&
@@ -257,18 +262,14 @@ export async function resolveApiKeyForProviderCore(input: {
       );
     }
     const mode = resolved.profileType ?? store.profiles[resolvedProfileId]?.type;
-    const result: ResolvedProviderAuth = {
-      apiKey: authConfig.sentinelizeSecretRefProfileApiKey({
-        apiKey: resolved.apiKey,
-        enabled: params.secretSentinels,
-        profileId: resolvedProfileId,
-        provider,
-        store,
-      }),
+    const result = authConfig.projectResolvedProfileAuth({
+      apiKey: resolved.apiKey,
+      enabled: params.secretSentinels,
       profileId: resolvedProfileId,
-      source: `profile:${resolvedProfileId}`,
+      provider,
+      store,
       mode: mode ? authConfig.profileTypeToAuthMode(mode) : "api-key",
-    };
+    });
     assertAuthModeAllowedForModel({
       provider,
       modelApi: params.modelApi,
@@ -329,52 +330,55 @@ export async function resolveApiKeyForProviderCore(input: {
     return authConfig.resolveAwsSdkAuthInfo();
   }
 
-  if (params.credentialPrecedence === "env-first") {
-    const envResolved = authConfig.resolveConfigAwareEnvApiKey(
+  const modeAllowed = (mode: ResolvedProviderAuth["mode"]) =>
+    isAuthModeAllowedForModel({ provider, modelApi: params.modelApi, mode });
+  const assertInlineSourceUsable = (source: string) => {
+    const store = getScopedStore();
+    if (authConfig.isConfigBackedInlineProviderApiKey({ cfg, provider, source, store })) {
+      authConfig.assertInlineProviderApiKeyUsable({ store, provider });
+    }
+  };
+  // An incompatible env credential restarts profile-first selection; absence continues in place.
+  const resolveEnvAuth = (): ResolvedProviderAuth | null | "incompatible" => {
+    const resolved = authConfig.resolveConfigAwareEnvApiKey(
       cfg,
       provider,
       params.workspaceDir,
       params.skipSetupProviderFallback,
     );
-    if (envResolved) {
-      const resolvedMode = resolveDirectProviderCredentialMode({
+    if (!resolved) {
+      return null;
+    }
+    const mode = resolveDirectProviderCredentialMode({
+      cfg,
+      provider,
+      inferredMode: resolved.source.includes("OAUTH_TOKEN") ? "oauth" : "api-key",
+    });
+    if (mode === "api-key") {
+      assertInlineSourceUsable(resolved.source);
+    }
+    if (!modeAllowed(mode)) {
+      return "incompatible";
+    }
+    return {
+      apiKey: authConfig.sentinelizeConfigSecretRefEnvApiKey({
+        apiKey: resolved.apiKey,
+        source: resolved.source,
         cfg,
         provider,
-        inferredMode: envResolved.source.includes("OAUTH_TOKEN") ? "oauth" : "api-key",
-      });
-      if (resolvedMode === "api-key") {
-        const inlineStore = getScopedStore();
-        if (
-          authConfig.isConfigBackedInlineProviderApiKey({
-            cfg,
-            provider,
-            source: envResolved.source,
-            store: inlineStore,
-          })
-        ) {
-          authConfig.assertInlineProviderApiKeyUsable({ store: inlineStore, provider });
-        }
-      }
-      if (
-        !isAuthModeAllowedForModel({
-          provider,
-          modelApi: params.modelApi,
-          mode: resolvedMode,
-        })
-      ) {
-        return resolveApiKeyForProviderCore({ ...params, credentialPrecedence: "profile-first" });
-      }
-      return {
-        apiKey: authConfig.sentinelizeConfigSecretRefEnvApiKey({
-          apiKey: envResolved.apiKey,
-          source: envResolved.source,
-          cfg,
-          provider,
-          enabled: params.secretSentinels,
-        }),
-        source: envResolved.source,
-        mode: resolvedMode,
-      };
+        enabled: params.secretSentinels,
+      }),
+      source: resolved.source,
+      mode,
+    };
+  };
+  if (params.credentialPrecedence === "env-first") {
+    const auth = resolveEnvAuth();
+    if (auth === "incompatible") {
+      return resolveApiKeyForProviderCore({ ...params, credentialPrecedence: "profile-first" });
+    }
+    if (auth) {
+      return auth;
     }
   }
 
@@ -464,14 +468,7 @@ export async function resolveApiKeyForProviderCore(input: {
     const candidateMode = candidateType
       ? authConfig.profileTypeToAuthMode(candidateType)
       : undefined;
-    if (
-      candidateMode &&
-      !isAuthModeAllowedForModel({
-        provider,
-        modelApi: params.modelApi,
-        mode: candidateMode,
-      })
-    ) {
+    if (candidateMode && !modeAllowed(candidateMode)) {
       continue;
     }
     if (getDeprecatedProfileIds().has(candidate)) {
@@ -496,28 +493,15 @@ export async function resolveApiKeyForProviderCore(input: {
       if (resolved) {
         const resolvedProfileId = resolved.profileId ?? candidate;
         const mode = resolved.profileType ?? store.profiles[resolvedProfileId]?.type;
-        const resolvedMode: ResolvedProviderAuth["mode"] = mode
-          ? authConfig.profileTypeToAuthMode(mode)
-          : "api-key";
-        const result: ResolvedProviderAuth = {
-          apiKey: authConfig.sentinelizeSecretRefProfileApiKey({
-            apiKey: resolved.apiKey,
-            enabled: params.secretSentinels,
-            profileId: resolvedProfileId,
-            provider,
-            store,
-          }),
+        const result = authConfig.projectResolvedProfileAuth({
+          apiKey: resolved.apiKey,
+          enabled: params.secretSentinels,
           profileId: resolvedProfileId,
-          source: `profile:${resolvedProfileId}`,
-          mode: resolvedMode,
-        };
-        if (
-          !isAuthModeAllowedForModel({
-            provider,
-            modelApi: params.modelApi,
-            mode: result.mode,
-          })
-        ) {
+          provider,
+          store,
+          mode: mode ? authConfig.profileTypeToAuthMode(mode) : "api-key",
+        });
+        if (!modeAllowed(result.mode)) {
           continue;
         }
         if (
@@ -540,12 +524,7 @@ export async function resolveApiKeyForProviderCore(input: {
       if (
         !refreshFailure &&
         err instanceof OAuthRefreshFailureError &&
-        (!candidateMode ||
-          isAuthModeAllowedForModel({
-            provider,
-            modelApi: params.modelApi,
-            mode: candidateMode,
-          }))
+        (!candidateMode || modeAllowed(candidateMode))
       ) {
         refreshFailure = err;
       }
@@ -557,51 +536,9 @@ export async function resolveApiKeyForProviderCore(input: {
     throw refreshFailure;
   }
 
-  const envResolved = authConfig.resolveConfigAwareEnvApiKey(
-    cfg,
-    provider,
-    params.workspaceDir,
-    params.skipSetupProviderFallback,
-  );
-  if (envResolved) {
-    const resolvedMode = resolveDirectProviderCredentialMode({
-      cfg,
-      provider,
-      inferredMode: envResolved.source.includes("OAUTH_TOKEN") ? "oauth" : "api-key",
-    });
-    if (resolvedMode === "api-key") {
-      const inlineStore = getScopedStore();
-      if (
-        authConfig.isConfigBackedInlineProviderApiKey({
-          cfg,
-          provider,
-          source: envResolved.source,
-          store: inlineStore,
-        })
-      ) {
-        authConfig.assertInlineProviderApiKeyUsable({ store: inlineStore, provider });
-      }
-    }
-    if (
-      isAuthModeAllowedForModel({
-        provider,
-        modelApi: params.modelApi,
-        mode: resolvedMode,
-      })
-    ) {
-      const result: ResolvedProviderAuth = {
-        apiKey: authConfig.sentinelizeConfigSecretRefEnvApiKey({
-          apiKey: envResolved.apiKey,
-          source: envResolved.source,
-          cfg,
-          provider,
-          enabled: params.secretSentinels,
-        }),
-        source: envResolved.source,
-        mode: resolvedMode,
-      };
-      return result;
-    }
+  const envAuth = resolveEnvAuth();
+  if (envAuth && envAuth !== "incompatible") {
+    return envAuth;
   }
 
   const managedRuntimeAuth = resolveManagedSecretRefRuntimeProviderAuth({
@@ -609,25 +546,8 @@ export async function resolveApiKeyForProviderCore(input: {
     provider,
     secretSentinels: params.secretSentinels,
   });
-  if (
-    managedRuntimeAuth &&
-    isAuthModeAllowedForModel({
-      provider,
-      modelApi: params.modelApi,
-      mode: managedRuntimeAuth.mode,
-    })
-  ) {
-    const inlineStore = getScopedStore();
-    if (
-      authConfig.isConfigBackedInlineProviderApiKey({
-        cfg,
-        provider,
-        source: managedRuntimeAuth.source,
-        store: inlineStore,
-      })
-    ) {
-      authConfig.assertInlineProviderApiKeyUsable({ store: inlineStore, provider });
-    }
+  if (managedRuntimeAuth && modeAllowed(managedRuntimeAuth.mode)) {
+    assertInlineSourceUsable(managedRuntimeAuth.source);
     return managedRuntimeAuth;
   }
 
@@ -642,7 +562,7 @@ export async function resolveApiKeyForProviderCore(input: {
       provider,
       inferredMode: "api-key",
     });
-    if (isAuthModeAllowedForModel({ provider, modelApi: params.modelApi, mode })) {
+    if (modeAllowed(mode)) {
       authConfig.assertInlineProviderApiKeyUsable({ store: getScopedStore(), provider });
       return { apiKey: customKey.apiKey, source: customKey.source, mode };
     }

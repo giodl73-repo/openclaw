@@ -1,7 +1,8 @@
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,9 +13,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { runInNewContext } from "node:vm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
@@ -35,6 +36,70 @@ const LIVE_BUILD = "scripts/test-live-build-docker.sh";
 const DOCKER_E2E_IMAGE_HELPER = "scripts/lib/docker-e2e-image.sh";
 const RELEASE_FILTER_VALIDATOR = resolve("scripts/github/validate-release-suite-filters.sh");
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+let toolingRoot = "";
+let toolingSha = "";
+
+beforeAll(() => {
+  toolingRoot = mkdtempSync(join(tmpdir(), "openclaw-release-tooling-"));
+  const tooling = join(toolingRoot, "workflow");
+  // Every capture uses these immutable committed bytes with its own output file.
+  for (const file of [
+    "scripts/preflight-frozen-target-contracts.mjs",
+    "scripts/lib/frozen-target-source.mjs",
+    "scripts/lib/docker-e2e-plan.mts",
+    "scripts/lib/docker-e2e-scenarios.mts",
+    "scripts/lib/official-external-channel-catalog.json",
+    "scripts/lib/upgrade-survivor-policy.mjs",
+    "scripts/lib/upgrade-survivor-scenarios.json",
+    "scripts/lib/release-version.mjs",
+    "scripts/lib/frozen-target-compat.sh",
+    "scripts/resolve-frozen-codex-live-suite.mjs",
+    "scripts/resolve-fs-safe-native-contract.mjs",
+    "scripts/e2e/lib/upgrade-survivor/config-recipe.mts",
+    "scripts/windows-cmd-helpers.mjs",
+    "package.json",
+    "pnpm-lock.yaml",
+    "scripts/plan-release-workflow-matrix.mjs",
+    "scripts/lib/direct-run.mjs",
+    "scripts/lib/plugin-prerelease-test-plan.mts",
+    "scripts/plan-targeted-docker-lane-groups.mjs",
+    "scripts/lib/numeric-options.mjs",
+    "scripts/e2e/lib/upgrade-survivor/config-recipe",
+    "scripts/github/validate-release-suite-filters.sh",
+    "scripts/lib/cross-os-release-checks/suite-filter.mjs",
+  ]) {
+    mkdirSync(dirname(join(tooling, file)), { recursive: true });
+    cpSync(file, join(tooling, file), { recursive: true });
+  }
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "-C",
+        tooling,
+        ...args,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+  git("init", "-q");
+  git("add", ".");
+  git("commit", "-qm", "candidate tooling fixture");
+  toolingSha = git("rev-parse", "HEAD");
+});
+
+afterAll(() => {
+  if (toolingRoot) {
+    rmSync(toolingRoot, { recursive: true, force: true });
+  }
+});
 
 type WorkflowInput = {
   default?: boolean | number | string;
@@ -219,16 +284,22 @@ function executeReleaseGroupCapture(
       "Capture selected inputs",
     );
     const result = spawnSync("bash", ["-euo", "pipefail", "-c", capture.run ?? ""], {
+      cwd: toolingRoot,
       encoding: "utf8",
       env: {
         ...process.env,
+        ADMISSION_TOOLING_ROOT: join(toolingRoot, "workflow"),
+        ADMISSION_TOOLING_SHA: toolingSha,
         CANDIDATE_ARTIFACT_JSON_INPUT: candidateArtifactJson,
         GITHUB_OUTPUT: output,
         RELEASE_ALLOW_UNRELEASED_CHANGELOG_INPUT: "false",
         RELEASE_CODEX_PLUGIN_SPEC_INPUT: "",
         RELEASE_CROSS_OS_SUITE_FILTER_INPUT: crossOsSuiteFilter,
         RELEASE_FAIL_FAST_INPUT: "false",
-        RELEASE_FILTER_VALIDATOR,
+        RELEASE_FILTER_VALIDATOR: join(
+          toolingRoot,
+          "workflow/scripts/github/validate-release-suite-filters.sh",
+        ),
         RELEASE_LIVE_SUITE_FILTER_INPUT: liveSuiteFilter,
         RELEASE_MODE_INPUT: "both",
         RELEASE_PHASE_INPUT: phase,
@@ -610,12 +681,9 @@ describe("release validation no-push transport", () => {
       "./.github/workflows/full-release-candidate.yml",
     );
     expect(capture.run).toContain(
-      "release_check_groups=(install-smoke cross-os package qa-parity)",
+      "import { createReleaseCheckSelection } from './workflow/scripts/plan-release-workflow-matrix.mjs'",
     );
-    expect(capture.run).toContain("release_check_groups=(qa-parity qa-live)");
-    expect(capture.run).toContain("release_check_groups_json=");
-    expect(capture.run).toContain("package_required=false");
-    expect(capture.run).toContain("docker_required=false");
+    expect(capture.run).toContain("JSON.stringify(createReleaseCheckSelection({");
     expect(job(release, "prepare_release_package").if).toBe(
       "needs.resolve_target.outputs.package_required == 'true'",
     );
@@ -1369,13 +1437,17 @@ describe("release validation no-push transport", () => {
       "job.workflow_repository must be an owner/repository slug",
     );
     expect(workflowIdentity.run).toContain("job.workflow_sha must be a full lowercase commit SHA");
-    expect(step(validation, "Materialize selected-source contract resolver").with).toMatchObject({
+    const harnessCheckout = step(validation, "Materialize selected-source contract resolver").with;
+    expect(harnessCheckout).toMatchObject({
       repository: "${{ steps.workflow.outputs.workflow_repository }}",
       ref: "${{ steps.workflow.outputs.workflow_sha }}",
       path: ".release-harness",
+      "fetch-depth": 1,
       "persist-credentials": false,
-      "sparse-checkout": "scripts/resolve-fs-safe-native-contract.mjs",
     });
+    expect(harnessCheckout?.["sparse-checkout"]).toBeUndefined();
+    expect(harnessCheckout?.["sparse-checkout-cone-mode"]).toBeUndefined();
+    expect(harnessCheckout?.submodules ?? false).toBe(false);
     const trustedCheckouts = Object.entries(workflow.jobs ?? {}).flatMap(([jobName, workflowJob]) =>
       (workflowJob.steps ?? [])
         .filter((candidate) => candidate.name?.startsWith("Checkout trusted "))
@@ -1864,7 +1936,9 @@ describe("release validation no-push transport", () => {
     });
     expect(fullText).toContain("-f publish_reports=false");
     expect(fullText).toContain("Report publication: disabled (artifacts only)");
-    expect(fullText).toContain('performanceReportPublication: "artifact-only"');
+    expect(
+      step(job(readWorkflow(FULL_RELEASE), "summary"), "Write release validation manifest").run,
+    ).toBe("node scripts/full-release-validation-state.mjs write-manifest");
     expect(publisher.if).toContain("inputs.publish_reports == true");
     const guard = job(performance, "artifact_only_guard");
     expect(guard.if).toContain("inputs.publish_reports != true");
@@ -1920,6 +1994,7 @@ describe("release validation no-push transport", () => {
       "resolve_release_target",
       "publish",
       "verify_core_npm_registry",
+      "finalize_github_release_before_docker",
     ]);
     expect(dockerCall.if).toContain("needs.publish.result == 'success'");
     expect(dockerCall.if).toContain("needs.verify_core_npm_registry.result == 'success'");
@@ -1952,15 +2027,17 @@ describe("release validation no-push transport", () => {
         "Validate OpenClaw npm preflight manifest",
       ).run,
     ).toContain("Preflight manifest SHA mismatch");
-    expect(
-      step(
-        job(releasePublish, "resolve_release_target"),
-        "Validate full release validation manifest",
-      ).run,
-    ).toContain("Full release validation target SHA mismatch");
+    const validation = step(
+      job(releasePublish, "resolve_release_target"),
+      "Validate full release validation manifest",
+    );
+    expect(validation.env?.EXPECTED_SHA).toBe("${{ steps.ref.outputs.sha }}");
+    expect(validation.run).toContain('--consumer publisher --manifest "$manifest"');
     expect(job(releasePublish, "finalize_github_release").needs).toEqual([
       "publish",
       "publish_docker",
+      "approve_github_release",
+      "finalize_github_release_before_docker",
     ]);
 
     const identity = step(
@@ -1976,8 +2053,15 @@ describe("release validation no-push transport", () => {
     expect(reusablePermissionViolations(DOCKER_RELEASE, "prepare")).toEqual([]);
   });
 
-  it("finalizes npm-only alpha releases while retaining required Docker gates for other trains", () => {
+  it("keeps Docker required by default and activates early only after explicit approval", () => {
     const workflow = readWorkflow(".github/workflows/openclaw-release-publish.yml");
+    expect(workflow.on?.workflow_dispatch?.inputs?.finalize_release_before_docker).toMatchObject({
+      type: "boolean",
+      default: false,
+    });
+    const early = job(workflow, "finalize_github_release_before_docker");
+    expect(early.needs).toEqual(["publish", "approve_github_release_before_docker"]);
+    expect(early.steps).toEqual(job(workflow, "finalize_github_release").steps);
     const cases = [
       {
         tag: "v2026.9.1-alpha.1",
@@ -2015,21 +2099,76 @@ describe("release validation no-push transport", () => {
         publishDocker: false,
         finalize: false,
       },
+      {
+        tag: "v2026.9.1",
+        npm: "success",
+        docker: "failure",
+        beforeDocker: true,
+        early: "success",
+        publishDocker: true,
+        finalize: false,
+      },
+      {
+        tag: "v2026.9.1",
+        npm: "success",
+        docker: "success",
+        beforeDocker: true,
+        early: "success",
+        publishDocker: true,
+        finalize: true,
+      },
+      {
+        tag: "v2026.9.1",
+        npm: "failure",
+        docker: "skipped",
+        beforeDocker: true,
+        early: "skipped",
+        publishDocker: false,
+        finalize: false,
+      },
+      {
+        tag: "v2026.9.1",
+        npm: "success",
+        docker: "skipped",
+        beforeDocker: true,
+        early: "failure",
+        publishDocker: false,
+        finalize: false,
+      },
     ];
     for (const scenario of cases) {
-      const evaluate = (name: string) =>
+      const beforeDocker = scenario.beforeDocker === true;
+      const evaluate = (name: string, preparedPlugins = "") =>
         runInNewContext(job(workflow, name).if!.slice(3, -2), {
           always: () => true,
           contains: (value: string, search: string) => value.includes(search),
-          inputs: { tag: scenario.tag, publish_openclaw_npm: true, publish_docker_only: false },
+          inputs: {
+            tag: scenario.tag,
+            finalize_release_before_docker: beforeDocker,
+            publish_openclaw_npm: true,
+            publish_docker_only: false,
+            prepared_plugins: preparedPlugins,
+          },
           needs: {
             publish: { result: scenario.npm },
             publish_docker: { result: scenario.docker },
+            approve_github_release: { result: beforeDocker ? "skipped" : "success" },
+            approve_github_release_before_docker: { result: beforeDocker ? "success" : "skipped" },
+            finalize_github_release_before_docker: { result: scenario.early ?? "skipped" },
             verify_core_npm_registry: { result: "skipped" },
           },
         });
+      expect(evaluate("approve_github_release_before_docker")).toBe(
+        beforeDocker && scenario.npm === "success",
+      );
+      expect(evaluate("approve_github_release")).toBe(!beforeDocker && scenario.finalize);
+      expect(evaluate("finalize_github_release_before_docker")).toBe(
+        beforeDocker && scenario.npm === "success",
+      );
       expect(evaluate("publish_docker"), JSON.stringify(scenario)).toBe(scenario.publishDocker);
       expect(evaluate("finalize_github_release"), JSON.stringify(scenario)).toBe(scenario.finalize);
+      expect(evaluate("finalize_github_release", '{"npm":{},"clawhub":{}}')).toBe(false);
+      expect(evaluate("publish_docker", '{"npm":{},"clawhub":{}}')).toBe(scenario.publishDocker);
     }
   });
 

@@ -13,6 +13,14 @@ describes each migration source and what to do when one stays blocked.
 
 `openclaw doctor --fix` is the only owner for persistent file-to-SQLite migrations. It validates and claims each recognized source, writes and verifies canonical rows, records a migration receipt, then removes the retired source. Runtime code does not perform lazy imports or fallback reads.
 
+When a refused step blocks later work, each blocked execution receipt keeps
+`refusal.code: "blocked-by-prior-refusal"` and includes `originatingRefusal` with
+the first refusal's `stepId`, reason `code`, and human-readable `message`.
+Resolve that originating failure before retrying the blocked steps. These fields
+travel with `stepReceipts`, including Doctor refusal errors; they are separate
+from the persisted import receipts in `migration_runs` and `migration_sources`.
+Older execution receipts may omit `originatingRefusal`.
+
 Doctor imports recognized legacy workspace setup files during preflight, before
 Workshop migration accesses workspace state. An existing canonical SQLite setup record wins,
 including milestones that are absent in SQLite. Doctor does not replay stale
@@ -25,6 +33,13 @@ milestones normally. A successful repair removes the runtime blocker; the next
 run has no workspace setup migration to repeat. Invalid files and workspace
 identity/version conflicts remain blocked for inspection.
 
+Update rehearsals write only inside their copied state directory. Workspace
+files are not copied by the rehearsal, so absolute paths retained in proposal,
+rollback, and backup records remain read-only inventory. Doctor reports how many
+legacy workspace files it left untouched; it does not retire their files or
+proposal history. After the candidate is installed, the real Doctor runs the
+normal import, archival, and relocation against the operator's state.
+
 Doctor reports interrupted auth-profile archive recovery even when no new migration remains or you decline another migration. If recovery cannot finish, its warning includes the failure cause and leaves the pending source for recovery; do not delete it to silence the warning.
 
 `doctor --fix` also repairs an inconsistent completed auth migration only when its old receipt has no credential fingerprints, none of the migrated credentials remain in the current canonical store, and the preserved archive still matches the recorded source hash. Doctor reimports through the normal verified migration flow. Completed receipts with fingerprints, surviving migrated credentials, or no archive remain untouched, so removing credentials after a verified migration does not restore them from backup.
@@ -36,6 +51,13 @@ For malformed legacy `exec-approvals.json`, Doctor preserves the original bytes 
 Repair the preserved file locally, then rerun `openclaw doctor --fix` with the same `OPENCLAW_STATE_DIR` setting (leave it unset if it was unset before). Exec approvals remain blocked until migration succeeds. Explicit repair exits nonzero while the legacy file or an interrupted `.doctor-importing` claim remains, before restarting any Gateway stopped for that repair. Do not delete the file or broaden its policy to bypass validation.
 
 Agent database schema upgrades are reported with the database path and the observed before and after versions, independently of media rewrites. The media persistence message appears only when transcript sessions or trajectory rows were rewritten and includes both counts. A run that does both reports both; an unchanged rerun reports neither.
+
+Doctor shares its initial fleet schema and ownership inspection across the update
+guard and admission checks. Database readers use a bounded worker pool, including
+private snapshots for closed WAL databases, so large fleets do not launch a new
+process for every agent at every check. Repairs still verify the resulting schemas
+before reporting completion; only successful recovery of a misplaced copy clears
+that copy's ownership refusal.
 
 Device Pair and Active Memory legacy JSON imports check namespace capacity before writing. If the missing entries do not fit, doctor warns and leaves the source unchanged. These imports also verify that source keys and pre-existing destination keys remain in SQLite before reporting completion and archiving the source. A retention warning keeps the source available for inspection and retry; do not delete it to silence the warning, because it may contain state that SQLite did not retain. Resolve the capacity problem before rerunning `openclaw doctor --fix`.
 

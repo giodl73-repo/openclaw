@@ -870,9 +870,9 @@ fun OnboardingFlow(
         prompt = prompt,
         confirmLabel = nativeString("Trust"),
         cancelLabel = nativeString("Cancel"),
-        onAccept = viewModel::acceptGatewayTrustPrompt,
-        onUseSystemTrust = viewModel::useSystemGatewayTrustPrompt,
-        onDecline = viewModel::declineGatewayTrustPrompt,
+        onAccept = { viewModel.acceptGatewayTrustPrompt(prompt, it) },
+        onUseSystemTrust = { viewModel.useSystemGatewayTrustPrompt(prompt) },
+        onDecline = { viewModel.declineGatewayTrustPrompt(prompt) },
       )
     }
 
@@ -1369,7 +1369,7 @@ private fun SetupCodeInstructionsScreen(
         }
         item {
           Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            ScanQrTile(
+            SetupQrScanner(
               scannerActive = scannerActive,
               cameraPermissionGranted = cameraPermissionGranted,
               scanner = scanner,
@@ -1477,7 +1477,7 @@ private fun SetupScanErrorDialog(
 }
 
 @Composable
-private fun ScanQrTile(
+internal fun SetupQrScanner(
   scannerActive: Boolean,
   cameraPermissionGranted: Boolean,
   scanner: BarcodeScanner,
@@ -2199,11 +2199,6 @@ private fun NodeApprovalScreen(
 ) {
   val approveCommand = recoveryNodeApprovalCommand(approvalRequestId(approval))
   var waitingDialogDismissed by rememberSaveable { mutableStateOf(false) }
-  LaunchedEffect(checkingApproval) {
-    if (checkingApproval) {
-      waitingDialogDismissed = false
-    }
-  }
   val showWaitingDialog =
     checkRequested &&
       !checkingApproval &&
@@ -2267,7 +2262,11 @@ private fun NodeApprovalScreen(
           loadingText = nativeText("Checking approval…"),
           loading = checkingApproval,
           modifier = Modifier.onboardingActionButton(),
-          onClick = onCheckApproval,
+          onClick = {
+            // Only an explicit check may reopen feedback dismissed during background polling.
+            waitingDialogDismissed = false
+            onCheckApproval()
+          },
         )
       }
     }

@@ -9,6 +9,7 @@ import {
   resolveDoctorMode,
   resolveLegacyParentVersionOverride,
 } from "./doctor-health-contribution-utils.js";
+import { recordDoctorHealthWarnings } from "./doctor-health-contribution.js";
 
 export async function runCommandOwnerHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { noteCommandOwnerHealth } = await import("../commands/doctor-command-owner.js");
@@ -87,7 +88,9 @@ export async function runStartupChannelMaintenanceHealth(
 export async function runSecurityHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   const { noteInstallPolicyHealth } = await import("../commands/doctor-install-policy.js");
   const { noteSecurityWarnings } = await import("../commands/doctor-security.js");
-  await noteSecurityWarnings(ctx.cfg);
+  const { securityAuditFindingToHealthFinding } = await import("./doctor-core-checks.js");
+  const findings = await noteSecurityWarnings(ctx.cfg);
+  recordDoctorHealthWarnings(ctx, findings.map(securityAuditFindingToHealthFinding));
   await noteInstallPolicyHealth(ctx.cfg, { deep: ctx.options.deep === true, env: ctx.env });
 }
 
@@ -100,7 +103,7 @@ export async function runWebFetchProxyHealth(ctx: DoctorHealthFlowContext): Prom
 }
 
 export async function runGitHubProjectHealth(ctx: DoctorHealthFlowContext): Promise<void> {
-  const { hasConfiguredGitHubApiCredential } = await import("../gateway/control-ui-github-api.js");
+  const { hasConfiguredGitHubApiCredential } = await import("../gateway/github-public-api.js");
   if (!hasConfiguredGitHubApiCredential(ctx.env ?? process.env, ctx.cfg)) {
     note(
       "Prefer gateway.controlUi.github.token for Gateway-owned GitHub project access, or set GH_TOKEN/GITHUB_TOKEN in the shared Gateway process environment. Without either, search is public-only.",

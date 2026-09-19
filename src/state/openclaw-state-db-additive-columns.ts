@@ -12,6 +12,7 @@ const lazyColumns = [
   ["claw_installs", "bootstrap_source_path", "TEXT"],
   ["worker_environments", "desktop_json", "TEXT"],
   ["worker_environments", "bootstrap_install_kind", "TEXT"],
+  ["worker_environments", "preparation_purpose", "TEXT"],
   ["claw_package_refs", "extension_adapter_identity", "TEXT"],
   ["claw_package_refs", "extension_detected_format", "TEXT"],
   ["claw_package_refs", "extension_format", "TEXT"],
@@ -35,6 +36,9 @@ const lazyColumns = [
   ["web_push_subscriptions", "device_id", "TEXT", true],
   ["web_push_subscriptions", "user_profile_id", "TEXT", true],
   ["web_push_subscriptions", "preferences_json", "TEXT", true],
+  ["task_runs", "execution_owner_host", "TEXT", true],
+  ["task_runs", "execution_owner_pid", "INTEGER", true],
+  ["task_runs", "execution_owner_start_identity", "INTEGER", true],
 ] as const satisfies readonly LazyColumn[];
 
 function lazyColumnDefinitions(firstUseOnly?: boolean) {

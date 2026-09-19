@@ -4,26 +4,30 @@
 import { join } from "node:path";
 import { vi, type Mock } from "vitest";
 import type { ContextEngine } from "../../context-engine/types.js";
-import type { PluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.js";
-import type { createOpenClawCodingTools } from "../agent-tools.js";
+import type { createOpenClawCodingToolsInternal } from "../agent-tools.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
 import { clearAgentHarnesses } from "../harness/registry.js";
 import type { AgentHarness } from "../harness/types.js";
 import type { ModelAuthMode } from "../model-auth.js";
-import type {
-  PreparedModelRuntimeInput,
-  PreparedModelRuntimeLeaseOptions,
-} from "../prepared-model-runtime.types.js";
 import type { AgentRuntimePlan, BuildAgentRuntimePlanParams } from "../runtime-plan/types.js";
 import {
   agentSessionAutomaticCompaction,
   agentSessionSetContextReplacementHook,
 } from "../sessions/agent-session-compaction.js";
 import type { SessionManager } from "../sessions/session-manager.js";
+import {
+  acquireCompactHooksPreparedModelRuntime,
+  emptyPluginMetadataSnapshot,
+  getCurrentPluginMetadataSnapshotMock,
+  mockCompactHooksPluginMetadata,
+} from "./compact.hooks.metadata.test-support.js";
+import { createMockToolDefinitions } from "./compact.hooks.tools.test-support.js";
+import type { resolveModelAsync } from "./model.js";
 import type { attemptServerEndpointCompaction } from "./server-endpoint-compaction.js";
 import type { buildEmbeddedSystemPrompt } from "./system-prompt.js";
 
 type MockResolvedModel = {
+  logicalRef: { provider: string; model: string };
   model: {
     provider: string;
     api: string;
@@ -66,6 +70,7 @@ export const resolveContextEngineMock = vi.fn(async () => ({
 export const resolveModelMock: Mock<
   (provider?: string, modelId?: string, agentDir?: string, cfg?: unknown) => MockResolvedModel
 > = vi.fn((provider?: string, modelId?: string, _agentDir?: string, _cfg?: unknown) => ({
+  logicalRef: { provider: provider ?? "openai", model: modelId ?? "fake" },
   model: {
     provider: provider ?? "openai",
     api: "openai-responses",
@@ -78,8 +83,13 @@ export const resolveModelMock: Mock<
   modelRegistry: {},
 }));
 export const resolveModelAsyncMock = vi.fn(
-  async (provider: string, modelId: string, agentDir?: string, cfg?: unknown, _options?: unknown) =>
-    resolveModelMock(provider, modelId, agentDir, cfg),
+  async (
+    provider: string,
+    modelId: string,
+    agentDir?: string,
+    cfg?: unknown,
+    _options?: Parameters<typeof resolveModelAsync>[4],
+  ) => resolveModelMock(provider, modelId, agentDir, cfg),
 );
 export const sessionCompactImpl = vi.fn(async () => ({
   summary: "summary",
@@ -95,6 +105,15 @@ export const limitHistoryTurnsMock = vi.fn<typeof import("./history.js").limitHi
 );
 export const sessionManualCompactionMock = vi.fn();
 export const sessionAutomaticCompactionMock = vi.fn();
+// Bootstrap context for prepared compaction. Returns the production
+// BootstrapContext shape so the budget chain runs; tests override with
+// mockResolvedValueOnce to inject aggregate-exhaustion scenarios.
+export const resolveBootstrapContextForRunMock = vi.fn<
+  typeof import("../bootstrap-files.js").resolveBootstrapContextForRun
+>(async () => ({
+  bootstrapFiles: [],
+  contextFiles: [],
+}));
 export const attemptServerEndpointCompactionMock: Mock<
   (params: Parameters<typeof attemptServerEndpointCompaction>[0]) => Promise<unknown>
 > = vi.fn(async () => undefined);
@@ -178,7 +197,7 @@ export const runCliAgentMock = vi.fn(async () => ({
 }));
 export const resolveCliBackendConfigMock = vi.fn(() => null as Record<string, unknown> | null);
 function createMockCompactionSession() {
-  let onContextReplaced: ((tokensAfter: number) => void) | undefined;
+  let onContextReplaced: ((tokensAfter: number, tokensBefore: number) => void) | undefined;
   const session = {
     sessionId: "session-1",
     messages: sessionMessages.map((message) => structuredClone(message)),
@@ -206,7 +225,7 @@ function createMockCompactionSession() {
       },
     ),
     [agentSessionSetContextReplacementHook]: (
-      callback: ((tokensAfter: number) => void) | undefined,
+      callback: ((tokensAfter: number, tokensBefore: number) => void) | undefined,
     ) => {
       onContextReplaced = callback;
     },
@@ -224,7 +243,7 @@ function createMockCompactionSession() {
       (tokens, message) => tokens + estimateTokensMock(message),
       0,
     );
-    onContextReplaced?.(tokensAfter);
+    onContextReplaced?.(tokensAfter, result.tokensBefore);
     return { result, tokensAfter };
   }
   return session;
@@ -232,20 +251,9 @@ function createMockCompactionSession() {
 export const createAgentSessionMock = vi.fn(async (..._args: [unknown?, unknown?]) => ({
   session: createMockCompactionSession(),
 }));
-function createMockToolDefinitions(tools: unknown[] = []) {
-  return tools.map((tool) => {
-    const source = tool && typeof tool === "object" ? (tool as Record<string, unknown>) : {};
-    const name = typeof source.name === "string" && source.name.length > 0 ? source.name : "tool";
-    return {
-      name,
-      label: source.label ?? name,
-      description: source.description ?? "",
-      parameters: source.parameters,
-      execute: source.execute ?? vi.fn(),
-    };
-  });
-}
-export const createOpenClawCodingToolsMock = vi.fn<typeof createOpenClawCodingTools>(() => []);
+export const createOpenClawCodingToolsMock = vi.fn<typeof createOpenClawCodingToolsInternal>(
+  () => [],
+);
 export const buildEmbeddedExtensionFactoriesMock = vi.fn(() => []);
 export const resolveEffectiveCompactionModeMock = vi.fn(() => "default");
 export const guardSessionManagerMock = vi.fn((sessionManager: Record<string, unknown>) => ({
@@ -415,67 +423,9 @@ export const buildAgentRuntimePlanMock = vi.fn((params: BuildAgentRuntimePlanPar
   createCompactHooksRuntimePlan(params),
 );
 
-const emptyPluginIndex: PluginMetadataSnapshot["index"] = {
-  version: 1,
-  hostContractVersion: "test",
-  compatRegistryVersion: "test",
-  migrationVersion: 1,
-  policyHash: "",
-  generatedAtMs: 1,
-  installRecords: {},
-  plugins: [],
-  diagnostics: [],
-};
-const emptyPluginMetadataSnapshot: PluginMetadataSnapshot = {
-  policyHash: "",
-  index: emptyPluginIndex,
-  registryIndex: emptyPluginIndex,
-  registryDiagnostics: [],
-  manifestRegistry: { plugins: [], diagnostics: [] },
-  plugins: [],
-  diagnostics: [],
-  byPluginId: new Map(),
-  normalizePluginId: (pluginId: string) => pluginId,
-  declaredProviderOwners: new Map(),
-  owners: {
-    channels: new Map(),
-    channelConfigs: new Map(),
-    providers: new Map(),
-    modelCatalogProviders: new Map(),
-    cliBackends: new Map(),
-    setupProviders: new Map(),
-    commandAliases: new Map(),
-    contracts: new Map(),
-    modelIdNormalizationPolicies: new Map(),
-  },
-  metrics: {
-    registrySnapshotMs: 0,
-    manifestRegistryMs: 0,
-    ownerMapsMs: 0,
-    totalMs: 0,
-    indexPluginCount: 0,
-    manifestPluginCount: 0,
-  },
-};
-
 export const acquireAgentRunPreparedModelRuntimeMock = vi.fn(
-  async (input: PreparedModelRuntimeInput, _options?: PreparedModelRuntimeLeaseOptions) => ({
-    snapshot: {
-      agentId: input.agentId,
-      agentDir: input.agentDir,
-      config: input.config,
-      workspaceDir: input.workspaceDir,
-      metadataSnapshot: { ...emptyPluginMetadataSnapshot, workspaceDir: input.workspaceDir },
-      configuredRuntimeModels: [],
-      inlineProviderModels: [],
-      createStores: () => ({ authStorage: {}, modelRegistry: {} }),
-    },
-    release: vi.fn(),
-  }),
+  acquireCompactHooksPreparedModelRuntime,
 );
-const getCurrentPluginMetadataSnapshotMock: Mock<
-  typeof import("../../plugins/current-plugin-metadata-snapshot.js").getCurrentPluginMetadataSnapshot
-> = vi.fn(() => emptyPluginMetadataSnapshot);
 
 export function resetCompactSessionStateMocks(): void {
   sanitizeSessionHistoryMock.mockReset();
@@ -516,6 +466,11 @@ export function resetCompactSessionStateMocks(): void {
   sessionAbortCompactionMock.mockReset();
   sessionManualCompactionMock.mockReset();
   sessionAutomaticCompactionMock.mockReset();
+  resolveBootstrapContextForRunMock.mockReset();
+  resolveBootstrapContextForRunMock.mockResolvedValue({
+    bootstrapFiles: [],
+    contextFiles: [],
+  });
   attemptServerEndpointCompactionMock.mockReset();
   attemptServerEndpointCompactionMock.mockResolvedValue(undefined);
   resolveEffectiveCompactionModeMock.mockReset();
@@ -627,6 +582,7 @@ export function resetCompactHooksHarnessMocks(workspaceDir: string): void {
 
   resolveModelMock.mockReset();
   resolveModelMock.mockImplementation((provider?: string, modelId?: string) => ({
+    logicalRef: { provider: provider ?? "openai", model: modelId ?? "fake" },
     model: {
       provider: provider ?? "openai",
       api: "openai-responses",
@@ -645,7 +601,7 @@ export function resetCompactHooksHarnessMocks(workspaceDir: string): void {
       modelId: string,
       agentDir?: string,
       cfg?: unknown,
-      _options?: unknown,
+      _options?: Parameters<typeof resolveModelAsync>[4],
     ) => resolveModelMock(provider, modelId, agentDir, cfg),
   );
   resolveAgentHarnessPolicyMock.mockReset();
@@ -711,12 +667,7 @@ export async function loadCompactHooksHarness(options: { durableSession?: boolea
     runGlobalGatewayStopSafely: vi.fn(async () => undefined),
   }));
 
-  vi.doMock("../../plugins/current-plugin-metadata-snapshot.js", () => ({
-    getCurrentPluginMetadataSnapshot: getCurrentPluginMetadataSnapshotMock,
-    isCurrentPluginMetadataSnapshotRuntimeGeneration: () => false,
-    resolvePluginMetadataControlPlaneFingerprint: vi.fn(() => "test-plugin-fingerprint"),
-    withPluginMetadataSnapshotScope: (_snapshot: unknown, run: () => unknown) => run(),
-  }));
+  mockCompactHooksPluginMetadata();
 
   vi.doMock("../../plugins/command-registry-state.js", () => ({
     clearPluginCommands: vi.fn(),
@@ -910,7 +861,7 @@ export async function loadCompactHooksHarness(options: { durableSession?: boolea
   vi.doMock("../bootstrap-files.js", () => ({
     makeBootstrapWarn: vi.fn(() => () => {}),
     resolveContextInjectionMode: vi.fn(() => "always"),
-    resolveBootstrapContextForRun: vi.fn(async () => ({ contextFiles: [] })),
+    resolveBootstrapContextForRun: resolveBootstrapContextForRunMock,
   }));
 
   vi.doMock("../agent-bundle-mcp-tools.js", () => ({
@@ -943,6 +894,7 @@ export async function loadCompactHooksHarness(options: { durableSession?: boolea
 
   vi.doMock("../agent-tools.js", () => ({
     createOpenClawCodingTools: createOpenClawCodingToolsMock,
+    createOpenClawCodingToolsInternal: createOpenClawCodingToolsMock,
   }));
 
   vi.doMock("./replay-history.js", () => ({
@@ -1013,7 +965,9 @@ export async function loadCompactHooksHarness(options: { durableSession?: boolea
 
   vi.doMock("../../skills/loading/workspace-skill-loader.js", () => {
     return {
-      loadWorkspaceSkills: vi.fn(() => []),
+      prepareWorkspaceSkills: vi.fn<
+        typeof import("../../skills/loading/workspace-skill-loader.js").prepareWorkspaceSkills
+      >(async () => []),
     };
   });
 
@@ -1063,12 +1017,16 @@ export async function loadCompactHooksHarness(options: { durableSession?: boolea
     getActiveMemorySearchManagerCore: getMemorySearchManagerMock,
   }));
 
-  vi.doMock("../date-time.js", () => ({
-    formatDateStamp: vi.fn(() => "2026-01-01"),
-    formatUserTime: vi.fn(() => ""),
-    resolveUserTimeFormat: vi.fn(() => ""),
-    resolveUserTimezone: vi.fn(() => ""),
-  }));
+  vi.doMock("../date-time.js", async () => {
+    const actual = await vi.importActual<typeof import("../date-time.js")>("../date-time.js");
+    return {
+      ...actual,
+      formatDateStamp: vi.fn(() => "2026-01-01"),
+      formatUserTime: vi.fn(() => ""),
+      resolveUserTimeFormat: vi.fn(() => ""),
+      resolveUserTimezone: vi.fn(() => ""),
+    };
+  });
 
   vi.doMock("../defaults.js", () => ({
     DEFAULT_MODEL: "fake-model",

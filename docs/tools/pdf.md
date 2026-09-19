@@ -64,6 +64,13 @@ Notes:
 
 Other URI schemes (for example `ftp://`) return `details.error = "unsupported_pdf_reference"`. Remote `http(s)` URLs are rejected when the tool runs sandboxed. With workspace-only file policy enabled, local paths outside allowed roots are rejected; managed inbound refs and replayed paths under OpenClaw's inbound media store are still allowed.
 
+`data:` URLs are unsupported. Files identified as other document types, such as
+plain text or JSON, are rejected before model dispatch.
+
+Relative paths resolve from the task's working directory, including selected Git
+worktrees. Local reads use the session's approved filesystem root; see
+[Local media files](/tools/media-overview#local-media-files).
+
 ## Execution modes
 
 ### Native provider mode
@@ -85,6 +92,7 @@ Used for every other provider.
 
 Details:
 
+- Local extraction runs in a reusable worker so PDF text and image processing do not block the Gateway. Cancelling the agent run stops queued or active extraction.
 - Encrypted PDFs open with the top-level `password` parameter.
 - If the model has no image input and there is no extractable text, the tool errors.
 - If image rendering fails, OpenClaw drops the images and continues with the extracted text.

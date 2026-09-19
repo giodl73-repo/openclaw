@@ -1,9 +1,13 @@
+import type { StateLeaseProcessOwner } from "../infra/state-lease-process-owner.js";
 import type { OpenClawStateLeaseIdentity } from "./openclaw-state-lease-store.js";
+
+export const LEASE_HEARTBEAT_START_TIMEOUT_MS = 5_000;
 
 export const leaseHeartbeatState = {
   status: 0,
   request: 1,
   ack: 2,
+  expiresAt: 3,
   starting: 0n,
   ready: 1n,
   closed: 2n,
@@ -12,8 +16,12 @@ export const leaseHeartbeatState = {
 
 export type LeaseHeartbeatWorkerData = {
   path: string;
+  existingOnly?: boolean;
+  /** Private parent retains the actual lifecycle coordinator until native worker exit. */
+  parentCoordinatorRetained?: true;
   identity: OpenClawStateLeaseIdentity;
   leaseMs: number;
   heartbeatMs: number;
+  processOwner?: { identity: StateLeaseProcessOwner; env: NodeJS.ProcessEnv };
   shared: SharedArrayBuffer;
 };

@@ -3,6 +3,7 @@ import type { TrustedSubagentCompletionHandoff } from "../../agents/subagents/an
 import type { ChatType } from "../../channels/chat-type.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { GroupToolPolicyConfig } from "../../config/types.tools.js";
+import type { GatewayUiCommandTarget } from "../../gateway/ui-command-target.types.js";
 import type { ImageContent } from "../../llm/types.js";
 import type { MediaFact } from "../../media/media-facts.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
@@ -55,6 +56,8 @@ export type ReplyBackendQueueMessageOptions = {
 export type ReplyMessageInjectionOptions = ReplyBackendQueueMessageOptions & {
   /** Consumed by reply ownership and never forwarded to the active backend. */
   toolAuthorityOverlay?: ReplyToolAuthorityOverlay;
+  /** Composed into V2's final admission assertion after asynchronous preparation. */
+  assertCurrent?: () => void;
 };
 
 export type ReplyToolAuthorityRoute = Readonly<{
@@ -90,6 +93,7 @@ export type ReplyToolAuthorityOverlay = Readonly<{
   traceAuthorized: boolean;
   approvalReviewerDeviceId?: string;
   clientCaps?: string[];
+  gatewayUiCommandTarget?: GatewayUiCommandTarget;
   toolBindings?: Readonly<Record<string, unknown>>;
 }>;
 
@@ -174,6 +178,8 @@ export const replyMessageInjectionTargetOperation = Symbol("replyMessageInjectio
 export type ReplyMessageInjectionTarget = {
   readonly [replyMessageInjectionTargetOperation]: ReplyOperation;
   readonly runId?: string;
+  /** Channel source-turn identity of the owning run (see the registry's `sourceTurnByKey`). */
+  readonly sourceTurnId?: string;
 };
 
 export const replyRunInterruptTargetOperation = Symbol("replyRunInterruptTargetOperation");
@@ -192,6 +198,8 @@ type ReplyMessageInjectionRejectionReason =
 export type ReplyMessageInjectionOutcome =
   | { status: "indeterminate"; errorMessage: string }
   | { status: "accepted"; result?: ReplyBackendQueueMessageResult }
+  /** Terminal authority failure; the separately recorded acceptance stays unchanged. */
+  | { status: "failed"; error: Error }
   | { status: "rejected"; reason: ReplyMessageInjectionRejectionReason; errorMessage?: string };
 
 export type ReplyMessageInjectionAttempt = {
@@ -204,6 +212,7 @@ export type ReplyMessageInjectionAttempt = {
 };
 
 type ReplyBackendQueueMessageMismatch =
+  | "input_visibility_mismatch"
   | "tool_authority_mismatch"
   | "image_input_unsupported"
   | "source_reply_delivery_mode_mismatch"
@@ -357,6 +366,9 @@ export type ReplyRunRegistry = {
   }): ReplyOperation;
   get(sessionKey: string): ReplyOperation | undefined;
   isActive(sessionKey: string): boolean;
+  /** Binds a source only while the exact operation still owns its run slot. */
+  bindSourceTurnId(operation: ReplyOperation, sourceTurnId: string): void;
+  getSourceTurnId(sessionKey: string): string | undefined;
   /** Captures the current direct owner without requiring client-supplied run identity. */
   resolveCurrentMessageInjectionTarget(sessionKey: string): ReplyMessageInjectionTarget | undefined;
   /** Captures the current direct owner for exact-instance interruption. */

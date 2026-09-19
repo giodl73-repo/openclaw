@@ -5,6 +5,7 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { Message, Usage } from "openclaw/plugin-sdk/llm";
 import { afterAll, describe, expect, it } from "vitest";
+import { createReadTool } from "../agents/sessions/tools/read.js";
 import { formatSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
 import {
   replaceSessionEntry,
@@ -187,7 +188,7 @@ function writeToolCallOnlySessionFile(sessionFile: string): void {
   );
 }
 
-function writeToolCallSessionFile(sessionFile: string): void {
+function writeToolCallSessionFile(sessionFile: string, toolResultText = "README contents"): void {
   const header = {
     type: "session",
     version: 3,
@@ -226,7 +227,7 @@ function writeToolCallSessionFile(sessionFile: string): void {
       id: "entry-tool-result",
       parentId: "entry-tool-call",
       timestamp: "2026-04-01T05:46:42.000Z",
-      message: toolResultMessage([{ type: "text", text: "README contents" }]),
+      message: toolResultMessage([{ type: "text", text: toolResultText }]),
     },
     {
       type: "message",
@@ -803,6 +804,50 @@ describe("exportTrajectoryBundle", () => {
     expect(artifacts).toBeUndefined();
   });
 
+  it.each(["evidence-line-1", '{"project":"Orion","ready":true}'])(
+    "preserves paginated read evidence beginning with %s in exported trajectory events",
+    async (firstLine) => {
+      const tmpDir = makeTempDir();
+      const sessionFile = path.join(tmpDir, "session.jsonl");
+      const sourceFile = path.join(tmpDir, "evidence.txt");
+      const outputDir = path.join(tmpDir, "bundle");
+      fs.writeFileSync(
+        sourceFile,
+        `${[firstLine, ...Array.from({ length: 14 }, (_, index) => `evidence-line-${index + 2}`)].join("\n")}\n`,
+        "utf8",
+      );
+      const readResult = await createReadTool(tmpDir).execute("call_1", {
+        path: "evidence.txt",
+        offset: 1,
+        limit: 3,
+      });
+      const resultText = readResult.content.find((part) => part.type === "text")?.text;
+      expect(resultText).toContain("[12 more lines in file. Use offset=4 to continue.]");
+      writeToolCallSessionFile(sessionFile, expectDefined(resultText, "read result text"));
+
+      await exportTrajectoryBundle({
+        outputDir,
+        sessionFile,
+        sessionId: "session-1",
+        workspaceDir: tmpDir,
+      });
+
+      const exportedEvents = fs
+        .readFileSync(path.join(outputDir, "events.jsonl"), "utf8")
+        .trim()
+        .split(/\r?\n/u)
+        .map((line) => JSON.parse(line) as TrajectoryEvent);
+      const toolResult = exportedEvents.find((event) => event.type === "tool.result");
+
+      expect(toolResult?.data).toMatchObject({
+        message: {
+          isError: false,
+          content: [{ type: "text", text: resultText }],
+        },
+      });
+    },
+  );
+
   it("preserves numeric transcript timestamps", async () => {
     const tmpDir = makeTempDir();
     const sessionFile = path.join(tmpDir, "session.jsonl");
@@ -1186,6 +1231,47 @@ describe("exportTrajectoryBundle", () => {
         workspaceDir: tmpDir,
       }),
     ).rejects.toThrow(/session file is too large/u);
+  });
+
+  it("rejects oversized SQLite transcript store before parsing or creating output", async () => {
+    const tmpDir = makeTempDir();
+    const storePath = path.join(tmpDir, "sessions.json");
+    const outputDir = path.join(tmpDir, "bundle");
+    const sessionId = "session-byte-budget";
+    const sessionKey = "agent:main:session-byte-budget";
+    const oversizedContent = "x".repeat(TRAJECTORY_RUNTIME_FILE_MAX_BYTES + 1);
+
+    await replaceTranscriptEvents({ agentId: "main", sessionId, sessionKey, storePath }, [
+      {
+        type: "session",
+        version: 3,
+        id: sessionId,
+        timestamp: "2026-04-01T05:46:39.000Z",
+        cwd: tmpDir,
+      },
+      {
+        type: "message",
+        id: "entry-user",
+        parentId: null,
+        timestamp: "2026-04-01T05:46:40.000Z",
+        message: userMessage(oversizedContent),
+      },
+    ]);
+
+    await expect(
+      exportTrajectoryBundle({
+        outputDir,
+        sessionFile: formatSqliteSessionFileMarker({
+          agentId: "main",
+          sessionId,
+          storePath,
+        }),
+        sessionId,
+        sessionKey,
+        workspaceDir: tmpDir,
+      }),
+    ).rejects.toThrow(/transcript store is too large to export/u);
+    expect(fs.existsSync(outputDir)).toBe(false);
   });
 
   it("skips malformed-but-valid runtime json rows before sorting", async () => {

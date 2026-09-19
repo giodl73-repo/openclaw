@@ -74,6 +74,31 @@ describe("native device settings wire contract", () => {
   });
 
   it.each([
+    { state: "locked", enabled: true },
+    { state: "unlocked", enabled: false },
+    { state: "unknown", enabled: true },
+    { state: undefined, enabled: undefined },
+  ] as const)(
+    "preserves published desktop state $state and hosting $enabled",
+    ({ state, enabled }) => {
+      installBridge();
+      const listener = vi.fn();
+      capability?.subscribe(listener);
+      const snapshot = createNativeDeviceSettingsSnapshot();
+      if (state === undefined) {
+        delete snapshot.desktopAvailability;
+        delete snapshot.capabilities.unattendedDesktopEnabled;
+      } else {
+        snapshot.desktopAvailability = { state };
+        snapshot.capabilities.unattendedDesktopEnabled = enabled;
+      }
+      publish(snapshot);
+      expect(capability?.snapshot).toEqual(snapshot);
+      expect(listener).toHaveBeenCalledWith(snapshot);
+    },
+  );
+
+  it.each([
     { name: "empty", entries: [] },
     { name: "single", entries: [{ id: "camera", status: "granted" }] },
     {
@@ -98,7 +123,12 @@ describe("native device settings wire contract", () => {
     ["absent family encoded as null", { app: null }],
     ["appearance", { app: { appearance: "sepia" } }],
     ["notifications", { app: { notificationsEnabled: "true" } }],
+    ["native experience", { app: { nativeExperienceEnabled: "true" } }],
     ["iOS capability", { capabilities: { healthSummaryEnabled: "true" } }],
+    ["unattended desktop toggle", { capabilities: { unattendedDesktopEnabled: "true" } }],
+    ...[null, {}, { state: "available" }, { state: true }].map(
+      (desktopAvailability) => ["desktop availability", { desktopAvailability }] as const,
+    ),
     ...[
       null,
       { selectedId: 1, available: [] },
@@ -264,6 +294,7 @@ describe("native device settings wire contract", () => {
     const post = installBridge();
     post.mockClear();
     capability?.set("app.showDockIcon", false);
+    capability?.set("app.nativeExperienceEnabled", true);
     capability?.set("app.iconStyle", "origami");
     capability?.set("voice.microphone", null);
     capability?.set("browser.cookieSync.domains", ["example.com"]);
@@ -274,6 +305,7 @@ describe("native device settings wire contract", () => {
     capability?.checkForUpdates();
     expect(post.mock.calls.map(([message]) => message)).toEqual([
       { type: "set", key: "app.showDockIcon", value: false },
+      { type: "set", key: "app.nativeExperienceEnabled", value: true },
       { type: "set", key: "app.iconStyle", value: "origami" },
       { type: "set", key: "voice.microphone", value: null },
       { type: "set", key: "browser.cookieSync.domains", value: ["example.com"] },

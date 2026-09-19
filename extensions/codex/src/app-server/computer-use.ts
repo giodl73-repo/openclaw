@@ -28,6 +28,7 @@ import {
 } from "./desktop-app-paths.js";
 import { isManagedCodexDesktopCommand } from "./managed-binary.js";
 import { acquireCodexNativeConfigFence } from "./native-config-fence.js";
+import type { ToolCallResult as CodexMcpToolCallResult } from "./protocol-mcp.js";
 import type {
   CodexAppServerRequestResult,
   CodexConfigReadResponse,
@@ -168,6 +169,7 @@ type CodexComputerUseInspectionParams = {
   timeoutMs?: number;
   signal?: AbortSignal;
   computerUseConfig: ResolvedCodexComputerUseConfig;
+  runLiveTest: boolean;
   installPlugin: boolean;
   defaultBundledMarketplacePath?: string;
   defaultBundledMarketplacePathCandidates?: readonly string[];
@@ -222,6 +224,9 @@ const COMPUTER_USE_MARKETPLACE_NAME_PRIORITY = [
 ];
 const COMPUTER_USE_LIVE_TEST_RETRY_COUNT = 1;
 const COMPUTER_USE_LIVE_TEST_THREAD_NAME = "OpenClaw Computer Use readiness probe";
+const COMPUTER_USE_LIST_APPS_TOOL = "list_apps";
+const COMPUTER_USE_UNIFIED_JS_TOOL = "js";
+const COMPUTER_USE_UNIFIED_JS_PROBE = "await cua.getState();";
 
 /** Reads Computer Use readiness without installing or mutating app-server state. */
 export async function readCodexComputerUseStatus(
@@ -235,6 +240,7 @@ export async function readCodexComputerUseStatus(
     return await inspectCodexComputerUse({
       ...params,
       computerUseConfig: config,
+      runLiveTest: true,
       installPlugin: false,
     });
   } catch (error) {
@@ -247,8 +253,8 @@ export async function readCodexComputerUseStatus(
 }
 
 /**
- * Ensures Computer Use is ready when enabled, optionally installing when config
- * allows safe auto-install.
+ * Ensures installation and MCP exposure before a turn, optionally installing when
+ * config allows safe auto-install. Only strict startup waits for a live probe.
  */
 export async function ensureCodexComputerUse(
   params: CodexComputerUseSetupParams = {},
@@ -260,12 +266,10 @@ export async function ensureCodexComputerUse(
   const status = await inspectCodexComputerUse({
     ...params,
     computerUseConfig: config,
+    runLiveTest: config.strictReadiness,
     installPlugin: false,
   });
   if (status.ready) {
-    return status;
-  }
-  if (isNonStrictLiveTestStartupAllowed(status, config)) {
     return status;
   }
   if (config.autoInstall) {
@@ -276,11 +280,9 @@ export async function ensureCodexComputerUse(
     const installedStatus = await inspectCodexComputerUse({
       ...params,
       computerUseConfig: config,
+      runLiveTest: config.strictReadiness,
       installPlugin: true,
     });
-    if (isNonStrictLiveTestStartupAllowed(installedStatus, config)) {
-      return installedStatus;
-    }
     if (!installedStatus.ready) {
       throw new CodexComputerUseSetupError(installedStatus);
     }
@@ -304,6 +306,7 @@ export async function installCodexComputerUse(
   const status = await inspectCodexComputerUse({
     ...params,
     computerUseConfig: config,
+    runLiveTest: true,
     installPlugin: true,
   });
   if (!status.ready) {
@@ -461,6 +464,7 @@ async function inspectCodexComputerUseWithoutFence(
     request,
     config: params.computerUseConfig,
     plugin: pluginInspection.plugin,
+    runLiveTest: params.runLiveTest,
     installPlugin: params.installPlugin,
     releaseNativeConfigFence: params.releaseNativeConfigFence,
   });
@@ -604,6 +608,7 @@ async function readComputerUseTools(params: {
   request: CodexComputerUseRequest;
   config: ResolvedCodexComputerUseConfig;
   plugin: CodexPluginDetail;
+  runLiveTest: boolean;
   installPlugin: boolean;
   releaseNativeConfigFence?: () => void;
 }): Promise<CodexComputerUseStatus> {
@@ -640,11 +645,17 @@ async function readComputerUseTools(params: {
     reason: "ready",
     message: "Computer Use is ready.",
   });
+  // Non-strict turns need installation and exposure, not a desktop round trip.
+  // Explicit diagnostics and the client-owned health monitor still probe live use.
+  if (!params.runLiveTest) {
+    return status;
+  }
   // The readiness thread reacquires this fence before loading native config.
   params.releaseNativeConfigFence?.();
   const { liveTest, repair } = await runCodexComputerUseLiveTest({
     request: params.request,
     config: params.config,
+    tools,
   });
   const compatibilityStartupAllowed = !liveTest.ok && !params.config.strictReadiness;
   return {
@@ -670,28 +681,15 @@ async function readComputerUseTools(params: {
   };
 }
 
-function isNonStrictLiveTestStartupAllowed(
-  status: CodexComputerUseStatus,
-  config: ResolvedCodexComputerUseConfig,
-): boolean {
-  return (
-    !config.strictReadiness &&
-    status.reason === "live_test_failed" &&
-    status.installed &&
-    status.pluginEnabled &&
-    status.mcpServerAvailable &&
-    status.installation.ok &&
-    status.exposure.ok
-  );
-}
-
 export async function runCodexComputerUseLiveTest(params: {
   request: CodexComputerUseRequest;
   config: ResolvedCodexComputerUseConfig;
+  tools?: readonly string[];
 }): Promise<{ liveTest: CodexComputerUseLiveTestStatus; repair?: CodexComputerUseRepairStatus }> {
   const startedAt = Date.now();
   let lastError: unknown;
   let repair: CodexComputerUseRepairStatus | undefined;
+  const probe = resolveComputerUseLiveTestProbe(params.tools);
   for (let attempt = 0; attempt <= COMPUTER_USE_LIVE_TEST_RETRY_COUNT; attempt += 1) {
     let threadId: string | undefined;
     try {
@@ -707,18 +705,23 @@ export async function runCodexComputerUseLiveTest(params: {
         },
       );
       threadId = thread.thread.id;
-      await params.request(
+      const toolResult = await params.request<CodexMcpToolCallResult>(
         "mcpServer/tool/call",
         {
           threadId,
           server: params.config.mcpServerName,
-          tool: "list_apps",
-          arguments: {},
+          tool: probe.tool,
+          arguments: probe.arguments,
         },
         {
           timeoutMs: params.config.toolCallTimeoutMs,
         },
       );
+      if (toolResult.isError === true) {
+        throw new Error(
+          `Computer Use readiness tool ${params.config.mcpServerName}.${probe.tool} returned an error result`,
+        );
+      }
       return {
         liveTest: {
           status: "passed",
@@ -763,6 +766,22 @@ export async function runCodexComputerUseLiveTest(params: {
     },
     ...(repair ? { repair } : {}),
   };
+}
+
+function resolveComputerUseLiveTestProbe(tools: readonly string[] | undefined): {
+  tool: string;
+  arguments: Record<string, JsonValue>;
+} {
+  if (
+    tools?.includes(COMPUTER_USE_UNIFIED_JS_TOOL) &&
+    !tools.includes(COMPUTER_USE_LIST_APPS_TOOL)
+  ) {
+    return {
+      tool: COMPUTER_USE_UNIFIED_JS_TOOL,
+      arguments: { code: COMPUTER_USE_UNIFIED_JS_PROBE },
+    };
+  }
+  return { tool: COMPUTER_USE_LIST_APPS_TOOL, arguments: {} };
 }
 
 async function repairComputerUseMcpRuntime(

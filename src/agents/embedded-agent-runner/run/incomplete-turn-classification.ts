@@ -1,7 +1,10 @@
 /** Classifies terminal assistant visibility and provider retry eligibility. */
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { getReplyPayloadMetadata } from "../../../auto-reply/reply-payload.js";
+import { parseReplyDirectives } from "../../../auto-reply/reply/reply-directives.js";
 import { isSilentReplyPayloadText, SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
+import { resolveRawAssistantAnswerText } from "../../../shared/assistant-answer-text.js";
 import { extractEmbeddedAssistantText } from "../../embedded-agent-utils.js";
 import {
   isStrictAgenticSupportedProviderModel,
@@ -9,6 +12,7 @@ import {
 } from "../../execution-contract.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import { assessLastAssistantMessage } from "../thinking.js";
+import type { EmbeddedAgentRunResult } from "../types.js";
 import { resolveCurrentAttemptAssistant } from "./attempt-terminal-evidence.js";
 import type { EmbeddedRunAttemptResult } from "./types.js";
 
@@ -79,6 +83,49 @@ export function hasComposedVisibleAnswerAfterSettledTools(params: {
   });
 }
 
+/** Excludes only plain progress text; structured or tool-owned payloads remain delivery evidence. */
+export function countSettledTurnDeliveryPayloads(params: {
+  payloads: EmbeddedAgentRunResult["payloads"];
+  attempt: IncompleteTurnAttempt;
+}): number {
+  const hasNoAssistantText = params.attempt.assistantTexts.every((text) => !text.trim());
+  const hasComposedVisibleAnswer = hasComposedVisibleAnswerAfterSettledTools(params.attempt);
+  const canFinalizeProviderError =
+    params.attempt.settledTurnFinalizationContext && !hasComposedVisibleAnswer;
+  return (params.payloads ?? []).filter((payload) => {
+    const metadata = getReplyPayloadMetadata(payload);
+    const syntheticFallback =
+      payload.isError === true &&
+      Object.keys(payload).every((key) => key === "text" || key === "isError") &&
+      ((hasNoAssistantText && metadata?.toolErrorWarning) ||
+        (canFinalizeProviderError && metadata?.terminalProviderError));
+    if (syntheticFallback) {
+      return false;
+    }
+    // Transcript row references do not establish a final answer or delivery.
+    const hasDeliveryMetadata =
+      metadata &&
+      Object.keys(metadata).some(
+        (key) =>
+          key !== "assistantMessageIndex" &&
+          key !== "assistantTranscriptOwned" &&
+          key !== "assistantTranscriptIdempotencyKey",
+      );
+    if (hasComposedVisibleAnswer || hasDeliveryMetadata) {
+      return true;
+    }
+    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    const hasNonTextDelivery = Object.entries(payload).some(
+      ([key, value]) => key !== "text" && value !== undefined && value !== false,
+    );
+    return (
+      hasNonTextDelivery ||
+      !text ||
+      !params.attempt.assistantTexts.some((candidate) => candidate.trim() === text)
+    );
+  }).length;
+}
+
 export function hasPositiveOutputTokenUsage(message: AgentMessage | null): boolean {
   if (!message || typeof message !== "object") {
     return false;
@@ -140,8 +187,23 @@ export function joinAssistantTexts(assistantTexts?: readonly string[]): string {
   return (assistantTexts ?? []).join("\n\n").trim();
 }
 
-export function hasOnlySilentAssistantReply(assistantTexts?: readonly string[]): boolean {
-  const nonEmptyTexts = (assistantTexts ?? []).filter((text) => text.trim().length > 0);
+/** Uses the current canonical answer, never earlier accumulated text, to recognize authored silence. */
+export function hasExplicitSilentAssistantReply(
+  attempt: Pick<
+    IncompleteTurnAttempt,
+    "assistantTexts" | "currentAttemptAssistant" | "currentAttemptCompletedAssistant"
+  >,
+): boolean {
+  const assistant = resolveCurrentAttemptAssistant(attempt);
+  if (assistant) {
+    return (
+      assistant.stopReason !== "error" &&
+      assistant.stopReason !== "aborted" &&
+      parseReplyDirectives(resolveRawAssistantAnswerText(assistant)).isSilent
+    );
+  }
+  // Text-only attempt projections have no canonical message to supersede these fragments.
+  const nonEmptyTexts = attempt.assistantTexts.filter((text) => text.trim().length > 0);
   return (
     nonEmptyTexts.length > 0 &&
     nonEmptyTexts.every((text) => isSilentReplyPayloadText(text, SILENT_REPLY_TOKEN))

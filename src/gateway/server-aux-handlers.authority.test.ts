@@ -19,6 +19,7 @@ import { ApprovalObserverClosedError } from "./exec-approval-lifecycle.js";
 import { getOperatorApprovalDetailed } from "./operator-approval-store.js";
 import { createGatewayAuxHandlers } from "./server-aux-handlers.js";
 import { createWorkerSessionPlacementStore } from "./worker-environments/placement-store.js";
+import { seedAttachedPlacementEnvironment } from "./worker-environments/placement-test-fixtures.js";
 
 type GatewayAux = ReturnType<typeof createGatewayAuxHandlers>;
 type GatewayAuxParams = Parameters<typeof createGatewayAuxHandlers>[0];
@@ -36,6 +37,7 @@ function createAuthorityHarness(
 ): GatewayAux {
   const aux = createGatewayAuxHandlers({
     log: {},
+    getNativeApprovalRouteCoordinator: () => undefined,
     activateRuntimeSecrets: async () => {
       throw new Error("unexpected secrets reload");
     },
@@ -115,7 +117,7 @@ describe("gateway auxiliary authority lifecycle", () => {
     expect(getOperatorApprovalDetailed({ id: record.id })).toEqual(pending);
   });
 
-  it("cancels generation approvals without closing whole-run capabilities", async () => {
+  it("reports scoped authority closure separately from whole-run capability closure", async () => {
     const onAgentRunAuthorityClosed = vi.fn();
     const gatewayAux = createAuthorityHarness({
       onAgentRunAuthorityClosed,
@@ -136,15 +138,92 @@ describe("gateway auxiliary authority lifecycle", () => {
 
     await expect(pending).resolves.toBeNull();
     expect(gatewayAux.execApprovalManager.getSnapshot(record.id)?.status).toBe("cancelled");
-    expect(onAgentRunAuthorityClosed).not.toHaveBeenCalled();
+    expect(onAgentRunAuthorityClosed).toHaveBeenCalledExactlyOnceWith(
+      scoped,
+      "approval-scope-closed",
+    );
     expect(validateAgentRunDelegatedAuthority(authority)).toBe(true);
 
     releaseAgentRunDelegatedAuthority(authority);
 
-    expect(onAgentRunAuthorityClosed).toHaveBeenCalledOnce();
-    expect(onAgentRunAuthorityClosed).toHaveBeenCalledWith(
+    expect(onAgentRunAuthorityClosed).toHaveBeenCalledTimes(2);
+    expect(onAgentRunAuthorityClosed).toHaveBeenLastCalledWith(
       expect.objectContaining({ operationalRunInstance }),
+      undefined,
     );
+  });
+
+  it("retires one request approval while its sibling and admitted run remain live", async () => {
+    const onAgentRunAuthorityClosed =
+      vi.fn<
+        (
+          authority: ReturnType<typeof claimAgentRunDelegatedAuthority>,
+          approvalReason?: string,
+        ) => void
+      >();
+    const gatewayAux = createAuthorityHarness({
+      onAgentRunAuthorityClosed,
+      validateAgentRuntimeDelegatedAuthority: validateAgentRunDelegatedAuthority,
+    });
+    const publishResolved = vi.fn();
+    gatewayAux.bindApprovalPublicationContext({
+      broadcast: vi.fn(),
+      broadcastToConnIds: vi.fn(),
+      approvalEvents: { publishResolved },
+      logGateway: { error: vi.fn() },
+    } as never);
+    const authority = claimAgentRunDelegatedAuthority({
+      instanceId: "native-permission-owner",
+      runId: "native-permission-run",
+    });
+    const host = new AbortController();
+    const first = new AbortController();
+    const second = new AbortController();
+    const records = [first, second].map((request, index) => {
+      const scoped = claimAgentRunApprovalAuthority(authority, [host.signal, request.signal]);
+      const record = gatewayAux.pluginApprovalManager.create(
+        { title: `Request ${index}`, description: "Independent native approval" },
+        60_000,
+      );
+      record.agentRuntimeDelegatedAuthority = { ...scoped, kind: "local" };
+      const decision = gatewayAux.pluginApprovalManager.register(record, 60_000);
+      return { record, decision };
+    });
+    try {
+      first.abort();
+      await expect(records[0]!.decision).resolves.toBeNull();
+      expect(getOperatorApprovalDetailed({ id: records[0]!.record.id })).toMatchObject({
+        outcome: "found",
+        record: { status: "cancelled", terminalReason: "run-aborted" },
+      });
+      await vi.waitFor(() => expect(publishResolved).toHaveBeenCalledTimes(1));
+      expect(publishResolved).toHaveBeenCalledWith(
+        "plugin",
+        expect.objectContaining({ id: records[0]!.record.id }),
+      );
+      expect(getOperatorApprovalDetailed({ id: records[1]!.record.id })).toMatchObject({
+        outcome: "found",
+        record: { status: "pending" },
+      });
+      // Scoped approval notifications do not retire whole-run capabilities.
+      expect(
+        onAgentRunAuthorityClosed.mock.calls.filter(
+          ([, approvalReason]) => approvalReason === undefined,
+        ),
+      ).toEqual([]);
+      expect(validateAgentRunDelegatedAuthority(authority)).toBe(true);
+      expect(
+        gatewayAux.pluginApprovalManager.resolve(
+          records[1]!.record.id,
+          "allow-once",
+          "fixture reviewer",
+        ),
+      ).toBe(true);
+      await expect(records[1]!.decision).resolves.toBe("allow-once");
+    } finally {
+      host.abort();
+      releaseAgentRunDelegatedAuthority(authority);
+    }
   });
 
   it.each(["release", "replacement", "generation"] as const)(
@@ -197,6 +276,7 @@ describe("gateway auxiliary authority lifecycle", () => {
         expect(onAgentRunAuthorityClosed).toHaveBeenCalledOnce();
         expect(onAgentRunAuthorityClosed).toHaveBeenCalledWith(
           expect.objectContaining({ operationalRunInstance }),
+          undefined,
         );
       } finally {
         await gatewayAux.stopOperatorInteractions();
@@ -301,6 +381,11 @@ describe("gateway auxiliary authority lifecycle", () => {
       agentId: "main",
       sessionKey: "agent:main:worker-close",
     };
+    seedAttachedPlacementEnvironment(database, {
+      environmentId: "worker-env",
+      sessionId: identity.sessionId,
+      ownerEpoch: 7,
+    });
     let placement = placements.startDispatch(identity);
     placement = placements.transition({
       sessionId: identity.sessionId,

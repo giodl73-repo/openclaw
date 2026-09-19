@@ -22,6 +22,11 @@ export const TSGO_CORE_TEST_SHARDS = [
     config: "test/tsconfig/tsconfig.core.test.gateway-root.json",
   },
   {
+    name: "gateway-server",
+    group: "src",
+    config: "test/tsconfig/tsconfig.core.test.gateway-server.json",
+  },
+  {
     name: "gateway-other",
     group: "src",
     config: "test/tsconfig/tsconfig.core.test.gateway-other.json",
@@ -62,6 +67,17 @@ export const TSGO_CORE_TEST_SHARDS = [
     group: "packages",
     config: "test/tsconfig/tsconfig.test.packages.json",
     sparseRoots: ["packages", "src", "ui/src"],
+  },
+  {
+    name: "plugin-sdk",
+    group: "src",
+    config: "test/tsconfig/tsconfig.core.test.plugin-sdk.json",
+  },
+  // Append new splits to preserve the existing CI stripe assignments.
+  {
+    name: "commands-doctor",
+    group: "src",
+    config: "test/tsconfig/tsconfig.core.test.commands-doctor.json",
   },
 ] as const;
 

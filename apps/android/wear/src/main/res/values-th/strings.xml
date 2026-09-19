@@ -6,6 +6,8 @@
     <string name="controls" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"การควบคุม"</string>
     <string name="talk" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"พูดคุย"</string>
     <string name="real_time_audio_failed" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เสียงจากนาฬิกาล้มเหลว"</string>
+    <string name="microphone_permission_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"ต้องให้สิทธิ์เข้าถึงไมโครโฟน"</string>
+    <string name="open_settings" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"เปิดการตั้งค่า"</string>
     <string name="dictate" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ป้อนด้วยเสียง"</string>
     <string name="live" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"สด"</string>
     <string name="thread" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เธรด"</string>
@@ -26,6 +28,7 @@
     <string name="speak_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"อ่านคำตอบล่าสุดออกเสียง"</string>
     <string name="speaking" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"กำลังพูด"</string>
     <string name="listening" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"กำลังฟัง"</string>
+    <string name="stopping" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"กำลังวางสาย…"</string>
     <string name="connecting" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"กำลังเชื่อมต่อ"</string>
     <string name="thinking" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"กำลังคิด"</string>
     <string name="typing" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"กำลังพิมพ์"</string>
@@ -79,6 +82,8 @@
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ไม่ยอมรับการดำเนินการ"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"เกิดข้อผิดพลาดบางอย่าง"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"รีเฟรชรายการแล้วลองอีกครั้ง"</string>
+    <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"ไม่สามารถรีเฟรชโมเดลบางรายการได้ โมเดลที่แสดงในรายการยังคงใช้งานได้"</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"อัปเดต OpenClaw บนโทรศัพท์ของคุณและ Gateway เพื่อเลือกโมเดลสำหรับแชทนี้"</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ลองอีกครั้งจากนาฬิกา"</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"จำเป็นต้องอัปเดต"</string>
     <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"อัปเดต OpenClaw ทั้งบนโทรศัพท์และนาฬิกา"</string>

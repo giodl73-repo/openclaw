@@ -42,7 +42,7 @@ Its disk write restores environment references using the original read snapshot.
 
 Internal OpenClaw runtime code follows the same direction: load config once at the CLI, gateway, or process boundary, then pass that value through. Successful mutation writes refresh the process runtime snapshot and advance its internal revision; long-lived caches should key off the runtime-owned cache key instead of serializing config locally. Long-lived runtime modules have a zero-tolerance scanner for ambient `loadConfig()` calls; use a passed `cfg`, a request `context.getRuntimeConfig()`, or `getRuntimeConfig()` at an explicit process boundary.
 
-Provider and channel execution paths must use the active runtime config snapshot, not a file snapshot returned for config readback or editing. File snapshots preserve source values such as SecretRef markers for UI and writes; provider callbacks need the resolved runtime view. When a helper may be called with either the active source snapshot or the active runtime snapshot, route through `selectApplicableRuntimeConfig()` before reading credentials.
+Provider and channel execution paths must use the active runtime config snapshot, not a file snapshot returned for config readback or editing. File snapshots preserve source values such as SecretRef markers for UI and writes; provider callbacks need the resolved runtime view. When a helper may be called with either the active source snapshot or the active runtime snapshot, route through `selectApplicableRuntimeConfig()` before reading credentials. The selector replaces a distinct supplied config only when it matches the runtime snapshot's paired source, including resolution provenance. A pinned snapshot without that source cannot override an explicit config, including a command-scoped config whose secrets have already been resolved. With no supplied config, the selector returns the runtime snapshot.
 
 Retained channel monitors can bind `createRuntimeConfigReader(cfg)` from
 `openclaw/plugin-sdk/runtime-config-snapshot` once at startup. The reader follows
@@ -82,9 +82,25 @@ to `execPolicy.resolveExecModePolicy`, selecting the returned fields they need.
 
 Native command probes should use `runCommandWithTimeout` from
 `openclaw/plugin-sdk/process-runtime` with `timeoutMs`, the caller's `signal`, and
-`killProcessTree: true`. Await its result so timeout or cancellation cleanup finishes
-before returning. For commands whose output is always UTF-8, such as JSON status
-probes, use `runUtf8CommandWithTimeout` from the same subpath.
+`killProcessTree: true`. For commands whose output is always UTF-8, such as JSON status
+probes, use `runUtf8CommandWithTimeout` from the same subpath. A bounded command result
+can return before canceled remote startup delivers its PID. When a command owns a
+session reservation or temporary output, await `withCommandProcessScope` from the
+same subpath around execution before releasing those resources. The scope joins
+late startup and process cleanup; uncertain cleanup remains an error.
+
+`WorkerTaskPool` from `openclaw/plugin-sdk/process-runtime` retains workers and
+unconsumed inputs when termination fails. Retry `close()` on that same pool;
+dispose dependent files only after closure is acknowledged. The optional
+`onRetirementFailure(error)` observer runs synchronously when termination fails.
+It may return `void` or `Promise<void>`; observer throws and rejections do not
+replace the termination error or release custody, and closure does not wait for
+the observer.
+
+When launching an isolated Gateway child that your plugin owns, remove
+`SUPERVISOR_HINT_ENV_VARS` from its environment after applying caller overrides.
+This list is exported from `openclaw/plugin-sdk/process-runtime`; inherited parent
+service markers would otherwise assign restart ownership to that parent's supervisor.
 
 Use `splitCommandArgs(raw)` from the same subpath to group quoted process
 arguments. Backslashes and `#` stay literal; there is no shell expansion.
@@ -204,3 +220,29 @@ spans do not advance the checkpoint used by `mark`.
 clock defaults to `Date.now`. Formatting produces comma-separated
 `name:durationMs@elapsedMs` entries (with `ms` units) or `none`. Callers retain
 ownership of log labels, warning thresholds, and when to emit a summary.
+
+For process-scoped performance logging,
+`openclaw/plugin-sdk/diagnostic-runtime` exports
+`areDiagnosticsEnabledForProcess(): boolean` and `createSubsystemLogger`. This
+focused entrypoint does not load live session diagnostics or network dispatcher
+configuration during plugin descriptor registration. The predicate reads the current process-wide
+diagnostic setting; `isDiagnosticsEnabled(config)` instead reads the supplied
+configuration snapshot. Neither function changes the setting or enables an
+exporter. Combine the process predicate with the selected log level before
+collecting diagnostic-only state:
+
+```typescript
+import {
+  areDiagnosticsEnabledForProcess,
+  createSubsystemLogger,
+} from "openclaw/plugin-sdk/diagnostic-runtime";
+
+const log = createSubsystemLogger("example/catalog");
+function diagnosticsEnabled() {
+  return areDiagnosticsEnabledForProcess() && log.isEnabled("warn");
+}
+```
+
+Recheck the gates when emitting a delayed summary. Keep fields bounded and
+content-free, and preserve the operation's result if the diagnostic sink fails.
+This predicate does not enable or authorize [audit identity collection](/gateway/audit).

@@ -11,20 +11,37 @@ import type { InternalSessionEntry } from "../../../config/sessions/types.js";
 import type { GatewayRecoveryRuntime } from "../../../gateway/server-instance-runtime.types.js";
 import { listAgentRunsForSession } from "../../../infra/agent-run-registry.js";
 import { isSessionWorkAdmissionActive } from "../../../sessions/session-lifecycle-admission.js";
-import { isRetiredSubagentExecution } from "./subagent-registry-restart-recovery-helpers.js";
+import {
+  INTERNAL_MESSAGE_CHANNEL,
+  isInternalNonDeliveryChannel,
+} from "../../../utils/message-channel-constants.js";
+import { normalizeMessageChannel } from "../../../utils/message-channel-core.js";
+import {
+  isRetiredSubagentExecution,
+  isRetiredSubagentSessionOwner,
+} from "./subagent-registry-restart-recovery-helpers.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 const RECOVERY_RESUMED_NOTICE = "Resumed your interrupted task after the Gateway restart.";
 
 export function shouldConfirmAcceptedRecoveryResumption(owner: SubagentRunRecord): boolean {
   const origin = owner.requesterOrigin;
-  return owner.expectsCompletionMessage !== false && Boolean(origin?.channel && origin.to);
+  const channel = normalizeMessageChannel(origin?.channel);
+  // Native sessions observe recovery through session events; they have no outbound transport.
+  return (
+    owner.expectsCompletionMessage !== false &&
+    Boolean(
+      channel &&
+      channel !== INTERNAL_MESSAGE_CHANNEL &&
+      !isInternalNonDeliveryChannel(channel) &&
+      origin?.to,
+    )
+  );
 }
 
 export async function loadSubagentRecoverySession(params: {
   entry: SubagentRunRecord;
   isOwnerCurrent: () => boolean;
-  now: number;
 }): Promise<{
   agentId: string;
   storePath: string;
@@ -37,9 +54,7 @@ export async function loadSubagentRecoverySession(params: {
   if (
     params.entry.execution.restartRecovery ||
     sessionEntry?.abortedLastRun === true ||
-    sessionEntry?.status !== "running" ||
-    sessionEntry.lifecycleRunId !== params.entry.runId ||
-    !isRetiredSubagentExecution(params.entry)
+    !isRetiredSubagentSessionOwner(params.entry, sessionEntry)
   ) {
     return { agentId, storePath, sessionEntry };
   }
@@ -58,14 +73,12 @@ export async function loadSubagentRecoverySession(params: {
         current.sessionId !== sessionId ||
         current.lifecycleRevision !== lifecycleRevision ||
         current.updatedAt !== updatedAt ||
-        current.status !== "running" ||
-        current.lifecycleRunId !== params.entry.runId
+        !isRetiredSubagentSessionOwner(params.entry, current)
       ) {
         return null;
       }
-      // A hard kill cannot write the shutdown marker. Bind its replacement to
-      // this exact retired run, never a newer turn sharing the child session.
-      return { ...current, abortedLastRun: true, updatedAt: params.now };
+      // Keep the last observed timestamp: restart must not make an old orphan fresh.
+      return { ...current, abortedLastRun: true };
     },
     {
       assertCommitAllowed: () => {
@@ -122,6 +135,7 @@ export async function settleAcceptedRecoverySession(params: {
   isOwnerCurrent: () => boolean;
   sessionId: string;
   sessionLifecycleRevision?: string;
+  sessionLifecycleRunId?: string;
   now: number;
   runId: string;
   storePath: string;
@@ -134,7 +148,9 @@ export async function settleAcceptedRecoverySession(params: {
         !params.isOwnerCurrent() ||
         current.sessionId !== params.sessionId ||
         (params.sessionLifecycleRevision !== undefined &&
-          current.lifecycleRevision !== params.sessionLifecycleRevision)
+          current.lifecycleRevision !== params.sessionLifecycleRevision) ||
+        (params.sessionLifecycleRunId !== undefined &&
+          current.lifecycleRunId !== params.sessionLifecycleRunId)
       ) {
         return current;
       }
@@ -150,6 +166,7 @@ export async function settleAcceptedRecoverySession(params: {
         ),
         lastAttemptAt: params.now,
         lastRunId: params.runId,
+        sessionLifecycleRunId: params.sessionLifecycleRunId,
       };
       current.updatedAt = params.now;
       settled = true;

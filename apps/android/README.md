@@ -24,6 +24,48 @@ OpenClaw Android is the officially released Google Play app. It connects to an O
 
 Long-press a row on the **Threads** page and choose **Color**, then select a swatch or **Default** to clear it. The eight colors are red, blue, green, yellow, purple, orange, pink, and cyan. Colored sessions show a narrow leading stripe in the sidebar and Threads page, plus a colored ring around the agent avatar in the open chat header. Unset colors add no indicator. Colors sync through the Gateway and remain visible in the local session cache while offline.
 
+## Completed work in Chat
+
+In the app's own conversation, agent main sessions, and dashboard conversations,
+completed commentary and tool activity fold into a **Worked** or **Worked for…**
+row. Tap the row to expand or collapse the details. Prompts, final answers,
+and attachments remain visible. Failures without a later answer stay visible;
+earlier tool failures remain available in expanded work. Active work stays expanded,
+including a run continued by a steering message. Channel conversations retain
+their full transcript.
+
+## Review changes
+
+When the connected Gateway advertises `sessions.diff`, open a conversation's
+three-dot **Chat actions** menu and choose **Review changes**. If the action is
+missing, update the Gateway before reviewing changes on Android.
+The full-screen native viewer loads the same `sessions.diff` snapshot as the web Review panel.
+Close it with Android Back or **Close review**; pulling down does not dismiss it.
+Review shows **Uncommitted** changes only. The scope label is static; branch-base
+and historical commit comparisons are outside this Android viewer's scope.
+Tap a file header to collapse it. Line numbers are hidden by default. Start a new
+rightward swipe of at least 64dp with the code already at its left edge to reveal them;
+swipe left at least 64dp to hide them, then start a fresh swipe to pan the code. A swipe that starts away
+from the left edge only pans, even after reaching that edge: lift your finger before swiping again to
+reveal numbers. Addition/deletion markers remain visible.
+Long-press a code line, then drag to select more lines. Release to choose **To
+chat** (append `path:start-end (Before | Uncommitted)` or the corresponding
+After context, followed by all selected text in a fenced
+code block, to your draft without sending it) or
+**Copy** (copy the selected text). A pulse marks the start of selection; a toast
+confirms either action. Drag any of the four selection handles to refine the range before
+choosing an action. Selection stays in one hunk and uses the starting line's
+side: **Before** for deleted lines, **After** otherwise. It skips the opposite
+side and never includes omitted context. Tap outside the actions to cancel.
+Use **Copy patch** to copy that file's returned patch.
+**Refresh changes** requests a new snapshot; the viewer does not stream updates.
+
+The Gateway owns repository selection and session-start filtering. This is a
+checkout snapshot, not an exact audit of the assistant's edits. Binary files,
+truncated patches, stopped workspaces, and unavailable repositories are identified
+in the viewer. Switching conversation or Gateway closes the review; safe fold
+layout changes preserve the opening.
+
 ## Foldable layout
 
 With a full-height vertical separator reported by AndroidX WindowManager, the
@@ -184,6 +226,14 @@ scene has 12 local branch alternatives and no active run. Switching updates the
 selected branch and transcript only in fixture memory, never on a live Gateway.
 Start a fresh app process before choosing a scene; restarting only the Activity
 reuses the process runtime. Same-scene re-entry retains the selected branch.
+
+For sidebar attention proof, use `openclaw.screenshotScene=attention`. The native drawer contains inactive sessions with multiple questions and execution, plugin, and Gateway-settings approvals. Tap or keyboard-focus an attention icon to inspect the oldest request. The `attention-expiry` scene uses successive short deadlines to exercise live removal without another Gateway event. These fixtures use the normal request parsers and lifecycle owners with synthetic in-memory responses; start a fresh app process between scenes.
+
+For completed-work proof, use `openclaw.screenshotScene=completed-work`,
+`active-work`, or `work-boundaries`. These scenes use the same Chat screen with
+synthetic history in a node-owned app conversation. They cover disclosure
+expansion, active work, attachments, and failed tools without a live Gateway.
+Start a fresh app process between scenes.
 
 `pnpm android:release:archive` builds signed release artifacts into `apps/android/build/release-artifacts/` and writes `.sha256` checksum files:
 

@@ -58,6 +58,10 @@ import {
   BROWSER_REF_MARKER_ATTRIBUTE,
   readMainFrameDocumentIdentityForPage,
 } from "./pw-session.page-cdp.js";
+import {
+  assertBrowserDashboardTabCanClose,
+  readBrowserDashboardTabs,
+} from "./session-tab-store.js";
 
 export async function getObservedBrowserStateViaPlaywright(opts: {
   cdpUrl: string;
@@ -186,36 +190,19 @@ async function tryTerminateExecutionViaCdp(opts: {
   });
   const needsAttach = cdpSocketNeedsAttach(wsUrl);
 
-  const runWithTimeout = async <T>(work: Promise<T>, ms: number): Promise<T> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("CDP command timed out")), ms);
-    });
-    try {
-      return await Promise.race([work, timeoutPromise]);
-    } finally {
-      if (timer) {
-        clearTimeout(timer);
-      }
-    }
-  };
-
   await withCdpSocket(
     wsUrl,
     async (send) => {
       let sessionId: string | undefined;
       try {
         if (needsAttach) {
-          const attached = (await runWithTimeout(
-            send("Target.attachToTarget", { targetId: opts.targetId, flatten: true }),
-            1500,
-          )) as { sessionId?: unknown };
-          const attachedSessionId = normalizeOptionalString(attached?.sessionId);
-          if (attachedSessionId) {
-            sessionId = attachedSessionId;
-          }
+          const attached = (await send("Target.attachToTarget", {
+            targetId: opts.targetId,
+            flatten: true,
+          })) as { sessionId?: unknown };
+          sessionId = normalizeOptionalString(attached?.sessionId);
         }
-        await runWithTimeout(send("Runtime.terminateExecution", undefined, sessionId), 1500);
+        await send("Runtime.terminateExecution", undefined, sessionId);
         if (sessionId) {
           // Best-effort cleanup; not required for termination to take effect.
           void send("Target.detachFromTarget", { sessionId }).catch(() => {});
@@ -224,30 +211,12 @@ async function tryTerminateExecutionViaCdp(opts: {
         // Best-effort; ignore
       }
     },
-    { handshakeTimeoutMs: 2000, ...(wsPin?.lookup ? { lookup: wsPin.lookup } : {}) },
+    { handshakeTimeoutMs: 2000, commandTimeoutMs: 1500, lookup: wsPin?.lookup },
   ).catch(() => {});
 }
 
-/**
- * Best-effort cancellation for stuck page operations.
- *
- * Playwright serializes CDP commands per page; a long-running or stuck operation (notably evaluate)
- * can block all subsequent commands. We cannot safely "cancel" an individual command, and we do
- * not want to close the actual Chromium tab. Instead, we disconnect Playwright's CDP connection
- * so in-flight commands fail fast and the next request reconnects transparently.
- *
- * IMPORTANT: We CANNOT call Connection.close() because Playwright shares a single Connection
- * across all objects (BrowserType, Browser, etc.). Closing it corrupts the entire Playwright
- * instance, preventing reconnection.
- *
- * Instead we:
- * 1. Retire the scoped cached or in-flight connection so the next call reconnects
- * 2. Fire-and-forget browser.close() — it may hang but won't block us
- * 3. The next connectBrowser() creates a completely new CDP WebSocket connection
- *
- * The old browser.close() eventually resolves when the in-browser evaluate timeout fires,
- * or the old connection gets GC'd. Either way, it doesn't affect the fresh connection.
- */
+// Closing Playwright's shared Connection would prevent later reconnects. Retire
+// only this browser adapter, and let the next action establish a fresh CDP socket.
 /** Force-disconnect a Playwright connection to unblock a stuck target operation. */
 export async function forceDisconnectPlaywrightForTarget(opts: {
   cdpUrl: string;
@@ -609,6 +578,14 @@ export async function closePageByTargetIdViaPlaywright(opts: {
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
   opts.signal?.throwIfAborted();
+  if (readBrowserDashboardTabs().length > 0) {
+    const targetId = (await pageTargetInfo(page))?.targetId;
+    opts.signal?.throwIfAborted();
+    if (!targetId) {
+      throw new Error("Cannot verify that this page is not retained by a dashboard");
+    }
+    assertBrowserDashboardTabCanClose(targetId);
+  }
   await page.close();
 }
 
@@ -621,8 +598,12 @@ export async function focusPageByTargetIdViaPlaywright(opts: {
   targetId: string;
   ssrfPolicy?: SsrFPolicy;
   signal?: AbortSignal;
+  assertCurrent?: () => Promise<void>;
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
+  if (opts.assertCurrent) {
+    await opts.assertCurrent();
+  }
   opts.signal?.throwIfAborted();
   await page.bringToFront();
 }

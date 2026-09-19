@@ -5,13 +5,13 @@ import { trackAsyncWork } from "../shared/async-work-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { getPluginRunContext, setPluginRunContext } from "./host-hook-runtime.js";
+import { createEmptyPluginRegistry } from "./registry-empty.js";
 import {
   capturePluginRegistryLifecycleEpoch,
   capturePluginRegistryLifecycleSignal,
   isPluginRegistryRetired,
 } from "./registry-lifecycle.js";
-import { createEmptyPluginRegistry } from "./registry.js";
-import type { PluginHttpRouteRegistration } from "./registry.js";
+import type { PluginHttpRouteRegistration } from "./registry-types.js";
 import {
   captureActivePluginRegistrySnapshot,
   clearActivePluginRegistry,
@@ -21,7 +21,7 @@ import {
   resetPluginRuntimeStateForTest,
   setActivePluginRegistry,
 } from "./runtime.js";
-import { createPluginRecord } from "./status.test-fixtures.js";
+import { createPluginRecord } from "./status.test-helpers.js";
 
 async function waitForCleanupSignal(signal: Promise<void>, label: string): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
@@ -85,6 +85,30 @@ describe("setActivePluginRegistry", () => {
     setActivePluginRegistry(registry);
     expect(getActivePluginRegistry()?.httpRoutes).toHaveLength(1);
   });
+
+  it.each(["empty", "loaded"] as const)(
+    "keeps a reactivated %s registry live after displaced cleanup",
+    async (kind) => {
+      const { withPluginCommandExecution } = await import("./command-execution-lock.js");
+      const original = createEmptyPluginRegistry();
+      if (kind === "loaded") {
+        original.plugins.push(createPluginRecord({ id: "reactivated", status: "loaded" }));
+      }
+      const temporary = createEmptyPluginRegistry();
+      onTestFinished(() => clearActivePluginRegistry());
+      setActivePluginRegistry(original);
+      setActivePluginRegistry(temporary);
+      setActivePluginRegistry(original);
+
+      await clearActivePluginRegistry(temporary);
+
+      expect(getActivePluginRegistry()).toBe(original);
+      expect(await withPluginCommandExecution(original, () => "current")).toEqual({
+        admitted: true,
+        value: "current",
+      });
+    },
+  );
 
   it("does not treat bundle-only loaded entries as imported runtime plugins", () => {
     const registry = createEmptyPluginRegistry();
@@ -423,9 +447,8 @@ describe("setActivePluginRegistry", () => {
   );
 
   it("retains a displaced loaded registry's cleanup through its admitted command", async () => {
-    const { loadOpenClawPlugins } = await import("./loader.js");
+    const { loadAndActivateRootPluginRegistry } = await import("./loader.js");
     const { resolvePluginLoadCacheContext } = await import("./loader-load-context.js");
-    const { pluginLoaderCacheState } = await import("./registry-lifecycle.js");
     const { withPluginCommandExecution } = await import("./command-execution-lock.js");
     const { useNoBundledPlugins, writePlugin, resetPluginLoaderTestStateForTest } =
       await import("./loader.test-fixtures.js");
@@ -455,10 +478,8 @@ describe("setActivePluginRegistry", () => {
     };
     const plugin = writePlugin({
       id: "loaded-retirement",
-      body: `module.exports = { id: "loaded-retirement", register(api) {
-        const read = globalThis[Symbol.for("openclaw.test.loadedRetirementCleanup")].read;
-        api.lifecycle.registerRuntimeLifecycle({ id: "native-cleanup", cleanup: read });
-      } };`,
+      registration: `const read = globalThis[Symbol.for("openclaw.test.loadedRetirementCleanup")].read;
+      api.lifecycle.registerRuntimeLifecycle({ id: "native-cleanup", cleanup: read });`,
     });
     const options = {
       config: {
@@ -489,16 +510,15 @@ describe("setActivePluginRegistry", () => {
       }
     });
     try {
-      expect(() => loadOpenClawPlugins(options)).toThrow(
+      expect(() => loadAndActivateRootPluginRegistry(options)).toThrow(
         "Plugin registry activation was superseded",
       );
       expect(heldCommand).toBeDefined();
       expect(closing).toBeDefined();
       expect(db.isOpen).toBe(true);
       expect(reads).toEqual([]);
-      expect(
-        pluginLoaderCacheState.get(resolvePluginLoadCacheContext(options).cacheKey),
-      ).toBeUndefined();
+      const { cacheState, cacheKey } = resolvePluginLoadCacheContext(options);
+      expect(cacheState.get(cacheKey)).toBeUndefined();
     } finally {
       releaseCommand.resolve();
       await heldCommand;

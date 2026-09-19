@@ -6,6 +6,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { isMissingPathError } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { shouldRejectHardlinkedPluginFiles } from "../../plugins/hardlink-policy.js";
+import type { PluginManifestRecord } from "../../plugins/manifest-registry.js";
 import {
   pluginCacheExistsSync,
   pluginCacheLstatSync,
@@ -18,16 +19,16 @@ import { resolvePluginMetadataSnapshot } from "../../plugins/plugin-metadata-sna
 import type { PluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.types.js";
 import { iteratePluginRootContributions } from "../../plugins/plugin-root-contributions.js";
 import { isPathInside } from "../../security/scan-paths.js";
+import { readPluginSkillBundle } from "./plugin-skill-bundle.js";
+import type { PluginSkillRoot } from "./plugin-skill-root.js";
 import { resolvePluginSkillsDir } from "./skill-paths.js";
+import { loadSkillRootRecords } from "./skill-root-loader.js";
+
+export type { PluginSkillRoot } from "./plugin-skill-root.js";
 
 const log = createSubsystemLogger("skills");
 
 type PluginSkillLinkType = "dir" | "junction";
-
-export type PluginSkillRoot = {
-  dir: string;
-  rejectHardlinks: boolean;
-};
 
 // This tracks the generated SDK links we last published, not plugin metadata.
 // Config and ACP availability can change the desired links without changing package files.
@@ -47,7 +48,7 @@ export function resolvePluginSkillRoots(params: {
   pluginSkillsDir?: string;
 }): PluginSkillRoot[] {
   const workspaceDir = (params.workspaceDir ?? "").trim();
-  if (!workspaceDir) {
+  if (!workspaceDir || params.config?.plugins?.enabled === false) {
     publishPluginSkills([], {
       pluginSkillsDir: params.pluginSkillsDir,
     });
@@ -149,6 +150,74 @@ function isPluginSkillPathInside(rootDir: string, candidate: string): boolean {
   return Boolean(
     rootRealPath && candidateRealPath && isPathInside(rootRealPath, candidateRealPath),
   );
+}
+
+/** Resolve manifest skill roots to the names users and agents actually see. */
+function resolvePluginSkillRecords(
+  record: Pick<PluginManifestRecord, "id" | "origin" | "rootDir" | "skills">,
+) {
+  const rejectHardlinks = shouldRejectHardlinkedPluginFiles({
+    origin: record.origin,
+    rootDir: record.rootDir,
+  });
+  const records = new Map<string, ReturnType<typeof loadSkillRootRecords>[number]>();
+  for (const raw of record.skills) {
+    const candidate = path.resolve(record.rootDir, raw.trim());
+    if (!raw.trim() || !pluginCacheExistsSync(candidate)) {
+      continue;
+    }
+    if (!isPluginSkillPathInside(record.rootDir, candidate)) {
+      log.warn(`plugin skill path escapes plugin root (${record.id}): ${candidate}`);
+      continue;
+    }
+    for (const loaded of loadSkillRootRecords({
+      dir: candidate,
+      source: record.origin === "bundled" ? "bundled" : "plugin",
+      mode: "audit",
+      rejectHardlinks,
+    })) {
+      records.set(loaded.skill.filePath, loaded);
+    }
+  }
+  return [...records.values()];
+}
+
+export function resolvePluginSkillDetails(
+  record: Pick<PluginManifestRecord, "id" | "origin" | "rootDir" | "skills">,
+): Array<{ name: string; description?: string }> {
+  return [
+    ...new Map(
+      resolvePluginSkillRecords(record).map(({ skill }) => [
+        skill.name,
+        {
+          name: skill.name,
+          ...(skill.description ? { description: skill.description } : {}),
+        },
+      ]),
+    ).values(),
+  ].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+export async function readPluginSkill(
+  record: Pick<PluginManifestRecord, "id" | "origin" | "rootDir" | "skills" | "version">,
+  name: string,
+) {
+  const matches = resolvePluginSkillRecords(record).filter(({ skill }) => skill.name === name);
+  if (matches.length !== 1) {
+    throw new Error(matches.length ? "Plugin skill name is ambiguous." : "Plugin skill not found.");
+  }
+  // Audit discovery returns real paths; relativize against the same root identity.
+  const pluginRoot = pluginCacheRealpathSync(record.rootDir);
+  if (!pluginRoot) {
+    throw new Error("Installed plugin root not found.");
+  }
+  const result = await readPluginSkillBundle({
+    pluginRoot,
+    rootPath: path.relative(pluginRoot, matches[0]!.skill.baseDir).split(path.sep).join("/") || ".",
+    name,
+    rejectHardlinks: shouldRejectHardlinkedPluginFiles(record),
+  });
+  return { ...result, ...(record.version ? { version: record.version } : {}) };
 }
 
 function listSkillChildDirectories(dir: string): Array<{ name: string; path: string }> {

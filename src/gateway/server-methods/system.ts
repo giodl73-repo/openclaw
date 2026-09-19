@@ -17,10 +17,8 @@ import {
   validateSystemEventParams,
 } from "../../../packages/gateway-protocol/src/schema/system-event.js";
 import { listAgentIds } from "../../agents/agent-scope.js";
-import {
-  readUtilityModelSetting,
-  resolveUtilityModelRefForAgent,
-} from "../../agents/utility-model.js";
+import { readUtilityModelSetting } from "../../agents/utility-model-setting.js";
+import { resolveUtilityModelRefForAgent } from "../../agents/utility-model.js";
 import { tryResolveLegacyCompatibilityAgentId } from "../../config/legacy.default-agent-owner.js";
 import { resolveGatewayPort, resolveStateDir } from "../../config/paths.js";
 import { resolveSystemMainSessionTarget } from "../../config/sessions.js";
@@ -35,15 +33,19 @@ import { requestHeartbeat, setHeartbeatsEnabled } from "../../infra/heartbeat-wa
 import { getMachineDisplayName } from "../../infra/machine-name.js";
 import { resolveRuntimeOsLabel } from "../../infra/os-summary.js";
 import { readSystemDisks } from "../../infra/system-disks.js";
-import { withSystemEventOwner } from "../../infra/system-event-ownership.js";
+import {
+  resolveSystemEventQueueKey,
+  withSystemEventOwner,
+} from "../../infra/system-event-ownership.js";
 import { enqueueSystemEvent, isSystemEventContextChanged } from "../../infra/system-events.js";
 import { listSystemPresence, updateSystemPresence } from "../../infra/system-presence.js";
 import { normalizeAgentId, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { createPresenceRecipientProjection } from "../presence-projection.js";
 import { getGatewayProcessInstanceId } from "../process-instance.js";
 import { broadcastPresenceSnapshot } from "../server/presence-events.js";
+import { readGatewayProcessVitals } from "../server/process-vitals.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
-import { loadGatewaySessionRow } from "../session-utils.js";
+import { loadGatewaySessionEntryReadOnly } from "../session-utils.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
@@ -102,6 +104,7 @@ async function collectSystemInfo(context: GatewayRequestContext): Promise<System
     ...(loadAverage.some((value) => value !== 0) ? { loadAverage } : {}),
     memoryTotalBytes: os.totalmem(),
     memoryFreeBytes: os.freemem(),
+    ...readGatewayProcessVitals(context.getEventLoopHealth),
     // Keep the existing state-volume reading when native discovery is unavailable;
     // an empty successful discovery intentionally stays empty.
     disks:
@@ -214,10 +217,10 @@ export const systemHandlers: GatewayRequestHandlers = {
       }
       // A targeted wake starts a model run. Require a live persisted session
       // so malformed keys cannot create phantom work under agent defaults.
-      const targetSession = loadGatewaySessionRow(requestedSessionKey, {
+      const { entry: targetSession } = loadGatewaySessionEntryReadOnly(requestedSessionKey, {
         agentId: requestedAgentId,
       });
-      if (!targetSession || targetSession.archived) {
+      if (!targetSession || targetSession.archivedAt !== undefined) {
         respond(
           false,
           undefined,
@@ -293,7 +296,10 @@ export const systemHandlers: GatewayRequestHandlers = {
       const reasonChanged = changed.has("reason") && !ignoreReason;
       const hasChanges = hostChanged || ipChanged || versionChanged || modeChanged || reasonChanged;
       if (hasChanges) {
-        const contextChanged = isSystemEventContextChanged(sessionKey, presenceUpdate.key);
+        const contextChanged = isSystemEventContextChanged(
+          resolveSystemEventQueueKey(sessionKey, eventOwnerAgentId),
+          presenceUpdate.key,
+        );
         const parts: string[] = [];
         // Re-state node identity only when the line would otherwise lose
         // routing context or the host/IP changed.

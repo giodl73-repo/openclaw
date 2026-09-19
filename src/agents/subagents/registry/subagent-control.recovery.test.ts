@@ -19,6 +19,7 @@ import {
 } from "../../../gateway/server-methods/chat.abort.test-helpers.js";
 import { sessionMutationHandlers } from "../../../gateway/server-methods/sessions-mutations.js";
 import { loadSessionsRuntimeModule } from "../../../gateway/server-methods/sessions-shared.js";
+import { getAgentEventLifecycleGeneration } from "../../../infra/agent-events.js";
 import {
   registerAgentRunContext,
   clearAgentRunContext,
@@ -26,6 +27,7 @@ import {
 import { bindGatewayContextResolver } from "../../../plugins/runtime/gateway-request-scope.js";
 import * as gatewayWorkAdmission from "../../../process/gateway-work-admission.js";
 import * as sessionLifecycle from "../../../sessions/session-lifecycle-admission.js";
+import { observeSessionWorkAdmissionDrain } from "../../../sessions/session-lifecycle-admission.test-support.js";
 import { SUBAGENT_KILL_TASK_ERROR } from "../../../tasks/detached-task-runtime-contract.js";
 import { getDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.js";
 import { setDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.test-support.js";
@@ -37,6 +39,7 @@ import {
 } from "../../../tasks/task-registry.test-support.js";
 import { clearActiveEmbeddedRun, setActiveEmbeddedRun } from "../../embedded-agent-runner/runs.js";
 import { createEmbeddedRunHandle } from "../../embedded-agent-runner/runs.test-support.js";
+import { isAgentRunDirectAbortReason } from "../../run-termination.js";
 import type { AgentWaitResult } from "../../run-wait.js";
 import { resolveStoredSubagentCapabilities } from "../spawn/subagent-capabilities.js";
 import { enqueueSwarmRun, releaseSwarmRun } from "../swarm/swarm-scheduler.js";
@@ -226,6 +229,7 @@ it.each(
       },
     );
     const recoveryRuntime: GatewayRecoveryRuntime = {
+      dispatchSessionMethod: vi.fn(),
       dispatchAgent: dispatchRecovery as GatewayRecoveryRuntime["dispatchAgent"],
       waitForAgent: async () => await new Promise<never>(() => {}),
       sendRecoveryNotice: async () => {
@@ -298,26 +302,26 @@ it.each(
     registerAgentRunContext("parent", { sessionKey: parentKey, sessionId: "parent-session" });
     const entered = createDeferred();
     const resume = createDeferred();
+    let admissionStopReason: unknown;
     const admission = await sessionLifecycle.beginSessionWorkAdmission({
       scope: storePath,
       identities: [aKey, "a-session"],
       assertAllowed: () => {},
-      onInterrupt: () => admission.release(),
+      onInterrupt: (reason) => {
+        admissionStopReason = reason;
+        admission.release();
+      },
     });
-    const interruptAdmissions = sessionLifecycle.interruptSessionWorkAdmissions;
-    const drain = vi
-      .spyOn(sessionLifecycle, "interruptSessionWorkAdmissions")
-      .mockImplementation(async (params) => {
-        const released = await interruptAdmissions(params);
-        if (params.scope === storePath && Array.from(params.identities).includes(aKey)) {
-          expect(released).toBe(true);
-          // Recovery/reset runs after the real drain but before cancellation
-          // effects, without holding an admission across its bounded deadline.
-          entered.resolve();
-          await resume.promise;
-        }
-        return released;
-      });
+    const restoreDrain = observeSessionWorkAdmissionDrain(async (params, released) => {
+      if (params.scope === storePath && Array.from(params.identities).includes(aKey)) {
+        expect(released).toBe(true);
+        expect(isAgentRunDirectAbortReason(admissionStopReason)).toBe(true);
+        // Recovery/reset runs after the real drain, before the kill owner finishes,
+        // without holding an admission across its bounded deadline.
+        entered.resolve();
+        await resume.promise;
+      }
+    });
     const dispatchChild = vi.fn(async () => {});
     enqueueSwarmRun({
       groupId: "recovery-lane",
@@ -367,7 +371,12 @@ it.each(
         }),
       ]);
       expect(sessionLifecycle.isSessionWorkAdmissionActive(storePath, [aKey])).toBe(false);
-      expect(a.killIntent).toBeUndefined();
+      expect(a.killIntent).toMatchObject({
+        reason: "killed",
+        sessionId: "a-session",
+        sessionLifecycleRevision: "a-revision",
+        lifecycleGeneration: getAgentEventLifecycleGeneration(),
+      });
       expect(b.killIntent).toBeUndefined();
       activateSubagentRegistry(gatewayContext.resolveGatewayContext);
       await testing.sweepOnceForTests();
@@ -664,7 +673,7 @@ it.each(
       try {
         await pending;
       } finally {
-        drain.mockRestore();
+        restoreDrain();
         releaseSwarmRun("a");
         releaseSwarmRun("child");
         releaseSwarmRun("fresh-capacity");

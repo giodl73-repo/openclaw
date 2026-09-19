@@ -3,10 +3,7 @@ import type { Command } from "commander";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { resolveCliArgvInvocation } from "../argv-invocation.js";
 import { resolveCliCommandPathPolicy } from "../command-path-policy.js";
-import {
-  shouldEagerRegisterSubcommands,
-  shouldRegisterPrimarySubcommandOnly,
-} from "../command-registration-policy.js";
+import { shouldEagerRegisterSubcommands } from "../command-registration-policy.js";
 import {
   buildCommandGroupEntries,
   type CommandGroupDescriptorSpec,
@@ -14,11 +11,12 @@ import {
 import { removeCommandByName } from "./command-tree.js";
 import { loadPrivateQaCliModule } from "./private-qa-cli.js";
 import {
+  findCommandGroupEntry,
   registerCommandGroupByName,
   registerCommandGroups,
   type CommandGroupEntry,
 } from "./register-command-groups.js";
-import { getSubCliEntriesCore, type SubCliDescriptor } from "./subcli-descriptors.js";
+import { getSubCliEntriesCore } from "./subcli-descriptors.js";
 
 export type SubCliRegistrationContext = {
   purpose?: "runtime" | "completion";
@@ -205,8 +203,19 @@ function resolveSubCliCommandGroups(
   );
 }
 
-export function getSubCliEntries(): ReadonlyArray<SubCliDescriptor> {
-  return getSubCliEntriesCore();
+export function getSubCliCompletionGroups(argv: string[] = process.argv) {
+  const entries = resolveSubCliCommandGroups(argv, { purpose: "completion" });
+  const groups: Array<{ name: string; entry: CommandGroupEntry }> = [];
+  let previous: CommandGroupEntry | undefined;
+  // Keep descriptor names for warnings and separated group visits for final command order.
+  for (const { name } of getSubCliEntriesCore()) {
+    const entry = findCommandGroupEntry(entries, name);
+    if (entry && entry !== previous) {
+      groups.push({ name, entry });
+    }
+    previous = entry;
+  }
+  return groups;
 }
 
 export async function registerSubCliByNameCore(
@@ -227,6 +236,6 @@ export function registerSubCliCommandsCore(program: Command, argv: string[] = pr
   registerCommandGroups(program, resolveSubCliCommandGroups(argv), {
     eager: shouldEagerRegisterSubcommands(),
     primary,
-    registerPrimaryOnly: Boolean(primary && shouldRegisterPrimarySubcommandOnly(argv)),
+    registerPrimaryOnly: true,
   });
 }

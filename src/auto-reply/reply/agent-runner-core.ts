@@ -41,7 +41,7 @@ import type { InternalGetReplyOptions } from "./get-reply.types.js";
 import { normalizeReplyPayload } from "./normalize-reply.js";
 import { sanitizePendingFinalDeliveryText } from "./pending-final-delivery-state.js";
 import { type FollowupRun, type QueueSettings, scheduleFollowupDrain } from "./queue.js";
-import { normalizeReplyPayloadDirectives } from "./reply-delivery.js";
+import { normalizeReplyPayloadDirectives, type DirectBlockDelivery } from "./reply-delivery.js";
 import { isReplyOperationSuperseded } from "./reply-operation-abort.js";
 import { type ReplyOperation, runAfterReplyOperationClear } from "./reply-run-registry.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
@@ -191,14 +191,14 @@ export function resolveReplyRunDeliveryContext(params: {
 
 export function hasSuccessfulSourceReplyDelivery(params: {
   blockReplyPipeline: { didStream: () => boolean; isAborted: () => boolean } | null;
-  directlySentBlockKeys?: Set<string>;
+  hasDirectlySentBlockReply?: boolean;
   messagingToolSentTexts?: string[];
   messagingToolSentMediaUrls?: string[];
   messagingToolSentTargets?: unknown[];
 }): boolean {
   return (
-    (params.blockReplyPipeline?.didStream() && !params.blockReplyPipeline.isAborted()) ||
-    (params.directlySentBlockKeys?.size ?? 0) > 0 ||
+    params.blockReplyPipeline?.didStream() ||
+    params.hasDirectlySentBlockReply === true ||
     hasVisibleCommittedMessagingToolDeliveryEvidence(params)
   );
 }
@@ -208,17 +208,18 @@ export function hasSuccessfulTerminalSourceReplyDelivery(params: {
     didStreamTerminalReply?: () => boolean;
     isAborted: () => boolean;
   } | null;
-  directlySentBlockPayloads?: ReplyPayload[];
+  directBlockDeliveries?: DirectBlockDelivery[];
 }): boolean {
-  const sentTerminalBlock = params.directlySentBlockPayloads?.some(
-    (payload) =>
+  const sentTerminalBlock = params.directBlockDeliveries?.some(
+    ({ payload, outcome, pending, source }) =>
+      outcome === "delivered" &&
+      !pending &&
+      source?.complete !== false &&
       isReplyPayloadTerminalContent(payload) &&
       normalizeReplyPayload(payload, { applyChannelTransforms: false }) !== null,
   );
   return (
-    (params.blockReplyPipeline?.didStreamTerminalReply?.() === true &&
-      !params.blockReplyPipeline.isAborted()) ||
-    sentTerminalBlock === true
+    params.blockReplyPipeline?.didStreamTerminalReply?.() === true || sentTerminalBlock === true
   );
 }
 

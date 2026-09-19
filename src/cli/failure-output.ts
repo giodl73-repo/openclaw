@@ -7,6 +7,7 @@ import {
   type UpdateSchemaRefusalDatabase,
 } from "../state/openclaw-update-schema-refusal.js";
 import { formatCliCommand } from "./command-format.js";
+import type { CronCliJobMatch } from "./cron-cli/cron-cli-error.js";
 
 type FormatCliFailureOptions = {
   title: string;
@@ -30,6 +31,7 @@ export type CliJsonFailure = {
     updaterVersion?: string;
     targetVersion?: string;
     commands?: readonly string[];
+    matches?: readonly CronCliJobMatch[];
   };
 };
 
@@ -53,18 +55,21 @@ export class ExpectedCliError extends Error {
   readonly humanOutput: string;
   readonly humanOutputWritten: boolean;
   readonly machineOutput: string;
+  readonly matches?: readonly CronCliJobMatch[];
 
   constructor(params: {
     message: string;
     humanOutput: string;
     humanOutputWritten?: boolean;
     machineOutput: string;
+    matches?: readonly CronCliJobMatch[];
   }) {
     super(params.message);
     this.name = "ExpectedCliError";
     this.humanOutput = params.humanOutput;
     this.humanOutputWritten = params.humanOutputWritten ?? false;
     this.machineOutput = params.machineOutput;
+    this.matches = params.matches;
   }
 }
 
@@ -91,6 +96,13 @@ function isGatewayExplicitAuthCliError(error: unknown): error is Error {
   return error instanceof Error && error.name === "GatewayExplicitAuthRequiredError";
 }
 
+function isAgentSelectionCliError(error: unknown): error is Error {
+  // Multi-agent selection refusals (src/agents/agent-scope-config.ts) already name
+  // the surface and its --agent remedy; crash framing would send operators to a
+  // stack trace and `openclaw doctor` for a missing flag.
+  return error instanceof Error && error.name === "AgentSelectionRequiredError";
+}
+
 function isImmutableConfigCliError(error: unknown): error is Error {
   // Config write-guard refusals (src/config/config-write-guard.ts) already carry the
   // redeploy remedy; crash framing would point operators at a stack trace and
@@ -107,6 +119,7 @@ export function isExpectedCliError(error: unknown): error is Error {
     isGatewayCredentialsCliError(error) ||
     isGatewayExplicitAuthCliError(error) ||
     isImmutableConfigCliError(error) ||
+    isAgentSelectionCliError(error) ||
     isGatewayTransportError(error)
   );
 }
@@ -141,6 +154,7 @@ export function formatCliJsonFailure(
     error: {
       type: "cli_error",
       message,
+      ...(error instanceof ExpectedCliError && error.matches ? { matches: error.matches } : {}),
       ...(error instanceof UpdateSchemaRefusalError
         ? {
             code: error.code,

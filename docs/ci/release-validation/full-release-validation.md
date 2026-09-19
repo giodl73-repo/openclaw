@@ -16,21 +16,34 @@ exact Validation SHA + Tooling SHA tuple and rejects an `expected_sha` mismatch
 before child dispatch. Validation SHA maps to the Code SHA for product
 validation or the Release SHA for changelog-only validation; it is not a third
 release identity. Beta-publish maps to `release_profile=beta` with
-`run_release_soak=false`. A canonical beta's `all` run records `npm-beta-v1`:
-it retains Node and Control UI CI, Plugin Prerelease, package/install/cross-OS
-checks, and QA parity, while deferring native apps, performance, and Telegram
-confidence. Broad live/E2E and QA-live remain outside that bounded gate.
-Postpublish-confidence uses the exact published package with soak or explicit
-focused groups. Regular stable releases use `release_profile=stable` and
-`npm-stable-v1`: only native apps are deferred; stable soak, blocking performance,
-Node on all three OS families, Control UI, package acceptance, and QA remain.
-Both npm scopes require an exact release version and validated matching branch
-or tag context. Numeric regular corrections are supported; extended-stable,
-uncontextualized `main`, full profiles, and explicit `ci` groups retain full CI.
+`run_release_soak=false`. Regular stable releases use `release_profile=stable`.
 
 See [Full release validation](/reference/full-release-validation) for the
-stage matrix, exact workflow job names, profile differences, artifacts, and
-focused rerun handles.
+stage matrix, exact workflow job names, profile differences, the `npm-beta-v1`
+and `npm-stable-v1` coverage policies, artifacts, and focused rerun handles.
+
+The `normal_ci` child dispatches `ci.yml` with the exact target and release scope,
+without `release_gate`. Complete campaigns (`rerun_group=all`) retain QA Smoke's
+full scenario profile, Control UI performance, and the Docker seed
+`published-upgrade-survivor` lane independently of changed paths. The survivor
+uses `legacy-operator-state` with `auto-auth`, so the published driver must update
+the running managed Gateway. This exact combination remains covered after
+ordinary PR/main runs adopt owner-path gates. Hosted manual CI splits QA Smoke
+into six parts; normal hybrid first attempts use four parts with the same coverage.
+
+Package Acceptance separately retains expanded published-upgrade scenarios:
+current unpublished candidates include native operator state, and stable/full
+profiles force the `reported-issues` soak. Its ordinary survivor restart mode
+and separate `update-restart-auth` base scenario do not replace the exact Docker
+seed combination. `Full Release Artifacts` and `Full Release Candidate` prepare
+the immutable package/image inputs; candidate-phase release checks consume them
+without moving or weakening that coverage.
+
+Existing frozen-target contracts still apply: Docker seed requires its declared
+capability, QA Smoke requires a supported harness, and historical performance
+checks retain their availability handling. Focused reruns select their requested
+groups, and validated evidence reuse can reuse completed proof. Regressions
+outside the automatic owner paths can first surface in this manual/release tier.
 
 The live/E2E selected-ref validator fetches the complete commit and ref history
 with a sparse checkout. Ancestry and release-ref checks remain unchanged, while
@@ -107,11 +120,23 @@ For pinned commit proof on a fast-moving branch, use the helper instead of
 ```bash
 TOOLING_SHA="<recorded-full-main-ancestor-sha>"
 VALIDATION_SHA="<full-release-candidate-sha>"
+PUBLICATION_SELECTION='{"route":"normal","npmDistTag":"latest","publishOpenclawNpm":true,"pluginPublishScope":"all-publishable","plugins":[]}'
 pnpm ci:full-release \
   --sha "$VALIDATION_SHA" \
   --target-ref release/YYYY.M.PATCH \
-  --workflow-sha "$TOOLING_SHA"
+  --workflow-sha "$TOOLING_SHA" \
+  -f validation_purpose=publish \
+  -f publication_selection_json="$PUBLICATION_SELECTION"
 ```
+
+Choose `npmDistTag=beta` for a beta and `route=prepared` only for an intended
+prepared-button consumer. Source admission verifies committed metadata; fresh
+publish runs also retain separate selected npm and ClawHub registry admission
+before fanout. Neither grants publication authority. See
+[Dispatch](/reference/full-release-validation/dispatch) for both contracts.
+For nonpublish work, explicitly select
+`diagnostic`, `main-qualification`, or `postpublish-confidence` and omit the
+publication selection; profile and filters still select the actual coverage.
 
 GitHub workflow dispatch refs must be branches or tags, not raw commit SHAs. The
 helper pushes a temporary `release-ci/<sha>-...` branch at a trusted Tooling

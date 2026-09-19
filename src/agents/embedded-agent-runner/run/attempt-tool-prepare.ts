@@ -1,10 +1,7 @@
 import type { SessionPermissionMode } from "../../../../packages/gateway-protocol/src/schema/sessions-row.js";
-/**
- * Prepares the core tool surface for one embedded attempt.
- * It may assume workspace, model, and runtime policy inputs are resolved.
- */
 import { messageToolOwnsVisibleReply } from "../../../auto-reply/source-reply-delivery-mode.js";
 import type { DiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
+import { isEmbeddedMode } from "../../../infra/embedded-mode.js";
 import {
   isCodeModeDiagnosticEnabled,
   logCodeModeDiagnostic,
@@ -14,12 +11,18 @@ import { extractModelCompat } from "../../../plugins/provider-model-compat.js";
 import { getPluginToolMeta } from "../../../plugins/tool-metadata.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import type { NestedToolActivity } from "../../../sessions/nested-tool-activity.js";
-import { createOpenClawCodingTools } from "../../agent-tools.js";
+import {
+  createOpenClawCodingToolsInternal,
+  resolveToolLoopDetectionConfig,
+} from "../../agent-tools.js";
 import { createSkillInstructionDeliveryCache } from "../../agent-tools.read.js";
 import { getChannelAgentToolMeta } from "../../channel-tools.js";
 import { createCodeModePermissionChangeReason } from "../../code-mode-permission-change.js";
 import type { CodeModeSkill } from "../../code-mode-skills.js";
+import { loadPairedComputerUseAvailabilityForSurface } from "../../computer-use-node-capabilities.js";
 import { resolveConversationCapabilityProfile } from "../../conversation-capability-profile.js";
+import { projectConversationToolNames } from "../../conversation-tool-policy-pipeline.js";
+import { createAgentHarnessToolSurfaceRuntimeCore } from "../../harness/tool-surface-bridge.js";
 import {
   isLocalModelLeanEnabled,
   resolveLocalModelLeanPreserveToolNames,
@@ -27,17 +30,15 @@ import {
 import { resolveModelAuthMode } from "../../model-auth.js";
 import { supportsModelTools } from "../../model-tool-support.js";
 import { recordAgentCleanupFailure } from "../../run-cleanup-timeout.js";
+import { resolveSessionPlacementComputer } from "../../session-placement-computer.js";
 import {
   resolveSessionPermissionExecMode,
   type PreparedSessionPermissionPolicy,
 } from "../../tool-fs-policy.js";
 import { toolPolicyRestrictsTools } from "../../tool-policy.js";
 import { isAgentToolRestartSafe } from "../../tool-replay-safety.js";
-import {
-  createToolSearchCatalogRef,
-  type ToolSearchCatalogToolExecutor,
-} from "../../tool-search.js";
-import { resolveAgentToolSurfacePlan } from "../../tool-surface-plan.js";
+import { TOOL_SEARCH_CONTROL_TOOL_NAMES } from "../../tool-search-types.js";
+import type { ToolSearchCatalogToolExecutor } from "../../tool-search.js";
 import type { ComputerContextEpoch } from "../../tools/computer-tool.js";
 import type {
   CronCreatorToolAllowlistEntry,
@@ -49,16 +50,18 @@ import type { EmbeddedAttemptSetup } from "./attempt-setup.js";
 import { resolveAttemptSpawnWorkspaceDir } from "./attempt-thread-helpers.js";
 import {
   applyEmbeddedAttemptToolsAllow,
+  mergeForcedEmbeddedAttemptToolsAllow,
   resolveEmbeddedAttemptToolConstructionPlan,
 } from "./attempt-tool-construction-plan.js";
 import { buildEmbeddedAttemptToolRunContext } from "./attempt-tool-run-context.js";
-import { TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES } from "./attempt-tool-search-run-plan.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
 
-type OpenClawCodingToolsOptions = NonNullable<Parameters<typeof createOpenClawCodingTools>[0]>;
+type OpenClawCodingToolsOptions = NonNullable<
+  Parameters<typeof createOpenClawCodingToolsInternal>[0]
+>;
 type SkillUsagePaths = OpenClawCodingToolsOptions["skillUsagePaths"];
 
-export function prepareEmbeddedAttemptToolBase(params: {
+export async function prepareEmbeddedAttemptToolBase(params: {
   agentDir: string;
   attempt: EmbeddedRunAttemptParams;
   setup: EmbeddedAttemptSetup;
@@ -67,6 +70,7 @@ export function prepareEmbeddedAttemptToolBase(params: {
   runAbortController: AbortController;
   runTrace: DiagnosticTraceContext;
   skillUsagePaths: SkillUsagePaths;
+  skillReadResources?: Parameters<typeof createOpenClawCodingToolsInternal>[1];
   skillsSnapshot: EmbeddedRunAttemptParams["skillsSnapshot"];
   codeModeSkills: readonly CodeModeSkill[];
   reviewTranscript?: NonNullable<OpenClawCodingToolsOptions["exec"]>["reviewTranscript"];
@@ -90,26 +94,33 @@ export function prepareEmbeddedAttemptToolBase(params: {
     toolsEnabled,
     toolsAllow: toolsAllowWithForcedRuntimeTools,
   });
+  const toolSurfaceRuntime = createAgentHarnessToolSurfaceRuntimeCore({
+    config: attempt.config,
+    agentId: params.setup.sessionAgentId,
+    sessionKey: params.setup.sandboxSessionKey,
+    forceMessageTool: forceDirectMessageTool,
+    model: attempt.model,
+    modelProvider: attempt.provider,
+    modelId: attempt.modelId,
+    codeModeOverride: attempt.codeModeOverride,
+    disableToolSearch: attempt.disableToolSearch,
+    modelToolsEnabled: toolsEnabled,
+    disableTools: attempt.disableTools,
+    isRawModelRun,
+    toolsAllow: attempt.toolsAllow,
+    forceCodeModeControls: attempt.forceCodeModeTools,
+    runtimeToolAllowlist: toolsAllowWithForcedRuntimeTools,
+    sessionId: attempt.sessionId,
+    runId: attempt.runId,
+    contextTokenBudget: attempt.contextTokenBudget,
+    executeTool: params.toolSearchCatalogExecutor,
+  });
   const {
     codeModeControlsEnabled: codeModeControlsEnabledForRun,
     toolSearchConfig,
     toolSearchControlsEnabled: toolSearchControlsEnabledForRun,
     toolSearchRuntimeConfig,
-  } = resolveAgentToolSurfacePlan({
-    config: attempt.config,
-    agentId: params.setup.sessionAgentId,
-    sessionKey: params.setup.sandboxSessionKey,
-    forceDirectMessageTool,
-    model: attempt.model,
-    modelProvider: attempt.provider,
-    modelId: attempt.modelId,
-    codeModeOverride: attempt.codeModeOverride,
-    toolsEnabled,
-    disableTools: attempt.disableTools,
-    isRawModelRun,
-    toolsAllow: attempt.toolsAllow,
-    forceCodeModeControls: attempt.forceCodeModeTools,
-  });
+  } = toolSurfaceRuntime.plan;
   if (isCodeModeDiagnosticEnabled()) {
     logCodeModeDiagnostic(log, "activation", {
       runId: attempt.runId,
@@ -126,10 +137,12 @@ export function prepareEmbeddedAttemptToolBase(params: {
             : "nonempty",
     });
   }
-  const effectiveToolsAllow =
-    toolSearchControlsEnabledForRun && toolsAllowWithForcedRuntimeTools
-      ? [...new Set([...toolsAllowWithForcedRuntimeTools, ...TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES])]
-      : toolsAllowWithForcedRuntimeTools;
+  const effectiveToolsAllow = mergeForcedEmbeddedAttemptToolsAllow(
+    toolsAllowWithForcedRuntimeTools,
+    {
+      forceToolNames: toolSearchControlsEnabledForRun ? [...TOOL_SEARCH_CONTROL_TOOL_NAMES] : [],
+    },
+  );
   const shouldConstructTools =
     toolConstructionPlan.constructTools ||
     toolSearchControlsEnabledForRun ||
@@ -138,10 +151,7 @@ export function prepareEmbeddedAttemptToolBase(params: {
   // generation so retained tool-result text cannot authorize stale coordinates.
   const computerContextEpoch: ComputerContextEpoch = { value: 0 };
   const skillInstructionDeliveryCache = createSkillInstructionDeliveryCache();
-  const toolSearchCatalogRef =
-    toolSearchControlsEnabledForRun || codeModeControlsEnabledForRun
-      ? createToolSearchCatalogRef()
-      : undefined;
+  const toolSearchCatalogRef = toolSurfaceRuntime.toolSearchCatalogRef;
   const nestedToolActivities: NestedToolActivity[] = [];
   const codeModeSkills = toolPolicyRestrictsTools({ allow: attempt.toolsAllow })
     ? []
@@ -208,6 +218,25 @@ export function prepareEmbeddedAttemptToolBase(params: {
     trustedInternalHandoff: attempt.trustedInternalHandoff,
     pluginMetadataSnapshot: attempt.preparedModelRuntime?.metadataSnapshot,
   });
+  const computerTransport = resolveSessionPlacementComputer(
+    attempt.admittedRunContext.operationalRunInstance,
+  );
+  const computerAllowed =
+    shouldConstructTools &&
+    projectConversationToolNames({
+      capabilityProfile: runtimeCapabilityProfile,
+      toolNames: ["computer"],
+      warn: () => undefined,
+    }).length === 1;
+  const pairedNodeComputerUse = (
+    await loadPairedComputerUseAvailabilityForSurface({
+      computerAllowed,
+      modelHasVision: attempt.model.input?.includes("image") ?? true,
+      computerTransport,
+      embeddedMode: isEmbeddedMode(),
+      signal: params.runAbortController.signal,
+    })
+  )?.prepared;
   const localModelLeanEnabled = isLocalModelLeanEnabled({
     config: attempt.config,
     agentId: params.setup.sessionAgentId,
@@ -243,7 +272,7 @@ export function prepareEmbeddedAttemptToolBase(params: {
     const constructedToolsRaw = !shouldConstructTools
       ? []
       : (() => {
-          const allTools = createOpenClawCodingTools({
+          const codingToolOptions: OpenClawCodingToolsOptions = {
             agentId: params.setup.sessionAgentId,
             ...buildConversationContext(),
             exec: {
@@ -261,12 +290,15 @@ export function prepareEmbeddedAttemptToolBase(params: {
             channelContext: attempt.channelContext,
             allowGatewaySubagentBinding: attempt.allowGatewaySubagentBinding,
             operationalRunInstance: attempt.admittedRunContext.operationalRunInstance,
+            computerTransport,
+            pairedNodeComputerUse,
             conversationRecall: attempt.conversationRecall,
             oneShotCliRun: attempt.oneShotCliRun,
             toolSearchCatalogRef,
             codeModeSkills,
             preparedModelRuntime: attempt.preparedModelRuntime,
             requireWorkspaceOnly: attempt.requireWorkspaceOnly,
+            sessionReadScopeKey: attempt.sessionReadScopeKey,
             sessionConfigSource: attempt.oneShotCliRun ? "pinned" : "runtime",
             webSearchEnabled: attempt.toolOverrides?.webSearch !== false,
             githubPublicationAvailable: attempt.githubPublicationAvailable,
@@ -309,7 +341,11 @@ export function prepareEmbeddedAttemptToolBase(params: {
             skillUsagePaths: params.skillUsagePaths,
             conversationCapabilityProfile: runtimeCapabilityProfile,
             onYield: params.onYield,
-          });
+          };
+          const allTools = createOpenClawCodingToolsInternal(
+            codingToolOptions,
+            params.skillReadResources,
+          );
           // The built-in harness retains its existing authoritative wrappers.
           // Only plugin harnesses receive and require the projected host capability.
           const boundTools = attempt.hostCapabilities
@@ -351,6 +387,23 @@ export function prepareEmbeddedAttemptToolBase(params: {
   });
 
   return {
+    toolHookContext: {
+      agentId: params.setup.sessionAgentId,
+      config: attempt.config,
+      cwd: params.setup.effectiveCwd,
+      sessionKey: params.setup.sandboxSessionKey,
+      sessionId: attempt.sessionId,
+      runId: attempt.runId,
+      approvalReviewerDeviceId: attempt.approvalReviewerDeviceId,
+      channelId: attempt.currentChannelId,
+      trace: params.runTrace,
+      loopDetection: resolveToolLoopDetectionConfig({
+        cfg: attempt.config,
+        agentId: params.setup.sessionAgentId,
+      }),
+      onToolOutcome: attempt.onToolOutcome,
+      allocateToolOutcomeOrdinal: attempt.allocateToolOutcomeOrdinal,
+    },
     get toolAbortSignal() {
       return toolAbortSignal;
     },
@@ -388,6 +441,7 @@ export function prepareEmbeddedAttemptToolBase(params: {
     runtimeCapabilityProfile,
     runCleanups,
     toolSearchCatalogRef,
+    toolSurfaceRuntime,
     toolSearchConfig,
     toolSearchControlsEnabledForRun,
     toolSearchRuntimeConfig,

@@ -7,15 +7,14 @@ import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
+  iterateSqliteQuerySync,
 } from "../infra/kysely-sync.js";
 import {
   coerceRequiredSqliteNumber as sqliteNumber,
   normalizeSqliteNumber,
 } from "../infra/sqlite-number.js";
-import {
-  hasOpenClawStateTablesBeyondStartupCheckpoint,
-  withExistingOpenClawStateDatabaseReadOnly,
-} from "../state/openclaw-state-db-readonly.js";
+import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
+import { hasOpenClawStateTablesBeyondStartupCheckpoint } from "../state/openclaw-state-db-schema-helpers.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
 import {
   openOpenClawStateDatabase,
@@ -253,7 +252,7 @@ function selectEvictionCandidates(
   db: DatabaseSync,
   params: { pluginId: string; namespace: string; key: string; now: number },
 ) {
-  return executeSqliteQuerySync(
+  return iterateSqliteQuerySync(
     db,
     kysely(db)
       .selectFrom("plugin_blob_entries")
@@ -265,7 +264,7 @@ function selectEvictionCandidates(
       .where((eb) => eb.or([eb("expires_at", "is", null), eb("expires_at", ">", params.now)]))
       .orderBy("created_at", "asc")
       .orderBy("entry_key", "asc"),
-  ).rows;
+  );
 }
 
 function readStoredUsage(
@@ -555,7 +554,7 @@ export function pluginBlobLookup<TMetadata>(params: {
       return row
         ? {
             ...decodeBlobInfo<TMetadata>(row, "lookup", params.env),
-            bytes: Uint8Array.from(row.blob),
+            bytes: row.blob,
           }
         : undefined;
     },

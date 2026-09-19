@@ -14,17 +14,14 @@ import { materializeProjectClone, refreshProjectClone } from "../../projects/pro
 import { parseProjectGitUrl } from "../../projects/project-git-url.js";
 import { resolveProjectDirectory } from "../../projects/project-registry.js";
 import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
-import { githubApiToken } from "../control-ui-github-api.js";
-import {
-  generateWorktreeSessionTitle,
-  hasExplicitSessionName,
-  resolveExplicitSessionName,
-} from "../dashboard-session-title.js";
+import { generateWorktreeSessionTitle } from "../dashboard-session-title.js";
+import { githubApiToken } from "../github-public-api.js";
 import { ADMIN_SCOPE } from "../operator-scopes.js";
 import type {
   PrepareGatewaySessionLifecycle,
   PreparedGatewaySessionLifecycle,
 } from "../session-lifecycle-preparation.js";
+import { hasExplicitSessionName, resolveExplicitSessionName } from "../session-title-state.js";
 import {
   prepareSessionWorktree,
   resolveSessionWorktreeBase,
@@ -284,8 +281,10 @@ export async function prepareSessionWorkspace(params: {
     }
     const root = prepareSessionCreateFilesystemRoot({
       cfg,
-      enforceSandboxContainment: Boolean(project),
-      requestedProjectId: project?.id,
+      // The saved child now carries the locked parent's inherited sandbox requirement.
+      // Registered projects must take the same pre-worktree containment path as clones.
+      enforceSandboxContainment: Boolean(project || saved.projectId),
+      requestedProjectId: project?.id ?? saved.projectId,
       sessionCwd: directory,
       sessionKey,
       targetAgentId: agentId,
@@ -362,6 +361,7 @@ export async function prepareSessionWorkspace(params: {
       }
       // Retries inherit workspace intent, not a previous caller's setup authority.
       const result = await prepareSessionWorktree({
+        cfg,
         target: { ...target, key: sessionKey, entry: saved },
         workspace: directory,
         name: pending.name,

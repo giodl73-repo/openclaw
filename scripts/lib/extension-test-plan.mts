@@ -7,6 +7,10 @@ import { isActiveMemoryExtensionRoot } from "../../test/vitest/vitest.extension-
 import { isBrowserExtensionRoot } from "../../test/vitest/vitest.extension-browser-paths.mjs";
 import { resolveSplitChannelExtensionShard } from "../../test/vitest/vitest.extension-channel-split-paths.mjs";
 import { isCodexExtensionRoot } from "../../test/vitest/vitest.extension-codex-paths.mjs";
+import {
+  databaseWorkerExtensionTestFiles,
+  isDatabaseWorkerExtensionRoot,
+} from "../../test/vitest/vitest.extension-database-workers-paths.mjs";
 import { isDiffsExtensionRoot } from "../../test/vitest/vitest.extension-diffs-paths.mjs";
 import { isFeishuExtensionRoot } from "../../test/vitest/vitest.extension-feishu-paths.mjs";
 import { isIrcExtensionRoot } from "../../test/vitest/vitest.extension-irc-paths.mjs";
@@ -145,6 +149,7 @@ const EXTENSION_TEST_CONFIG_ROUTES: Array<[(root: string) => boolean, string]> =
   [isMiscExtensionRoot, "test/vitest/vitest.extension-misc.config.ts"],
   [isMsTeamsExtensionRoot, "test/vitest/vitest.extension-msteams.config.ts"],
   [isQaExtensionRoot, "test/vitest/vitest.extension-qa.config.ts"],
+  [isDatabaseWorkerExtensionRoot, "test/vitest/vitest.extension-database-workers.config.ts"],
   [isTelegramExtensionRoot, "test/vitest/vitest.extension-telegram.config.ts"],
   [isVoiceCallExtensionRoot, "test/vitest/vitest.extension-voice-call.config.ts"],
   [isWhatsAppExtensionRoot, "test/vitest/vitest.extension-whatsapp.config.ts"],
@@ -252,7 +257,12 @@ function listFilesystemTestFiles(rootPath: string) {
 
 /** List working-tree test files for extension roots, including new untracked tests. */
 export function listExtensionTestFilesForRoots(roots: string[]) {
-  const files = roots.flatMap((root) => listFilesystemTestFiles(path.join(repoRoot, root)));
+  const files = roots.flatMap((root) => {
+    const rootPath = path.join(repoRoot, root);
+    return fs.existsSync(rootPath) && fs.statSync(rootPath).isFile()
+      ? [root]
+      : listFilesystemTestFiles(rootPath);
+  });
   return [...new Set(files)].toSorted((left, right) => left.localeCompare(right));
 }
 
@@ -279,6 +289,32 @@ function splitTargetsByFileLimit(targets: string[], maxFilesPerChunk: number) {
   return chunks;
 }
 
+const DATABASE_WORKER_CONFIG = "test/vitest/vitest.extension-database-workers.config.ts";
+// The 185-file native worker envelope was still running after 58 minutes in
+// run 35176277297. Bound jobs separately from the existing process lifetimes.
+export const NATIVE_DATABASE_WORKER_TEST_JOB_FILE_LIMIT = 20;
+
+function splitWorkerTargetsByOriginalConfig(
+  targets: string[],
+  split: (config: string, files: string[]) => string[][],
+  nativeFileLimit?: number,
+) {
+  const groups = new Map<string, string[]>();
+  for (const target of uniqueSortedTargets(targets)) {
+    const config = resolveExtensionTestConfig(target.split("/").slice(0, 2).join("/"));
+    const group = groups.get(config) ?? [];
+    group.push(target);
+    groups.set(config, group);
+  }
+  return [...groups].flatMap(([config, files]) =>
+    config === DATABASE_WORKER_CONFIG
+      ? nativeFileLimit
+        ? splitTargetsByFileLimit(files, nativeFileLimit)
+        : [files]
+      : split(config, files),
+  );
+}
+
 function resolveExtensionTestJobFileLimit(config: string) {
   return (
     EXTENSION_TEST_JOB_FILE_LIMITS.get(config) ?? EXTENSION_TEST_PROCESS_FILE_LIMITS.get(config)
@@ -287,6 +323,9 @@ function resolveExtensionTestJobFileLimit(config: string) {
 
 /** Split an extension config's test files across bounded process lifetimes when required. */
 export function splitExtensionTestProcessTargets(config: string, targets: string[]) {
+  if (config === DATABASE_WORKER_CONFIG) {
+    return splitWorkerTargetsByOriginalConfig(targets, splitExtensionTestProcessTargets);
+  }
   const maxFilesPerProcess = EXTENSION_TEST_PROCESS_FILE_LIMITS.get(config);
   return maxFilesPerProcess
     ? splitTargetsByFileLimit(targets, maxFilesPerProcess)
@@ -295,6 +334,13 @@ export function splitExtensionTestProcessTargets(config: string, targets: string
 
 /** Split an extension config's test files into CI envelopes without changing process lifetime. */
 export function splitExtensionTestJobTargets(config: string, targets: string[]) {
+  if (config === DATABASE_WORKER_CONFIG) {
+    return splitWorkerTargetsByOriginalConfig(
+      targets,
+      splitExtensionTestJobTargets,
+      NATIVE_DATABASE_WORKER_TEST_JOB_FILE_LIMIT,
+    );
+  }
   const maxFilesPerJob = resolveExtensionTestJobFileLimit(config);
   return maxFilesPerJob
     ? splitTargetsByFileLimit(targets, maxFilesPerJob)
@@ -303,7 +349,7 @@ export function splitExtensionTestJobTargets(config: string, targets: string[]) 
 
 /** Whether a Vitest invocation can safely be split into independent one-shot processes. */
 export function shouldSplitExtensionTestProcesses(config: string, vitestArgs: string[] = []) {
-  if (!EXTENSION_TEST_PROCESS_FILE_LIMITS.has(config)) {
+  if (config !== DATABASE_WORKER_CONFIG && !EXTENSION_TEST_PROCESS_FILE_LIMITS.has(config)) {
     return false;
   }
   // Per-test retries and exact file exclusions preserve independent process scopes.
@@ -335,7 +381,9 @@ export function createExtensionTestProcessTargetChunks(
   }
   // Explicit file targets replace Vitest's root discovery, so inventory the working tree.
   // Otherwise a newly authored untracked test would silently disappear from a broad run.
-  const testFiles = listExtensionTestFilesForRoots(roots);
+  const testFiles = listExtensionTestFilesForRoots(roots).filter(
+    (file) => config === DATABASE_WORKER_CONFIG || !databaseWorkerExtensionTestFiles.includes(file),
+  );
   return testFiles.length > 0 ? splitExtensionTestProcessTargets(config, testFiles) : [roots];
 }
 
@@ -353,8 +401,12 @@ export function estimateExtensionTestCost(config: string, testFileCount: number)
   return Math.max(1, Math.ceil(testFileCount * multiplier));
 }
 
-/** Resolve the dedicated Vitest config for an extension root. */
-export function resolveExtensionTestConfig(root: string) {
+/** Resolve the dedicated Vitest config for an extension root or test file. */
+export function resolveExtensionTestConfig(target: string) {
+  if (databaseWorkerExtensionTestFiles.includes(target)) {
+    return "test/vitest/vitest.extension-database-workers.config.ts";
+  }
+  const root = target.split("/").slice(0, 2).join("/");
   const splitChannelShard = resolveSplitChannelExtensionShard(root);
   if (splitChannelShard) {
     return splitChannelShard.config;
@@ -417,7 +469,27 @@ export function resolveExtensionTestPlan(params: { cwd?: string; targetArg?: str
     (sum, root) => sum + countTestFiles(path.join(repoRoot, root)),
     0,
   );
-  const estimatedCost = estimateExtensionTestCost(config, testFileCount);
+  const workerFiles = databaseWorkerExtensionTestFiles.filter(
+    (file) =>
+      file.startsWith(`${relativeExtensionDir}/`) && fs.existsSync(path.join(repoRoot, file)),
+  );
+  const groups = [{ config, roots, testFileCount: testFileCount - workerFiles.length }];
+  if (workerFiles.length > 0) {
+    groups.push({
+      config: resolveExtensionTestConfig(workerFiles[0]!),
+      roots: workerFiles,
+      testFileCount: workerFiles.length,
+    });
+  }
+  const planGroups = groups
+    .filter((group) => group.testFileCount > 0)
+    .map((group) =>
+      Object.assign({}, group, {
+        extensionIds: [extensionId],
+        estimatedCost: estimateExtensionTestCost(group.config, group.testFileCount),
+      }),
+    );
+  const estimatedCost = planGroups.reduce((sum, group) => sum + group.estimatedCost, 0);
 
   return {
     config,
@@ -425,6 +497,7 @@ export function resolveExtensionTestPlan(params: { cwd?: string; targetArg?: str
     extensionDir: relativeExtensionDir,
     extensionId,
     hasTests: testFileCount > 0,
+    planGroups,
     roots,
     testFileCount,
   };
@@ -441,7 +514,7 @@ export function mergeExtensionTestPlans(plans: ResolvedExtensionTestPlan[]): Ext
     .map((plan) => plan.extensionId)
     .toSorted((left, right) => left.localeCompare(right));
 
-  for (const plan of testPlans) {
+  for (const plan of testPlans.flatMap((entry) => entry.planGroups)) {
     const current = groupsByConfig.get(plan.config) ?? {
       config: plan.config,
       extensionIds: [],
@@ -450,7 +523,7 @@ export function mergeExtensionTestPlans(plans: ResolvedExtensionTestPlan[]): Ext
       testFileCount: 0,
     };
 
-    current.extensionIds.push(plan.extensionId);
+    current.extensionIds.push(...plan.extensionIds);
     current.roots.push(...plan.roots);
     current.estimatedCost += plan.estimatedCost;
     current.testFileCount += plan.testFileCount;

@@ -129,8 +129,22 @@ export function createStreamRendering({
   const stripBlockTags = (
     text: string,
     stateLocal: StreamBlockState,
-    options?: { final?: boolean; completeMarkdownChunk?: boolean },
+    options?: { final?: boolean; completeMarkdownChunk?: boolean; startsAtLineStart?: boolean },
   ): string => {
+    const hasPendingPrefix = Boolean(
+      stateLocal.pendingFenceFragment || stateLocal.pendingTagFragment,
+    );
+    if (!hasPendingPrefix && options?.startsAtLineStart !== undefined) {
+      const atLineStart = options.startsAtLineStart;
+      stateLocal.fence = { ...stateLocal.fence, atLineStart };
+      if (stateLocal.thinking && !stateLocal.reasoningPendingFenceFragment) {
+        stateLocal.reasoningFence = { ...stateLocal.reasoningFence, atLineStart };
+      }
+      if (stateLocal.final) {
+        stateLocal.finalFence = { ...stateLocal.finalFence, atLineStart };
+      }
+    }
+    const fenceStateStart = stateLocal.fence;
     const input = `${stateLocal.pendingFenceFragment ?? ""}${stateLocal.pendingTagFragment ?? ""}${text}`;
     stateLocal.pendingFenceFragment = undefined;
     stateLocal.pendingTagFragment = undefined;
@@ -142,14 +156,13 @@ export function createStreamRendering({
       ? { text: input, pendingFenceFragment: undefined }
       : options?.completeMarkdownChunk
         ? { text: input, pendingFenceFragment: undefined }
-        : splitTrailingFenceFragment(input, stateLocal.fence?.atLineStart ?? true);
+        : splitTrailingFenceFragment(input, fenceStateStart?.atLineStart ?? true);
     stateLocal.pendingFenceFragment = pendingFenceFragment;
     if (!fenceInput) {
       return "";
     }
 
     const inlineStateStart = stateLocal.inlineCode ?? createInlineCodeState();
-    const fenceStateStart = stateLocal.fence;
     const initialCodeSpans = buildCodeSpanIndex(fenceInput, inlineStateStart, fenceStateStart);
     const { text: scanText, pendingTagFragment } = options?.final
       ? { text: fenceInput, pendingTagFragment: undefined }
@@ -359,9 +372,11 @@ export function createStreamRendering({
   const emitBlockChunk = (
     text: string,
     options?: {
+      sourceText?: string;
       assistantMessageIndex?: number;
       final?: boolean;
       completeMarkdownChunk?: boolean;
+      startsAtLineStart?: boolean;
       finalReply?: ReplyDirectiveParseResult;
     },
   ) => {
@@ -381,6 +396,7 @@ export function createStreamRendering({
             stripBlockTags(text, state.blockState, {
               final: options?.final === true,
               completeMarkdownChunk: options?.completeMarkdownChunk === true,
+              startsAtLineStart: options?.startsAtLineStart,
             }),
           )
     ).trimEnd();
@@ -460,9 +476,13 @@ export function createStreamRendering({
       markBlockReplyTextHandled();
       return;
     }
-    let splitResult = replyDirectiveAccumulator.consume(chunk, {
-      final: options?.finalReply !== undefined,
-    });
+    // Prepared chunks already removed real directives with full source context;
+    // a chunk boundary can separate a remaining literal from its code opener.
+    let splitResult: ReplyDirectiveParseResult | null = state.blockState.textIsVisible
+      ? { text: chunk, replyToTag: false, isSilent: false }
+      : replyDirectiveAccumulator.consume(chunk, {
+          final: options?.finalReply !== undefined,
+        });
     if (options?.finalReply) {
       let pendingText = splitResult?.text ?? "";
       if (pendingText && !options.finalReply.text.endsWith(pendingText)) {
@@ -520,6 +540,8 @@ export function createStreamRendering({
       },
       {
         assistantMessageIndex: options?.assistantMessageIndex ?? state.assistantMessageIndex,
+        blockSourceText:
+          chunk === text.trimEnd() && cleanedText === chunk ? options?.sourceText : undefined,
         consumePendingToolMedia:
           options?.finalReply !== undefined || Boolean(mediaUrls?.length || audioAsVoice),
       },
@@ -541,26 +563,32 @@ export function createStreamRendering({
     if (!params.onBlockReply) {
       return undefined;
     }
-    let pendingChunk: string | undefined;
+    let pendingChunk:
+      | { text: string; sourceText?: string; startsAtLineStart?: boolean }
+      | undefined;
     if (blockChunker.hasBuffered()) {
       blockChunker.drain({
         force: true,
-        emit: (text) => {
+        emit: (text, metadata) => {
           if (pendingChunk !== undefined) {
-            emitBlockChunk(pendingChunk, {
+            emitBlockChunk(pendingChunk.text, {
+              sourceText: pendingChunk.sourceText,
+              startsAtLineStart: pendingChunk.startsAtLineStart,
               assistantMessageIndex: options?.assistantMessageIndex,
               completeMarkdownChunk: true,
             });
           }
-          pendingChunk = text;
+          pendingChunk = { text, ...metadata };
         },
       });
     }
     if (pendingChunk !== undefined || options?.final) {
       // Only the final chunk can select attachments or consume fallback tool
       // media. Intermediate chunks remain text-only until that selection exists.
-      emitBlockChunk(pendingChunk ?? "", {
+      emitBlockChunk(pendingChunk?.text ?? "", {
         ...options,
+        sourceText: pendingChunk?.sourceText,
+        startsAtLineStart: pendingChunk?.startsAtLineStart,
         completeMarkdownChunk: options?.final === true,
       });
     }

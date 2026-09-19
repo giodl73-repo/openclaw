@@ -6,6 +6,8 @@
     <string name="controls" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"عناصر التحكم"</string>
     <string name="talk" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"التحدث"</string>
     <string name="real_time_audio_failed" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"فشل الصوت على الساعة"</string>
+    <string name="microphone_permission_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"إذن استخدام الميكروفون مطلوب"</string>
+    <string name="open_settings" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"فتح الإعدادات"</string>
     <string name="dictate" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"إملاء"</string>
     <string name="live" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"مباشر"</string>
     <string name="thread" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"سلسلة"</string>
@@ -26,6 +28,7 @@
     <string name="speak_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"نطق أحدث رد"</string>
     <string name="speaking" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"جارٍ النطق"</string>
     <string name="listening" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"جارٍ الاستماع"</string>
+    <string name="stopping" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"جارٍ إنهاء المكالمة…"</string>
     <string name="connecting" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"جارٍ الاتصال"</string>
     <string name="thinking" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"جارٍ التفكير"</string>
     <string name="typing" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"جارٍ الكتابة"</string>
@@ -79,6 +82,8 @@
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"لم يُقبل الإجراء"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"حدث خطأ ما"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"حدِّث القوائم وحاول مرة أخرى."</string>
+    <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"تعذّر تحديث بعض النماذج. لا تزال النماذج المدرجة متاحة."</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"حدّث OpenClaw على هاتفك وحدّث Gateway لاختيار نماذج لهذه المحادثة."</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"حاول مجددًا من الساعة."</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"التحديث مطلوب"</string>
     <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"حدّث OpenClaw على كل من الهاتف والساعة."</string>

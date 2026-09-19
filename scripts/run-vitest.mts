@@ -10,6 +10,7 @@ import {
   isPluginControlUiPath,
   isUiBrowserTestFile,
   isUiTestTarget,
+  uiTimingTestFiles,
 } from "../test/vitest/vitest.ui-paths.mjs";
 import { boundaryTestFiles } from "../test/vitest/vitest.unit-paths.mjs";
 import { parsePermissiveBooleanToken } from "./lib/arg-utils.mts";
@@ -576,7 +577,7 @@ export function resolveImplicitVitestArgs(argv: string[], cwd = process.cwd()): 
   if (collectExplicitDirectoryTargetArgs(argv, cwd).length > 0) {
     return argv;
   }
-  const testTargets = argv
+  const testTargets = collectVitestFileFilters(argv)
     .filter((arg) => !arg.startsWith("-") && arg.endsWith(".test.ts"))
     .map((arg) => toRepoRelativeArg(arg, cwd));
   if (testTargets.length > 0 && testTargets.every(isToolingDockerTestTarget)) {
@@ -596,6 +597,10 @@ export function resolveImplicitVitestArgs(argv: string[], cwd = process.cwd()): 
     testTargets.length > 0 &&
     testTargets.every((target) => isUiTestTarget(target) && !isUiBrowserTestFile(target))
   ) {
+    // Mixed timing/ordinary UI selection needs the root matrix to preserve groups.
+    if (testTargets.some((target) => uiTimingTestFiles.includes(target))) {
+      return argv;
+    }
     return withImplicitVitestConfig(argv, UI_VITEST_CONFIG);
   }
   return argv;
@@ -614,10 +619,10 @@ export function installVitestNoOutputWatchdog(params: {
   onForceKill?: () => void;
   setTimeoutFn?: typeof setTimeout;
   clearTimeoutFn?: typeof clearTimeout;
-}): () => void {
+}): { recordActivity: () => void; teardown: () => void } {
   const timeoutMs = params.timeoutMs;
   if (!timeoutMs || timeoutMs <= 0) {
-    return () => {};
+    return { recordActivity: () => {}, teardown: () => {} };
   }
 
   const setTimeoutFn = params.setTimeoutFn ?? setTimeout;
@@ -725,17 +730,20 @@ export function installVitestNoOutputWatchdog(params: {
 
   resetSilenceTimer();
 
-  return () => {
-    if (!active) {
-      return;
-    }
-    active = false;
-    clearSilenceTimer();
-    clearForceKillTimer();
-    clearHeartbeatTimer();
-    for (const { stream, handler } of listeners) {
-      stream.off("data", handler);
-    }
+  return {
+    recordActivity: handleActivity,
+    teardown() {
+      if (!active) {
+        return;
+      }
+      active = false;
+      clearSilenceTimer();
+      clearForceKillTimer();
+      clearHeartbeatTimer();
+      for (const { stream, handler } of listeners) {
+        stream.off("data", handler);
+      }
+    },
   };
 }
 
@@ -784,7 +792,7 @@ function forwardVitestOutput(
 }
 
 /**
- * Spawns Vitest with output forwarding, watchdogs, and process-group cleanup.
+ * Joins watched Vitest processes and keeps expired deadlines failed after cooperative exits.
  */
 export function spawnWatchedVitestProcess({
   pnpmArgs,
@@ -804,7 +812,7 @@ export function spawnWatchedVitestProcess({
   if (homeMode !== "tooling") {
     assertTestHomeSelection(env, homeMode);
   }
-  let diagnosticsCompletion: Promise<void> | null = null;
+  let timeoutCompletion: Promise<boolean> | null = null;
   const directNodeArgs = resolveDirectNodeVitestArgs(pnpmArgs);
   if (workerRun && directNodeArgs) {
     // Preserve Node flags while giving the same owned child its private generation.
@@ -845,7 +853,7 @@ export function spawnWatchedVitestProcess({
     forceSignal: "SIGKILL",
     forceSignalDelayMs: 100,
   });
-  const teardownNoOutputWatchdog = installVitestNoOutputWatchdog({
+  const noOutputWatchdog = installVitestNoOutputWatchdog({
     streams: [child.stdout, child.stderr],
     timeoutMs: resolveVitestNoOutputTimeoutMs(env),
     heartbeatMs: resolveVitestNoOutputHeartbeatMs(env),
@@ -861,7 +869,7 @@ export function spawnWatchedVitestProcess({
         },
         onTimeout: onNoOutputTimeout,
       });
-      diagnosticsCompletion = termination.diagnostics;
+      timeoutCompletion = termination.diagnostics.then(() => true);
     },
     onForceKill: () => {
       forwardSignalToVitestProcessGroup({
@@ -884,11 +892,11 @@ export function spawnWatchedVitestProcess({
 
   const teardown = () => {
     childCleanup.teardown();
-    teardownNoOutputWatchdog();
+    noOutputWatchdog.teardown();
   };
   const completion = Promise.all([childCompletion, forwardedOutput])
-    .then(async ([{ code, signal, groupJoined }]) => {
-      await diagnosticsCompletion;
+    .then(async ([{ code: childCode, signal, groupJoined }]) => {
+      const code = (await timeoutCompletion) && childCode === 0 ? 1 : childCode;
       const result = unhandledErrors.finish();
       if (result) {
         writeVitestUnhandledErrorSummary(result, env);
@@ -899,7 +907,9 @@ export function spawnWatchedVitestProcess({
 
   return {
     child,
-    completion: workerRun ? workerRun.borrow(child, completion) : completion,
+    completion: workerRun
+      ? workerRun.borrow(child, completion, noOutputWatchdog.recordActivity)
+      : completion,
     getForwardedSignal: childCleanup.getForwardedSignal,
     teardown,
   };
@@ -910,6 +920,20 @@ export async function runVitest(
   argv: string[] = process.argv.slice(2),
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
+  if (argv.some((arg) => arg === "--isolated-image" || arg.startsWith("--isolated-image="))) {
+    const { parseIsolatedVitestArgs, runIsolatedVitest } =
+      await import("./lib/vitest-isolated.mts");
+    const isolated = parseIsolatedVitestArgs(argv);
+    if (isolated) {
+      process.exitCode = await runIsolatedVitest(
+        resolveRepoRoot(import.meta.url),
+        isolated.image,
+        isolated.args,
+        env,
+      );
+      return;
+    }
+  }
   if (argv.length === 0) {
     console.error("usage: node scripts/run-vitest.mjs <vitest args...>");
     process.exitCode = 1;

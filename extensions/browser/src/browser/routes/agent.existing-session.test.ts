@@ -1,6 +1,7 @@
 // Browser tests cover agent.existing session plugin behavior.
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { saveMediaBuffer } from "../../media/store.js";
 import type { ChromeMcpSnapshotNode } from "../chrome-mcp.snapshot.js";
 import { EXISTING_SESSION_LIMITS } from "./existing-session-limits.js";
 import {
@@ -218,6 +219,42 @@ describe("existing-session browser routes", () => {
     expect(chromeMcpMocks.takeChromeMcpScreenshot).toHaveBeenCalled();
   });
 
+  it.each(["snapshot", "screenshot"])(
+    "clears %s labels after media persistence fails and its caller aborts",
+    async (operation) => {
+      const failure = new Error("media persistence failed");
+      const controller = new AbortController();
+      vi.mocked(saveMediaBuffer).mockImplementationOnce(async () => {
+        controller.abort();
+        throw failure;
+      });
+      const response = createBrowserRouteResponse();
+      const handler = operation === "snapshot" ? getSnapshotGetHandler() : getSnapshotPostHandler();
+      const request = handler?.(
+        {
+          params: {},
+          query: { format: "ai", labels: "1" },
+          body: { labels: true },
+          signal: controller.signal,
+        },
+        response.res,
+      );
+      if (operation === "snapshot") {
+        await request;
+        expect(response.body).toEqual({ error: failure.message });
+      } else {
+        await expect(request).rejects.toBe(failure);
+        expect(response.body).toBeUndefined();
+      }
+      expect(chromeMcpMocks.evaluateChromeMcpScript).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          signal: undefined,
+          fn: expect.stringContaining("node.remove()"),
+        }),
+      );
+    },
+  );
+
   it("omits deltas for existing-session snapshots without stable document identity", async () => {
     chromeMcpMocks.takeChromeMcpSnapshot
       .mockResolvedValueOnce({
@@ -418,9 +455,15 @@ describe("existing-session browser routes", () => {
     expect(response.statusCode).toBe(200);
     expect(routeState.profileCtx.closeTab).toHaveBeenCalledWith("7", {
       exactTargetId: true,
-      signal: ctrl.signal,
-      timeoutMs: undefined,
+      signal: expect.any(AbortSignal),
+      timeoutMs: 60_000,
     });
+    const reason = new Error("caller cancelled");
+    ctrl.abort(reason);
+    expect(routeState.profileCtx.closeTab).toHaveBeenCalledWith(
+      "7",
+      expect.objectContaining({ signal: expect.objectContaining({ aborted: true, reason }) }),
+    );
   });
 
   it("allows existing-session snapshots under the default SSRF policy object", async () => {
@@ -552,6 +595,27 @@ describe("existing-session browser routes", () => {
     expect(chromeMcpMocks.fillChromeMcpElement).not.toHaveBeenCalled();
   });
 
+  it("explains unsupported focused paste without forwarding or echoing its text", async () => {
+    const response = createBrowserRouteResponse();
+    await getActPostHandler()?.(
+      {
+        params: {},
+        query: {},
+        body: { kind: "insertText", text: "synthetic-password-paste" },
+      },
+      response.res,
+    );
+
+    expect(response.statusCode).toBe(501);
+    expect(response.body).toMatchObject({
+      code: "ACT_EXISTING_SESSION_UNSUPPORTED",
+      error: expect.stringContaining("Paste is not supported for existing-session"),
+    });
+    expect(JSON.stringify(response.body)).not.toContain("synthetic-password-paste");
+    expect(chromeMcpMocks.fillChromeMcpElement).not.toHaveBeenCalled();
+    expect(chromeMcpMocks.evaluateChromeMcpScript).not.toHaveBeenCalled();
+  });
+
   it("fails closed for existing-session dialogId responses", async () => {
     const handler = getDialogHookPostHandler();
     const response = createBrowserRouteResponse();
@@ -629,7 +693,10 @@ describe("existing-session browser routes", () => {
     expect(clickParams.uid).toBe("btn-1");
     expect(clickParams.doubleClick).toBe(false);
     expect(clickParams.timeoutMs).toBe(1234);
-    expect(clickParams.signal).toBe(ctrl.signal);
+    expect(clickParams.signal).toBeInstanceOf(AbortSignal);
+    const reason = new Error("caller cancelled");
+    ctrl.abort(reason);
+    expect(clickParams.signal).toMatchObject({ aborted: true, reason });
   });
 
   it("supports coordinate clicks for existing-session profiles", async () => {

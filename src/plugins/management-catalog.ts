@@ -41,6 +41,39 @@ import type { PluginMetadataSnapshot } from "./plugin-metadata-snapshot.js";
 export type ManagedPluginCatalogEntry = PluginCatalogEntry;
 export type ManagedPluginCatalog = PluginsListResult;
 
+export type ManagedPluginIconSource = { kind: "file"; path: string; rootPath: string };
+
+export function resolvePluginIconSource(params: {
+  metadata: PluginMetadataSnapshot;
+  pluginId: string;
+}): ManagedPluginIconSource | undefined {
+  const normalizedPluginId = params.metadata.normalizePluginId(params.pluginId);
+  const manifest = params.metadata.byPluginId.get(normalizedPluginId);
+  const localIconPath = normalizeOptionalString(manifest?.iconPath);
+  if (localIconPath && manifest) {
+    return { kind: "file", path: localIconPath, rootPath: manifest.rootDir };
+  }
+  return undefined;
+}
+
+export function resolvePluginActivityIconSource(params: {
+  metadata: PluginMetadataSnapshot;
+  pluginId: string;
+  toolName?: string;
+}): ManagedPluginIconSource | undefined {
+  const pluginId = params.metadata.normalizePluginId(params.pluginId);
+  const manifest = params.metadata.byPluginId.get(pluginId);
+  if (!manifest) {
+    return undefined;
+  }
+  const overrides = manifest.toolActivityIconPaths;
+  const override =
+    params.toolName && overrides && Object.hasOwn(overrides, params.toolName)
+      ? overrides[params.toolName]
+      : undefined;
+  const iconPath = override ?? manifest.activityIconPath;
+  return iconPath ? { kind: "file", path: iconPath, rootPath: manifest.rootDir } : undefined;
+}
 export function getManagedPluginCache(metadata?: PluginMetadataSnapshot) {
   if (metadata) {
     return getPluginMetadataSnapshotCache(metadata);
@@ -63,9 +96,11 @@ export function withManagedPluginCache<
   return (params) => withPluginCache(getManagedPluginCache(params.metadata), () => run(params));
 }
 
-/** Clear the process-stable hosted catalog snapshot after an explicit owner reload. */
-export function clearManagedPluginOfficialCatalogCache(): void {
-  getManagedPluginCache().officialCatalog = undefined;
+/** Clear process-stable catalog snapshots after an explicit owner reload. */
+export function clearManagedPluginCatalogCache(): void {
+  const cache = getManagedPluginCache();
+  cache.officialCatalog = undefined;
+  cache.pluginVersionCategories = undefined;
 }
 
 function mergeCatalogMetadata(
@@ -227,8 +262,8 @@ export function normalizeFeaturedAt(value: unknown): number | undefined {
   return asSafeIntegerInRange(value, { min: 0 });
 }
 
-/** Coarse manifest-derived grouping so catalog UIs can shelve a large inventory. */
-export function derivePluginCategory(
+/** Preserve the shipped coarse category projection for older catalog clients. */
+export function deriveLegacyPluginCategory(
   manifest: PluginManifestRecord | undefined,
 ): string | undefined {
   if (!manifest) {

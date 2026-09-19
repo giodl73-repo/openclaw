@@ -28,6 +28,7 @@ import {
 } from "../../lib/chat/message-normalizer.ts";
 import type { CanvasToolPreview } from "../../lib/chat/tool-cards.ts";
 import { areUiSessionKeysEquivalent } from "../../lib/sessions/session-key.ts";
+import type { ChatMessageRecovery } from "./chat-message-recovery.ts";
 import { buildPendingInputItems } from "./chat-pending-inputs.ts";
 import {
   buildCompactionDividerItem,
@@ -93,9 +94,10 @@ export type BuildChatItemsProps = {
   stream: string | null;
   streamStartedAt: number | null;
   queue?: ChatQueueItem[];
+  initialTurnId?: string;
   pendingInputs?: ChatPendingInputsPage["items"];
   workspaceSyncPendingRunIds?: readonly string[];
-  workerSetupPendingRunIds?: readonly string[];
+  workerSetupPending?: boolean;
   showToolCalls: boolean;
   persistCommentary?: boolean;
   /** True while the agent is visibly working (isChatRunWorking). */
@@ -107,6 +109,7 @@ export type BuildChatItemsProps = {
   loading?: boolean;
   searchOpen?: boolean;
   searchQuery?: string;
+  messageRecovery?: ChatMessageRecovery;
 };
 
 function canvasAssistantItemKey(
@@ -161,7 +164,8 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     if (
       role === "assistant" &&
       message &&
-      (!searchFiltering || messageMatchesSearchQuery(history[index], props.searchQuery ?? ""))
+      (!searchFiltering ||
+        messageMatchesSearchQuery(history[index], props.searchQuery ?? "", props.messageRecovery))
     ) {
       canvasTurn.lastMatchingAssistantIndex = index;
       canvasTurn.previews.push(
@@ -257,7 +261,11 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     }
 
     const searchQuery = props.searchQuery ?? "";
-    if (props.searchOpen && searchQuery.trim() && !messageMatchesSearchQuery(msg, searchQuery)) {
+    if (
+      props.searchOpen &&
+      searchQuery.trim() &&
+      !messageMatchesSearchQuery(msg, searchQuery, props.messageRecovery)
+    ) {
       continue;
     }
     if (
@@ -301,6 +309,7 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
   );
   const currentRunQueuedSends = threadQueuedSends.filter(
     (queued) =>
+      queued.sendState === "submitting" ||
       queued.sendState === "sending" ||
       queued.sendState === "waiting-model" ||
       (queued.sendState === "waiting-reconnect" &&
@@ -322,7 +331,8 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     props.searchOpen ? props.searchQuery : undefined,
     props.queue,
     props.workspaceSyncPendingRunIds,
-    props.workerSetupPendingRunIds,
+    props.workerSetupPending,
+    props.messageRecovery,
   ).map((item) => ({ item }));
   if (compaction && compactionKey && !hasPersistedCompaction) {
     const timestamp = compaction.startedAt ?? compaction.completedAt ?? Date.now();
@@ -350,7 +360,7 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     if (
       props.searchOpen &&
       searchQuery.trim() &&
-      !messageMatchesSearchQuery(message, searchQuery)
+      !messageMatchesSearchQuery(message, searchQuery, props.messageRecovery)
     ) {
       return;
     }
@@ -368,7 +378,10 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
         (identity?.role === "assistant" && !identity.isImported && identity.runId === runId)
       );
     });
-    items.splice(insertionIndex < 0 ? items.length : insertionIndex, 0, {
+    // The retained New Session prompt predates all recovery output, including
+    // after a reload when its original browser timestamp is unavailable.
+    const position = queued.id === props.initialTurnId ? 0 : insertionIndex;
+    items.splice(position < 0 ? items.length : position, 0, {
       kind: "message",
       key: queued.sendRunId ? buildMessageItems([message])[0]!.key : `pending-send:${queued.id}`,
       message,
@@ -621,7 +634,9 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     ((props.runWorking === true && !initialHistoryLoad) ||
       hasEmptyLiveStream ||
       queuedSends.some(
-        (item) => item.sendState === "sending" && shouldRenderQueuedSendInThread(item),
+        (item) =>
+          (item.sendState === "submitting" || item.sendState === "sending") &&
+          shouldRenderQueuedSendInThread(item),
       ));
   if (props.runWorking !== true && props.stream === null && !showWorkingIndicator) {
     clearWorkingProgress(props.sessionKey);

@@ -4,6 +4,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { stripInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
 import { stripUserEnvelopeForDisplay } from "../auto-reply/reply/user-envelope-display.js";
+import { isToolCallContentType } from "../chat/tool-content.js";
 import { isPrimarySessionTranscriptFileName } from "../config/sessions/artifacts.js";
 import { parseSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
 import type { SessionEntry } from "../config/sessions/types.js";
@@ -26,7 +27,7 @@ import {
 import {
   computeUsageTokenTotals,
   createUsageCostResolver,
-  parseUsageCostTranscriptEntry,
+  parseUsageCostTranscriptEntryAsync,
 } from "./session-cost-usage-pricing.js";
 import { createUsageDayKeyFormatter } from "./session-cost-usage-projection.js";
 import { buildSessionCostSummaryFromRollup } from "./session-cost-usage-rollup.js";
@@ -49,7 +50,6 @@ export async function discoverAllSessions(params: {
   agentId: string;
   startMs?: number;
   endMs?: number;
-  includeFirstUserMessage?: boolean;
 }): Promise<DiscoveredSession[]> {
   const files = await listUsageCountedTranscriptStats(params.agentId, {
     minMtimeMs: params.startMs,
@@ -59,49 +59,12 @@ export async function discoverAllSessions(params: {
 
   for (const file of files) {
     // Do not exclude by endMs: a session can have activity in range even if it continued later.
-    const { filePath, sourcePath: sessionFile, sessionId } = file;
+    const { sourcePath: sessionFile, sessionId } = file;
     if (!sessionId) {
       continue;
     }
     const isPrimaryTranscript =
       file.kind === "sqlite" || isPrimarySessionTranscriptFileName(path.basename(sessionFile));
-
-    // Try to read first user message for label extraction
-    let firstUserMessage: string | undefined;
-    if (params.includeFirstUserMessage !== false) {
-      try {
-        for await (const parsed of readTranscriptRecords(filePath)) {
-          try {
-            const message = parsed.message as Record<string, unknown> | undefined;
-            if (message?.role === "user") {
-              const content = message.content;
-              if (typeof content === "string") {
-                firstUserMessage = truncateUtf16Safe(content, 100);
-              } else if (Array.isArray(content)) {
-                for (const block of content) {
-                  if (
-                    typeof block === "object" &&
-                    block &&
-                    (block as Record<string, unknown>).type === "text"
-                  ) {
-                    const text = (block as Record<string, unknown>).text;
-                    if (typeof text === "string") {
-                      firstUserMessage = truncateUtf16Safe(text, 100);
-                    }
-                    break;
-                  }
-                }
-              }
-              break; // Found first user message
-            }
-          } catch {
-            // Skip malformed lines
-          }
-        }
-      } catch {
-        // Ignore read errors
-      }
-    }
 
     const existing = discovered.get(sessionId);
     const existingIsPrimary = existing
@@ -117,19 +80,14 @@ export async function discoverAllSessions(params: {
         sessionId,
         sessionFile,
         mtime: file.mtimeMs,
-        firstUserMessage: firstUserMessage ?? existing?.firstUserMessage,
       });
-      continue;
-    }
-
-    if (!existing.firstUserMessage && firstUserMessage) {
-      existing.firstUserMessage = firstUserMessage;
-      discovered.set(sessionId, existing);
     }
   }
 
   // Sort by mtime descending (most recent first)
-  return Array.from(discovered.values()).toSorted((a, b) => b.mtime - a.mtime);
+  const sessions = Array.from(discovered.values());
+  sessions.sort((a, b) => b.mtime - a.mtime);
+  return sessions;
 }
 
 export async function loadSessionCostSummary(params: {
@@ -178,7 +136,7 @@ export async function loadSessionCostSummary(params: {
   if (!currentFile) {
     return null;
   }
-  const pricingFingerprint = resolveUsageCostPricingFingerprint(params.config, agentDir);
+  const pricingFingerprint = await resolveUsageCostPricingFingerprint(params.config, agentDir);
   const stored = readUsageCostRollups(params.agentId, pricingFingerprint, databasePath, {
     filePaths: [currentFile.filePath],
   }).get(currentFile.filePath);
@@ -224,7 +182,7 @@ export async function loadSessionUsageTimeSeries(params: {
   const resolveCost = createUsageCostResolver({ config: params.config, agentDir });
 
   for await (const record of readTranscriptRecords(sessionFile)) {
-    const entry = parseUsageCostTranscriptEntry(record, resolveCost);
+    const entry = await parseUsageCostTranscriptEntryAsync(record, resolveCost, params.config);
     const timestamp = entry?.timestamp?.getTime();
     if (!entry?.usage || !timestamp) {
       continue;
@@ -319,16 +277,24 @@ export async function loadSessionLogs(params: {
   const resolveCost = createUsageCostResolver({ config: params.config, agentDir });
 
   for await (const parsed of readTranscriptRecordsBestEffort(sessionFile)) {
+    let role: SessionLogEntry["role"];
+    let content: string;
     try {
       const message = parsed.message as Record<string, unknown> | undefined;
       if (!message) {
         continue;
       }
 
-      const role = message.role as string | undefined;
-      if (role !== "user" && role !== "assistant" && role !== "tool" && role !== "toolResult") {
+      const recordRole = message.role as string | undefined;
+      if (
+        recordRole !== "user" &&
+        recordRole !== "assistant" &&
+        recordRole !== "tool" &&
+        recordRole !== "toolResult"
+      ) {
         continue;
       }
+      role = recordRole;
 
       const contentParts: string[] = [];
       const rawToolName = message.toolName ?? message.tool_name ?? message.name ?? message.tool;
@@ -353,7 +319,7 @@ export async function loadSessionLogs(params: {
             if (b.type === "text" && typeof b.text === "string") {
               return b.text;
             }
-            if (b.type === "tool_use") {
+            if (isToolCallContentType(normalizeOptionalString(b.type))) {
               const name = typeof b.name === "string" ? b.name : "unknown";
               return `[Tool: ${name}]`;
             }
@@ -389,7 +355,7 @@ export async function loadSessionLogs(params: {
       }
 
       const rawText = contentParts.join("\n");
-      let content =
+      content =
         role === "user"
           ? stripUserEnvelopeForDisplay(rawText).trim()
           : stripInboundMetadata(rawText.trim());
@@ -402,27 +368,28 @@ export async function loadSessionLogs(params: {
       if (content.length > maxLen) {
         content = truncateUtf16Safe(content, maxLen) + "…";
       }
-
-      // Logs share pricing and timestamp interpretation with summaries and charts.
-      // Recomputing here can turn unknown prices into zero or ignore tiered rates.
-      const entry = parseUsageCostTranscriptEntry(parsed, resolveCost);
-      const usage = role === "assistant" ? entry?.usage : undefined;
-
-      logs.push({
-        timestamp: entry?.timestamp?.getTime() ?? 0,
-        role,
-        content,
-        tokens: usage ? computeUsageTokenTotals(usage).totalTokens : undefined,
-        cost: usage ? entry?.costTotal : undefined,
-      });
-      // Timestamps can arrive out of order, so keep a bounded sorted window instead
-      // of relying on transcript append order or retaining the whole file.
-      if (boundedLimit && logs.length > retentionLimit) {
-        logs.sort((a, b) => a.timestamp - b.timestamp);
-        logs.splice(0, logs.length - limit);
-      }
     } catch {
-      // Ignore malformed lines
+      // Ignore malformed records.
+      continue;
+    }
+
+    // Logs share pricing and timestamp interpretation with summaries and charts.
+    // Recomputing here can turn unknown prices into zero or ignore tiered rates.
+    const entry = await parseUsageCostTranscriptEntryAsync(parsed, resolveCost, params.config);
+    const usage = role === "assistant" ? entry?.usage : undefined;
+
+    logs.push({
+      timestamp: entry?.timestamp?.getTime() ?? 0,
+      role,
+      content,
+      tokens: usage ? computeUsageTokenTotals(usage).totalTokens : undefined,
+      cost: usage ? entry?.costTotal : undefined,
+    });
+    // Timestamps can arrive out of order, so keep a bounded sorted window instead
+    // of relying on transcript append order or retaining the whole file.
+    if (boundedLimit && logs.length > retentionLimit) {
+      logs.sort((a, b) => a.timestamp - b.timestamp);
+      logs.splice(0, logs.length - limit);
     }
   }
 

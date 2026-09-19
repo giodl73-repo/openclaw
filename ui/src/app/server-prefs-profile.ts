@@ -2,17 +2,15 @@ import {
   normalizeUiAppearancePreference,
   UI_APPEARANCE_PREFERENCE_KEYS,
 } from "../../../packages/gateway-protocol/src/schema/ui-appearance-preferences.ts";
-import type {
-  UsersPrefsGetResult,
-  UsersPrefsSetResult,
-} from "../../../packages/gateway-protocol/src/schema/users.ts";
 import { GatewayRequestError, type GatewayBrowserClient } from "../api/gateway.ts";
 import type { RuntimeConfigCapability } from "../lib/config/runtime-config-capability.ts";
 import { isAppearancePref, type ServerUiPrefs } from "./server-prefs-state.ts";
+import { saveUserPreferences } from "./user-prefs-cache.ts";
 
 type ProfileAppearancePrefs = { profileId: string; scope: string; prefs: ServerUiPrefs };
 
 let profileAppearancePrefs: ProfileAppearancePrefs | null = null;
+let profileAppearanceIdentity: { profileId: string; scope: string } | null = null;
 let profilePreferencesRequestId = 0;
 
 export function resolveProfilePreferenceScope(scope: string, profileId?: string | null): string {
@@ -31,11 +29,16 @@ export function resolveProfileAppearancePrefs(
 }
 
 export function resolveProfileAppearanceProfileId(scope: string): string | null {
-  return profileAppearancePrefs?.scope === scope ? profileAppearancePrefs.profileId : null;
+  return profileAppearanceIdentity?.scope === scope ? profileAppearanceIdentity.profileId : null;
+}
+
+export function rememberProfileAppearanceIdentity(scope: string, profileId: string): void {
+  profileAppearanceIdentity = { scope, profileId };
 }
 
 export function resetProfileAppearancePrefs(): void {
   profileAppearancePrefs = null;
+  profileAppearanceIdentity = null;
   profilePreferencesRequestId += 1;
 }
 
@@ -44,8 +47,13 @@ export async function loadProfileAppearancePrefs(
   profileId: string,
   scope: string,
 ): Promise<boolean> {
+  rememberProfileAppearanceIdentity(scope, profileId);
   const requestId = ++profilePreferencesRequestId;
-  const result = await client.request<UsersPrefsGetResult>("users.prefs.get", {
+  const { loadUserPreferences } = await import("./user-prefs-request.ts");
+  if (requestId !== profilePreferencesRequestId) {
+    return false;
+  }
+  const result = await loadUserPreferences(client, profileId, {
     keys: Object.values(UI_APPEARANCE_PREFERENCE_KEYS),
   });
   if (requestId !== profilePreferencesRequestId || result.status !== "ok") {
@@ -79,7 +87,7 @@ export async function writeProfileAppearancePrefs(
     ),
   );
   try {
-    const result = await client.request<UsersPrefsSetResult>("users.prefs.set", { entries });
+    const result = await saveUserPreferences(client, { entries });
     return result.status === "ok"
       ? { ok: true, value: result, refresh: { ok: true } }
       : { ok: false, reason: "rejected", error: "Profile preferences are unavailable." };

@@ -1052,6 +1052,28 @@ syncBuiltinESMExports();
 
   const packageContractCases: NamedTarballCheck[] = [
     {
+      name: "accepts the handoff native URL staged before helper launch",
+      inventory: ["dist/managed-handoff-runtime.mjs"],
+      files: {
+        "dist/managed-handoff-runtime.mjs":
+          'new URL("./node_modules/koffi/indirect.cjs", import.meta.url);\n',
+      },
+      options: { pnpmPack: true, postinstall: true },
+      status: 0,
+      successText: true,
+    },
+    {
+      name: "rejects a handoff static import of the unpackaged native runtime",
+      inventory: ["dist/managed-handoff-runtime.mjs"],
+      files: {
+        "dist/managed-handoff-runtime.mjs": 'import "./node_modules/koffi/indirect.cjs";\n',
+      },
+      status: "nonzero",
+      stderr: [
+        "dist/managed-handoff-runtime.mjs imports missing dist/node_modules/koffi/indirect.cjs",
+      ],
+    },
+    {
       name: "accepts historical packages published before the Code Mode worker existed",
       version: "2026.5.14-beta.1",
       status: 0,
@@ -1280,6 +1302,59 @@ syncBuiltinESMExports();
       status: 0,
     });
   });
+
+  it.each([
+    ["missing declaration and package", {}, undefined, "is missing declared dependency"],
+    [
+      "missing package",
+      { "@openclaw/ai": "2026.7.33" },
+      undefined,
+      "is missing declared dependency",
+    ],
+    ["missing declaration", {}, { version: "2026.7.33" }, "is missing declared dependency"],
+    [
+      "different declaration",
+      { "@openclaw/ai": "2026.7.1-2" },
+      { version: "2026.7.33" },
+      "dependency spec mismatch",
+    ],
+    ["workspace link", { "@openclaw/ai": "2026.7.33" }, { link: true }, "invalid runtime package"],
+    [
+      "dev-only package",
+      { "@openclaw/ai": "2026.7.33" },
+      { version: "2026.7.33", dev: true },
+      "invalid runtime package",
+    ],
+    ["complete runtime", { "@openclaw/ai": "2026.7.33" }, { version: "2026.7.33" }, null],
+  ] as const)(
+    "validates legacy shrinkwrap runtime coverage: %s",
+    (_name, dependencies, ai, error) => {
+      const version = "2026.7.33";
+      checkTarball({
+        files: {
+          "dist/index.js": "export {};\n",
+          "npm-shrinkwrap.json": JSON.stringify({
+            name: "openclaw",
+            version,
+            lockfileVersion: 3,
+            packages: {
+              "": { name: "openclaw", version, dependencies },
+              ...(ai ? { "node_modules/@openclaw/ai": ai } : {}),
+            },
+          }),
+        },
+        version,
+        options: {
+          packageJson: {
+            files: ["dist", "npm-shrinkwrap.json"],
+            dependencies: { "@openclaw/ai": version },
+          },
+        },
+        status: error ? "nonzero" : 0,
+        ...(error ? { stderr: [`npm-shrinkwrap.json ${error} @openclaw/ai`] } : {}),
+      });
+    },
+  );
 
   const bundledRuntimeCases: NamedTarballCheck[] = [
     {

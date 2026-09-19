@@ -30,6 +30,7 @@ import {
   type BrowserNoDisplayErrorDetails,
 } from "./errors.js";
 import { resolveBrowserRateLimitMessage } from "./rate-limit-message.js";
+import { getBrowserRequestScope } from "./request-scope.js";
 
 // Application-level error from the browser control service (service is reachable
 // but returned an error response). Must NOT be wrapped with "Can't reach ..." messaging.
@@ -66,12 +67,6 @@ function browserServiceErrorFromPayload(
   );
 }
 
-type LoopbackBrowserAuthDeps = {
-  getRuntimeConfig: typeof getRuntimeConfig;
-  resolveBrowserControlAuth: typeof resolveBrowserControlAuth;
-  getBridgeAuthForPort: typeof getBridgeAuthForPort;
-};
-
 function isAbsoluteHttp(url: string): boolean {
   return /^https?:\/\//i.test(url.trim());
 }
@@ -84,10 +79,9 @@ function isLoopbackHttpUrl(url: string): boolean {
   }
 }
 
-function withLoopbackBrowserAuthImpl(
+function withLoopbackBrowserAuth(
   url: string,
   init: (RequestInit & { timeoutMs?: number }) | undefined,
-  deps: LoopbackBrowserAuthDeps,
 ): RequestInit & { timeoutMs?: number } {
   const headers = new Headers(init?.headers ?? {});
   if (headers.has("authorization") || headers.has("x-openclaw-password")) {
@@ -98,8 +92,8 @@ function withLoopbackBrowserAuthImpl(
   }
 
   try {
-    const cfg = deps.getRuntimeConfig();
-    const auth = deps.resolveBrowserControlAuth(cfg);
+    const cfg = getRuntimeConfig();
+    const auth = resolveBrowserControlAuth(cfg);
     if (auth.token) {
       headers.set("Authorization", `Bearer ${auth.token}`);
       return { ...init, headers };
@@ -116,7 +110,7 @@ function withLoopbackBrowserAuthImpl(
   // Fall back to the in-memory registry if config auth is not available.
   try {
     const { port } = parseBrowserHttpUrl(url, "browser control URL");
-    const bridgeAuth = deps.getBridgeAuthForPort(port);
+    const bridgeAuth = getBridgeAuthForPort(port);
     if (bridgeAuth?.token) {
       headers.set("Authorization", `Bearer ${bridgeAuth.token}`);
     } else if (bridgeAuth?.password) {
@@ -127,17 +121,6 @@ function withLoopbackBrowserAuthImpl(
   }
 
   return { ...init, headers };
-}
-
-function withLoopbackBrowserAuth(
-  url: string,
-  init: (RequestInit & { timeoutMs?: number }) | undefined,
-): RequestInit & { timeoutMs?: number } {
-  return withLoopbackBrowserAuthImpl(url, init, {
-    getRuntimeConfig,
-    resolveBrowserControlAuth,
-    getBridgeAuthForPort,
-  });
 }
 
 const BROWSER_TOOL_PERSISTENT_MODEL_HINT =
@@ -428,9 +411,13 @@ export async function fetchBrowserJson<T>(
   init?: RequestInit & { timeoutMs?: number },
 ): Promise<T> {
   const timeoutMs = resolveBrowserFetchTimeoutMs(init?.timeoutMs);
+  const scope = getBrowserRequestScope();
   let isDispatcherPath = false;
   try {
     if (isAbsoluteHttp(url)) {
+      if (scope) {
+        throw new Error("Dashboard browser requests must stay on the local managed browser");
+      }
       const httpInit = withLoopbackBrowserAuth(url, init);
       return await fetchHttpJson<T>(url, { ...httpInit, timeoutMs });
     }
@@ -440,6 +427,9 @@ export async function fetchBrowserJson<T>(
     const query: Record<string, unknown> = {};
     for (const [key, value] of parsed.searchParams.entries()) {
       query[key] = value;
+    }
+    if (scope) {
+      query.managedOnly = true;
     }
     let body = init?.body;
     if (typeof body === "string") {
@@ -491,6 +481,7 @@ export async function fetchBrowserJson<T>(
       query,
       body,
       signal: abortCtrl.signal,
+      ...(scope ? { assertCurrent: scope.assertCurrent } : {}),
     });
 
     const result = await Promise.race([dispatchPromise, abortPromise]).finally(() => {

@@ -134,6 +134,7 @@ async function setupAcceptedRecovery(persistedPhase: "attempted" | "consumed" = 
     throw new Error("Already accepted recovery must not dispatch another turn");
   });
   const gatewayRuntime: GatewayRecoveryRuntime = {
+    dispatchSessionMethod: vi.fn(),
     dispatchAgent,
     waitForAgent: async () => {
       throw new Error("Recovery settlement must not wait through Gateway");
@@ -218,7 +219,7 @@ it.each(["attempted", "consumed"] as const)(
     expect(stored.get(state.receipt.idempotencyKey)?.execution.restartRecovery).toEqual(
       state.receipt,
     );
-    reloadTaskRuntimeStateFromStore();
+    await reloadTaskRuntimeStateFromStore();
     expect(getTaskById(state.task.taskId)).toMatchObject({
       runId: state.source.runId,
       status: "running",

@@ -1,12 +1,16 @@
-import type { VerboseLevel } from "../auto-reply/thinking.js";
+import type { VerboseLevel } from "../auto-reply/thinking.shared.js";
 import type {
   AgentRunApprovalLeases,
   AgentRunApprovalClosureReason,
 } from "./agent-run-approval-leases.js";
 import type { AgentRunDelegatedAuthority } from "./agent-run-authority.types.js";
 
+export type AgentRunModel = { provider: string; model: string };
+
 /** Per-run metadata used to stamp events and gate Control UI visibility. */
 export type AgentRunContext = {
+  /** Queued reply delivery, rather than runtime execution, owns chat completion. */
+  completionSource?: "reply-dispatch";
   sessionKey?: string;
   /** Resolved agent owner, including for unscoped session keys. */
   agentId?: string;
@@ -16,6 +20,7 @@ export type AgentRunContext = {
   lifecycleGeneration?: string;
   /** Producer-owned start captured from this run's accepted lifecycle event. */
   lifecycleStartedAt?: number;
+  activeModel?: AgentRunModel;
   verboseLevel?: VerboseLevel;
   isHeartbeat?: boolean;
   /** Whether control UI clients should receive chat/agent updates for this run. */
@@ -69,6 +74,7 @@ export type AgentRunRegistryState = {
 export type ProjectedAgentRunState = "queued" | "running" | "capacity-wait";
 
 export type ProjectedAgentRunIndex = {
+  modelsBySessionId: ReadonlyMap<string, AgentRunModel | null>;
   sessionKeys: ReadonlyMap<string, ProjectedAgentRunState>;
   sessionIds: ReadonlyMap<string, ProjectedAgentRunState>;
   ownerlessSessionKeys: ReadonlyMap<string, ProjectedAgentRunState>;

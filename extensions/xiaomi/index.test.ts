@@ -1,11 +1,12 @@
 // Xiaomi tests cover index plugin behavior.
+import { expectDefined } from "@openclaw/normalization-core";
+import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
 import type { Context, Model } from "openclaw/plugin-sdk/llm";
 import { createAssistantMessageEventStream } from "openclaw/plugin-sdk/llm";
 import {
   registerProviderPlugin,
   requireRegisteredProvider,
   resolveProviderPluginChoice,
-  type RegisteredProviderCollections,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { buildOpenAICompletionsParams } from "openclaw/plugin-sdk/provider-transport-runtime";
 import * as ssrfRuntime from "openclaw/plugin-sdk/ssrf-runtime";
@@ -13,7 +14,6 @@ import { createZeroUsageFixture } from "openclaw/plugin-sdk/test-fixtures";
 import { describe, expect, it, vi } from "vitest";
 import { runSingleProviderCatalog } from "../test-support/provider-model-test-helpers.js";
 import xiaomiPlugin from "./index.js";
-import { createMiMoThinkingWrapper } from "./stream.js";
 
 type OpenAICompletionsModel = Model<"openai-completions">;
 
@@ -34,17 +34,7 @@ type ReplayToolCall = {
   };
 };
 
-type RegisteredProvider = RegisteredProviderCollections["providers"][number];
 const emptyUsage = createZeroUsageFixture();
-
-function requireThinkingProfileResolver(
-  provider: RegisteredProvider,
-): NonNullable<RegisteredProvider["resolveThinkingProfile"]> {
-  if (!provider.resolveThinkingProfile) {
-    throw new Error("Xiaomi provider did not register a thinking profile resolver");
-  }
-  return provider.resolveThinkingProfile;
-}
 
 const readToolCall = { type: "toolCall", id: "call_1", name: "read", arguments: {} };
 const readToolResult = {
@@ -140,15 +130,14 @@ function mimoReasoningToolReplayContext(provider = "xiaomi") {
   );
 }
 
-function createPayloadCapturingStream(capture: PayloadCapture, model: OpenAICompletionsModel) {
-  return (
-    _streamModel: OpenAICompletionsModel,
-    streamContext: Context,
-    options?: { onPayload?: (payload: unknown, m: unknown) => unknown },
-  ) => {
+function createPayloadCapturingStream(
+  capture: PayloadCapture,
+  model: OpenAICompletionsModel,
+): StreamFn {
+  return (_streamModel, streamContext, options) => {
     capture.payload = buildOpenAICompletionsParams(model, streamContext, {
       reasoning: "high",
-    } as never);
+    });
     options?.onPayload?.(capture.payload, model);
     const stream = createAssistantMessageEventStream();
     queueMicrotask(() => stream.end());
@@ -156,14 +145,23 @@ function createPayloadCapturingStream(capture: PayloadCapture, model: OpenAIComp
   };
 }
 
-function requireThinkingWrapper(
-  wrapper: ReturnType<typeof createMiMoThinkingWrapper>,
-  label: string,
-): NonNullable<ReturnType<typeof createMiMoThinkingWrapper>> {
-  if (!wrapper) {
-    throw new Error(`expected MiMo thinking wrapper for ${label}`);
-  }
-  return wrapper;
+async function createRegisteredThinkingStream(
+  capture: PayloadCapture,
+  model: OpenAICompletionsModel,
+  thinkingLevel: "off" | "high",
+) {
+  const { providers } = await registerXiaomiPlugin();
+  const provider = requireRegisteredProvider(providers, model.provider);
+  return expectDefined(
+    provider.wrapStreamFn?.({
+      provider: model.provider,
+      modelId: model.id,
+      model,
+      streamFn: createPayloadCapturingStream(capture, model),
+      thinkingLevel,
+    }),
+    "Registered MiMo thinking stream",
+  );
 }
 
 function readThinking(payload: Record<string, unknown> | undefined): ThinkingPayload | undefined {
@@ -470,7 +468,10 @@ describe("xiaomi provider plugin", () => {
 
   it("advertises thinking profiles for MiMo reasoning models only", async () => {
     const provider = await getXiaomiProvider();
-    const resolveThinkingProfile = requireThinkingProfileResolver(provider);
+    const resolveThinkingProfile = expectDefined(
+      provider.resolveThinkingProfile,
+      "Xiaomi thinking profile resolver",
+    );
     const expectedLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     for (const modelId of ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2.6-pro"]) {
@@ -509,12 +510,7 @@ describe("xiaomi provider plugin", () => {
         stopReason: "toolUse",
       }),
     );
-    const baseStreamFn = createPayloadCapturingStream(capture, model);
-
-    const wrapThinkingHigh = requireThinkingWrapper(
-      createMiMoThinkingWrapper(baseStreamFn as never, "high"),
-      "high",
-    );
+    const wrapThinkingHigh = await createRegisteredThinkingStream(capture, model, "high");
     await wrapThinkingHigh(model, context, {});
 
     const assistantMessage = readPayloadMessage(capture, 1);
@@ -531,12 +527,7 @@ describe("xiaomi provider plugin", () => {
     const capture: PayloadCapture = {};
     const model = mimoReasoningModel("mimo-v2.5-pro", "xiaomi-token-plan");
     const context = mimoReasoningToolReplayContext("xiaomi-token-plan");
-    const baseStreamFn = createPayloadCapturingStream(capture, model);
-
-    const wrapThinkingHigh = requireThinkingWrapper(
-      createMiMoThinkingWrapper(baseStreamFn as never, "high"),
-      "high",
-    );
+    const wrapThinkingHigh = await createRegisteredThinkingStream(capture, model, "high");
     await wrapThinkingHigh(model, context, {});
 
     expect(readThinking(capture.payload)?.type).toBe("enabled");
@@ -553,13 +544,8 @@ describe("xiaomi provider plugin", () => {
     const capture: PayloadCapture = {};
     const model = mimoReasoningModel("mimo-v2.5");
     const context = mimoReasoningToolReplayContext();
-    const baseStreamFn = createPayloadCapturingStream(capture, model);
-
-    const wrapThinkingNone = requireThinkingWrapper(
-      createMiMoThinkingWrapper(baseStreamFn as never, "none" as never),
-      "none",
-    );
-    await wrapThinkingNone(model, context, {});
+    const wrapThinkingOff = await createRegisteredThinkingStream(capture, model, "off");
+    await wrapThinkingOff(model, context, {});
 
     expect(readThinking(capture.payload)?.type).toBe("disabled");
     expect((capture.payload!.messages as Array<Record<string, unknown>>)[1]).not.toHaveProperty(

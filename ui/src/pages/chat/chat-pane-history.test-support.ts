@@ -50,7 +50,6 @@ export type TestChatPane = HTMLElement & {
   loadOlderMessages: () => Promise<boolean>;
   stagedOlderPage: unknown;
   stagedOlderLoad: Promise<void> | null;
-  showEarlierMessages: () => Promise<void>;
   requestReplyMessage: (messageId: string) => void;
   readReplyMessage: (messageId: string) => unknown;
   openReplyMessage: (messageId: string) => void;
@@ -131,6 +130,7 @@ export function createTestChatPane(params: {
     chatHasAutoScrolled: false,
     chatUserNearBottom: true,
     chatFollowLocked: false,
+    chatReadingHistory: false,
     chatNewMessagesBelow: false,
     handleChatScroll: vi.fn(),
     renderLifecycle: { afterCommit: () => () => {}, invalidate: () => {} },

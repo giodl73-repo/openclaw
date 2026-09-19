@@ -2,12 +2,16 @@ import { html, nothing, type TemplateResult } from "lit";
 // Deep import on purpose: the protocol barrel carries typebox and every
 // schema, which must stay out of the Control UI startup bundle.
 import { isCloudWorkerPlacementState } from "../../../packages/gateway-protocol/src/schema/session-placement-state.js";
-import type { SessionPlacementDiskSpace } from "../../../packages/gateway-protocol/src/schema/session-placement.js";
+import type {
+  SessionPlacementDiskSpace,
+  SessionPlacementMachine,
+} from "../../../packages/gateway-protocol/src/schema/session-placement.js";
 import type { SessionCatalogPullRequestSummary } from "../../../packages/gateway-protocol/src/schema/sessions-catalog.js";
 import type { GatewaySessionRow } from "../api/types.ts";
 import type { ApplicationGatewaySnapshot } from "../app/gateway.ts";
 import { t } from "../i18n/index.ts";
 import { icons } from "./icons.ts";
+import { sessionMachineParts } from "./session-machine.ts";
 
 export type SessionPlacementState = NonNullable<GatewaySessionRow["placement"]>["state"];
 
@@ -59,6 +63,7 @@ function renderSessionRowBadge(
 
 export function renderSessionRowBadges(params: {
   isChild?: boolean;
+  workspaceKind?: "worktree" | "checkout";
   incognito?: boolean;
   pullRequest?: SessionCatalogPullRequestSummary;
   hasApproval?: boolean;
@@ -67,6 +72,7 @@ export function renderSessionRowBadges(params: {
   placementState?: SessionPlacementState;
   placementProviderId?: string;
   placementProfileId?: string;
+  placementMachine?: SessionPlacementMachine;
   diskSpaceStatus?: SessionPlacementDiskSpace["status"];
   workspaceConflictCount?: number;
 }) {
@@ -104,6 +110,7 @@ export function renderSessionRowBadges(params: {
       : "";
   if (
     !params.incognito &&
+    !params.workspaceKind &&
     !pullRequestLabel &&
     !params.hasApproval &&
     attentionCount === 0 &&
@@ -115,7 +122,14 @@ export function renderSessionRowBadges(params: {
   }
   const placementLabel = displayedPlacementState
     ? params.placementProviderId && params.placementProfileId
-      ? `${params.placementProviderId} · ${params.placementProfileId} · ${displayedPlacementState}`
+      ? [
+          params.placementProviderId,
+          params.placementProfileId,
+          ...sessionMachineParts(params.placementMachine),
+          displayedPlacementState,
+        ]
+          .filter(Boolean)
+          .join(" · ")
       : t("sessionsView.cloudWorkerPlacement", { state: displayedPlacementState })
     : "";
   const cloudPlacementLabel = hasWorkspaceConflict
@@ -138,6 +152,13 @@ export function renderSessionRowBadges(params: {
     : placementLabel;
   const cloudLabel = [cloudPlacementLabel, diskSpaceLabel].filter(Boolean).join(" · ");
   return html`<span class="session-row-badges">
+    ${
+      params.workspaceKind
+        ? html`<span class="session-row-workspace" data-workspace-kind=${params.workspaceKind}
+            >${t(`sessionsView.workspaceKinds.${params.workspaceKind}`)}</span
+          >`
+        : nothing
+    }
     ${
       params.incognito
         ? renderSessionRowBadge(

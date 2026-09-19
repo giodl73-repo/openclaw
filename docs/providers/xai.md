@@ -111,13 +111,13 @@ subscription quota are separate billing buckets.
 - xAI decides which accounts can receive OAuth API tokens. If an account is
   not eligible, use the API-key path or check the subscription on xAI's side.
 
-Existing `xai/auto` selections on the Grok subscription route are retired.
+Existing `xai/auto` selections on the native xAI API and Grok subscription routes are retired.
 Run `openclaw doctor --fix` to replace affected config and session selections
 with `xai/grok-4.6`. Doctor preserves account pins and fallbacks, and leaves
 custom endpoints unchanged. For a pinned session, an unavailable account or a
 disallowed successor keeps the selection unchanged, with a diagnostic explaining
-the required action. Unpinned config can be repaired from its declared
-subscription route. You can also choose a permitted concrete model explicitly.
+the required action. Doctor moves a shared alias only when the applicable accounts
+and routes agree on its successor. You can also choose a permitted concrete model explicitly.
 
 For a manually managed Grok subscription token, set `models.providers.xai.auth`
 to `"token"` and `models.providers.xai.baseUrl` to
@@ -673,13 +673,14 @@ An explicit tool model remains selected; the Grok 4.3 examples below are overrid
 
     Other Responses-compatible providers can opt in with
     `params.responsesCompactEndpoint: true`; non-Responses routes ignore the
-    setting. OpenAI's native Responses API does not need this option because
-    its `context_management` compaction is already managed by
-    `responsesServerCompaction`.
+    setting. The public OpenAI Responses API also enables this endpoint by
+    default for budget compaction. Its inline `context_management`
+    compaction is separately controlled by `responsesServerCompaction`.
 
     Endpoint failures fall back to OpenClaw's client-side summarization.
-    Overflow recovery never calls the endpoint because xAI requires the input
-    to fit the model context window before compaction.
+    Provider-confirmed overflow recovery never calls the endpoint because
+    xAI requires the input to fit the model context window before compaction.
+    Predicted pressure can try the endpoint before submitting the next turn.
 
   </Accordion>
 

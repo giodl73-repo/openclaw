@@ -10,7 +10,7 @@ import {
   readRequiredClawHubBooleanField,
   readRequiredClawHubStringArrayField,
   readRequiredClawHubStringField,
-  requestClawHub,
+  withClawHubResponse,
   resolveClawHubAuthToken,
   type ClawHubFetch,
 } from "./clawhub-client.js";
@@ -120,6 +120,7 @@ export type ClawHubPackageSecurityResponse = {
     version?: string | null;
   } | null;
   overview: string;
+  verdict?: string;
   securityAuditUrl: string;
   trust: ClawHubPackageSecurityTrust;
 };
@@ -291,7 +292,9 @@ function parseOptionalSecurityRelease(value: unknown): ClawHubPackageSecurityRes
   return result;
 }
 
-function parseClawHubPackageSecurityResponse(value: unknown): ClawHubPackageSecurityResponse {
+export function parseClawHubPackageSecurityResponse(
+  value: unknown,
+): ClawHubPackageSecurityResponse {
   if (!isJsonObject(value)) {
     throw new Error("Malformed ClawHub security response: expected an object.");
   }
@@ -327,6 +330,10 @@ function parseClawHubPackageSecurityResponse(value: unknown): ClawHubPackageSecu
     trust: parsedTrust,
   };
   const parsedPackage = parseOptionalSecurityPackage(value.package);
+  const verdict = readClawHubStringField(value, "verdict", "security response");
+  if (verdict) {
+    result.verdict = verdict;
+  }
   const parsedRelease = parseOptionalSecurityRelease(value.release);
   if (parsedPackage !== undefined) {
     result.package = parsedPackage;
@@ -452,22 +459,26 @@ export async function reportClawHubPluginInstallTelemetry(params: {
     return;
   }
 
-  const { response, url, hasToken } = await requestClawHub({
-    baseUrl: params.baseUrl,
-    path: "/api/cli/telemetry/install",
-    method: "POST",
-    token,
-    timeoutMs: params.timeoutMs,
-    fetchImpl: params.fetchImpl,
-    json: {
-      event: "plugin_install",
-      packageName,
-      version: params.version ?? undefined,
+  return await withClawHubResponse(
+    {
+      baseUrl: params.baseUrl,
+      path: "/api/cli/telemetry/install",
+      method: "POST",
+      token,
+      timeoutMs: params.timeoutMs,
+      fetchImpl: params.fetchImpl,
+      json: {
+        event: "plugin_install",
+        packageName,
+        version: params.version ?? undefined,
+      },
     },
-  });
-  if (!response.ok) {
-    throw await createClawHubError(response, url, hasToken, params.timeoutMs);
-  }
+    async ({ response, url, hasToken }) => {
+      if (!response.ok) {
+        throw await createClawHubError(response, url, hasToken, params.timeoutMs);
+      }
+    },
+  );
 }
 
 export function resolveLatestVersionFromPackage(detail: ClawHubPackageDetail): string | null {

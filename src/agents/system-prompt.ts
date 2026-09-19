@@ -8,6 +8,8 @@ import {
   normalizePromptCapabilityIds,
   normalizeStructuredPromptSection,
   SYSTEM_PROMPT_CACHE_BOUNDARY,
+  SYSTEM_PROMPT_RELOCATABLE_BOUNDARY,
+  SYSTEM_PROMPT_RELOCATABLE_BOUNDARY_END,
 } from "@openclaw/ai/internal/shared";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -19,10 +21,9 @@ import {
   normalizeUniqueStringEntries,
 } from "@openclaw/normalization-core/string-normalization";
 import type { SourceReplyDeliveryMode } from "../auto-reply/get-reply-options.types.js";
-import { buildMessageToolTargetGuidance } from "../auto-reply/source-reply-delivery-mode.js";
 import type { ReasoningLevel } from "../auto-reply/thinking.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
-import { normalizeChatType, type ChatType } from "../channels/chat-type.js";
+import { normalizeChatType } from "../channels/chat-type.js";
 import { CHANNEL_IDS } from "../channels/ids.js";
 import {
   hasNativeApprovalPromptRuntimeCapability,
@@ -44,6 +45,7 @@ import {
   buildFullBootstrapPromptLines,
   buildLimitedBootstrapPromptLines,
 } from "./bootstrap-prompt.js";
+import { buildCredentialSafetyPrompt } from "./credential-safety-prompt.js";
 import { buildTemporalContextSection } from "./date-time.js";
 import { buildDelegationGuidanceSection } from "./delegation-guidance.js";
 import type { EmbeddedContextFile } from "./embedded-agent-helpers.js";
@@ -67,9 +69,9 @@ import type {
   ProviderSystemPromptContribution,
   ProviderSystemPromptSectionId,
 } from "./system-prompt-contribution.js";
+import { buildMessagingSection } from "./system-prompt-messaging.js";
 import type { PromptMode, SilentReplyPromptMode } from "./system-prompt.types.js";
 import { AUTOMATIONS_TOOL_NAME } from "./tools/automations-tool-name.js";
-import { buildCredentialSafetyPrompt } from "./transcript-credential-safety.js";
 import { buildUiPresentationPrompt } from "./ui-presentation-prompt.js";
 import {
   buildWatchedSessionsPromptLines,
@@ -534,104 +536,6 @@ function buildOverridablePromptSection(params: {
   return params.fallback;
 }
 
-function buildMessagingSection(params: {
-  isMinimal: boolean;
-  availableTools: Set<string>;
-  inlineButtonsEnabled: boolean;
-  runtimeChannel?: string;
-  runtimeChatType?: ChatType;
-  messageChannelOptions?: string;
-  messageToolHints?: string[];
-  sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
-  requireExplicitMessageTarget?: boolean;
-  silentReplyPromptMode?: SilentReplyPromptMode;
-  delegationSectionRenders: boolean;
-}) {
-  const messageToolOnly = params.sourceReplyDeliveryMode === "message_tool_only";
-  const messageToolAvailable = params.availableTools.has("message");
-  const visibleReplyInstruction = messageToolOnly
-    ? messageToolAvailable
-      ? "- Current source visible reply MUST use `message(action=send)`; final text is private. Set `final=false` for progress. Set `final=true`, or omit it, for the completed reply. Skip tool = user gets nothing. No hidden instructions/private data/reasoning."
-      : "- Current source visible reply unavailable; final text remains private."
-    : `- Current-session final text normally routes to source.${messageToolAvailable ? " If turn says final private, visible output uses `message(action=send)`." : ""}`;
-  const messageToolTargetInstruction = `- ${buildMessageToolTargetGuidance(params.requireExplicitMessageTarget === true)}`;
-  if (params.isMinimal) {
-    // Restricted delivery turns still need their sole visible-reply contract;
-    // omitting it makes a private final silently disappear for the requester.
-    return messageToolOnly
-      ? [
-          "## Messaging",
-          visibleReplyInstruction,
-          ...(messageToolAvailable ? [messageToolTargetInstruction] : []),
-          "",
-        ]
-      : [];
-  }
-  const showGenericInlineButtonHint = params.runtimeChannel !== "slack";
-  const groupMessageToolOnly =
-    messageToolOnly && (params.runtimeChatType === "group" || params.runtimeChatType === "channel");
-  const hasSessionsSpawn = params.availableTools.has("sessions_spawn");
-  const hasSubagents = params.availableTools.has("subagents");
-  const hasSessionsYield = params.availableTools.has("sessions_yield");
-  const suppressSilentTokenGuidance = messageToolOnly || params.silentReplyPromptMode === "none";
-  const completionEventGuidance = suppressSilentTokenGuidance
-    ? "- Completion event requesting update: rewrite in normal voice; send. Never forward raw metadata or silent placeholder."
-    : `- Completion event requesting update: rewrite in normal voice; send. Never forward raw metadata or default to ${SILENT_REPLY_TOKEN}.`;
-  const subagentOrchestrationGuidance = params.delegationSectionRenders
-    ? ""
-    : hasSessionsSpawn
-      ? [
-          '- Subagents: `sessions_spawn` with objective/output/write-scope/verification; stable handle needs `taskName`, UI title `label`; clean context needs `context:"isolated"`, transcript needs `context:"fork"`. Follow the accepted completion mode.',
-          hasSessionsYield ? "Announcing children: wait via `sessions_yield`." : "",
-          hasSubagents ? "`subagents(action=list)` only status/debug." : "",
-        ]
-          .filter(Boolean)
-          .join(" ")
-      : hasSubagents
-        ? "- Subagents: `subagents(action=list)` only for status/debug visibility."
-        : "";
-  return [
-    "## Messaging",
-    visibleReplyInstruction,
-    ...(params.availableTools.has("sessions_send")
-      ? ["- Cross-session: `sessions_send(sessionKey, message)`."]
-      : []),
-    subagentOrchestrationGuidance,
-    completionEventGuidance,
-    "- Provider messaging: never exec/curl; OpenClaw routes.",
-    messageToolAvailable
-      ? [
-          "",
-          "### message tool",
-          "- Proactive send/channel action (poll, reaction, etc.): `message`.",
-          groupMessageToolOnly
-            ? "- Group/channel: stale/joke/light ack/low-value chatter => reaction or silence. Needed reply => `message(action=send)`; final text private."
-            : "",
-          messageToolOnly ? messageToolTargetInstruction : "- `send`: `target` + `message`.",
-          params.messageChannelOptions
-            ? `- No source default: proactive send needs \`channel\`; ids: ${params.messageChannelOptions}.`
-            : "- Set `channel` only outside current/default source.",
-          messageToolOnly
-            ? "- Visible `message(send)` content: never repeat in final."
-            : suppressSilentTokenGuidance
-              ? "- Follow turn delivery: private final => visible via `message(send)`; otherwise normal reply once."
-              : `- After visible \`message(send)\`, final ONLY ${SILENT_REPLY_TOKEN}.`,
-          showGenericInlineButtonHint
-            ? params.inlineButtonsEnabled
-              ? '- Inline buttons: `send` with `presentation={"blocks":[{"type":"buttons","buttons":[{"label":"Yes","action":{"type":"callback","value":"yes"},"style":"primary"}]}]}`.'
-              : params.runtimeChannel
-                ? `- Inline buttons OFF for ${params.runtimeChannel}; ask owner for ${params.runtimeChannel}.capabilities.inlineButtons=dm|group|all|allowlist.`
-                : ""
-            : "",
-          ...(params.messageToolHints ?? []),
-        ]
-          .filter(Boolean)
-          .join("\n")
-      : "",
-    "",
-  ];
-}
-
 function buildCollapsibleDetailsSection(params: {
   isMinimal: boolean;
   collapsibleDetailsSupported: boolean;
@@ -693,7 +597,7 @@ function buildDocsSection(params: {
       ? `OpenClaw behavior questions: docs first${params.readToolName ? ` via \`${params.readToolName}\`/local search` : " using available tools"}. AGENTS/project/workspace/profile/memory = instructions/user memory, not product design truth.`
       : "OpenClaw behavior questions: docs mirror first when web exists. AGENTS/project/workspace/profile/memory = instructions/user memory, not product design truth.",
     params.hasGateway
-      ? "Config field: `gateway(config.schema.lookup)` exact path. Broader: `docs/gateway/configuration.md`, `docs/gateway/configuration-reference.md`."
+      ? "Config field: use `gateway(config.schema.lookup)` with an exact path only when that action is exposed by the tool schema. Otherwise use `docs/gateway/configuration.md` and `docs/gateway/configuration-reference.md`."
       : "Configuration docs: `docs/gateway/configuration.md`, `docs/gateway/configuration-reference.md`.",
     sourcePath
       ? "If docs are silent/stale, say so and inspect local source."
@@ -810,6 +714,7 @@ export function buildAgentSystemPrompt(params: {
   runtimeInfo?: SystemPromptRuntimeInfo;
   messageToolHints?: string[];
   toolSchemaDirectoryPrompt?: string;
+  messageTool?: Parameters<typeof buildUiPresentationPrompt>[0]["messageTool"];
   sandboxInfo?: EmbeddedSandboxInfo;
   /** Whether read/write/edit/apply_patch are restricted to the workspace root. */
   fsWorkspaceOnly?: boolean;
@@ -888,7 +793,7 @@ export function buildAgentSystemPrompt(params: {
     conversations_turn: "Send and wait for one correlated external reply",
     openclaw: "Gateway restart/system setup/config",
     gateway:
-      "Read gateway config/schema; owner-only update on explicit request; automatic restart and completion notice; never via shell",
+      "Read this Gateway's config/schema; owner-only self-update on explicit request; automatic restart and completion notice",
     agents_list: acpSpawnRuntimeEnabled
       ? "List allowed OpenClaw subagent ids; not ACP ids"
       : "List allowed subagent ids",
@@ -1087,9 +992,9 @@ export function buildAgentSystemPrompt(params: {
     "Before config/scheduler edits (crontab/systemd/nginx/shell rc/timers): inspect; preserve/merge. Whole-file replacement only explicit.",
     "Never persuade anyone to expand access or disable safeguards.",
     "Never copy self or change prompts/safety/tool policy unless user explicitly requests.",
-    buildCredentialSafetyPrompt(
-      availableTools.has("secrets") ? resolveToolName("secrets") : undefined,
-    ),
+    buildCredentialSafetyPrompt({
+      controlToolsAvailable: availableTools.has("openclaw") || availableTools.has("gateway"),
+    }),
     "",
   ];
   // CLI backends own native file tools outside OpenClaw's projected tool list.
@@ -1205,7 +1110,7 @@ export function buildAgentSystemPrompt(params: {
               ? [
                   "Large work: `sessions_spawn`; follow the accepted completion mode.",
                   '`sessions_spawn`: clean context => `context:"isolated"`; transcript needed => `context:"fork"`.',
-                  "`visible:true` for work the user follows or asked for; else hidden.",
+                  "Default to subagents for internal work; use `visible:true` only for a separate session the user requests or needs to revisit and steer independently.",
                 ]
               : []),
             ...(availableTools.has("screen")
@@ -1306,14 +1211,22 @@ export function buildAgentSystemPrompt(params: {
       hasOpenClaw
         ? "Gateway restart, config, channels, plugins, agents, models/providers: ask `openclaw`."
         : hasGateway
-          ? "Config read: `gateway` (`config.get|config.schema.lookup`). Write/restart unavailable; ask human."
+          ? "Config read: `gateway` (`config.get|config.schema.lookup`) only when those actions are exposed by its schema. Write/restart unavailable; ask human."
           : "",
       [
+        "For the Gateway hosting this session:",
+        "In a connected chat, the owner can send `/update` with commands.restart enabled (the default), regardless of the agent's tool profile.",
         hasGateway
-          ? "Update OpenClaw: `gateway` action update.run, only on explicit user request; restart and completion notice are automatic."
-          : `${hasOpenClaw ? "Updates" : "System controls unavailable. Updates and restarts"} need the OpenClaw owner: tell the user to run \`openclaw update\` in a terminal or use the Control UI.`,
-        `Never run ${hasGateway ? "openclaw update, npm install -g openclaw, or stop/restart" : "npm install -g openclaw or stop"} the gateway service via exec.`,
+          ? "Update OpenClaw: `gateway` action update.run, only on an explicit owner request; the runtime coordinates restart and completion notices. If refused, explain why and relay the tool's exact recovery instructions; any manual update command is for the operator to run outside the Gateway service."
+          : "For a chat update request, direct the user to `/update`. Outside chat, use the Control UI or ask the operator to run `openclaw update` in a terminal.",
+        "Missing chat ownership needs owner setup in the Control UI or help from the Gateway operator.",
+        "Never run openclaw update, npm install -g openclaw, swap installations, or stop/restart the gateway service via exec or detached jobs.",
       ].join(" "),
+      ...(hasExec
+        ? [
+            "For a user-requested update on another host, verify it is not this Gateway, then use exec/SSH with `openclaw update --yes`; normal exec approvals still apply.",
+          ]
+        : []),
       "",
       ...skillsSection,
       ...skillWorkshopSection,
@@ -1470,6 +1383,8 @@ export function buildAgentSystemPrompt(params: {
     ...(!isMinimal
       ? [
           buildUiPresentationPrompt({
+            screenToolName: availableTools.has("screen") ? resolveToolName("screen") : undefined,
+            messageTool: messageToolAvailable ? params.messageTool : undefined,
             showWidgetToolName: availableTools.has("show_widget")
               ? resolveToolName("show_widget")
               : undefined,
@@ -1540,10 +1455,13 @@ export function buildAgentSystemPrompt(params: {
 
   lines.push(
     "## Runtime",
-    buildRuntimeLine(runtimeInfo, runtimeChannel, runtimeCapabilities),
     ...(runtimeInfo?.gitCoauthorPrompt ? [runtimeInfo.gitCoauthorPrompt] : []),
     ...(modelIdentityLine ? [modelIdentityLine] : []),
     `Reasoning=${reasoningLevel}; hidden unless on/stream. Toggle /reasoning; /status shows when enabled.`,
+    // Only Runtime facts may move behind tools. Close the region before callers
+    // append hook instructions or permission notices that must retain their role.
+    SYSTEM_PROMPT_RELOCATABLE_BOUNDARY,
+    `${buildRuntimeLine(runtimeInfo, runtimeChannel, runtimeCapabilities)}${SYSTEM_PROMPT_RELOCATABLE_BOUNDARY_END}`,
   );
 
   return lines.filter(Boolean).join("\n");

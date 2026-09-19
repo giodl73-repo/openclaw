@@ -183,7 +183,8 @@ export default definePluginEntry({
 });
 ```
 
-Load the file directly and restart the Gateway:
+Add the file to `plugins.load.paths`; the default hybrid reload mode applies
+the change:
 
 ```json5
 {
@@ -214,6 +215,7 @@ Load the file directly and restart the Gateway:
 `AGENT_ID` must name the agent bound to the maintenance conversation. The
 binding selects that agent for normal messages and `/fix`; the standalone file
 remains the single owner of owner-versus-maintainer tool policy.
+After editing the file itself, run `openclaw plugins reload maintenance-access`.
 
 `requireAuth: true` reuses each channel's existing sender admission. For
 Discord, a guild or channel `users`/`roles` allowlist can authorize the
@@ -255,7 +257,7 @@ by `before_tool_call`. Omit the matcher to retain match-all behavior.
 harness-native shell. It receives:
 
 - `event.sessionKey`
-- `event.toolName`, currently always `"exec"`
+- `event.toolName`, always `"exec"`
 - `event.host`, one of `"gateway"`, `"sandbox"`, or `"node"`
 - context fields such as `ctx.agentId`, `ctx.sessionKey`, `ctx.sessionId`,
   `ctx.messageProvider`, and `ctx.channelId`

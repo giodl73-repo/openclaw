@@ -5,7 +5,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isCrablineServerChannel, OPENCLAW_CRABLINE_DEFAULT_CHANNEL } from "@openclaw/crabline";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeRuntimeParitySummary } from "./agentic-parity-report-test-helpers.js";
 import { readQaScenarioById, type QaScenarioPack } from "./scenario-catalog.js";
+import * as taxonomyModule from "./scorecard-taxonomy.js";
 
 const {
   runQaManualLane,
@@ -254,7 +256,7 @@ function executionCellsForSuiteParams(params?: QaSuiteRunParams) {
   return expandQaScenarioExecutionCells({
     scenarios,
     channelDriver: params?.channelDriver ?? "qa-channel",
-    channel: params?.channelId ?? params?.channelDriverSelection?.channel,
+    channel: params?.channelId,
     defaultChannel:
       params?.channelDriver === "crabline" ? OPENCLAW_CRABLINE_DEFAULT_CHANNEL : undefined,
     supportsChannel:
@@ -552,7 +554,6 @@ describe("qa cli runtime", () => {
       outputDir: path.join(process.cwd(), ".artifacts", "qa-e2e", "scenario-test"),
       transportId: "qa-channel",
       channelDriver: undefined,
-      channelDriverSelection: undefined,
       primaryModel: "mock-openai/gpt-5.6-luna",
       alternateModel: undefined,
       fastMode: undefined,
@@ -905,160 +906,174 @@ describe("qa cli runtime", () => {
     expect(runQaSuite).not.toHaveBeenCalled();
   });
 
-  it("dispatches a taxonomy-backed profile category through the suite runner", async () => {
-    const previousProfile = process.env.OPENCLAW_QA_PROFILE;
-    process.env.OPENCLAW_QA_PROFILE = "release";
-    try {
-      runQaSuite.mockImplementationOnce(async (params) => {
-        expect(process.env.OPENCLAW_QA_PROFILE).toBe("smoke-ci");
-        await fs.writeFile(
-          suiteEvidencePath,
-          JSON.stringify(
-            makeQaEvidence([
-              {
-                test: {
-                  kind: "qa-scenario",
-                  id: "telegram-commands-command",
-                  title: "Telegram commands list reply",
-                  source: {
-                    path: "qa/scenarios/channels/telegram-commands-command.yaml",
-                  },
-                },
-                coverage: [
-                  {
-                    id: "telegram.built-in-commands",
-                    role: "primary",
-                  },
-                ],
-                execution: {
-                  runner: "host",
-                  environment: {
-                    ref: null,
-                    os: process.platform,
-                    nodeVersion: process.version,
-                  },
-                  provider: {
-                    id: "openai",
-                    live: false,
-                    model: {
-                      name: "gpt-5.6-luna",
-                      ref: "mock-openai/gpt-5.6-luna",
+  it.each(["full", "slim"] as const)(
+    "captures taxonomy before the filtered %s profile suite runs",
+    async (evidenceMode) => {
+      const report = taxonomyModule.readQaScorecardTaxonomyReport(readQaScenarioPack().scenarios);
+      const capturedIdentity = { ...report.taxonomy!.identity };
+      const readReport = vi
+        .spyOn(taxonomyModule, "readQaScorecardTaxonomyReport")
+        .mockReturnValue(report);
+      const previousProfile = process.env.OPENCLAW_QA_PROFILE;
+      process.env.OPENCLAW_QA_PROFILE = "release";
+      try {
+        runQaSuite.mockImplementationOnce(async (params) => {
+          expect(process.env.OPENCLAW_QA_PROFILE).toBe("smoke-ci");
+          report.taxonomy!.identity.sha256 = "0".repeat(64);
+          report.profiles.find((entry) => entry.id === "smoke-ci")!.evidenceMode =
+            evidenceMode === "full" ? "slim" : "full";
+          await fs.writeFile(
+            suiteEvidencePath,
+            JSON.stringify(
+              makeQaEvidence([
+                {
+                  test: {
+                    kind: "qa-scenario",
+                    id: "telegram-commands-command",
+                    title: "Telegram commands list reply",
+                    source: {
+                      path: "qa/scenarios/channels/telegram-commands-command.yaml",
                     },
-                    fixture: "mock-openai",
                   },
-                  channel: {
-                    id: "qa-channel",
-                    live: false,
+                  coverage: [
+                    {
+                      id: "telegram.built-in-commands",
+                      role: "primary",
+                    },
+                  ],
+                  execution: {
+                    runner: "host",
+                    environment: {
+                      ref: null,
+                      os: process.platform,
+                      nodeVersion: process.version,
+                    },
+                    provider: {
+                      id: "openai",
+                      live: false,
+                      model: {
+                        name: "gpt-5.6-luna",
+                        ref: "mock-openai/gpt-5.6-luna",
+                      },
+                      fixture: "mock-openai",
+                    },
+                    channel: {
+                      id: "qa-channel",
+                      live: false,
+                    },
+                    packageSource: {
+                      kind: "source-checkout",
+                    },
+                    artifacts: [],
                   },
-                  packageSource: {
-                    kind: "source-checkout",
+                  result: {
+                    status: "pass",
                   },
-                  artifacts: [],
                 },
-                result: {
-                  status: "pass",
-                },
-              },
-            ]),
-          ),
-          "utf8",
-        );
-        return flowSuiteRuntimeResult({
-          observedCells: expandQaScenarioExecutionCells({
-            scenarios: [readQaScenarioById("telegram-commands-command")],
-            channelDriver: params?.channelDriver ?? "qa-channel",
-            channel: params?.channelId ?? params?.channelDriverSelection?.channel,
-            defaultChannel: OPENCLAW_CRABLINE_DEFAULT_CHANNEL,
-            supportsChannel: isCrablineServerChannel,
-            expandChannels: true,
-          }),
-          reportPath: suiteReportPath,
-          summaryPath: suiteSummaryPath,
+              ]),
+            ),
+            "utf8",
+          );
+          return flowSuiteRuntimeResult({
+            observedCells: expandQaScenarioExecutionCells({
+              scenarios: [readQaScenarioById("telegram-commands-command")],
+              channelDriver: params?.channelDriver ?? "qa-channel",
+              channel: params?.channelId,
+              defaultChannel: OPENCLAW_CRABLINE_DEFAULT_CHANNEL,
+              supportsChannel: isCrablineServerChannel,
+              expandChannels: true,
+            }),
+            reportPath: suiteReportPath,
+            summaryPath: suiteSummaryPath,
+          });
         });
-      });
 
-      await runQaProfileCommand({
-        repoRoot: "/tmp/openclaw-repo",
-        outputDir: ".artifacts/qa-e2e/smoke-ci",
-        profile: "smoke-ci",
-        surface: "telegram",
-        category: "telegram.native-controls-and-approvals",
-        scenarioIds: ["telegram-commands-command"],
-        transportId: "qa-channel",
-        fastMode: true,
-        concurrency: 2,
-        allowFailures: true,
-      });
+        await runQaProfileCommand({
+          repoRoot: "/tmp/openclaw-repo",
+          outputDir: ".artifacts/qa-e2e/smoke-ci",
+          profile: "smoke-ci",
+          evidenceMode,
+          surface: "telegram",
+          category: "telegram.native-controls-and-approvals",
+          scenarioIds: ["telegram-commands-command"],
+          transportId: "qa-channel",
+          fastMode: true,
+          concurrency: 2,
+          allowFailures: true,
+        });
 
-      const suiteArgs = mockFirstObjectArg(runQaSuite);
-      expectFields(suiteArgs, {
-        repoRoot: path.resolve("/tmp/openclaw-repo"),
-        outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa-e2e/smoke-ci"),
-        transportId: "qa-channel",
-        channelDriver: "crabline",
-        providerMode: "mock-openai",
-        fastMode: true,
-        concurrency: 2,
-      });
-      expect(suiteArgs.channelDriverSelection).toMatchObject({
-        channel: "telegram",
-        channelDriver: "crabline",
-      });
-      expect(suiteArgs.scenarioIds).toEqual(["telegram-commands-command"]);
-      expect(process.env.OPENCLAW_QA_PROFILE).toBe("release");
-      const evidence = JSON.parse(await fs.readFile(suiteEvidencePath, "utf8")) as {
-        evidenceMode?: unknown;
-        entries?: unknown[];
-        profile?: unknown;
-        profilePlan?: {
-          counts?: Record<string, unknown>;
-          expectedCells?: unknown[];
-          observedCells?: unknown[];
-        };
-        scorecard?: {
-          run?: { evidenceEntryCount?: unknown };
-          coverageIds?: { fulfilled?: unknown };
-          categoryReports?: Array<{
-            id?: unknown;
+        const suiteArgs = mockFirstObjectArg(runQaSuite);
+        expectFields(suiteArgs, {
+          repoRoot: path.resolve("/tmp/openclaw-repo"),
+          outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa-e2e/smoke-ci"),
+          transportId: "qa-channel",
+          channelDriver: "crabline",
+          providerMode: "mock-openai",
+          fastMode: true,
+          concurrency: 2,
+        });
+        expect(suiteArgs.channelId).toBe("telegram");
+        expect(suiteArgs.scenarioIds).toEqual(["telegram-commands-command"]);
+        expect(process.env.OPENCLAW_QA_PROFILE).toBe("release");
+        const evidence = JSON.parse(await fs.readFile(suiteEvidencePath, "utf8")) as {
+          evidenceMode?: unknown;
+          entries?: unknown[];
+          profile?: unknown;
+          profilePlan?: {
+            taxonomyIdentity?: unknown;
+            counts?: Record<string, unknown>;
+            expectedCells?: unknown[];
+            observedCells?: unknown[];
+          };
+          scorecard?: {
+            run?: { evidenceEntryCount?: unknown };
             coverageIds?: { fulfilled?: unknown };
-            missingCoverageIds?: unknown;
-          }>;
+            categoryReports?: Array<{
+              id?: unknown;
+              coverageIds?: { fulfilled?: unknown };
+              missingCoverageIds?: unknown;
+            }>;
+          };
         };
-      };
-      expect(evidence.profile).toBe("smoke-ci");
-      expect(evidence.profilePlan?.counts).toMatchObject({
-        membership: 1,
-        selected: 1,
-        excluded: 0,
-        expectedCells: 1,
-        observedCells: 1,
-        missingCells: 0,
-      });
-      expect(evidence.profilePlan?.observedCells).toEqual(evidence.profilePlan?.expectedCells);
-      expect(evidence.evidenceMode).toBe("slim");
-      expect(evidence.scorecard).toMatchObject({
-        run: {
-          evidenceEntryCount: 1,
-        },
-      });
-      expect(evidence.scorecard).not.toHaveProperty("kind");
-      expect(evidence.scorecard).not.toHaveProperty("taxonomy");
-      expect(evidence.scorecard).not.toHaveProperty("profile");
-      expect(evidence.scorecard?.categoryReports?.[0]).toMatchObject({
-        id: "telegram.native-controls-and-approvals",
-      });
-      expect(evidence.entries?.[0]).not.toHaveProperty("execution");
-      expect(JSON.stringify(evidence.scorecard)).not.toContain("telegram-commands-command");
-      expectWriteContains(stdoutWrite, "QA run profile: smoke-ci; categories: 1; scenarios:");
-      expectWriteContains(stdoutWrite, `QA profile scorecard: ${suiteEvidencePath}`);
-    } finally {
-      if (previousProfile === undefined) {
-        delete process.env.OPENCLAW_QA_PROFILE;
-      } else {
-        process.env.OPENCLAW_QA_PROFILE = previousProfile;
+        expect(evidence.profile).toBe("smoke-ci");
+        expect(evidence.profilePlan?.counts).toMatchObject({
+          membership: 1,
+          selected: 1,
+          excluded: 0,
+          expectedCells: 1,
+          observedCells: 1,
+          missingCells: 0,
+        });
+        expect(evidence.profilePlan?.observedCells).toEqual(evidence.profilePlan?.expectedCells);
+        expect(evidence.evidenceMode).toBe(evidenceMode);
+        expect(evidence.profilePlan?.taxonomyIdentity).toEqual(capturedIdentity);
+        expect(evidence.scorecard).toMatchObject({
+          run: {
+            evidenceEntryCount: 1,
+          },
+        });
+        expect(evidence.scorecard).not.toHaveProperty("kind");
+        expect(evidence.scorecard).not.toHaveProperty("taxonomy");
+        expect(evidence.scorecard).not.toHaveProperty("profile");
+        expect(evidence.scorecard?.categoryReports?.[0]).toMatchObject({
+          id: "telegram.native-controls-and-approvals",
+        });
+        expect(Object.hasOwn(evidence.entries?.[0] as object, "execution")).toBe(
+          evidenceMode === "full",
+        );
+        expect(JSON.stringify(evidence.scorecard)).not.toContain("telegram-commands-command");
+        expectWriteContains(stdoutWrite, "QA run profile: smoke-ci; categories: 1; scenarios:");
+        expectWriteContains(stdoutWrite, `QA profile scorecard: ${suiteEvidencePath}`);
+      } finally {
+        readReport.mockRestore();
+        if (previousProfile === undefined) {
+          delete process.env.OPENCLAW_QA_PROFILE;
+        } else {
+          process.env.OPENCLAW_QA_PROFILE = previousProfile;
+        }
       }
-    }
-  });
+    },
+  );
 
   it("passes non-Crabline profile channel drivers as declarative suite metadata", async () => {
     await runQaProfileCommand({
@@ -1071,7 +1086,7 @@ describe("qa cli runtime", () => {
 
     const suiteArgs = mockFirstObjectArg(runQaSuite);
     expect(suiteArgs.channelDriver).toBe("live");
-    expect(suiteArgs.channelDriverSelection).toBeUndefined();
+    expect(suiteArgs.channelId).toBeUndefined();
   });
 
   it("keeps portable channel scenarios in driver-selected profile runs", async () => {
@@ -1106,7 +1121,7 @@ describe("qa cli runtime", () => {
       providerMode: "mock-openai",
       channelDriver: "live",
     });
-    expect(suiteArgs.channelDriverSelection).toBeUndefined();
+    expect(suiteArgs.channelId).toBeUndefined();
     expectWriteContains(stdoutWrite, "QA run profile: all; categories: 1; scenarios:");
   });
 
@@ -1229,7 +1244,7 @@ describe("qa cli runtime", () => {
     const suiteArgs = mockFirstObjectArg(runQaSuite);
     expect(suiteArgs).toMatchObject({
       channelDriver: "crabline",
-      channelDriverSelection: { channel: "matrix", channelDriver: "crabline" },
+      channelId: "matrix",
       scenarioIds: ["matrix-restart-resume"],
     });
   });
@@ -1291,7 +1306,6 @@ describe("qa cli runtime", () => {
       outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa/frontier"),
       transportId: "qa-channel",
       channelDriver: undefined,
-      channelDriverSelection: undefined,
       providerMode: "live-frontier",
       primaryModel: "openai/gpt-5.6-luna",
       alternateModel: "anthropic/claude-sonnet-4-6",
@@ -1361,7 +1375,7 @@ describe("qa cli runtime", () => {
     const [crablineArgs, liveArgs] = runQaSuite.mock.calls.map(([args]) => args);
     expect(crablineArgs).toMatchObject({
       channelDriver: "crabline",
-      channelDriverSelection: { channel: "telegram" },
+      channelId: "telegram",
       scenarioIds: ["telegram-help-command"],
     });
     expect(liveArgs).toMatchObject({
@@ -1394,7 +1408,7 @@ describe("qa cli runtime", () => {
       2,
       expect.objectContaining({
         channelDriver: "crabline",
-        channelDriverSelection: expect.objectContaining({ channel: "telegram" }),
+        channelId: "telegram",
         scenarioIds: [],
       }),
     );
@@ -1458,12 +1472,7 @@ describe("qa cli runtime", () => {
       outputDir: path.resolve("/tmp/openclaw-repo", ".artifacts/qa/multipass-telegram"),
       transportId: "qa-channel",
       channelDriver: "crabline",
-      channelDriverSelection: {
-        capabilityMatrixPath: "crabline-channel-driver-capabilities.json",
-        channel: "telegram",
-        channelDriver: "crabline",
-        providerReadinessArtifactPath: "crabline-provider-readiness.json",
-      },
+      channelId: "telegram",
       evidenceMode: undefined,
       providerMode: "mock-openai",
       primaryModel: undefined,
@@ -1484,7 +1493,6 @@ describe("qa cli runtime", () => {
     expect(runQaSuite).toHaveBeenCalledWith(
       expect.objectContaining({
         channelDriver: "crabline",
-        channelDriverSelection: undefined,
         scenarioIds: ["telegram-help-command", "matrix-restart-resume"],
       }),
     );
@@ -1497,7 +1505,7 @@ describe("qa cli runtime", () => {
     });
 
     const suiteArgs = mockFirstObjectArg(runQaSuite);
-    expect(suiteArgs.channelDriverSelection).toBeUndefined();
+    expect(suiteArgs.channelId).toBeUndefined();
     expect(suiteArgs.scenarioIds).toEqual(
       expect.arrayContaining(["telegram-help-command", "matrix-restart-resume"]),
     );
@@ -1523,7 +1531,7 @@ describe("qa cli runtime", () => {
     expect(runQaMultipass).not.toHaveBeenCalled();
   });
 
-  it("passes Crabline channel-driver selection through to the multipass runner", async () => {
+  it("passes the generic channel driver and channel through to the multipass runner", async () => {
     await runQaSuiteCommand({
       repoRoot: "/tmp/openclaw-repo",
       providerMode: "mock-openai",
@@ -1536,12 +1544,8 @@ describe("qa cli runtime", () => {
 
     expect(runQaMultipass).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelDriverSelection: {
-          capabilityMatrixPath: "crabline-channel-driver-capabilities.json",
-          channel: "telegram",
-          channelDriver: "crabline",
-          providerReadinessArtifactPath: "crabline-provider-readiness.json",
-        },
+        channelDriver: "crabline",
+        channelId: "telegram",
       }),
     );
     expect(runQaSuite).not.toHaveBeenCalled();
@@ -1560,7 +1564,6 @@ describe("qa cli runtime", () => {
       outputDir: undefined,
       transportId: "qa-channel",
       channelDriver: undefined,
-      channelDriverSelection: undefined,
       providerMode: "mock-openai",
       primaryModel: undefined,
       alternateModel: undefined,
@@ -1607,7 +1610,6 @@ describe("qa cli runtime", () => {
         outputDir: undefined,
         transportId: "qa-channel",
         channelDriver: undefined,
-        channelDriverSelection: undefined,
         providerMode: "mock-openai",
         primaryModel: undefined,
         alternateModel: undefined,
@@ -1686,7 +1688,6 @@ describe("qa cli runtime", () => {
       outputDir: undefined,
       transportId: "qa-channel",
       channelDriver: undefined,
-      channelDriverSelection: undefined,
       providerMode: "mock-openai",
       primaryModel: undefined,
       alternateModel: undefined,
@@ -2579,57 +2580,29 @@ describe("qa cli runtime", () => {
     }
   });
 
-  it("writes a runtime-axis parity report from one summary", async () => {
+  it.each([
+    { status: "pass", runtimeErrorClass: "tool-error" },
+    { status: "skip", details: "known-harness-gap fixture: unavailable" },
+  ])("writes a runtime-axis parity report preserving $status", async (cellOutcome) => {
     const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "qa-runtime-parity-"));
     const priorExitCode = process.exitCode;
     process.exitCode = 0;
 
     try {
+      const summary = makeRuntimeParitySummary();
+      const scenario = summary.scenarios[1];
+      if (!scenario?.runtimeParity) {
+        throw new Error("runtime parity fixture missing");
+      }
+      scenario.status = "fail";
+      Object.assign(scenario.runtimeParity.cells.codex, cellOutcome);
       await fs.writeFile(
         path.join(repoRoot, "runtime-summary.json"),
         JSON.stringify({
-          scenarios: [
-            {
-              name: "Approval turn tool followthrough",
-              status: "fail",
-              steps: [],
-              runtimeParity: {
-                scenarioId: "approval-turn-tool-followthrough",
-                drift: "tool-call-shape",
-                driftDetails: "tool call 1 differs",
-                cells: {
-                  openclaw: {
-                    runtime: "openclaw",
-                    status: "pass",
-                    transcriptBytes: '{"role":"assistant"}\n',
-                    toolCalls: [{ tool: "read_file", argsHash: "a", resultHash: "r" }],
-                    finalText: "done",
-                    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-                    wallClockMs: 10,
-                    bootStateLines: [],
-                  },
-                  codex: {
-                    runtime: "codex",
-                    status: "pass",
-                    transcriptBytes: '{"role":"assistant"}\n',
-                    toolCalls: [{ tool: "read_file", argsHash: "b", resultHash: "r" }],
-                    finalText: "done",
-                    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-                    wallClockMs: 10,
-                    runtimeErrorClass: "tool-error",
-                    bootStateLines: [],
-                  },
-                },
-              },
-            },
-          ],
+          ...summary,
+          scenarios: [scenario],
           counts: { total: 1, passed: 1, failed: 0 },
-          run: {
-            status: "completed",
-            providerMode: "mock-openai",
-            primaryModel: "openai/gpt-5.6-luna",
-            runtimePair: ["openclaw", "codex"],
-          },
+          run: { ...summary.run, status: "completed" },
         }),
         "utf8",
       );
@@ -2638,8 +2611,17 @@ describe("qa cli runtime", () => {
         repoRoot,
         runtimeAxis: true,
         summary: "runtime-summary.json",
+        outputDir: "report",
       });
 
+      const reportDir = path.join(repoRoot, "report");
+      const report = JSON.parse(
+        await fs.readFile(path.join(reportDir, "qa-runtime-parity-summary.json"), "utf8"),
+      );
+      expect(report.scenarios[0].codexStatus).toBe(cellOutcome.status);
+      expect(
+        await fs.readFile(path.join(reportDir, "qa-runtime-parity-report.md"), "utf8"),
+      ).toContain(`- codex: ${cellOutcome.status} (`);
       expect(process.exitCode).toBe(0);
       expect(stdoutWrite).toHaveBeenCalledWith(
         expect.stringContaining("QA runtime parity report:"),
@@ -3311,7 +3293,6 @@ describe("qa cli runtime", () => {
       outputDir: undefined,
       transportId: "qa-channel",
       channelDriver: undefined,
-      channelDriverSelection: undefined,
       providerMode: "mock-openai",
       primaryModel: "openai/gpt-5.6-luna",
       alternateModel: "anthropic/claude-opus-4-8",
@@ -3392,7 +3373,7 @@ describe("qa cli runtime", () => {
       transportId: "qa-channel",
       providerMode: "live-frontier",
       primaryModel: DEFAULT_LIVE_FRONTIER_MODEL,
-      alternateModel: "openai/gpt-5.6-luna",
+      alternateModel: "openai/gpt-5.6-terra",
       fastMode: undefined,
       message: "read qa kickoff and reply short",
       timeoutMs: undefined,
@@ -3440,7 +3421,7 @@ describe("qa cli runtime", () => {
       transportId: "qa-channel",
       providerMode: "live-frontier",
       primaryModel: "openai/gpt-5.6-luna",
-      alternateModel: "openai/gpt-5.6-sol",
+      alternateModel: "openai/gpt-5.6-terra",
       fastMode: undefined,
       message: "read qa kickoff and reply short",
       timeoutMs: undefined,

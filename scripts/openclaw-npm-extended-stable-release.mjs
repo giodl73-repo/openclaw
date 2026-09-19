@@ -94,7 +94,10 @@ export function validateNpmPreflightDistTag({ manifest, npmDistTag }) {
     typeof manifest.packageVersion === "string" &&
     resolveNpmPreflightSdkSelectors(manifest.packageVersion, manifest.npmDistTag).length === 2 &&
     ["beta", "latest"].includes(npmDistTag) &&
-    manifest.pluginSdkApi?.schema === "openclaw.plugin-sdk-api-release-evidence-set/v1" &&
+    [
+      "openclaw.plugin-sdk-api-release-evidence-set/v1",
+      "openclaw.plugin-sdk-api-release-evidence-set/v2",
+    ].includes(manifest.pluginSdkApi?.schema) &&
     selectors &&
     Object.keys(selectors).length === 2 &&
     ["beta", "latest"].every(
@@ -193,9 +196,12 @@ export function validateExtendedStableNpmReleaseRequest(request) {
   }
   const mainCalendarMonth = mainVersion.year * 12 + mainVersion.month;
   const releaseCalendarMonth = taggedVersion.year * 12 + taggedVersion.month;
-  if (mainCalendarMonth <= releaseCalendarMonth) {
+  // Keep one active trailing-month line; advancing main another month retires the older line.
+  if (mainCalendarMonth - releaseCalendarMonth !== 1) {
+    const expectedYear = mainVersion.month === 1 ? mainVersion.year - 1 : mainVersion.year;
+    const expectedMonth = mainVersion.month === 1 ? 12 : mainVersion.month - 1;
     throw new Error(
-      `Protected main must be in a later calendar month than ${taggedVersion.year}.${taggedVersion.month}; got ${request.mainPackageVersion}.`,
+      `Extended-stable publishes only the trailing completed month: protected main ${request.mainPackageVersion} allows ${expectedYear}.${expectedMonth}.PATCH, not ${releaseVersion}. Retire the older line or dispatch with BYPASS_EXTENDED_STABLE_GUARD for an explicitly approved exception.`,
     );
   }
   if (classifyReleaseTrain(mainVersion) !== "stable") {
@@ -215,6 +221,7 @@ export function validateExtendedStableRunIdentity({
   fullReleaseRunId = "",
   fullReleaseRunAttempt = "",
   workflowPath = "",
+  trustedPluginWorkflowSha = "",
 }) {
   const fullReleasePreflight =
     kind === "preflight" && run.workflowName === "Full Release Validation";
@@ -255,8 +262,20 @@ export function validateExtendedStableRunIdentity({
   }
   // FRV runs trusted tooling against a separately pinned release source; its
   // qualified manifest, not the workflow head, binds that source SHA.
+  // A main-branch plugin recovery likewise separates tooling from source. The
+  // caller authenticates its tooling lineage; the immutable run title binds the
+  // exact candidate checked by that trusted workflow.
+  const trustedPluginRecovery =
+    kind === "plugin" &&
+    npmDistTag === "extended-stable" &&
+    run.headBranch === "main" &&
+    /^[0-9a-f]{40}$/u.test(trustedPluginWorkflowSha) &&
+    run.headSha === trustedPluginWorkflowSha &&
+    /^extended-stable\/[0-9]{4}\.(?:[1-9]|1[0-2])\.33$/u.test(expectedBranch ?? "") &&
+    workflowPath.split("@", 1)[0] === ".github/workflows/plugin-npm-release.yml";
   if (
     !fullReleasePreflight &&
+    !trustedPluginRecovery &&
     npmDistTag === "extended-stable" &&
     (run.headBranch !== expectedBranch || run.headSha !== expectedSha)
   ) {
@@ -553,6 +572,7 @@ async function main() {
       fullReleaseRunId: process.env.FULL_RELEASE_VALIDATION_RUN_ID,
       fullReleaseRunAttempt: process.env.FULL_RELEASE_VALIDATION_RUN_ATTEMPT,
       workflowPath: process.env.RUN_WORKFLOW_PATH,
+      trustedPluginWorkflowSha: process.env.TRUSTED_PLUGIN_WORKFLOW_SHA,
     });
     console.log(`Verified referenced ${process.env.RUN_KIND} run.`);
     return;

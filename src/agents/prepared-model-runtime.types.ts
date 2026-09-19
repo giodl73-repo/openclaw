@@ -12,17 +12,35 @@ import type { InlineModelEntry } from "./embedded-agent-runner/model.inline-prov
 import type { AgentHarnessPluginSelection } from "./harness/runtime-plugin-load-plan.js";
 import type { ModelCatalogEntry, ModelCatalogSnapshot } from "./model-catalog.types.js";
 import type { PublishedModelCatalogOwnerCandidate } from "./prepared-model-catalog.types.js";
-import type { PreparedConfiguredRuntimeModel } from "./prepared-model-runtime.configured.js";
 import type { AuthStorage, AuthStorageData } from "./sessions/auth-storage.js";
 import type { ModelRegistry } from "./sessions/model-registry.js";
 
+export type PreparedConfiguredRuntimeModel = Readonly<{
+  provider: string;
+  modelId: string;
+  model: ProviderRuntimeModel;
+}>;
+
+/**
+ * A concrete runtime contract attached to the logical provider/model ref that
+ * selects it. Prepared catalog rows retain this fact after runtime-only rows
+ * are intentionally omitted from the configured view.
+ */
+export type PreparedRuntimeCapabilityModel = PreparedConfiguredRuntimeModel;
+
 export type PreparedModelRuntimeCatalogMode = "live" | "static";
 
-export type PreparedModelRuntimeResourceClaim = { release: () => void };
+export type PreparedModelCatalogRefreshOptions = {
+  refresh?: boolean;
+  providerIds?: readonly string[];
+  changedOnly?: boolean;
+};
+
+export type PreparedModelRuntimeResourceClaim = { release: () => Promise<void> };
 
 export type PreparedMediaCapabilityProviderSource = Readonly<{
   registry: PluginRegistry;
-  resources: Pick<PluginRegistryInspectionResources, "retain">;
+  resources: Pick<PluginRegistryInspectionResources, "retain" | "createInvocationScope">;
 }>;
 
 export type PreparedMediaCapabilityProviderAcquisition = Readonly<{
@@ -78,12 +96,23 @@ export type PreparedModelRuntimeSnapshot = Readonly<{
    * Full inventory discovery is deliberately outside the startup publication boundary.
    */
   modelCatalog: ModelCatalogSnapshot;
-  /** Reads a completed full catalog without starting provider discovery. */
+  /** Returns saved inventory immediately while expired provider catalogs renew separately. */
   readFullModelCatalog?: () => ModelCatalogSnapshot | undefined;
+  /** Reads validated executable rows from this owner's accepted provider publication. */
+  readPublishedModels?: () => ReadonlyMap<string, readonly Model[]> | undefined;
   /** Builds this generation's full control-plane catalog without replacing turn facts. */
-  loadFullModelCatalog?: (options?: { refresh?: boolean }) => Promise<ModelCatalogSnapshot>;
+  loadFullModelCatalog?: (
+    options?: PreparedModelCatalogRefreshOptions,
+  ) => Promise<ModelCatalogSnapshot>;
   /** Full static models for configured refs, resolved once at the lifecycle boundary. */
   configuredRuntimeModels: readonly PreparedConfiguredRuntimeModel[];
+  /** Exact logical IDs precede static equivalence within this policy generation. */
+  findConfiguredRuntimeModel: (
+    provider: string,
+    modelId: string,
+  ) => ProviderRuntimeModel | undefined;
+  /** Supported aliases for this immutable turn generation, separate from catalog metadata. */
+  configuredModelAliases?: readonly Readonly<{ alias: string; provider: string; model: string }>[];
   /** Inline provider projection prepared once for all resolutions owned by this snapshot. */
   inlineProviderModels: readonly InlineModelEntry[];
   createStores: () => PreparedModelRuntimeStores;
@@ -98,6 +127,7 @@ export type PreparedReplyDispatchRuntime = Readonly<{
   workspaceDir: string;
   config: OpenClawConfig;
   modelCatalog: ModelCatalogSnapshot;
+  readFullModelCatalog?: () => ModelCatalogSnapshot | undefined;
   inboundPluginRegistry: PluginRegistry;
   pluginGeneration: PreparedModelRuntimePluginGeneration;
 }>;
@@ -126,7 +156,7 @@ export type PreparedModelRuntimeInput = {
 export type PreparedModelRuntimeLease = Readonly<{
   snapshot: PreparedModelRuntimeSnapshot;
   pluginGeneration: PreparedModelRuntimePluginGeneration;
-  release: () => void;
+  [Symbol.asyncDispose](): Promise<void>;
 }>;
 
 export type PreparedModelRuntimeLeaseOptions = {
@@ -150,6 +180,8 @@ export type PreparedModelRuntimePublicationOptions = {
 
 export type PreparedModelRuntimeRefreshOptions = {
   gatewayLifecycle?: boolean;
+  /** Startup may serve settled agents while the remaining publication continues. */
+  startup?: boolean;
   defaultWorkspaceDir?: string;
   catalogMode?: PreparedModelRuntimeCatalogMode;
   onBuildStats?: (stats: PreparedModelRuntimeBuildStats) => void;
@@ -186,10 +218,16 @@ export type PreparedModelRuntimeBuildStats = Readonly<{
 
 export type PreparedModelCatalogInventory = {
   catalog: ModelCatalogSnapshot;
+  runtimeModels: ReadonlyMap<string, readonly Model[]>;
+  configuredProviderModelIds: ReadonlyMap<string, readonly string[]>;
   key: string;
   pluginFingerprint: string;
+  nativeSource: string;
+  providers: ReadonlyMap<string, { source: string; credentials: string; expiresAt?: number }>;
   discoveryOrigins: readonly { provider: string; profileId?: string }[];
 };
+
+export type PreparedModelCatalogAcquisitionKind = "provider" | "native";
 
 export type PreparedModelCatalogAttempt = {
   source: {
@@ -197,7 +235,8 @@ export type PreparedModelCatalogAttempt = {
     pluginFingerprint: string;
     credentials: Readonly<AuthStorageData>;
   };
-  error?: Error;
+  /** Undefined records a failure before an individual provider scope starts. */
+  failedProviders: Record<PreparedModelCatalogAcquisitionKind, Set<string | undefined>>;
 };
 
 export type PreparedModelRuntimeOwner = {
@@ -207,6 +246,8 @@ export type PreparedModelRuntimeOwner = {
   catalogMode: PreparedModelRuntimeCatalogMode;
   provenance: "configured" | "standalone" | "explicit" | "run" | "ephemeral";
   generation: number;
+  /** First-build auth events need replay only once this owner has begun reading credentials. */
+  authCaptureStarted?: boolean;
   needsRefresh: boolean;
   catalogStale: boolean;
   /** Completed discovery facts; runtime capability projection belongs to each generation. */
@@ -216,7 +257,6 @@ export type PreparedModelRuntimeOwner = {
   refreshError?: Error;
   snapshot?: PreparedModelRuntimeSnapshot;
   pluginGeneration?: PreparedModelRuntimePluginGeneration;
-  resourceClaim?: PreparedModelRuntimeResourceClaim;
   /** Explicit generation admitted for the current publication, when known. */
   pendingPluginGeneration?: PreparedModelRuntimePluginGeneration;
   pending?: Promise<PreparedModelRuntimeSnapshot>;
@@ -226,6 +266,7 @@ export type PreparedModelRuntimeOwner = {
 };
 
 export type PreparedModelRuntimeReplacement = {
+  degraded?: boolean;
   gateId: PreparedModelRuntimeReplacementGateId;
   promise: Promise<void>;
   resolve: () => void;

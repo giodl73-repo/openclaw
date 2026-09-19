@@ -5,23 +5,43 @@ import { RequestClient } from "../internal/rest.js";
 import { sendPollDiscord, sendStickerDiscord } from "../send.outbound.js";
 import { handleDiscordMessageAction } from "./handle-action.js";
 import { handleDiscordAction } from "./runtime.js";
-import { discordMessagingActionRuntime as runtime } from "./runtime.messaging.runtime.js";
+import * as runtime from "./runtime.messaging.runtime.js";
+
+vi.mock("./runtime.messaging.runtime.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./runtime.messaging.runtime.js")>();
+  return {
+    ...actual,
+    editMessageDiscord: vi.fn(actual.editMessageDiscord),
+    deleteMessageDiscord: vi.fn(actual.deleteMessageDiscord),
+    fetchChannelInfoDiscord: vi.fn(actual.fetchChannelInfoDiscord),
+    fetchGuildInfoDiscord: vi.fn(actual.fetchGuildInfoDiscord),
+    sendMessageDiscord: vi.fn(actual.sendMessageDiscord),
+    sendDiscordComponentMessage: vi.fn(actual.sendDiscordComponentMessage),
+    sendStickerDiscord: vi.fn(actual.sendStickerDiscord),
+    createThreadDiscord: vi.fn(actual.createThreadDiscord),
+  };
+});
 
 const channelId = "123456789012345678";
 const messageId = "223456789012345678";
 const guildId = "323456789012345678";
+const threadId = "623456789012345678";
 const token = "synthetic-message-body-token";
 const attachment = { id: "423456789012345678", filename: "example.txt", size: 4 };
 const cfg: OpenClawConfig = {
   channels: { discord: { token, groupPolicy: "open" } },
 };
-const original = { ...runtime };
+const original = await vi.importActual<typeof import("./runtime.messaging.runtime.js")>(
+  "./runtime.messaging.runtime.js",
+);
 const originalFetch = globalThis.fetch;
 let server: Server;
 let rest: RequestClient;
 let requests: { method: string; path: string; body: Record<string, unknown> }[];
 let current: { content: string; attachments: (typeof attachment)[] };
 let unexpectedUrls: string[];
+let parentChannelType: number;
+let threadMessageIds: string[];
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -42,12 +62,35 @@ beforeAll(async () => {
       if (method === "PATCH") {
         current = { ...current, ...body };
       }
-      const result =
+      let result: Record<string, unknown> =
         method === "GET"
           ? path.startsWith("/v10/guilds/")
             ? { id: guildId, name: "synthetic-guild" }
-            : { id: channelId, type: 0, guild_id: guildId, name: "synthetic-channel" }
+            : {
+                id: channelId,
+                type: parentChannelType,
+                guild_id: guildId,
+                name: "synthetic-channel",
+              }
           : { id: messageId, channel_id: channelId, ...current, ...body };
+      if (method === "POST" && path.endsWith("/threads")) {
+        result = {
+          id: threadId,
+          type: 11,
+          name: body.name,
+          message_count: 0,
+          total_message_sent: 0,
+          last_message_id: null,
+        };
+        if (body.message) {
+          threadMessageIds.push(messageId);
+          result.message = { id: messageId, channel_id: threadId };
+        }
+      } else if (method === "POST" && path === `/v10/channels/${threadId}/messages`) {
+        const id = String(BigInt(messageId) + BigInt(threadMessageIds.length));
+        threadMessageIds.push(id);
+        result = { id, channel_id: threadId, ...body };
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(result));
     })().catch((error: unknown) => {
@@ -72,28 +115,28 @@ beforeAll(async () => {
     return originalFetch(input, init);
   });
   rest = new RequestClient(token, { baseUrl, timeout: 5000 });
-  vi.spyOn(runtime, "editMessageDiscord").mockImplementation((channel, id, payload, opts) =>
+  vi.mocked(runtime.editMessageDiscord).mockImplementation((channel, id, payload, opts) =>
     original.editMessageDiscord(channel, id, payload, { ...opts, rest }),
   );
-  vi.spyOn(runtime, "deleteMessageDiscord").mockImplementation((channel, id, opts) =>
+  vi.mocked(runtime.deleteMessageDiscord).mockImplementation((channel, id, opts) =>
     original.deleteMessageDiscord(channel, id, { ...opts, rest }),
   );
-  vi.spyOn(runtime, "fetchChannelInfoDiscord").mockImplementation((channel, opts) =>
+  vi.mocked(runtime.fetchChannelInfoDiscord).mockImplementation((channel, opts) =>
     original.fetchChannelInfoDiscord(channel, { ...opts, rest }),
   );
-  vi.spyOn(runtime, "fetchGuildInfoDiscord").mockImplementation((guild, opts) =>
+  vi.mocked(runtime.fetchGuildInfoDiscord).mockImplementation((guild, opts) =>
     original.fetchGuildInfoDiscord(guild, { ...opts, rest }),
   );
-  vi.spyOn(runtime, "sendMessageDiscord").mockImplementation((to, content, opts) =>
+  vi.mocked(runtime.sendMessageDiscord).mockImplementation((to, content, opts) =>
     original.sendMessageDiscord(to, content, { ...opts, rest }),
   );
-  vi.spyOn(runtime, "sendDiscordComponentMessage").mockImplementation((to, spec, opts) =>
+  vi.mocked(runtime.sendDiscordComponentMessage).mockImplementation((to, spec, opts) =>
     original.sendDiscordComponentMessage(to, spec, { ...opts, rest }),
   );
-  vi.spyOn(runtime, "sendStickerDiscord").mockImplementation((to, ids, opts) =>
+  vi.mocked(runtime.sendStickerDiscord).mockImplementation((to, ids, opts) =>
     original.sendStickerDiscord(to, ids, { ...opts, rest }),
   );
-  vi.spyOn(runtime, "createThreadDiscord").mockImplementation((channel, payload, opts) =>
+  vi.mocked(runtime.createThreadDiscord).mockImplementation((channel, payload, opts) =>
     original.createThreadDiscord(channel, payload, { ...opts, rest }),
   );
 });
@@ -101,6 +144,8 @@ beforeAll(async () => {
 beforeEach(() => {
   requests = [];
   unexpectedUrls = [];
+  parentChannelType = 0;
+  threadMessageIds = [];
   current = { content: "Initial caption", attachments: [attachment] };
 });
 
@@ -109,6 +154,18 @@ afterEach(() => {
 });
 
 afterAll(async () => {
+  for (const mock of [
+    runtime.editMessageDiscord,
+    runtime.deleteMessageDiscord,
+    runtime.fetchChannelInfoDiscord,
+    runtime.fetchGuildInfoDiscord,
+    runtime.sendMessageDiscord,
+    runtime.sendDiscordComponentMessage,
+    runtime.sendStickerDiscord,
+    runtime.createThreadDiscord,
+  ]) {
+    vi.mocked(mock).mockReset();
+  }
   vi.restoreAllMocks();
   rest?.abortAllRequests();
   server?.closeAllConnections();
@@ -144,6 +201,52 @@ describe.each(["runtime", "adapter"] as const)("Discord %s message bodies", (ent
           cfg: config,
           conversationReadOrigin: "direct-operator",
         });
+
+  const createThread = (content?: string) =>
+    entry === "runtime"
+      ? handleDiscordAction({ action: "threadCreate", channelId, name: "example", content }, cfg)
+      : handleDiscordMessageAction({
+          action: "thread-create",
+          params: { channelId, threadName: "example", message: content },
+          cfg,
+        });
+
+  it.each([
+    [0, "hello", 1],
+    [0, "a".repeat(2001), 2],
+    [15, "hello", 1],
+    [15, "a".repeat(2001), 2],
+    [16, undefined, 1],
+  ] as const)(
+    "reports confirmed initial delivery for parent type %i (case %#)",
+    async (type, content, chunkCount) => {
+      parentChannelType = type;
+      const result = await createThread(content);
+      expect(threadMessageIds).toHaveLength(chunkCount);
+      expect(result.details).toMatchObject({
+        ok: true,
+        threadSnapshot: "creation",
+        thread: { id: threadId, message_count: 0, total_message_sent: 0, last_message_id: null },
+        initialMessageDelivery: {
+          status: "delivered",
+          starterMessageDelivered: type !== 0,
+          deliveredChunkCount: chunkCount,
+          totalChunkCount: chunkCount,
+          deliveredMessageIds: threadMessageIds,
+        },
+      });
+      const text = result.content.find((block) => block.type === "text");
+      expect(text?.type === "text" ? JSON.parse(text.text) : undefined).toEqual(result.details);
+      expect(requests.filter((request) => request.method === "GET")).toHaveLength(1);
+    },
+  );
+
+  it("does not report initial delivery for an empty standalone thread", async () => {
+    const result = await createThread();
+    expect(threadMessageIds).toEqual([]);
+    expect(result.details).not.toHaveProperty("initialMessageDelivery");
+    expect(writes()).toHaveLength(1);
+  });
 
   it.each(["Changed caption", "    console.log(1);\n", ""])(
     "edits exact content %j and retains attachments",
@@ -183,6 +286,11 @@ describe.each(["runtime", "adapter"] as const)("Discord %s message bodies", (ent
         body: { content },
       },
     ]);
+  });
+
+  it("rejects malformed message IDs before a message mutation", async () => {
+    await expect(edit("Changed caption", cfg, "..")).rejects.toThrow("Invalid Discord message ID");
+    expect(writes()).toEqual([]);
   });
 
   it.each([undefined, null, 42])(

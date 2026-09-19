@@ -291,19 +291,6 @@
   gap: 16px;
 }
 
-.usage-loading-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.usage-loading-controls {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .usage-loading-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -342,10 +329,6 @@
 
 .usage-date-range {
   flex-wrap: wrap;
-}
-
-.usage-date-range--loading {
-  opacity: 0.75;
 }
 
 .usage-date-input,
@@ -1951,4 +1934,28 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+.provider-usage-window-group__windows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: var(--space-3);
+}
+
+.provider-usage-window-group__title {
+  color: var(--muted);
+  font-size: var(--control-ui-text-xs);
+  margin-bottom: var(--space-2);
+}
+
+.provider-usage-progress--ok > span {
+  background: var(--ok);
+}
+
+.provider-usage-progress--warn > span {
+  background: var(--warn);
+}
+
+.provider-usage-progress--danger > span {
+  background: var(--danger);
 }

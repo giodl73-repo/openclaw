@@ -6,6 +6,8 @@
     <string name="controls" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Kontroller"</string>
     <string name="talk" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Konuş"</string>
     <string name="real_time_audio_failed" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Saat sesi başarısız oldu"</string>
+    <string name="microphone_permission_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Mikrofon izni gerekli"</string>
+    <string name="open_settings" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Ayarları Aç"</string>
     <string name="dictate" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Dikte et"</string>
     <string name="live" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Canlı"</string>
     <string name="thread" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"İleti dizisi"</string>
@@ -26,6 +28,7 @@
     <string name="speak_reply" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Son yanıtı seslendir"</string>
     <string name="speaking" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Konuşuyor"</string>
     <string name="listening" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Dinleniyor"</string>
+    <string name="stopping" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Arama sonlandırılıyor…"</string>
     <string name="connecting" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Bağlanıyor"</string>
     <string name="thinking" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Düşünüyor"</string>
     <string name="typing" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Yazıyor"</string>
@@ -79,6 +82,8 @@
     <string name="message_not_sent" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Eylem kabul edilmedi"</string>
     <string name="something_went_wrong" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Bir şeyler ters gitti"</string>
     <string name="refresh_and_try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Listeleri yenileyip tekrar deneyin."</string>
+    <string name="model_catalog_refresh_failed" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Bazı modeller yenilenemedi. Listelenen modeller hâlâ kullanılabilir."</string>
+    <string name="model_catalog_update_required" tools:ignore="MissingTranslation,Typos,TypographyDashes,TypographyEllipsis">"Bu sohbet için model seçebilmek üzere telefonunuzdaki OpenClaw uygulamasını ve Gateway\'i güncelleyin."</string>
     <string name="try_again" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Saatten tekrar deneyin."</string>
     <string name="update_required" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Güncelleme gerekli"</string>
     <string name="update_required_detail" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw\'u hem telefonda hem de saatte güncelleyin."</string>

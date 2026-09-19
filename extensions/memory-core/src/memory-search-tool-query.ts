@@ -1,10 +1,12 @@
 // Memory Core plugin module owns ranked search-window filtering and diagnostics.
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import {
-  formatMemoryIndexRebuildGuidance,
   resolveMemoryIndexIdentityDiagnostic,
+  resolveMemoryIndexSearchDiagnostic,
+  MEMORY_SEARCH_DEADLINE_CONTROL,
   type MemoryIndexIdentityDiagnostic,
   type MemoryProviderStatus,
+  type MemorySearchDeadlineControl,
   type MemorySearchManager,
   type MemorySearchRuntimeDebug,
   type MemorySearchResult,
@@ -12,6 +14,7 @@ import {
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
+import { captureMemoryRebuildNotice } from "./memory-rebuild-notice.js";
 import { filterMemorySearchHitsBySessionVisibility } from "./session-search-visibility.js";
 import { buildMemorySearchUnavailableResult } from "./tools.shared.js";
 
@@ -21,19 +24,18 @@ export function buildPausedMemoryIndexUnavailableResult(
   diagnostic: MemoryIndexIdentityDiagnostic,
   params: {
     agentId: string;
-    status: Pick<MemoryProviderStatus, "provider" | "requestedProvider">;
+    status: Pick<
+      MemoryProviderStatus,
+      "provider" | "requestedProvider" | "lastSyncError" | "custom"
+    >;
   },
 ) {
-  const cause =
-    diagnostic.owner === "configuration"
-      ? `the current memory configuration no longer matches the index (${diagnostic.reason})`
-      : diagnostic.code === "metadata_missing"
-        ? `the memory index metadata is missing (${diagnostic.reason}); no configuration change is needed`
-        : `this OpenClaw version changed the memory index format (${diagnostic.reason}); no configuration change is needed`;
-  return buildMemorySearchUnavailableResult(diagnostic.reason, {
-    warning: `Tell the user: memory search is paused because ${cause}.`,
-    action: `Tell the user to run: ${formatMemoryIndexRebuildGuidance(params.status, params.agentId)}`,
-  });
+  const { error, warning, action } = resolveMemoryIndexSearchDiagnostic(
+    diagnostic,
+    params.status,
+    params.agentId,
+  );
+  return buildMemorySearchUnavailableResult(error, { warning, action });
 }
 
 type ManagerState = { manager: MemorySearchManager; managerMs?: number };
@@ -73,6 +75,8 @@ export async function executeMemorySearchToolQuery(params: {
   query: MemorySearchToolQuery;
   visibility: MemorySearchToolVisibility;
   signal: AbortSignal;
+  deadlineControl?: MemorySearchDeadlineControl;
+  onRebuildNotice?: (readWarning: () => string | undefined) => void;
   onPartialResults?: (
     result: Awaited<ReturnType<typeof finalizeMemorySearchToolQuery>> | null,
   ) => void;
@@ -93,9 +97,15 @@ export async function executeMemorySearchToolQuery(params: {
           ? query.indexedSources
           : query.defaultSources
         : undefined);
-  const queryContext = { query, visibility, searchSources, startedAt };
+  const queryContext = {
+    query,
+    visibility,
+    searchSources,
+    startedAt,
+  };
 
   const searchOnce = async () => {
+    params.onRebuildNotice?.(captureMemoryRebuildNotice(active.manager.status()));
     const allowedSources = searchSources ? new Set(searchSources) : undefined;
     const searchesSessions = searchSources?.includes("sessions") === true;
     const indexedCandidateCount = searchesSessions
@@ -116,6 +126,9 @@ export async function executeMemorySearchToolQuery(params: {
       sessionKey: query.sessionKey,
       activeProjectKeys: query.activeProjectKeys ? [...query.activeProjectKeys] : undefined,
       signal,
+      ...(params.deadlineControl
+        ? { [MEMORY_SEARCH_DEADLINE_CONTROL]: params.deadlineControl }
+        : {}),
       onDebug: (debug) => runtimeDebug.push(debug),
       onPartialResults: params.onPartialResults
         ? (partialCandidates) => {

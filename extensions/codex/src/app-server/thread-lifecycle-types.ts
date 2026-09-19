@@ -82,7 +82,7 @@ export type CodexStartOrResumeThreadParams = {
   finalConfigPatch?: JsonObject;
   buildFinalConfigPatch?: (
     decision: CodexThreadFinalConfigPatchDecision,
-  ) => CodexThreadFinalConfigPatchResult;
+  ) => CodexThreadFinalConfigPatchResult | Promise<CodexThreadFinalConfigPatchResult>;
   nativeHookRelayGeneration?: string;
   /** Session-layer PreToolUse hooks must survive authoritative managed hook requirements. */
   nativeHookRelayRequired?: boolean;
@@ -135,6 +135,7 @@ export type CodexThreadResumePreparation = {
   assertConfigured: () => void;
   assertCurrent: () => void;
   dispose: () => void;
+  settledSystemError: boolean;
 };
 
 export type CodexResumeThreadContext = CodexThreadRequestContext & {

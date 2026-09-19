@@ -2,11 +2,14 @@
 
 install_update_restart_systemctl_shim() {
   local shim_dir="$npm_config_prefix/bin"
+  export XDG_RUNTIME_DIR="$shim_dir/runtime"
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
   local manager_env
   manager_env="$(node <<'MANAGER_ENV'
 const keys = [
   "CI", "OPENCLAW_NO_ONBOARD", "OPENCLAW_NO_PROMPT", "OPENCLAW_SKIP_PROVIDERS",
   "OPENCLAW_SKIP_CHANNELS", "OPENCLAW_DISABLE_BONJOUR",
+  "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
 ];
 const captured = Object.fromEntries(keys.map((key) => [key, process.env[key] ?? null]));
 const registry = process.env.NPM_CONFIG_REGISTRY || process.env.npm_config_registry || null;
@@ -18,6 +21,13 @@ MANAGER_ENV
   )" || return "$?"
   mkdir -p "$shim_dir"
   cp "$(dirname "${BASH_SOURCE[0]}")/systemd-fixture.mjs" "$shim_dir/systemd-fixture.mjs"
+  node - "$shim_dir/systemd-fixture-runtime.json" \
+    "${OPENCLAW_UPGRADE_SURVIVOR_SYSTEMCTL_SHIM_PID_FILE:-$shim_dir/systemctl-shim.pid}" \
+    "${OPENCLAW_UPGRADE_SURVIVOR_SYSTEMCTL_SHIM_DAEMON_LOG:-$shim_dir/systemctl-shim-gateway.log}" <<'RUNTIME_PATHS'
+const fs = require("node:fs");
+const [file, pidFile, daemonLog] = process.argv.slice(2);
+fs.writeFileSync(file, JSON.stringify({ pidFile, daemonLog }), { mode: 0o600 });
+RUNTIME_PATHS
   cat >"$shim_dir/busctl" <<'BUSCTL'
 #!/usr/bin/env bash
 exec node "$(dirname "$0")/systemd-fixture.mjs" busctl "$@"
@@ -65,6 +75,12 @@ if [ "${#filtered[@]}" -gt 2 ] ||
   echo "systemctl shim unsupported unit or arguments: $*" >&2
   exit 1
 fi
+
+case "$command" in
+  stop | start | restart | enable | disable)
+    node "$manager_script" record-caller "${log_file}.callers" "$PPID" "$command"
+    ;;
+esac
 
 is_running() {
   [ -s "$pid_file" ] || return 1
@@ -135,6 +151,7 @@ const restartWindowMs = 60_000;
 const restartBurst = 5;
 const stopTimeoutMs = 30_000;
 const starts = [];
+let totalStarts = 0;
 let firstExit;
 let child;
 let activeGroupPid;
@@ -222,12 +239,16 @@ const start = () => {
     return finish();
   }
   starts.push(now);
+  totalStarts++;
   child = spawn("bash", ["-c", command], {
     detached: true,
     env: childEnv,
     stdio: ["ignore", output, output],
   });
   activeGroupPid = child.pid;
+  fs.writeFileSync(`${daemonLog}.runtime.json`, JSON.stringify({
+    restarts: totalStarts - 1, entered: Math.trunc(performance.now() * 1000),
+  }));
   const childGroupPid = activeGroupPid;
   child.on("error", (error) => {
     fs.writeSync(output, `[systemctl-shim] gateway spawn failed: ${String(error)}\n`);

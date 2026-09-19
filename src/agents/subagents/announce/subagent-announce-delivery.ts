@@ -18,6 +18,8 @@ import {
 import { isCronSessionKey } from "../../../sessions/session-key-utils.js";
 import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.js";
 import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.types.js";
+import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.js";
+import type { OpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.types.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../../utils/message-channel.js";
 import { hasGeneratedMediaCompletionEvent } from "../../internal-event-contract.js";
 import {
@@ -136,23 +138,25 @@ function createCompletionUserTurnTranscriptRecorderFactory(params: {
 export async function deliverSubagentAnnouncement(params: {
   requesterSessionKey: string;
   requesterAgentId?: string;
-  announceId?: string;
+  requesterRunTimeoutSeconds?: number;
   triggerMessage: string;
   steerMessage: string;
   internalEvents?: AgentInternalEvent[];
-  summaryLine?: string;
   requesterSessionOrigin?: DeliveryContext;
-  requesterOrigin?: DeliveryContext;
   completionDirectOrigin?: DeliveryContext;
   directOrigin?: DeliveryContext;
   sourceSessionKey?: string;
   sourceRunId?: string;
   sourceTool?: string;
   isSourceSessionEffectsAllowed?: () => boolean;
+  /** Additional source guard released by the accepting Gateway or injection owner. */
+  isSourceSessionAdmissionAllowed?: () => boolean;
   isCompletionOwnedByRequesterYield?: () => boolean;
   targetRequesterSessionKey: string;
   requesterIsSubagent: boolean;
   expectsCompletionMessage: boolean;
+  completionTarget?: "parent";
+  completionRequesterSessionId?: string;
   requireDirectDelivery?: boolean;
   requireVisibleReply?: boolean;
   bestEffortDeliver?: boolean;
@@ -161,7 +165,9 @@ export async function deliverSubagentAnnouncement(params: {
   signal?: AbortSignal;
   resolveGatewayContext?: import("../../../gateway/server-methods/types.js").GatewayContextResolver;
 }): Promise<SubagentAnnounceDeliveryResult> {
-  const sourceOwnerChanged = () => params.isSourceSessionEffectsAllowed?.() === false;
+  const sourceOwnerChanged = () =>
+    params.isSourceSessionEffectsAllowed?.() === false ||
+    params.isSourceSessionAdmissionAllowed?.() === false;
   if (sourceOwnerChanged()) {
     return sourceOwnerChangedResult();
   }
@@ -169,8 +175,9 @@ export async function deliverSubagentAnnouncement(params: {
     params.expectsCompletionMessage &&
     isAgentMediatedCompletionSourceTool(params.sourceTool) &&
     hasGeneratedMediaCompletionEvent(params.internalEvents);
-  let durableQueueId: string | undefined;
-  let durableQueueClaimed = false;
+  let durableQueue:
+    | { id: string; claimed: boolean; context: OpenClawStateWorkerContext }
+    | undefined;
   if (durableGeneratedMediaHandoff) {
     try {
       const cfg = getSubagentAnnounceRuntimeConfig();
@@ -228,12 +235,17 @@ export async function deliverSubagentAnnouncement(params: {
         ...expectedMedia,
         idempotencyKey: `${params.directIdempotencyKey}:agent-loop`,
       } as const;
+      const queueContext = captureOpenClawStateWorkerContext();
       const queued = params.sourceRunId
         ? admitCorrelatedSubagentSessionDelivery({
             runId: params.sourceRunId,
             payload: queuePayload,
           })
-        : await enqueueClaimedSessionDelivery(queuePayload, resolveSubagentAnnounceTimeoutMs(cfg));
+        : await enqueueClaimedSessionDelivery(
+            queuePayload,
+            resolveSubagentAnnounceTimeoutMs(cfg),
+            queueContext,
+          );
       if (queued.status === "failed") {
         return {
           delivered: false,
@@ -246,8 +258,7 @@ export async function deliverSubagentAnnouncement(params: {
       if (queued.status === "completed") {
         return { delivered: true, path: "queued", disposition: "delivered" };
       }
-      durableQueueId = queued.id;
-      durableQueueClaimed = queued.claimed;
+      durableQueue = { id: queued.id, claimed: queued.claimed, context: queueContext };
     } catch (error) {
       defaultRuntime.log(
         `[warn] Generated media session handoff could not be persisted; refusing ambiguous fallback: ${summarizeDeliveryError(error)}`,
@@ -262,15 +273,17 @@ export async function deliverSubagentAnnouncement(params: {
     }
   }
 
-  if (durableQueueId) {
-    if (durableQueueClaimed) {
-      await releaseSessionDeliveryClaim(durableQueueId).catch((error: unknown) => {
-        defaultRuntime.log(
-          `[warn] Generated media session handoff lease release failed; durable recovery remains pending: ${summarizeDeliveryError(error)}`,
-        );
-      });
+  if (durableQueue) {
+    if (durableQueue.claimed) {
+      await releaseSessionDeliveryClaim(durableQueue.id, durableQueue.context).catch(
+        (error: unknown) => {
+          defaultRuntime.log(
+            `[warn] Generated media session handoff lease release failed; durable recovery remains pending: ${summarizeDeliveryError(error)}`,
+          );
+        },
+      );
     }
-    await scheduleSessionDelivery(durableQueueId).catch((error: unknown) => {
+    await scheduleSessionDelivery(durableQueue.id, durableQueue.context).catch((error: unknown) => {
       defaultRuntime.log(
         `[warn] Generated media session handoff retry scheduling failed; durable recovery remains pending: ${summarizeDeliveryError(error)}`,
       );
@@ -284,7 +297,7 @@ export async function deliverSubagentAnnouncement(params: {
 
   return await runSubagentAnnounceDispatch({
     expectsCompletionMessage: params.expectsCompletionMessage,
-    requireDirectDelivery: params.requireDirectDelivery,
+    requireDirectDelivery: params.requireDirectDelivery || params.completionTarget === "parent",
     signal: params.signal,
     steer: async () => {
       if (sourceOwnerChanged()) {
@@ -298,6 +311,7 @@ export async function deliverSubagentAnnouncement(params: {
         createUserTurnTranscriptRecorder: createCompletionUserTurnTranscriptRecorder,
         signal: params.signal,
         isSourceSessionEffectsAllowed: params.isSourceSessionEffectsAllowed,
+        isSourceSessionAdmissionAllowed: params.isSourceSessionAdmissionAllowed,
       });
     },
     direct: async () => {
@@ -307,6 +321,7 @@ export async function deliverSubagentAnnouncement(params: {
       return await sendSubagentAnnounceDirectly({
         requesterSessionKey: params.requesterSessionKey,
         requesterAgentId: params.requesterAgentId,
+        requesterRunTimeoutSeconds: params.requesterRunTimeoutSeconds,
         targetRequesterSessionKey: params.targetRequesterSessionKey,
         triggerMessage: params.triggerMessage,
         internalEvents: params.internalEvents,
@@ -317,8 +332,11 @@ export async function deliverSubagentAnnouncement(params: {
         sourceSessionKey: params.sourceSessionKey,
         sourceTool: params.sourceTool,
         isSourceSessionEffectsAllowed: params.isSourceSessionEffectsAllowed,
+        isSourceSessionAdmissionAllowed: params.isSourceSessionAdmissionAllowed,
         isCompletionOwnedByRequesterYield: params.isCompletionOwnedByRequesterYield,
         requesterIsSubagent: params.requesterIsSubagent,
+        completionTarget: params.completionTarget,
+        completionRequesterSessionId: params.completionRequesterSessionId,
         expectsCompletionMessage: params.expectsCompletionMessage,
         createUserTurnTranscriptRecorder: createCompletionUserTurnTranscriptRecorder,
         requireVisibleReply: params.requireVisibleReply,

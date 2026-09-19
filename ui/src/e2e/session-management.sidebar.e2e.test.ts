@@ -40,7 +40,7 @@ function sessionActionPresentation(button: Locator) {
 }
 
 suite.define(() => {
-  it("expands and manages child sessions inline before opening a child chat", async () => {
+  it.each([false, true])("nests and manages spawned sessions (pinned: %s)", async (pinned) => {
     const baseTime = Date.parse("2026-07-01T16:00:00.000Z");
     const parentKey = "agent:main:release-plan";
     const childOneKey = "agent:main:research-sources";
@@ -54,55 +54,58 @@ suite.define(() => {
       viewport: { height: 900, width: 1280 },
     });
     const page = await context.newPage();
+    const children = [
+      sessionRow(childOneKey, "Research sources", baseTime - 1_000, {
+        hasActiveRun: true,
+        spawnedBy: parentKey,
+        startedAt: baseTime - 61_000,
+        status: "running",
+      }),
+      sessionRow(childTwoKey, "Verify tests", baseTime - 2_000, {
+        endedAt: baseTime - 2_000,
+        spawnedBy: parentKey,
+        startedAt: baseTime - 62_000,
+        status: "done",
+      }),
+      {
+        ...sessionRow(staleRunningChildKey, "Stale activity", baseTime - 3_000, {
+          hasActiveRun: false,
+          spawnedBy: parentKey,
+          startedAt: baseTime - 64_000,
+          status: "running",
+        }),
+        runtimeMs: 61_000,
+        runtimeSampledAt: baseTime,
+      },
+      {
+        ...sessionRow(failedChildKey, "Failed checks", baseTime - 4_000, {
+          endedAt: baseTime - 4_000,
+          hasActiveRun: true,
+          spawnedBy: parentKey,
+          startedAt: baseTime - 64_000,
+          status: "failed",
+        }),
+        lastReadAt: baseTime,
+        runtimeMs: 60_000,
+        runtimeSampledAt: baseTime,
+      },
+    ];
+    const parentRow = sessionRow(parentKey, "Plan release", baseTime, {
+      childSessions: [childOneKey, childTwoKey, staleRunningChildKey, failedChildKey],
+      pinned,
+    });
     const gateway = await installMockGateway(page, {
+      // Direct routes resolve canonical identity before the sidebar list arrives.
+      sessions: [parentRow, ...children],
       methodResponses: {
         "sessions.list": {
           cases: [
             {
               match: { spawnedBy: parentKey },
-              response: sessionsListResponse([
-                sessionRow(childOneKey, "Research sources", baseTime - 1_000, {
-                  hasActiveRun: true,
-                  spawnedBy: parentKey,
-                  startedAt: baseTime - 61_000,
-                  status: "running",
-                }),
-                sessionRow(childTwoKey, "Verify tests", baseTime - 2_000, {
-                  endedAt: baseTime - 2_000,
-                  spawnedBy: parentKey,
-                  startedAt: baseTime - 62_000,
-                  status: "done",
-                }),
-                {
-                  ...sessionRow(staleRunningChildKey, "Stale activity", baseTime - 3_000, {
-                    hasActiveRun: false,
-                    spawnedBy: parentKey,
-                    startedAt: baseTime - 64_000,
-                    status: "running",
-                  }),
-                  runtimeMs: 61_000,
-                  runtimeSampledAt: baseTime,
-                },
-                {
-                  ...sessionRow(failedChildKey, "Failed checks", baseTime - 4_000, {
-                    endedAt: baseTime - 4_000,
-                    hasActiveRun: true,
-                    spawnedBy: parentKey,
-                    startedAt: baseTime - 64_000,
-                    status: "failed",
-                  }),
-                  lastReadAt: baseTime,
-                  runtimeMs: 60_000,
-                  runtimeSampledAt: baseTime,
-                },
-              ]),
+              response: sessionsListResponse(children),
             },
             {
-              response: sessionsListResponse([
-                sessionRow(parentKey, "Plan release", baseTime, {
-                  childSessions: [childOneKey, childTwoKey, staleRunningChildKey, failedChildKey],
-                }),
-              ]),
+              response: sessionsListResponse([parentRow]),
             },
           ],
         },
@@ -115,14 +118,11 @@ suite.define(() => {
       const parent = page.locator(`[data-session-key="${parentKey}"]`);
       await parent.waitFor({ state: "visible", timeout: 10_000 });
       await expect.poll(() => page.locator(".sidebar-recent-session--child").count()).toBe(0);
-      // The parent is idle: its running child is summarized by the collapsed toggle
-      // on the right, never as a ring on the parent's own glyph.
+      // Delegated work keeps the idle parent's ring visible even with children collapsed.
       await expect
         .poll(() => parent.locator(".sidebar-child-session-toggle--running").count())
         .toBe(1);
-      expect(await parent.locator(".sidebar-session-indicator .session-glyph__ring").count()).toBe(
-        0,
-      );
+      await parent.getByRole("img", { name: "Subagents working", exact: true }).waitFor();
       const accessibility = await context.newCDPSession(page);
       const collapsedTree = await accessibility.send("Accessibility.getFullAXTree");
       const collapsedToggle = collapsedTree.nodes.find(
@@ -178,6 +178,22 @@ suite.define(() => {
       }
       await captureUiProof(suite, page, "child-sessions-expanded.png");
       await captureUiProof(suite, page, "child-sessions-run-state-precedence.png");
+
+      const tree = page.locator(`[data-session-tree="${parentKey}"]`);
+      expect(await tree.locator("xpath=ancestor::nav").count()).toBe(pinned ? 1 : 0);
+      const nesting = await tree.evaluate((element) => {
+        const parentElement = element.querySelector(".sidebar-recent-session")!;
+        const childContainer = element.querySelector(".sidebar-session-tree__children")!;
+        return {
+          parentLeft: parentElement.getBoundingClientRect().left,
+          childLeft: childContainer
+            .querySelector(".sidebar-recent-session")!
+            .getBoundingClientRect().left,
+          guide: getComputedStyle(childContainer).backgroundImage,
+        };
+      });
+      expect(nesting.childLeft - nesting.parentLeft).toBeGreaterThan(8);
+      expect(nesting.guide).not.toBe("none");
 
       const completedChild = childRows.nth(1);
       const childMenuButton = completedChild.getByRole("button", {

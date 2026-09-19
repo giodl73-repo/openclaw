@@ -123,7 +123,7 @@ export function createDraftState(params: TurnConfig): TelegramDraftStateSlice {
               }
             : {}),
           onProviderMessage: async (message) => {
-            recordSentMessage(params.context.chatId, message.message_id, params.cfg, {
+            await recordSentMessage(params.context.chatId, message.message_id, params.cfg, {
               accountId: params.context.route.accountId,
               agentId: params.opts.ownerAgentId,
             });
@@ -240,6 +240,12 @@ export async function rotateAnswerLaneForNewMessage(turn: Turn) {
   // An accepted block must become durable before rotation; otherwise cleanup
   // can discard its only visible preview.
   await turn.materializeAnswerLaneBeforeRotation();
+  if (!turn.answerLane.finalized) {
+    // Unaccepted partial text remains a preview, including across tool-only
+    // messages. Reposition with cleanup instead of retaining it as a reply.
+    repositionLaneForNewMessage(turn, turn.answerLane);
+    return;
+  }
   await rotateLaneForNewMessage(turn, turn.answerLane);
 }
 

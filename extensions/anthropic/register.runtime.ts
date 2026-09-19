@@ -26,7 +26,6 @@ import {
   resolveClaudeMythos5ModelIdentity,
   resolveClaudeOpus5ModelIdentity,
   resolveClaudeSonnet5ModelIdentity,
-  resolveClaudeThinkingProfile,
   supportsClaude1MContext,
   supportsClaudeAdaptiveThinking,
   supportsClaudeNativeMaxEffort,
@@ -36,7 +35,6 @@ import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coer
 import { buildAnthropicCliBackend } from "./cli-backend.js";
 import {
   CLAUDE_CLI_CANONICAL_DEFAULT_MODEL_REF,
-  CLAUDE_CLI_OFF_THINKING_PROFILE,
   CLAUDE_CLI_PROFILE_ID,
   CLAUDE_MODEL_ID_ALIASES,
 } from "./cli-constants.js";
@@ -54,6 +52,7 @@ import { acceptsAnthropicLiveModelContract } from "./live-model-contract-gate.js
 import { anthropicMediaUnderstandingProvider } from "./media-understanding-provider.js";
 import manifest from "./openclaw.plugin.json" with { type: "json" };
 import anthropicProviderDiscovery from "./provider-discovery.js";
+import { resolveThinkingProfile } from "./provider-policy-api.js";
 import {
   createClaudeSessionNodeInvokePolicies,
   registerClaudeSessionDiscovery,
@@ -567,7 +566,11 @@ function applyAnthropicModernMaxTokens(params: {
   modelId: string;
   model: ProviderRuntimeModel;
 }): ProviderRuntimeModel | undefined {
-  if (!isAnthropic128kOutputModel(params.modelId)) {
+  // Catalog defaults must not raise an operator-configured output cap.
+  if (
+    params.model.maxTokensSource === "configured" ||
+    !isAnthropic128kOutputModel(params.modelId)
+  ) {
     return undefined;
   }
   if ((params.model.maxTokens ?? 0) >= ANTHROPIC_MODERN_MAX_OUTPUT_TOKENS) {
@@ -862,17 +865,7 @@ export function buildAnthropicProvider(): ProviderPlugin {
     resolveReasoningOutputMode: () => "native",
     classifyFailoverReason: ({ code, errorType }) =>
       classifyAnthropicFailoverDescriptor(errorType) ?? classifyAnthropicFailoverDescriptor(code),
-    resolveThinkingProfile: ({ provider, modelId, params }) => {
-      const contractModelId = resolveClaudeModelIdentity({ id: modelId, params });
-      return isAnthropicMythos5Model(contractModelId) &&
-        normalizeLowercaseStringOrEmpty(provider) !== PROVIDER_ID
-        ? CLAUDE_CLI_OFF_THINKING_PROFILE
-        : resolveClaudeThinkingProfile(contractModelId, undefined, {
-            includeNativeMax: [PROVIDER_ID, CLAUDE_CLI_BACKEND_ID].includes(
-              normalizeLowercaseStringOrEmpty(provider),
-            ),
-          });
-    },
+    resolveThinkingProfile,
     wrapStreamFn: wrapAnthropicProviderStream,
     resolveFastModeSupport,
     resolveUsageAuth: resolveAnthropicUsageAuth,

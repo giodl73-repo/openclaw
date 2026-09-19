@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import {
   createOperationalRunInstanceRef,
   prepareAgentRunAdmission,
@@ -19,7 +20,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { clearAgentRunContext, registerAgentRunContext } from "../../infra/agent-run-registry.js";
 import {
   getGatewayRestartDrainSignal,
-  runWithGatewayIndependentRootWorkAdmission,
+  runWithGatewayDetachedWorkAdmission,
 } from "../../process/gateway-work-admission.js";
 import { bumpSkillsSnapshotVersion } from "../runtime/refresh-state.js";
 import { recordSkillExperienceReviewOutcome } from "./collection-review-state.js";
@@ -107,7 +108,7 @@ export async function runSkillExperienceReview(
 ): Promise<void> {
   // The foreground root has closed by the idle timer's callback. Admit this
   // detached review independently; a real Gateway drain still refuses it.
-  await runWithGatewayIndependentRootWorkAdmission(
+  await runWithGatewayDetachedWorkAdmission(
     () => runSkillExperienceReviewInner(candidate),
     "skills:experience-review",
   );
@@ -276,7 +277,7 @@ async function runSkillExperienceReviewInner(candidate: ExperienceReviewCandidat
     recordSkillExperienceReviewOutcome(foregroundPromptContext.agentId, workspaceDir, {
       attemptedAtMs,
       outcome: "failed",
-      error: String(error).slice(0, 300),
+      error: truncateUtf16Safe(String(error), 300),
     });
     throw error;
   } finally {

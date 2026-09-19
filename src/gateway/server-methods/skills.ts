@@ -4,9 +4,9 @@ import {
   buildClawHubTrustErrorDetails,
   ErrorCodes,
   errorShape,
+  type SkillsInstallParams,
+  type SkillsUpdateParams,
   validateSkillsBinsParams,
-  validateSkillsCuratorActionParams,
-  validateSkillsCuratorStatusParams,
   validateSkillsDetailParams,
   validateSkillsInstallParams,
   validateSkillsProposalActionParams,
@@ -36,6 +36,7 @@ import { resolveNodeExecEligibility } from "../../agents/exec-defaults.js";
 import { redactConfigObject } from "../../config/redact-snapshot.js";
 import { fetchClawHubSkillDetail } from "../../infra/clawhub-skills.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { registerClawHubCatalogIconUrls } from "../../plugins/catalog-icon-registry.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { getOrCreatePromise } from "../../shared/lazy-promise.js";
 import { updateSkillConfigEntry } from "../../skills/config/mutations.js";
@@ -58,10 +59,6 @@ import {
   collectClawHubVerdictTargets,
   fetchOpenClawSkillSecurityVerdicts,
 } from "../../skills/security/clawhub-verdicts.js";
-import {
-  getSkillCuratorStatus,
-  SKILL_LIFECYCLE_CURATION_RETIRED_MESSAGE,
-} from "../../skills/workshop/curator.js";
 import { resolveSkillProposalName } from "../../skills/workshop/frontmatter.js";
 import { assertExpectedRevisionHash } from "../../skills/workshop/service-evaluation.js";
 import {
@@ -83,6 +80,7 @@ import {
   readWritableWorkshopSkill,
 } from "../../skills/workshop/workspace-skill-read.js";
 import { authorizeSessionSharingTarget, resolveSessionSharingTarget } from "../session-sharing.js";
+import { skillsCuratorHandlers } from "./skills-curator.js";
 import { skillsLibraryHandlers } from "./skills-library.js";
 import { skillProposalHistoryHandlers } from "./skills-proposal-history.js";
 import { skillsUploadHandlers } from "./skills-upload.js";
@@ -92,7 +90,7 @@ import {
   SKILL_PROPOSAL_RESPONSE_HANDLED,
   type ResolvedSkillsWorkspace,
 } from "./skills-workspace-handler.js";
-import type { GatewayRequestHandlerOptions, GatewayRequestHandlers, RespondFn } from "./types.js";
+import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
 type ClawHubInstallResult = Awaited<ReturnType<typeof installSkillFromClawHub>>;
@@ -167,20 +165,6 @@ function buildRemoteAwareWorkspaceSkillStatus(
   });
 }
 
-function respondSkillWorkshopError(respond: RespondFn, err: unknown) {
-  respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, formatErrorMessage(err)));
-}
-
-function respondRetiredSkillCuratorAction(
-  { params, respond }: GatewayRequestHandlerOptions,
-  method: `skills.curator.${"pin" | "restore" | "unpin"}`,
-): void {
-  if (!assertValidParams(params, validateSkillsCuratorActionParams, method, respond)) {
-    return;
-  }
-  respondSkillWorkshopError(respond, new Error(SKILL_LIFECYCLE_CURATION_RETIRED_MESSAGE));
-}
-
 function collectClawHubTrustWarnings(results: Array<{ warning?: string }>): string[] {
   return results
     .map((result) => normalizeOptionalString(result.warning))
@@ -243,6 +227,7 @@ async function forwardSkillWorkshopRevisionToChatSend(
 
 /** Gateway request handlers for skill status, catalogs, installs, updates, and workshop proposals. */
 export const skillsHandlers: GatewayRequestHandlers = {
+  ...skillsCuratorHandlers,
   ...skillsLibraryHandlers,
   ...skillsUploadHandlers,
   ...skillProposalHistoryHandlers,
@@ -385,6 +370,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
         query: (params as { query?: string }).query,
         limit: (params as { limit?: number }).limit,
       });
+      registerClawHubCatalogIconUrls(results.map((result) => result.icon ?? undefined));
       respond(true, { results }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(err)));
@@ -416,30 +402,15 @@ export const skillsHandlers: GatewayRequestHandlers = {
         slug: requested.slug,
         ...(requested.ownerHandle ? { ownerHandle: requested.ownerHandle } : {}),
       });
+      registerClawHubCatalogIconUrls([
+        detail.skill?.icon ?? undefined,
+        detail.owner?.image ?? undefined,
+      ]);
       respond(true, detail, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatErrorMessage(err)));
     }
   },
-  "skills.curator.status": async ({ params, respond }) => {
-    if (
-      !assertValidParams(
-        params,
-        validateSkillsCuratorStatusParams,
-        "skills.curator.status",
-        respond,
-      )
-    ) {
-      return;
-    }
-    respond(true, getSkillCuratorStatus(), undefined);
-  },
-  "skills.curator.pin": (options) =>
-    respondRetiredSkillCuratorAction(options, "skills.curator.pin"),
-  "skills.curator.unpin": (options) =>
-    respondRetiredSkillCuratorAction(options, "skills.curator.unpin"),
-  "skills.curator.restore": (options) =>
-    respondRetiredSkillCuratorAction(options, "skills.curator.restore"),
   "skills.proposals.list": async ({ params, respond, context }) => {
     await runSkillsProposalWorkspaceHandler({
       method: "skills.proposals.list",
@@ -708,6 +679,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
     if (!assertValidParams(params, validateSkillsInstallParams, "skills.install", respond)) {
       return;
     }
+    const p: SkillsInstallParams = params;
     const resolved = resolveSkillsAgentWorkspace(params, context);
     if (!resolved.ok) {
       respond(false, undefined, resolved.error);
@@ -717,13 +689,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
     const workspaceDirRaw = resolved.workspaceDir;
     // Skill installs are intentionally routed by source; each source owns its
     // validation, provenance checks, and result payload shape.
-    if (params && typeof params === "object" && "source" in params && params.source === "clawhub") {
-      const p = params as {
-        source: "clawhub";
-        slug: string;
-        version?: string;
-        force?: boolean;
-      };
+    if ("source" in p && p.source === "clawhub") {
       const result = await installClawHubSkillDeduped({
         workspaceDir: workspaceDirRaw,
         slug: p.slug,
@@ -758,15 +724,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    if (params && typeof params === "object" && "source" in params && params.source === "upload") {
-      const p = params as {
-        source: "upload";
-        uploadId: string;
-        slug: string;
-        force?: boolean;
-        sha256?: string;
-        timeoutMs?: number;
-      };
+    if ("source" in p && p.source === "upload") {
       const result = await installUploadedSkillArchive({
         uploadId: p.uploadId,
         slug: p.slug,
@@ -795,11 +753,6 @@ export const skillsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const p = params as {
-      name: string;
-      installId: string;
-      timeoutMs?: number;
-    };
     const result = await installSkill({
       workspaceDir: workspaceDirRaw,
       agentId: resolved.agentId,
@@ -818,13 +771,8 @@ export const skillsHandlers: GatewayRequestHandlers = {
     if (!assertValidParams(params, validateSkillsUpdateParams, "skills.update", respond)) {
       return;
     }
-    if (params && typeof params === "object" && "source" in params && params.source === "clawhub") {
-      const p = params as {
-        source: "clawhub";
-        slug?: string;
-        all?: boolean;
-        force?: boolean;
-      };
+    const p: SkillsUpdateParams = params;
+    if ("source" in p) {
       if (!p.slug && !p.all) {
         respond(
           false,
@@ -879,12 +827,6 @@ export const skillsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const p = params as {
-      skillKey: string;
-      enabled?: boolean;
-      apiKey?: string;
-      env?: Record<string, string>;
-    };
     const updated = await updateSkillConfigEntry(p);
     respond(
       true,

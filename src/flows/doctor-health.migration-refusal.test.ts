@@ -1,19 +1,21 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as doctorMaintenance from "../commands/doctor-maintenance.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
-import { SQLITE_READONLY_CHILD_ARG } from "../infra/sqlite-readonly-worker.js";
+import { SQLITE_READONLY_CHILD_ARG } from "../infra/runtime-process-entrypoints.js";
 import * as coordinators from "../infra/state-database-coordinator.js";
 import { DoctorStateMigrationRefusalError } from "../infra/state-migrations.messages.js";
+import { buildUpdateDoctorEnv } from "../infra/update-runner-doctor.js";
+import { readConfiguredParsedLogTail } from "../logging/log-tail.js";
+import { flushLogger, resetLogger, setLoggerOverride } from "../logging/logger.js";
 import {
   assertNoOpenClawAgentDatabaseLeasesReadOnly,
   claimOpenClawAgentDatabaseLease,
 } from "../state/openclaw-agent-db-lease.js";
 import { recordOpenClawDatabaseQuarantine } from "../state/openclaw-quarantine-store.js";
-import {
-  closeOpenClawStateDatabaseByPath,
-  openOpenClawStateDatabase,
-} from "../state/openclaw-state-db.js";
+import { closeOpenClawStateDatabaseByPath } from "../state/openclaw-state-db-cache.js";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { runDoctorHealthFlow } from "./doctor-health.js";
 import { mocks } from "./doctor-health.test-support.js";
@@ -22,16 +24,23 @@ const snapshotProcesses = vi.hoisted(() => ({
   execFile: vi.fn<typeof import("node:child_process").execFile>(),
 }));
 vi.mock("node:child_process", async (importOriginal) => {
+  const { promisify } = await import("node:util");
   const actual = await importOriginal<typeof import("node:child_process")>();
   snapshotProcesses.execFile.mockImplementation(actual.execFile);
-  Object.defineProperties(
+  Object.defineProperty(
     snapshotProcesses.execFile,
-    Object.getOwnPropertyDescriptors(actual.execFile),
+    promisify.custom,
+    Object.getOwnPropertyDescriptor(actual.execFile, promisify.custom)!,
   );
   return { ...actual, execFile: snapshotProcesses.execFile };
 });
 
-const maintenance = vi.hoisted(() => ({ finish: vi.fn(), release: vi.fn() }));
+const maintenance = vi.hoisted(() => ({
+  run: <T>(operation: () => T): T => operation(),
+  finish: vi.fn(),
+  releaseState: vi.fn(),
+  release: vi.fn(),
+}));
 afterEach(() => vi.restoreAllMocks());
 
 describe("Doctor refused-migration maintenance outcome", () => {
@@ -40,6 +49,79 @@ describe("Doctor refused-migration maintenance outcome", () => {
     vi.spyOn(doctorMaintenance, "beginDoctorMaintenance").mockResolvedValue(maintenance);
     mocks.config.mockReturnValue({});
     mocks.packageRoot.mockReturnValue(undefined);
+  });
+
+  it("retains migration recovery and explains why source rollback cannot undo repaired state", async () => {
+    await withOpenClawTestState(
+      {
+        scenario: "minimal",
+        env: buildUpdateDoctorEnv({
+          allowGatewayServiceRepair: true,
+          allowGatewayActivation: false,
+        }),
+      },
+      async (state) => {
+        const root = state.path("checkout");
+        fs.mkdirSync(root);
+        execFileSync("git", ["init", root], { stdio: "ignore" });
+        mocks.packageRoot.mockReturnValue(root);
+        const failure = new DoctorStateMigrationRefusalError([
+          {
+            id: "agent-ownership",
+            phase: "shared",
+            source: [],
+            target: [],
+            requiredness: "required",
+            reversibility: "not-applicable",
+            outcome: "refused",
+            changes: [],
+            warnings: ["Resolve the reported ownership mismatch before retrying."],
+            refusal: {
+              code: "agent-database-ownership-mismatch",
+              message: "Resolve the reported ownership mismatch before retrying.",
+            },
+          },
+        ]);
+        const originalMessage = failure.message;
+        mocks.runContributions.mockImplementationOnce(async () => {
+          await state.writeConfig({ gateway: { mode: "local" } });
+          throw failure;
+        });
+        setLoggerOverride({
+          level: "warn",
+          consoleLevel: "silent",
+          file: state.path("warnings.log"),
+        });
+        try {
+          await expect(
+            runDoctorHealthFlow(
+              { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
+              { repair: true, nonInteractive: true },
+            ),
+          ).rejects.toBe(failure);
+          expect(failure.message.startsWith(originalMessage)).toBe(true);
+          expect(failure.message).toContain(
+            "Checking out the previous source is not enough: state repairs have already run.",
+          );
+          expect(failure.message).toContain("Follow the migration recovery instructions above");
+          expect(failure.message).not.toContain("git -C");
+          expect(failure.message).not.toContain("pnpm install");
+          expect(failure.message).not.toContain("openclaw gateway start");
+          expect(JSON.parse(fs.readFileSync(state.configPath, "utf8"))).toEqual({
+            gateway: { mode: "local" },
+          });
+          expect(maintenance.release).toHaveBeenCalledOnce();
+          expect(maintenance.finish).not.toHaveBeenCalled();
+          await flushLogger();
+          const tail = await readConfiguredParsedLogTail();
+          expect(tail.lines.map((line) => line.message).join("\n")).toContain(failure.message);
+        } finally {
+          await flushLogger();
+          setLoggerOverride(null);
+          resetLogger();
+        }
+      },
+    );
   });
 
   it.each([true, false])(
@@ -91,7 +173,7 @@ describe("Doctor maintenance admission", () => {
           vi.spyOn(
             coordinators,
             owner === "gateway"
-              ? "acquireGatewayLifecycleCoordinator"
+              ? "acquireGatewayMaintenanceCoordinator"
               : "acquireStateDatabaseCoordinator",
           ).mockImplementation(() => {
             throw new coordinators.StateDatabaseCoordinatorContentionError(
@@ -124,6 +206,52 @@ describe("Doctor maintenance admission", () => {
 });
 
 describe("Doctor agent lease admission", () => {
+  it("reserves dangling Workshop index admission for Doctor without mutating state", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      const opened = openOpenClawStateDatabase({ env: state.env });
+      const pathname = opened.path;
+      closeOpenClawStateDatabaseByPath(pathname);
+      const db = openNodeSqliteDatabase(pathname);
+      try {
+        db.exec(
+          "CREATE INDEX idx_skill_workshop_collection_reviews_workspace_time ON skill_workshop_collection_reviews(review_id, create_time DESC);",
+        );
+        db.enableDefensive?.(false);
+        db.exec("PRAGMA writable_schema = ON;");
+        db.prepare(
+          `UPDATE sqlite_schema
+              SET sql = 'CREATE INDEX idx_skill_workshop_collection_reviews_workspace_time
+                           ON skill_workshop_collection_reviews(workspace_dir, create_time DESC, review_id DESC)'
+            WHERE type = 'index'
+              AND name = 'idx_skill_workshop_collection_reviews_workspace_time'`,
+        ).run();
+        const schema = db.prepare("PRAGMA schema_version").get() as { schema_version: number };
+        db.exec(
+          `PRAGMA writable_schema = OFF; PRAGMA schema_version = ${schema.schema_version + 1};`,
+        );
+      } finally {
+        db.close();
+      }
+      const before = fs.readFileSync(pathname);
+
+      expect(() => assertNoOpenClawAgentDatabaseLeasesReadOnly({ env: state.env })).toThrow(
+        /malformed database schema/,
+      );
+      expect(fs.readFileSync(pathname)).toEqual(before);
+      const doctor = await doctorMaintenance.beginDoctorMaintenance({
+        options: { repair: true, nonInteractive: true },
+        root: null,
+        runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
+      });
+      try {
+        expect(doctor).toBeDefined();
+        expect(fs.readFileSync(pathname)).toEqual(before);
+      } finally {
+        await doctor?.release();
+      }
+    });
+  });
+
   it("admits a restored primary database without opening or clearing its quarantine store", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       const pathname = state.statePath("state/openclaw.sqlite");

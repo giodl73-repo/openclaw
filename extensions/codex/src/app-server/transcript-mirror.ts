@@ -16,6 +16,7 @@ import {
   type SessionTranscriptWriteLockParams,
 } from "openclaw/plugin-sdk/session-transcript-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { readCodexAsyncQuestions } from "./async-questions.js";
 import type { AttemptSettlementWarning, EmbeddedRunAttemptResult } from "./attempt-terminal.js";
 import type { CodexAsyncDeliverySettlement } from "./event-projector-options.js";
 import type { CodexThread } from "./protocol.js";
@@ -261,6 +262,7 @@ export async function mirrorPromptAtTurnStartBestEffort(params: {
     const mirrorPromise = (async () => {
       const userPromptMessage = projectAgentHarnessTranscriptMessageForDisplay({
         hidden: params.params.trigger === "memory",
+        inputProvenance: params.params.inputProvenance,
         message: attachUpstreamUserText(
           attachCodexMirrorIdentity(
             await buildResolvedCodexUserPromptMessage(params.params),
@@ -375,6 +377,7 @@ async function mirror(params: {
     async (transcript) => {
       assertWritable();
       const nextAppendedUpdates: Array<{
+        lifecycleRevision?: string;
         messageId: string;
         message: AgentMessage;
         messageSeq?: number;
@@ -449,6 +452,10 @@ async function mirror(params: {
             preparedUserMessage["__openclaw"].humanMentions,
           );
         }
+        const asyncSourceText =
+          message.role === "assistant" && message.openclawAsyncDelivery
+            ? readMirroredAssistantText(message)
+            : undefined;
         const nextMessage = runAgentHarnessBeforeMessageWriteHook({
           message: transcriptMessage,
           agentId: params.agentId,
@@ -496,8 +503,17 @@ async function mirror(params: {
         if (message.role === "assistant" && message.openclawAsyncDelivery) {
           // Async delivery ownership is provider-authored. Whole-message hooks may
           // rewrite content, but must not turn the durable row into a terminal answer.
+          // Controls must not re-expose source text that a hook rewrote or redacted.
+          const questions =
+            isMirroredAgentMessage(messageToAppend) &&
+            readMirroredAssistantText(messageToAppend) === asyncSourceText
+              ? readCodexAsyncQuestions(messageToAppend.openclawAsyncDelivery?.questions)
+              : undefined;
           messageToAppend = Object.assign(messageToAppend, {
-            openclawAsyncDelivery: { itemId: message.openclawAsyncDelivery.itemId },
+            openclawAsyncDelivery: {
+              itemId: message.openclawAsyncDelivery.itemId,
+              ...(questions ? { questions } : {}),
+            },
           });
         }
         // Whole-message hooks can replace metadata, but cannot erase source-owned taint.
@@ -507,7 +523,11 @@ async function mirror(params: {
           message: messageToAppend,
         });
         assertWritable();
-        const { messageSeq, result: appended } = await transcript.appendMessageWithMessageSequence({
+        const {
+          lifecycleRevision,
+          messageSeq,
+          result: appended,
+        } = await transcript.appendMessageWithMessageSequence({
           message: messageToAppend,
           ...(params.assertCurrent || params.assertWriteCurrent
             ? {
@@ -548,6 +568,7 @@ async function mirror(params: {
         }
         if (appended.appended) {
           nextAppendedUpdates.push({
+            lifecycleRevision,
             messageId,
             message: appendedMessage,
             ...(messageSeq !== undefined ? { messageSeq } : {}),
@@ -585,6 +606,7 @@ async function mirror(params: {
       await publishSessionTranscriptUpdateByIdentity({
         ...transcriptTarget,
         update: {
+          lifecycleRevision: update.lifecycleRevision,
           ...(params.agentId ? { agentId: params.agentId } : {}),
           message: update.message,
           messageId: update.messageId,

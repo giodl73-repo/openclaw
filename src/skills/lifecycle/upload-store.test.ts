@@ -6,6 +6,7 @@ import path from "node:path";
 import { toErrorObject as toLintErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { trackSqliteStatementExecutions } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import { createTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -139,6 +140,7 @@ async function expectMissingPath(targetPath: string): Promise<void> {
 
 describe("skill upload store", () => {
   let activeUploadLimitError: unknown;
+  let capacityReads: ReturnType<typeof trackSqliteStatementExecutions<"capacity">>;
   let activeLimitRoot: string | undefined;
 
   beforeAll(async () => {
@@ -147,13 +149,22 @@ describe("skill upload store", () => {
       path: path.join(activeLimitRoot, "openclaw.sqlite"),
       tempRootDir: activeLimitRoot,
     });
-    for (let i = 0; i < ACTIVE_UPLOAD_LIMIT; i += 1) {
-      await store.begin({ kind: "skill-archive", slug: `active-${i}`, sizeBytes: 1 });
-    }
+    capacityReads = trackSqliteStatementExecutions(
+      stateDatabase(path.join(activeLimitRoot, "openclaw.sqlite")),
+      ["capacity"],
+      (sql) => (/from "skill_uploads" where "expires_at" >/u.test(sql) ? "capacity" : null),
+    );
     try {
-      await store.begin({ kind: "skill-archive", slug: "too-many", sizeBytes: 1 });
-    } catch (err) {
-      activeUploadLimitError = err;
+      for (let i = 0; i < ACTIVE_UPLOAD_LIMIT; i += 1) {
+        await store.begin({ kind: "skill-archive", slug: `active-${i}`, sizeBytes: 1 });
+      }
+      try {
+        await store.begin({ kind: "skill-archive", slug: "too-many", sizeBytes: 1 });
+      } catch (err) {
+        activeUploadLimitError = err;
+      }
+    } finally {
+      capacityReads.restore();
     }
   });
 
@@ -339,23 +350,38 @@ describe("skill upload store", () => {
     const archiveReads: Array<{ bytes: number; inTransaction: boolean }> = [];
     const nativeBlobs = new WeakSet<Uint8Array>();
     const bufferFrom = vi.spyOn(Buffer, "from");
+    const observeRow = (row: Record<string, unknown>) => {
+      for (const bytes of [row.chunk_blob, row.archive_blob]) {
+        if (bytes instanceof Uint8Array) {
+          nativeBlobs.add(bytes);
+        }
+      }
+      if (row.archive_blob instanceof Uint8Array) {
+        archiveReads.push({
+          bytes: row.archive_blob.byteLength,
+          inTransaction: db.isTransaction,
+        });
+      }
+    };
     const nativePrepare = db.prepare.bind(db);
     vi.spyOn(db, "prepare").mockImplementation((sql) => {
       const statement = nativePrepare(sql);
+      const nativeGet = statement.get.bind(statement);
+      vi.spyOn(statement, "get").mockImplementation(
+        new Proxy(nativeGet, {
+          apply(get, _receiver, bindings) {
+            const row = get(...bindings);
+            if (row) {
+              observeRow(row);
+            }
+            return row;
+          },
+        }),
+      );
       const iterate = statement.iterate.bind(statement);
       vi.spyOn(statement, "iterate").mockImplementation(function* (...bindings) {
         for (const row of iterate(...bindings)) {
-          for (const bytes of [row.chunk_blob, row.archive_blob]) {
-            if (bytes instanceof Uint8Array) {
-              nativeBlobs.add(bytes);
-            }
-          }
-          if (row.archive_blob instanceof Uint8Array) {
-            archiveReads.push({
-              bytes: row.archive_blob.byteLength,
-              inTransaction: db.isTransaction,
-            });
-          }
+          observeRow(row);
           yield row;
         }
         return undefined;
@@ -590,6 +616,8 @@ describe("skill upload store", () => {
       Promise.reject(toLintErrorObject(activeUploadLimitError, "Non-Error rejection")),
       "too many active skill uploads",
     );
+    expect(capacityReads.counts.capacity).toBeGreaterThan(0);
+    expect(capacityReads.rowCounts.capacity).toBeLessThanOrEqual(1);
   });
 
   it("rejects new uploads when the clock cannot produce a valid expiry", async () => {

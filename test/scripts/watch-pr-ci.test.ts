@@ -25,6 +25,7 @@ function runWatcher(
   headSha = sha,
   options: string[] = [],
   clock: "poll" | "wall" = "poll",
+  envOverrides: NodeJS.ProcessEnv = {},
 ) {
   return withTempDir("openclaw-watch-pr-ci-", async (binDir) => {
     const ghPath = join(binDir, "gh");
@@ -72,6 +73,7 @@ if (process.argv[1] === ${JSON.stringify(fileURLToPath(new URL("../../scripts/wa
             encoding: "utf8",
             env: {
               ...process.env,
+              ...envOverrides,
               NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(clockPath).href}`,
               PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
             },
@@ -254,7 +256,7 @@ describe("watch-pr-ci", () => {
   });
 
   it.skipIf(process.platform === "win32")(
-    "attaches to real CI when a newer draft workflow was skipped",
+    "revalidates run status when a newer draft workflow was skipped",
     async () => {
       const result = await runWatcher(
         `#!/usr/bin/env bash
@@ -267,7 +269,9 @@ case "$1 $2" in
     esac
     ;;
   "run view")
-    if [ "$3" = "202" ]; then
+    if [ "\${OCTOPOOL_FRESH:-}" != "1" ]; then
+      printf '{"status":"queued","conclusion":null}\\n'
+    elif [ "$3" = "202" ]; then
       printf '{"status":"completed","conclusion":"skipped"}\\n'
     else
       printf '{"status":"completed","conclusion":"success"}\\n'
@@ -278,6 +282,8 @@ esac
 `,
         sha,
         ["--completion", "ci-run"],
+        "poll",
+        { OCTOPOOL_FRESH: "0" },
       );
 
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -285,6 +291,122 @@ esac
       expect(result.stdout).toContain("GREEN");
     },
   );
+
+  it.skipIf(process.platform === "win32").each([
+    {
+      label: "active jobs and a failure hidden by queued run status",
+      jobs: [
+        { name: "tests", status: "in_progress", conclusion: "" },
+        { name: "lint", status: "queued", conclusion: null },
+        { name: "check-dependencies\u001b[31m\n", status: "completed", conclusion: "failure" },
+      ],
+      progress:
+        'jobs=3 running=1 queued=1 completed=1 other=0 failing=1 failed=["check-dependencies?"]',
+    },
+    { label: "missing job details", jobs: undefined, progress: "jobs=unknown" },
+    { label: "malformed job details", jobs: [{ name: "incomplete" }], progress: "jobs=unknown" },
+  ])("reports $label without changing native completion", async ({ jobs, progress }) => {
+    await withTempDir("openclaw-watch-pr-ci-progress-", async (root) => {
+      const callsPath = join(root, "calls.jsonl");
+      writeFileSync(callsPath, "");
+      const result = await runWatcher(
+        `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args) + "\\n");
+let value;
+if (args[0] === "pr" && args[1] === "view") {
+  value = { state: "OPEN", mergeable: true, headRefOid: ${JSON.stringify(sha)} };
+} else if (args.includes("repos/openclaw/openclaw/actions/workflows/ci.yml/runs")) {
+  value = { workflow_runs: [{ id: 201 }] };
+} else if (args[0] === "run" && args[1] === "view") {
+  value = { status: "queued", conclusion: null };
+  if (args[args.indexOf("--json") + 1].includes("jobs")) {
+    value = ${JSON.stringify({ status: "queued", conclusion: null, jobs })};
+  }
+} else {
+  throw new Error("unexpected gh invocation: " + JSON.stringify(args));
+}
+console.log(JSON.stringify(value));
+`,
+        sha,
+        ["--completion", "ci-run"],
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(16);
+      expect(result.stdout).toContain(`STATUS run=queued conclusion=pending ${progress}`);
+      expect(result.stdout).toContain("TIMEOUT completion=ci-run");
+      expect(result.stdout).not.toContain("\nGREEN");
+      expect(result.stdout).not.toContain("\nFAILING");
+      const calls = readFileSync(callsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      const runReads = calls.filter((args) => args[0] === "run" && args[1] === "view");
+      expect(runReads.map((args) => args[args.indexOf("--json") + 1])).toEqual([
+        "status,conclusion",
+        "status,conclusion,jobs",
+      ]);
+    });
+  });
+
+  describe.skipIf(process.platform === "win32")("proxy failures", () => {
+    it.each([
+      ...[
+        "407 Proxy Authentication Required",
+        'Post "https://api.github.com/graphql": Proxy Authentication Required',
+      ].flatMap((error) => [
+        { phase: "attach", completion: "rollup", status: 407, exitCode: 2, error },
+        { phase: "watch", completion: "rollup", status: 407, exitCode: 2, error },
+        { phase: "watch", completion: "ci-run", status: 407, exitCode: 2, error },
+      ]),
+      ...[
+        { phase: "attach", completion: "rollup", exitCode: 13 },
+        { phase: "watch", completion: "rollup", exitCode: 16 },
+        { phase: "watch", completion: "ci-run", exitCode: 16 },
+      ].map((scenario) => Object.assign(scenario, { status: 502, error: "502 Bad Gateway" })),
+    ])(
+      "handles $error during $phase ($completion)",
+      async ({ phase, completion, status, exitCode, error }) => {
+        const result = await runWatcher(
+          `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const marker = path.join(__dirname, "attached");
+const phase = fs.existsSync(marker) ? "watch" : "attach";
+if (phase === ${JSON.stringify(phase)}) {
+  console.error(${JSON.stringify(error)});
+  process.exit(1);
+}
+const args = process.argv.slice(2);
+let value;
+if (args[0] === "pr" && args[1] === "view") value = { state: "OPEN", mergeable: true, headRefOid: "${sha}" };
+else if (args.includes("repos/openclaw/openclaw/actions/workflows/ci.yml/runs")) value = { workflow_runs: [{ id: 201 }] };
+else if (args[0] === "run" && args[1] === "view") {
+  fs.writeFileSync(marker, "");
+  value = { status: "in_progress", conclusion: null };
+}
+else throw new Error("unexpected gh invocation: " + JSON.stringify(args));
+console.log(JSON.stringify(value));
+`,
+          sha,
+          ["--completion", completion],
+        );
+
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(exitCode);
+        if (status === 407) {
+          expect(result.stderr).toContain(`PROXY-AUTH-FAILED phase=${phase}`);
+          expect(result.stderr).toContain("Restart the watcher in an active run");
+          expect(result.stdout).not.toContain("RETRY");
+          expect(result.stdout).not.toContain("TIMEOUT");
+          expect(result.stdout).not.toContain("NO-RUN-ATTACHED");
+        } else {
+          expect(result.stdout).toContain(`RETRY phase=${phase}`);
+          expect(result.stdout).toContain(error);
+          expect(result.stderr).not.toContain("PROXY-AUTH-FAILED");
+        }
+      },
+    );
+  });
 
   describe.skipIf(process.platform === "win32")("PR run replacement ownership", () => {
     const association = (number = 42, baseRef = "main") => ({
@@ -634,6 +756,14 @@ esac
         exitCode: 0,
         output: "GREEN",
       },
+      {
+        label: "pending ci-run completion policy",
+        status: "in_progress",
+        conclusion: null,
+        completion: "ci-run",
+        exitCode: 16,
+        output: "TIMEOUT completion=ci-run",
+      },
     ])(
       "preserves replacement ownership for $label",
       async ({
@@ -861,7 +991,9 @@ console.log(JSON.stringify(value));
         }
         const result = await replayPlaceholder(fixture, { watchTimeout: 5 });
         expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-        expect(result.stdout).toContain(`pending=0 superseded=${observed}`);
+        expect(result.stdout).toContain(
+          `STATUS rollup=green github_rollup=${state} pending=0 superseded=${observed}`,
+        );
         expect(result.stdout).toContain("GREEN");
         // Cost and ordering matter: direct proof precedes run revalidation and
         // a fresh PR snapshot, followed by the ordinary final CI-run check.
@@ -1072,6 +1204,7 @@ console.log(JSON.stringify(value));
         watchTimeout: 5,
       });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(16);
+      expect(result.stdout).toContain("STATUS rollup=green github_rollup=FAILURE pending=0");
       expect(result.stdout).not.toContain("GREEN");
     });
 
@@ -1268,8 +1401,12 @@ console.log(JSON.stringify(value));
       const result = await replayPlaceholder(fixture, { watchTimeout: 5 });
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(exitCode);
       expect(result.stdout).not.toContain("GREEN");
+      expect(result.stdout).toContain(
+        `STATUS rollup=${exitCode === 16 ? "pending" : "failing"} github_rollup=FAILURE`,
+      );
       if (exitCode === 16) {
         expect(result.stdout).toContain("superseded=1");
+        expect(result.stdout).toContain("TIMEOUT github_rollup=FAILURE");
       }
     });
 

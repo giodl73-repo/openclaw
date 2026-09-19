@@ -39,6 +39,8 @@ export type OpenClawPluginNodeHostCommandContext = {
   /** Protect one exact node-owned placement workspace for this invocation's lifetime. */
   acquireManagedWorkspace?: (request: OpenClawPluginNodeWorkspace) => {
     workspaceDir: string;
+    /** Stable HOME owned and validated by this exact prepared workspace binding. */
+    homeDir?: string;
     release: () => void;
   };
 };
@@ -58,6 +60,8 @@ type OpenClawPluginNodeHostCommandBase = {
   ) => (() => void) | void;
   /** Release command-owned state when the active Gateway connection closes. */
   onDisconnect?: () => Promise<void> | void;
+  /** Return false only when retained work and cleanup are idle; an absent hook defers auto-update. */
+  hasActiveWork?: () => boolean;
   /** Optional Computer Use declaration published with this command's node manifest. */
   computerUse?: (context: OpenClawPluginNodeHostCommandAvailabilityContext) => unknown;
   agentTool?: {

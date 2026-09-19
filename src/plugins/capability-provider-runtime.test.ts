@@ -101,7 +101,8 @@ vi.mock("./bundled-capability-runtime.js", () => ({
   loadBundledCapabilityRuntimeRegistry: mocks.loadBundledCapabilityRuntimeRegistry,
 }));
 
-vi.mock("./manifest-registry-installed.js", () => ({
+vi.mock("./manifest-registry-installed.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./manifest-registry-installed.js")>()),
   loadPluginManifestRegistryForInstalledIndex: mocks.loadPluginManifestRegistryCore,
   resolveInstalledManifestRegistryIndexFingerprint:
     mocks.resolveInstalledManifestRegistryIndexFingerprint,
@@ -159,6 +160,7 @@ vi.mock("./bundled-compat.js", () => ({
 let resolvePluginCapabilityProviders: typeof import("./capability-provider-runtime.js").resolvePluginCapabilityProviders;
 let resolvePluginCapabilityProvider: typeof import("./capability-provider-runtime.js").resolvePluginCapabilityProvider;
 let prepareMediaCapabilityProviders: typeof import("./capability-provider-runtime.js").prepareMediaCapabilityProviders;
+let makeEmptyPluginMetadataOwners: typeof import("./current-plugin-metadata.test-support.js").makeEmptyPluginMetadataOwners;
 let setCurrentPluginMetadataSnapshot: typeof import("./current-plugin-metadata.test-support.js").setCurrentPluginMetadataSnapshot;
 let clearPluginMetadataLifecycleCaches: typeof import("./plugin-metadata-lifecycle.js").clearPluginMetadataLifecycleCaches;
 
@@ -392,7 +394,7 @@ describe("resolvePluginCapabilityProviders", () => {
       resolvePluginCapabilityProvider,
       resolvePluginCapabilityProviders,
     } = await import("./capability-provider-runtime.js"));
-    ({ setCurrentPluginMetadataSnapshot } =
+    ({ makeEmptyPluginMetadataOwners, setCurrentPluginMetadataSnapshot } =
       await import("./current-plugin-metadata.test-support.js"));
     ({ clearPluginMetadataLifecycleCaches } = await import("./plugin-metadata-lifecycle.js"));
   });
@@ -464,17 +466,7 @@ describe("resolvePluginCapabilityProviders", () => {
       diagnostics: [],
       byPluginId: new Map(),
       normalizePluginId: (id: string) => id,
-      owners: {
-        channels: new Map(),
-        channelConfigs: new Map(),
-        providers: new Map(),
-        modelCatalogProviders: new Map(),
-        cliBackends: new Map(),
-        setupProviders: new Map(),
-        commandAliases: new Map(),
-        contracts: new Map(),
-        modelIdNormalizationPolicies: new Map(),
-      },
+      owners: makeEmptyPluginMetadataOwners(),
       metrics: {
         registrySnapshotMs: 0,
         manifestRegistryMs: 0,
@@ -855,17 +847,7 @@ describe("resolvePluginCapabilityProviders", () => {
       diagnostics: [],
       byPluginId: new Map(),
       normalizePluginId: (id: string) => id,
-      owners: {
-        channels: new Map(),
-        channelConfigs: new Map(),
-        providers: new Map(),
-        modelCatalogProviders: new Map(),
-        cliBackends: new Map(),
-        setupProviders: new Map(),
-        commandAliases: new Map(),
-        contracts: new Map(),
-        modelIdNormalizationPolicies: new Map(),
-      },
+      owners: makeEmptyPluginMetadataOwners(),
       metrics: {
         registrySnapshotMs: 0,
         manifestRegistryMs: 0,

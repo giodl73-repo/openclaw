@@ -48,6 +48,13 @@ Node harnesses:
   `node scripts/run-vitest.mjs <path-or-filter>`.
 - Changed typecheck/lint/guard proof: `node scripts/check-changed.mjs`.
 
+For Control UI route tests, run `node scripts/run-tsgo-core-test-shards.mjs ui`
+to check fixture types; `node scripts/run-tsgo.mjs -p tsconfig.ui.json` checks
+production UI code and excludes tests. Type route fixtures against the loader's
+required capabilities instead of asserting a partial fixture as the full
+application context. Keep real selection capabilities in lifecycle tests so
+agent scope changes and subscription cleanup follow the application behavior.
+
 For remote-environment proof, invoke `node scripts/crabbox-wrapper.mjs`
 directly. Avoid local `pnpm crabbox:run` in linked worktrees because pnpm may
 reconcile dependencies before the remote wrapper starts.
@@ -56,6 +63,9 @@ reconcile dependencies before the remote wrapper starts.
 
 Run the test toolchain on Node 24.16+ or Node 26.1+, matching the packaged
 runtime floor. Older Node bindings can truncate SQLite TEXT values at embedded NUL characters.
+
+The script erasability gate uses Node's strip-only parser, including when package
+checks run under Bun. It selects an installed Node runtime and skips Bun's `node` shim.
 
 The test toolchain pins stable Vitest `5.0.0`, including its browser and coverage
 packages. Use `describe(name, { concurrent: false }, callback)` for ordered
@@ -130,16 +140,28 @@ Isolated Doctor config scripts also share the prepared config-flow, health-write
 and install-index modules. Each case still starts a fresh process with separate
 state; standalone and watch runs resolve the original TypeScript entrypoints.
 
-The prepared model-catalog worker also uses this compiled generation. Separate
-prepared model generations still own separate worker threads, and their choice
-of source or built plugin artifacts stays independent of worker compilation.
+The model-catalog and session model-context workers also use this compiled generation.
+Model-catalog workers still belong to their prepared model generations; context reads
+retain their serial worker pool. Plugin source/built selection remains independent
+of worker compilation.
 Other worker-thread entries and arbitrary source CLI fixtures remain outside
 this declared set.
+
+The agent database module-identity test shares the compiled host and SQLite SDK
+entries while forcing a separate plugin transform of the SDK. Its standalone and
+watch runs retain a disposable build from current source because this regression
+specifically checks a packaged graph. Both modes use the same assertions and
+subprocess deadline.
 
 The session-title and child-link retention tests declare their title-reader,
 session-utils, and listing roots in this same generation. Each fresh
 heap-measurement child runs their JavaScript without spending its execution
 deadline on TypeScript imports.
+
+Native Bash output-lifecycle fixtures also prepare the real tool and executor
+roots in this generation. Each scenario still uses a fresh process and real
+shell, pipe, and spill file; its unchanged child deadline covers prepared
+JavaScript startup and output handling instead of repeated TypeScript compilation.
 
 Automatic-triage process fixtures share this generation for admission, failure handling, execution, process identity, and respawn checks. Compilation finishes before readiness deadlines begin, so children load prepared JavaScript. The detached helper uses the same sealed lease runtime as the installed package.
 
@@ -176,9 +198,12 @@ they impose resource limits. Third-party dependencies remain external except for
 the always-bundled OpenClaw packages. fs-safe remains external so its native loader
 resolves the optional platform package from fs-safe's own dependency scope, including
 nested pnpm installs. Compiled workers use that same installed package; they do not
-copy native binaries. The default stays off, and the existing `off`/`auto`/`require`
-opt-ins retain their behavior. Sealed portable worker bundles use guarded JavaScript
-only and explicitly disable native loading.
+copy native binaries. Native mode defaults to `auto` on macOS, Linux, and Windows.
+No-clobber Root moves require native support; Windows secure credential reads
+require the matching helper for descriptor-bound ACL checks. Explicit
+`off`/`auto`/`require` settings and programmatic configuration retain their
+precedence. Sealed portable worker bundles use guarded JavaScript only and
+explicitly disable native loading.
 
 Watch mode deliberately keeps the existing live-source path, including tsx for
 Node subprocesses and native TypeScript handling for Bun. It creates no prepared generation, so a new child launch

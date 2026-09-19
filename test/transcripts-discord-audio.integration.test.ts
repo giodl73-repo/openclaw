@@ -28,6 +28,8 @@ defineDiscordVoiceTests(
     transcribeAudioFileMock,
     agentCommandMock,
     controlRealtimeVoiceAgentRunMock,
+    loggerWarnMock,
+    receiveRecordedSpeech,
   }) => {
     it.each(
       ["conversation", "control"].flatMap((dispatch) =>
@@ -73,7 +75,15 @@ defineDiscordVoiceTests(
         };
         const models: MediaUnderstandingModelConfig[] =
           opening === "empty CLI"
-            ? [{ type: "cli", command: "synthetic-stt", capabilities: ["audio"] }]
+            ? [
+                {
+                  type: "cli",
+                  command: "synthetic-stt",
+                  // The process succeeds with empty stdout; its input is still valid.
+                  args: ["{{AttachmentPath}}"],
+                  capabilities: ["audio"],
+                },
+              ]
             : [
                 ...(opening === "fallback" ? [{ ...apiModel, model: "unavailable-stt" }] : []),
                 apiModel,
@@ -102,17 +112,20 @@ defineDiscordVoiceTests(
         );
         await manager.join({ guildId: "g1", channelId: "1001" });
         const entry = getSessionEntry(manager);
+        const conversations = vi.spyOn(entry.conversations, "enqueue");
         if (dispatch === "control") {
-          controlRealtimeVoiceAgentRunMock.mockResolvedValue({
-            ok: true,
-            mode: "cancel",
-            sessionKey: entry.route.sessionKey,
-            active: true,
-            aborted: true,
-            message: "Cancelled",
-            speak: false,
-            show: true,
-            suppress: true,
+          controlRealtimeVoiceAgentRunMock.mockImplementation(async () => {
+            return {
+              ok: true,
+              mode: "cancel",
+              sessionKey: entry.route.sessionKey,
+              active: true,
+              aborted: true,
+              message: "Cancelled",
+              speak: false,
+              show: true,
+              suppress: true,
+            };
           });
         }
         const stream = new PassThrough({ objectMode: true });
@@ -173,8 +186,14 @@ defineDiscordVoiceTests(
           }
           recordingStream.end();
           await receivingOutcome;
-          await recorded.promise;
+          if (oversized) {
+            // The capture scan owns a new receive operation after the rejected opening.
+            await recorded.promise;
+          }
           await entry.processingQueue;
+          // Join owned work even when transcription fails and produces no sink/dispatch call.
+          await Promise.all(conversations.mock.results.map((result) => result.value));
+          expect(loggerWarnMock).not.toHaveBeenCalledWith(expect.stringContaining("cli-missing-"));
           expect(wavSizes).toEqual(oversized ? [192_044] : [192_044, 192_044]);
           expect(results[0]).toMatchObject({
             text: oversized ? suffix : opening === "fallback" ? prefix : undefined,
@@ -202,6 +221,7 @@ defineDiscordVoiceTests(
             expect(controlRealtimeVoiceAgentRunMock).not.toHaveBeenCalled();
           } else if (dispatch === "control") {
             expect(controlRealtimeVoiceAgentRunMock).toHaveBeenCalledExactlyOnceWith({
+              getToolAuthorityOverlay: expect.any(Function),
               sessionKey: entry.route.sessionKey,
               text: completeText,
             });
@@ -218,9 +238,49 @@ defineDiscordVoiceTests(
           recordingStream.end();
           await receivingOutcome;
           await entry.processingQueue;
+          conversations.mockRestore();
           await manager.destroy();
         }
       },
     );
+
+    it.each([
+      { command: undefined, args: ["{{AttachmentPath}}"], reason: "cli-missing-command" },
+      { command: "synthetic-stt", args: undefined, reason: "cli-missing-attachment-arg" },
+    ])("finishes voice capture with a warning for $reason", async ({ command, args, reason }) => {
+      cli.mockReset();
+      const manager = createManager(
+        makeVoiceConfig({}, { groupPolicy: "open", allowFrom: ["discord:u-owner"] }),
+        undefined,
+        { tools: { media: { models: [{ type: "cli", command, args, capabilities: ["audio"] }] } } },
+      );
+      await manager.join({ guildId: "g1", channelId: "1001" });
+      const sink = vi.fn();
+      expect(await startTranscripts(manager, sink)).toMatchObject({ ok: true });
+      const wavPaths: string[] = [];
+      transcribeAudioFileMock.mockImplementation(async (params) => {
+        wavPaths.push(params.filePath);
+        return await withPluginRuntimeGenerationScope(
+          {
+            metadataSnapshot: createPluginMetadataSnapshotFixture({ plugins: [] }),
+            pluginRegistry: createEmptyPluginRegistry(),
+          },
+          () => transcribeAudioFile(params),
+        );
+      });
+      // This joins receive, recording, and conversation completion, including refusal.
+      await receiveRecordedSpeech(manager);
+      expect(transcribeAudioFileMock).toHaveBeenCalledOnce();
+      expect(cli).not.toHaveBeenCalled();
+      expect(loggerWarnMock).toHaveBeenCalledWith(
+        expect.stringContaining(`discord voice: recording failed: ${reason}; Set `),
+      );
+      expect(sink).not.toHaveBeenCalled();
+      expect(agentCommandMock).not.toHaveBeenCalled();
+      expect(controlRealtimeVoiceAgentRunMock).not.toHaveBeenCalled();
+      for (const wavPath of wavPaths) {
+        await expect(fs.stat(wavPath)).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    });
   },
 );

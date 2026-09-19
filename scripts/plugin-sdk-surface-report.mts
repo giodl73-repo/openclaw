@@ -202,7 +202,11 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: restore the shipped read-only conversation-binding inspection facade.
       // +1: canonical node CLI owners for plugin-provided node commands.
       // +3: typed feature contracts, backend registration, and native Control UI hosting.
-      152,
+      // +1: public provider-owned asynchronous embedding batch contract.
+      // +1: runtime-neutral WebSocket client/server adapter for bundled and external plugins.
+      // +1: approved host-owned workspace access runtime entrypoint.
+      // +1: passive docked link-reader contracts.
+      156,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
@@ -362,8 +366,23 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // -1: add one tool policy object and retire two unused deprecated mode exports.
       // -1: one exec policy object replaces two deprecated comparator exports.
       // +1: approved bounded TAR inspection through the archive admission owner.
+      // +8: bounded group-thread coordination, mention/route facts, and participant delivery types.
       // +1: canonical runtime-context classifier for native history projection.
-      4447,
+      // +1: prepared model-specific runtime choices for channel consumers.
+      // +3: public provider-owned asynchronous embedding batch contract.
+      // +2: canonical credential-value functions through the narrow secret-input surface.
+      // +1: shared removed-model choice recovery text for channel consumers.
+      // +2: shared stored-account key selection and its plugin-owned policy type.
+      // +1: shared per-connection webhook request ordering for channel listeners.
+      // +1: approved shared widget CDN policy for core and channel presenters.
+      // +13: runtime-neutral WebSocket client/server, stream, data, and option contracts.
+      // +2: approved process-diagnostics predicate and lightweight subsystem logger.
+      // +1: approved shared native-command argument-menu applicability predicate.
+      // +4: shared activity projectors and complete-preamble admission, including the shipped barrel.
+      // -1: keep complete-preamble admission off the deprecated compatibility facade.
+      // +4: approved workspace access exports; later stack exports belong to their consumers.
+      // +6: passive link-reader descriptor, metadata, document, preview, and request types.
+      4495,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -494,8 +513,19 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // -2: retire the deprecated mode projection callables.
       // -2: exec comparators are members of the shared policy object.
       // +1: approved bounded TAR inspection through the archive admission owner.
+      // +5: group-thread coordinator, config resolution, mention facts, route exclusion, delivery session.
       // +1: canonical runtime-context classifier for native history projection.
-      2629,
+      // +1: prepared model-specific runtime choice reader.
+      // +2: canonical env-value reader and managed SecretRef marker constructor.
+      // +1: shared stored-account key selection for channel readers and writers.
+      // +1: shared per-connection webhook request ordering for channel listeners.
+      // +4: runtime-neutral WebSocket client/server and stream constructors.
+      // +2: approved process-diagnostics predicate and lightweight subsystem logger.
+      // +1: approved shared native-command argument-menu applicability predicate.
+      // +4: shared activity projectors and complete-preamble admission, including the shipped barrel.
+      // -1: keep complete-preamble admission off the deprecated compatibility facade.
+      // +3: approved workspace access callables; later stack exports belong to their consumers.
+      2652,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
@@ -523,7 +553,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // -1: infra-runtime now names its error exports explicitly.
       // -1: infra-runtime excludes the internal system-event receipt API.
       // -1: infra-runtime re-exports number coercion directly from its canonical owner.
-      50,
+      // -1: channel-message pins its published compatibility exports explicitly.
+      49,
       env,
     ),
   };

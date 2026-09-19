@@ -1,7 +1,11 @@
+import { AsyncResource } from "node:async_hooks";
+import { fork } from "node:child_process";
+import { expectDefined } from "@openclaw/normalization-core/expect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { cleanupTempDirs, makeTempDir } from "../../test/helpers/temp-dir.js";
 import * as sqlite from "../infra/node-sqlite.js";
+import { resolveRuntimeProcessEntrypointUrl } from "../infra/runtime-process-url.js";
 import * as integrityWorker from "../infra/sqlite-integrity-worker.js";
 import { readSqliteNumberPragma } from "../infra/sqlite-pragma.test-support.js";
 import {
@@ -16,12 +20,20 @@ import {
   OPENCLAW_AGENT_SCHEMA_VERSION,
   openOpenClawAgentDatabase,
   withAgentDatabaseMaintenanceLease,
+  withOpenClawAgentDatabaseAsync,
 } from "./openclaw-agent-db.js";
 import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
+  runOpenClawStateWriteTransaction,
 } from "./openclaw-state-db.js";
+import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
 import { withOpenClawStateLease, type OpenClawStateLeaseContext } from "./openclaw-state-lease.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, fork: vi.fn(actual.fork) };
+});
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -106,12 +118,63 @@ function withAbortableMaintenance<T>(
     },
     (maintenance) => {
       assertNoOpenClawAgentDatabaseLeases(maintenance, { env: f.env });
-      return runWithAgentDatabaseMaintenanceAuthority(maintenance, () => run(maintenance));
+      return runWithAgentDatabaseMaintenanceAuthority(
+        maintenance,
+        resolveOpenClawStateSqlitePath(f.env),
+        () => run(maintenance),
+      );
     },
   );
 }
 
 describe("asynchronous agent database maintenance admission", () => {
+  it("reuses one integrity process across agent maintenance while checking each file afresh", async () => {
+    const f = fixture();
+    const createTarget = (agentId: string) => {
+      const database = openOpenClawAgentDatabase({ agentId, env: f.env });
+      return { agentId, pathname: database.path };
+    };
+    const second = createTarget("second");
+    const third = createTarget("third");
+    closeOpenClawAgentDatabasesForTest();
+    vi.mocked(fork).mockClear();
+    const entry = resolveRuntimeProcessEntrypointUrl("sqliteIntegrity").href;
+    const children = () =>
+      vi.mocked(fork).mock.calls.flatMap((args, index) => {
+        if (String(args[0]) !== entry) {
+          return [];
+        }
+        const result = expectDefined(vi.mocked(fork).mock.results[index], "integrity fork result");
+        if (result.type !== "return") {
+          throw new Error("Integrity worker did not start");
+        }
+        return [result.value];
+      });
+    await withAgentDatabaseMaintenanceLease({ env: f.env }, async (maintenance) => {
+      await migrateOpenClawAgentDatabaseForMaintenance(f.options, maintenance);
+      await withAgentDatabaseMaintenanceLease({ env: f.env }, async (nested) => {
+        await migrateOpenClawAgentDatabaseForMaintenance(second, nested);
+      });
+      await migrateOpenClawAgentDatabaseForMaintenance(third, maintenance);
+      expect(children()).toHaveLength(1);
+      const child = expectDefined(children()[0], "reused integrity child");
+      expect(child.exitCode).toBeNull();
+
+      installIndexDrift(f.options.pathname, true);
+      await expect(
+        integrityWorker.assertSqliteIntegrityInWorker(f.options.pathname, 250, maintenance.signal),
+      ).rejects.toMatchObject({ name: "SqliteIntegrityError" });
+      expect(child.exitCode).toBe(0);
+      await migrateOpenClawAgentDatabaseForMaintenance(f.options, maintenance);
+      expect(readIndexState(f.options.pathname).integrity).toEqual([{ integrity_check: "ok" }]);
+      maintenance.assertOwned();
+    });
+    expect(children().every((child) => child.exitCode !== null || child.signalCode !== null)).toBe(
+      true,
+    );
+    expect(f.state.db.prepare("SELECT owner FROM state_leases").all()).toEqual([]);
+  });
+
   it("yields during real integrity admission while retaining the maintenance fence", async () => {
     const f = fixture();
     const before = readIndexState(f.options.pathname);
@@ -133,6 +196,158 @@ describe("asynchronous agent database maintenance admission", () => {
     });
     expect(readIndexState(f.options.pathname)).toEqual(before);
   });
+
+  it.each([false, true])(
+    "admits only the live mutation owner and revokes inherited callbacks (cached=%s)",
+    async (cached) => {
+      const f = fixture();
+      const before = readIndexState(f.options.pathname);
+      const ready = createDeferred();
+      const release = createDeferred();
+      const open = () => openOpenClawAgentDatabase({ agentId: "worker", env: f.env });
+      let late: (() => ReturnType<typeof open>) | undefined;
+      const running = withAgentDatabaseMaintenanceLease({ env: f.env }, async (maintenance) => {
+        const mutation = maintenance.withDatabaseFileMutation;
+        if (!mutation) {
+          throw new Error("Missing live mutation owner");
+        }
+        await mutation({
+          assertCurrent: () => maintenance.assertOwned(),
+          async mutate() {
+            late = AsyncResource.bind(open);
+            try {
+              expect(open().db.prepare("SELECT value_json FROM cache_entries").all()).toEqual(
+                before.retained,
+              );
+              if (!cached) {
+                await closeOpenClawAgentDatabasesAsync();
+              }
+              ready.resolve();
+              await release.promise;
+            } finally {
+              await closeOpenClawAgentDatabasesAsync();
+            }
+          },
+          async capture() {
+            expect(() => late?.()).toThrow(/scope is (closed|no longer current)/);
+          },
+          bind() {
+            return undefined;
+          },
+        });
+      });
+      void running.catch((error: unknown) => ready.reject(error));
+      try {
+        await ready.promise;
+        expect(open).toThrow(
+          cached
+            ? /another maintenance mutation scope/
+            : /another OpenClaw process owns state-handles/,
+        );
+      } finally {
+        release.resolve();
+        await running;
+      }
+      expect(() => late?.()).toThrow(/scope is (closed|no longer current)/);
+      expect(readIndexState(f.options.pathname)).toEqual(before);
+    },
+  );
+
+  it("refuses a foreign caller coalesced onto the mutation owner's real async admission", async () => {
+    const f = fixture();
+    const ready = createDeferred();
+    const release = createDeferred();
+    const inspect = integrityWorker.assertSqliteIntegrityInWorker;
+    vi.spyOn(integrityWorker, "assertSqliteIntegrityInWorker").mockImplementation(
+      async (...args) => {
+        ready.resolve();
+        await release.promise;
+        return inspect(...args);
+      },
+    );
+    const ownerOperation = vi.fn();
+    const foreignOperation = vi.fn();
+    const options = { agentId: "worker", env: f.env };
+    const running = withAgentDatabaseMaintenanceLease({ env: f.env }, async (maintenance) => {
+      const mutation = maintenance.withDatabaseFileMutation;
+      if (!mutation) {
+        throw new Error("Missing live mutation owner");
+      }
+      await mutation({
+        assertCurrent: () => maintenance.assertOwned(),
+        async mutate() {
+          try {
+            await withOpenClawAgentDatabaseAsync(options, ownerOperation);
+          } finally {
+            await closeOpenClawAgentDatabasesAsync();
+          }
+        },
+        async capture() {},
+        bind() {
+          return undefined;
+        },
+      });
+    });
+    void running.catch((error: unknown) => ready.reject(error));
+    try {
+      await ready.promise;
+      const foreign = withOpenClawAgentDatabaseAsync(options, foreignOperation);
+      const refused = expect(foreign).rejects.toThrow(/another maintenance mutation scope/);
+      release.resolve();
+      await refused;
+      await running;
+      expect(ownerOperation).toHaveBeenCalledOnce();
+      expect(foreignOperation).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await running;
+    }
+  });
+
+  it.each(["expiry", "replacement"] as const)(
+    "refuses ordinary agent admission after the mutation owner's %s",
+    async (loss) => {
+      const f = fixture();
+      const before = readIndexState(f.options.pathname);
+      await expect(
+        withAgentDatabaseMaintenanceLease({ env: f.env }, async (maintenance) => {
+          const mutation = maintenance.withDatabaseFileMutation;
+          if (!mutation) {
+            throw new Error("Missing live mutation owner");
+          }
+          await mutation({
+            assertCurrent: () => maintenance.assertOwned(),
+            async mutate() {
+              runOpenClawStateWriteTransaction(
+                (database) => {
+                  database.db
+                    .prepare(
+                      `UPDATE state_leases SET ${loss === "expiry" ? "expires_at=0" : "owner='successor'"}
+                    WHERE scope=? AND lease_key=?`,
+                    )
+                    .run(
+                      AGENT_DATABASE_MAINTENANCE_LEASE.scope,
+                      AGENT_DATABASE_MAINTENANCE_LEASE.key,
+                    );
+                },
+                { env: f.env },
+              );
+              expect(() => openOpenClawAgentDatabase({ agentId: "worker", env: f.env })).toThrow(
+                /lost/i,
+              );
+            },
+            async capture() {
+              throw new Error("Capture must not run after ownership loss");
+            },
+            bind() {
+              return undefined;
+            },
+          });
+        }),
+      ).rejects.toThrow(/lost/i);
+      expect(readIndexState(f.options.pathname)).toEqual(before);
+    },
+  );
 
   it.each(
     [false, true].flatMap((corrupt) =>

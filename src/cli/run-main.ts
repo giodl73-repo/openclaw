@@ -6,6 +6,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { Command as CommanderCommand, Option as CommanderOption } from "commander";
 import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
+import type { DoctorDatabasePreflight } from "../commands/doctor-database-preflight.js";
 import {
   createInvalidConfigError,
   formatInvalidConfigDetails,
@@ -22,7 +23,6 @@ import type { PluginCliLoadSession } from "../plugins/cli-registry-loader.js";
 import { createPluginCache, getPluginCache, withPluginCache } from "../plugins/plugin-cache.js";
 import { resolveCliArgvInvocation } from "./argv-invocation.js";
 import {
-  hasFlag,
   normalizeGeneratedHelpCommandArgv,
   normalizeRootHelpTargetArgv,
   normalizeRootLogLevelArgv,
@@ -30,11 +30,11 @@ import {
 } from "./argv.js";
 import {
   isReservedNonPluginCommandRoot,
-  shouldRegisterPrimaryCommandOnly,
   shouldSkipPluginCommandRegistration,
 } from "./command-registration-policy.js";
 import { resolveCliStartupPolicy as resolveCliStartupPolicyForArgv } from "./command-startup-policy.js";
 import { maybeRunCliInContainer, parseCliContainerArgs } from "./container-target.js";
+import { tryRunGatewayServiceUpdateCapabilityProbe } from "./daemon-cli/update-capability.js";
 import { shouldStartLocalOnboarding } from "./fresh-install-config.js";
 import {
   consumeGatewayFastPathRootOptionToken,
@@ -96,7 +96,7 @@ const UNKNOWN_COMMAND_DISPLAY_LIMIT = 128;
 
 const loadRootHelpLiveConfigModule = async () => await import("./root-help-live-config.js");
 const loadRootHelpMetadataModule = async () => await import("./root-help-metadata.js");
-const loadLoggingModule = async () => await import("../logging.js");
+const loadLoggingModule = async () => await import("../logging/console.js");
 const loadCliRegistryLoaderModule = async () => await import("../plugins/cli-registry-loader.js");
 const loadManifestCommandAliasesRuntimeModule = async () =>
   await import("../plugins/manifest-command-aliases.runtime.js");
@@ -964,8 +964,10 @@ export async function runCli(
   options: {
     additionalStartupTrace?: ReturnType<typeof createGatewayDispatchStartupTrace>;
     retainConsoleRoutingUntilProcessExit?: boolean;
+    runtimeRecoveryEnv?: NodeJS.ProcessEnv;
   } = {},
 ) {
+  const runtimeRecoveryEnv = options.runtimeRecoveryEnv ?? { ...process.env };
   const originalArgv = normalizeWindowsArgv(argv);
   const builtInMachineOutput = resolveBuiltInMachineOutput(originalArgv);
   return await withConsoleLogsRoutedToStderrForJson(
@@ -975,6 +977,7 @@ export async function runCli(
         try {
           return await runCliWithPreparedOutputMode(originalArgv, {
             ...options,
+            runtimeRecoveryEnv,
             builtInMachineOutput,
             harnessCleanup,
           });
@@ -1027,6 +1030,7 @@ async function runCliWithPreparedOutputMode(
     additionalStartupTrace?: ReturnType<typeof createGatewayDispatchStartupTrace>;
     builtInMachineOutput: boolean;
     harnessCleanup?: CliHarnessCleanup;
+    runtimeRecoveryEnv: NodeJS.ProcessEnv;
   },
 ) {
   const startupTrace = createGatewayDispatchStartupTrace(originalArgv, "cli.main");
@@ -1109,8 +1113,19 @@ async function runCliWithPreparedOutputMode(
   startupTrace.mark("argv");
 
   // Enforce the minimum supported runtime before gateway selection can read or recover config.
-  const { assertSupportedRuntime } = await import("../infra/runtime-guard.js");
-  await assertSupportedRuntime();
+  const { assertSupportedRuntime, isCurrentRuntimeSupported } =
+    await import("../infra/runtime-guard.js");
+  await assertSupportedRuntime(
+    undefined,
+    undefined,
+    normalizedArgv,
+    true,
+    options.runtimeRecoveryEnv,
+  );
+
+  if (await tryRunGatewayServiceUpdateCapabilityProbe(normalizedArgv)) {
+    return;
+  }
 
   if (
     !isHelpOrVersionInvocation &&
@@ -1128,19 +1143,13 @@ async function runCliWithPreparedOutputMode(
       }
     });
   }
-  if (
-    !isHelpOrVersionInvocation &&
-    normalizedInvocation.primary === "doctor" &&
-    process.env.OPENCLAW_UPDATE_IN_PROGRESS === "1"
-  ) {
+  let doctorDatabasePreflight: DoctorDatabasePreflight | undefined;
+  if (!isHelpOrVersionInvocation && normalizedInvocation.primary === "doctor") {
     // Debug capture can migrate shared state before Commander reaches Doctor.
     // Resolve the update guard after selectors settle, before any bootstrap writer.
-    const [{ guardUpdateDoctorSchemaUpgrade }, { defaultRuntime }] = await Promise.all([
-      import("../commands/doctor-update-schema-guard.js"),
-      import("../runtime.js"),
-    ]);
-    await guardUpdateDoctorSchemaUpgrade({
-      runtime: defaultRuntime,
+    const { guardUpdateDoctorSchemaUpgrade } =
+      await import("../commands/doctor-update-schema-guard.js");
+    doctorDatabasePreflight = await guardUpdateDoctorSchemaUpgrade({
       json: options.builtInMachineOutput,
     });
   }
@@ -1192,8 +1201,9 @@ async function runCliWithPreparedOutputMode(
     env: process.env,
   });
   const useSourceOnlyBestEffortConfig =
+    !(await isCurrentRuntimeSupported()) ||
     normalizedInvocation.primary === "update" ||
-    (normalizedInvocation.primary === "doctor" && hasFlag(normalizedArgv, "--lint"));
+    normalizedInvocation.primary === "doctor";
   const readBestEffortCliConfig = async (): Promise<OpenClawConfig> => {
     if (!bestEffortConfigPromise) {
       bestEffortConfigPromise = import("../config/io.js").then(async (configIo) => {
@@ -1204,7 +1214,7 @@ async function runCliWithPreparedOutputMode(
           // Routing must not create state before Doctor decides whether migrations are needed.
           observe: false,
           ...(isolateProxyConfigEnv ? { isolateEnv: true } : {}),
-          ...(bestEffortConfigStartupPolicy.validateConfigOnly
+          ...(bestEffortConfigStartupPolicy.validateConfigOnly || isGatewayRunInvocation
             ? { pluginValidation: "core-only" }
             : { skipPluginValidation: true }),
         };
@@ -1289,6 +1299,7 @@ async function runCliWithPreparedOutputMode(
     installProxySignalHandlers();
   };
   let uninstallGatewayRunRuntimeHooks: (() => void) | null = null;
+  let unhandledRejectionHandlerInstalled = false;
 
   try {
     const startupTraces = [startupTrace, options.additionalStartupTrace].filter(
@@ -1490,6 +1501,16 @@ async function runCliWithPreparedOutputMode(
       !isHelpOrVersionInvocation && shouldStartProxyForCli(normalizedArgv);
     const bootstrapProxyBeforeFastPath =
       shouldUseCliEnvProxy && shouldBootstrapCliProxyBeforeFastPath();
+    // Gateway execution can return before full CLI bootstrap, so install the
+    // shared process policy before the fast path can start asynchronous work.
+    if (isGatewayRunFastPathArgv(normalizedArgv)) {
+      const { installUnhandledRejectionHandler } = await startupTrace.measure(
+        "unhandled-rejection-handler-import",
+        () => import("../infra/unhandled-rejections.js"),
+      );
+      installUnhandledRejectionHandler();
+      unhandledRejectionHandlerInstalled = true;
+    }
     if (
       !bootstrapProxyBeforeFastPath &&
       (await tryRunGatewayRunFastPath(normalizedArgv, startupTrace))
@@ -1565,12 +1586,16 @@ async function runCliWithPreparedOutputMode(
           import("../runtime.js"),
         ]),
       );
-      const program = await startupTrace.measure("build-program", () => buildProgram());
+      const program = await startupTrace.measure("build-program", () =>
+        buildProgram({ doctorDatabasePreflight }),
+      );
       await options.harnessCleanup?.pluginResources?.waitForRegistrations();
 
       // Global error handlers to prevent silent crashes from unhandled rejections/exceptions.
       // These log the error and exit gracefully instead of crashing without trace.
-      installUnhandledRejectionHandler();
+      if (!unhandledRejectionHandlerInstalled) {
+        installUnhandledRejectionHandler();
+      }
 
       process.on("uncaughtException", (error) => {
         if (isUncaughtExceptionHandled(error)) {
@@ -1604,7 +1629,7 @@ async function runCliWithPreparedOutputMode(
       // Register the primary command (builtin or subcli) so help and command parsing
       // are correct even with lazy command registration.
       const { primary } = invocation;
-      if (primary && shouldRegisterPrimaryCommandOnly(parseArgv)) {
+      if (primary) {
         await startupTrace.measure("register-primary", async () => {
           const { getProgramContext } = await import("./program/program-context.js");
           const ctx = getProgramContext(program);

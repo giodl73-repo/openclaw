@@ -1,4 +1,4 @@
-import { WorkerProviderError } from "openclaw/plugin-sdk/plugin-entry";
+import { WorkerProviderError, type WorkerProvider } from "openclaw/plugin-sdk/plugin-entry";
 import { crabboxCommandError } from "./crabbox-worker-command-error.js";
 import {
   isUnrecognizedLease,
@@ -17,6 +17,27 @@ import {
 } from "./crabbox-worker-timeouts.js";
 
 export type LeaseCommandContext = { binary: string; id: string; provider: string };
+
+/** Allocation retains host and project authority independently of cancellation or cleanup. */
+export function createCrabboxProvisionAuthority(
+  options: Parameters<WorkerProvider["provision"]>[2],
+): { signal?: AbortSignal; assertCurrent: () => void } {
+  const assertHostCurrent = options?.assertCurrent;
+  if (!assertHostCurrent) {
+    throw new WorkerProviderError(
+      "Crabbox provisioning requires current Gateway allocation authority",
+    );
+  }
+  const signal = options?.signal;
+  const project = options?.project;
+  const assertCurrent = () => {
+    signal?.throwIfAborted();
+    assertHostCurrent();
+    project?.assertCurrent();
+  };
+  assertCurrent();
+  return { signal, assertCurrent };
+}
 export type InspectCommandResult =
   | { status: "found"; inspect: ParsedInspect }
   | { status: "unknown" };
@@ -232,7 +253,7 @@ export async function runProvisionSetup(
         }),
     );
     if (result.termination !== "exit" || result.code !== 0) {
-      throw new WorkerProviderError(crabboxCommandError(params.phase, result).message);
+      throw crabboxCommandError(params.phase, result);
     }
   } catch (error) {
     params.signal?.throwIfAborted();
@@ -261,5 +282,5 @@ export async function failProvisionAfterCleanup(
   } catch (cleanupError) {
     throw WorkerProviderError.cleanupIndeterminate(params.id, provisionError, cleanupError);
   }
-  throw provisionError;
+  throw WorkerProviderError.cleanupComplete(params.id, provisionError);
 }

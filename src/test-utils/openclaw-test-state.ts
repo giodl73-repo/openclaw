@@ -2,15 +2,14 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
-import {
-  closeAuthProfileReadPool,
-  resolveAuthProfileDatabasePath,
-} from "../agents/auth-profiles/sqlite.js";
-import { saveAuthProfileStore } from "../agents/auth-profiles/store-runtime.js";
+import { resolveAuthProfileDatabasePath } from "../agents/auth-profiles/sqlite.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
-import * as configRuntime from "../config/config.js";
+import * as configRuntime from "../config/runtime-snapshot.js";
 import { GATEWAY_STARTUP_MUTATED_ENV_KEYS } from "../gateway/test-helpers.env.js";
+import {
+  captureStateDatabaseCoordinatorRuntime,
+  withStateDatabaseCoordinatorRuntimeDirectory,
+} from "../infra/state-database-coordinator.js";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { captureEnv } from "./env.js";
 import { cleanupSessionStateForTest } from "./session-state-cleanup.js";
@@ -37,6 +36,7 @@ type OpenClawTestStateOptions = {
   agentEnv?: "clear" | "main";
   applyEnv?: boolean;
   env?: Record<string, string | undefined>;
+  verifyCleanup?: (cleanup: () => Promise<void>) => Promise<void>;
   gateway?: {
     port?: number;
     token?: string;
@@ -305,13 +305,16 @@ export async function createOpenClawTestState(
       extraEnv: options.env ?? {},
     });
     const env = createSpawnEnv(envVars);
-    const snapshot = captureEnv(uniqueStrings([...ENV_KEYS, ...Object.keys(envVars)]));
+    const capturedEnvKeys = new Set([...ENV_KEYS, ...Object.keys(envVars)]);
+    const snapshots = [captureEnv([...capturedEnvKeys])];
     let envApplied = false;
     let releasePromise: Promise<void> | undefined;
     let cleanupPromise: Promise<void> | undefined;
     const restoreAppliedEnv = () => {
       if (envApplied) {
-        snapshot.restore();
+        for (const snapshot of snapshots) {
+          snapshot.restore();
+        }
         resetConfigRuntimeStateForTest();
         envApplied = false;
       }
@@ -338,19 +341,36 @@ export async function createOpenClawTestState(
         await fs.writeFile(filePath, value, "utf8");
         return filePath;
       },
-      writeAuthProfiles: (store, agentId = "main") => {
+      writeAuthProfiles: async (store, agentId = "main") => {
         const targetAgentDir = agentDir(agentId);
+        // Fixture persistence does not need native plugin discovery.
+        const [{ createAuthProfileStoreRuntime }, { createExternalAuthRuntime }] =
+          await Promise.all([
+            import("../agents/auth-profiles/store.js"),
+            import("../agents/auth-profiles/external-auth.js"),
+          ]);
+        const { saveAuthProfileStore } = createAuthProfileStoreRuntime(
+          createExternalAuthRuntime(() => []),
+        );
         saveAuthProfileStore(store as AuthProfileStore, targetAgentDir, {
           filterExternalAuthProfiles: false,
           syncExternalCli: false,
         });
-        return Promise.resolve(resolveAuthProfileDatabasePath(targetAgentDir));
+        return resolveAuthProfileDatabasePath(targetAgentDir);
       },
       applyEnv: () => {
         if (releasePromise || cleanupPromise) {
           throw new Error("Cannot apply a released OpenClaw test state");
         }
         resetConfigRuntimeStateForTest();
+        // envVars is mutable; capture late keys before their first application.
+        const newKeys = Object.keys(envVars).filter((key) => !capturedEnvKeys.has(key));
+        if (newKeys.length > 0) {
+          snapshots.push(captureEnv(newKeys));
+          for (const key of newKeys) {
+            capturedEnvKeys.add(key);
+          }
+        }
         // A later write can throw after earlier keys changed; restoration still owns them.
         envApplied = true;
         for (const [key, value] of Object.entries(envVars)) {
@@ -366,8 +386,7 @@ export async function createOpenClawTestState(
       // including failure, so no concurrent caller can restore selectors early.
       restoreEnv: () =>
         (releasePromise ??= Promise.resolve().then(async () => {
-          await cleanupSessionStateForTest({ stateDir: paths.stateDir });
-          closeAuthProfileReadPool({ kind: "root", rootPath: paths.stateDir });
+          await cleanupSessionStateForTest({ stateDir: paths.stateDir, rootPath: root });
           restoreAppliedEnv();
         })),
       cleanup: () =>
@@ -394,8 +413,16 @@ export async function createOpenClawTestState(
     return state;
   } catch (error) {
     // Acquisition has no session/auth work to drain or close. Only undo this fixture.
-    rollbackEnv?.();
-    await removeRoot();
+    // Restore selectors synchronously before the verifier can yield.
+    const rollback = (async () => {
+      rollbackEnv?.();
+      await removeRoot();
+    })();
+    if (options.verifyCleanup) {
+      await options.verifyCleanup(() => rollback);
+    } else {
+      await rollback;
+    }
     throw error;
   }
 }
@@ -405,11 +432,18 @@ export async function withOpenClawTestState<T>(
   fn: (state: OpenClawTestState) => Promise<T>,
 ): Promise<T> {
   const state = await createOpenClawTestState(options);
-  const work = new AsyncWorkScope();
-  try {
-    return await work.track(() => fn(state));
-  } finally {
-    await work.drain();
-    await state.cleanup();
-  }
+  // On Windows the coordinator directory lives beneath this temporary home.
+  // Keep its location, but never lend fixture handles to the process idle pool.
+  return await withStateDatabaseCoordinatorRuntimeDirectory(
+    { ...captureStateDatabaseCoordinatorRuntime(), keepAlive: false },
+    async () => {
+      const work = new AsyncWorkScope();
+      try {
+        return await work.track(() => fn(state));
+      } finally {
+        await work.drain();
+        await state.cleanup();
+      }
+    },
+  );
 }

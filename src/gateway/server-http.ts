@@ -51,6 +51,7 @@ import {
   finishFailedGatewayHttpResponse,
   sendGatewayAuthFailure,
   setDefaultSecurityHeaders,
+  isWebSocketUpgradeRequest,
 } from "./http-common.js";
 import {
   markGatewayIngressTransport,
@@ -59,6 +60,10 @@ import {
   type GatewayUnattributableProxyReporter,
 } from "./ingress-attribution.js";
 import { normalizePluginNodeCapabilityScopedUrl } from "./plugin-node-capability.js";
+import {
+  handleProviderOAuthCallback,
+  PROVIDER_OAUTH_CALLBACK_PATH,
+} from "./provider-browser-auth.js";
 import {
   getCachedPluginGatewayAuthBypassPaths,
   shouldEnforceDefaultPluginGatewayAuth,
@@ -137,24 +142,12 @@ const getPluginRouteRuntimeScopesModule = createLazyRuntimeModule(
   () => import("./server/plugin-route-runtime-scopes.js"),
 );
 
-function isWebSocketUpgradeRequest(req: IncomingMessage): boolean {
-  const headerContains = (value: string | readonly string[] | undefined, token: string) =>
-    (typeof value === "string" ? [value] : (value ?? [])).some((entry) =>
-      entry
-        .toLowerCase()
-        .split(",")
-        .some((part) => part.trim() === token),
-    );
-  return (
-    headerContains(req.headers.upgrade, "websocket") &&
-    headerContains(req.headers.connection, "upgrade")
-  );
-}
-
 type GatewayHttpRequestStage = () => Promise<boolean> | boolean;
 
 /** Creates the gateway HTTP/HTTPS server and ordered request-stage router. */
 export function createGatewayHttpServer(opts: {
+  /** Pre-bound listener supplied by the internal test transport. */
+  testListener?: HttpServer;
   clients: Set<GatewayWsClient>;
   controlUiEnabled?: boolean;
   controlUiBasePath: string;
@@ -229,9 +222,10 @@ export function createGatewayHttpServer(opts: {
       }
     });
   };
-  const httpServer: HttpServer = opts.tlsOptions
-    ? createHttpsServer(opts.tlsOptions, handleServerRequest)
-    : createHttpServer(handleServerRequest);
+  const httpServer =
+    opts.testListener ??
+    (opts.tlsOptions ? createHttpsServer(opts.tlsOptions) : createHttpServer());
+  httpServer.on("request", handleServerRequest);
   // Node otherwise sends interim/expectation responses before application admission.
   httpServer.on("checkContinue", (req, res) => handleServerRequest(req, res, "continue"));
   httpServer.on("checkExpectation", (req, res) => handleServerRequest(req, res, "reject"));
@@ -472,6 +466,9 @@ export function createGatewayHttpServer(opts: {
         );
       }
 
+      addAdmittedStage(scopedRequestPath === PROVIDER_OAUTH_CALLBACK_PATH, () =>
+        handleProviderOAuthCallback(req, res),
+      );
       // Before hooks: an operator hooks.path of "/oauth" would otherwise claim
       // this exact GET and 405 every provider redirect. The claim is exact-path
       // and config-gated, so preceding hooks cannot shadow any hook route.
@@ -656,6 +653,7 @@ export function createGatewayHttpServer(opts: {
               req,
               res,
               ...routeAuth,
+              getResolvedAuth,
               requestPath: scopedRequestPath,
               resolveOperatorScopes: resolvePluginRouteRuntimeOperatorScopes,
             });
@@ -692,7 +690,7 @@ export function createGatewayHttpServer(opts: {
       );
       for (const [routes, loadHandler] of [
         [
-          ["pluginIcon", "catalogIcon", "linkFavicon"],
+          ["pluginIcon", "pluginActivityIcon", "catalogIcon", "linkFavicon"],
           async () => (await getPluginIconHttpModule()).handlePluginIconHttpRequest,
         ],
         [
@@ -714,8 +712,9 @@ export function createGatewayHttpServer(opts: {
           async () => (await loadHandler())(req, res, controlUiRouteOptions),
         );
       }
+      // Authenticated media also serves non-browser clients when dashboard hosting is disabled.
       addRequestStage(
-        controlUiEnabled,
+        scopedRequestPath === resolveAssistantMediaRoutePath(controlUiBasePath),
         async () =>
           (await loadControlUi())?.handleControlUiAssistantMediaRequest(req, res, {
             ...controlUiRouteOptions,

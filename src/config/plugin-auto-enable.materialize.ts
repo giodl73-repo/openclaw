@@ -7,6 +7,9 @@ import {
 import { findChatChannelMeta } from "../channels/chat-meta.js";
 import { normalizeChatChannelId } from "../channels/ids.js";
 import { isBlockedObjectKey } from "../infra/prototype-keys.js";
+import { normalizePluginsConfig } from "../plugins/config-state.js";
+import { findUninspectedPluginDiagnostic } from "../plugins/discovery-availability.js";
+import { hasExplicitManifestOwnerTrust } from "../plugins/manifest-owner-policy.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.types.js";
 import { isNativeSessionCatalogOptOutOnly } from "../plugins/native-session-catalog-config.js";
 import { isOfficialExternalPluginId } from "../plugins/official-external-plugin-catalog.js";
@@ -278,13 +281,34 @@ export function materializePluginAutoEnableCandidatesInternal(params: {
   const changes: string[] = [];
   const autoEnabledReasons = new Map<string, string[]>();
 
-  if (next.plugins?.enabled === false) {
+  if (
+    next.plugins?.enabled === false ||
+    findUninspectedPluginDiagnostic(params.manifestRegistry.diagnostics)
+  ) {
     return { config: next, changes, autoEnabledReasons: {} };
   }
 
   const preferOverCache = new Map<string, string[]>();
+  const workspacePluginIds = new Set(
+    params.manifestRegistry.plugins
+      .filter((plugin) => plugin.origin === "workspace")
+      .map((plugin) => plugin.id),
+  );
+  const normalizedConfig = normalizePluginsConfig(next.plugins);
+  const preferenceCandidates = params.candidates.filter((entry) => {
+    if (!workspacePluginIds.has(entry.pluginId)) {
+      return true;
+    }
+    return hasExplicitManifestOwnerTrust({
+      plugin: { id: entry.pluginId },
+      normalizedConfig,
+    });
+  });
+  const candidates = preferenceCandidates.filter(
+    (entry) => !workspacePluginIds.has(entry.pluginId),
+  );
 
-  for (const entry of params.candidates) {
+  for (const entry of candidates) {
     const builtInChannelId = resolveAutoEnableChannelId({
       entry,
       manifestRegistry: params.manifestRegistry,
@@ -296,7 +320,7 @@ export function materializePluginAutoEnableCandidatesInternal(params: {
       shouldSkipPreferredPluginAutoEnable({
         config: next,
         entry,
-        configured: params.candidates,
+        configured: preferenceCandidates,
         env: params.env,
         registry: params.manifestRegistry,
         isPluginDenied,

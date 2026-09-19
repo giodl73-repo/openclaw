@@ -6,7 +6,7 @@ import type {
 } from "openai/resources/responses/responses.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeTextToolResult } from "../../../../test/helpers/text-tool-result.js";
-import { configureAiTransportHost } from "../host.js";
+import { configureAiTransportHost, getAiTransportHost } from "../host.js";
 import {
   buildOpenAIResponsesReasoningReplayMetadata,
   captureOpenAIResponsesCompaction,
@@ -17,11 +17,11 @@ import type { AssistantMessage, AssistantMessageEvent, Context, Model, Tool } fr
 import { createZeroUsage } from "../usage.test-support.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../utils/system-prompt-cache-boundary.js";
+import { resolveOpenAISimpleReasoningEffort } from "./openai-request-reasoning.js";
 import {
   applyCommonResponsesParams,
   createResponsesAssistantOutput,
   convertResponsesMessages,
-  resolveResponsesReasoningEffort,
   runResponsesStreamLifecycle,
 } from "./openai-responses-shared.js";
 import { convertResponsesToolPayload } from "./openai-responses-tools.js";
@@ -102,16 +102,7 @@ const testAllowedToolCallProviders = new Set(["openai", "openai-codex", "opencod
 const reasoningReplayIdentity = { sessionId: "session-a", authProfileId: "profile-a" };
 
 function createAssistantOutput(): AssistantMessage {
-  return {
-    role: "assistant",
-    api: nativeOpenAIModel.api,
-    provider: nativeOpenAIModel.provider,
-    model: nativeOpenAIModel.id,
-    usage: createZeroUsage(),
-    stopReason: "stop",
-    timestamp: 0,
-    content: [],
-  };
+  return { ...createResponsesAssistantOutput(nativeOpenAIModel), timestamp: 0 };
 }
 
 async function* responseEvents(events: Array<Record<string, unknown>>) {
@@ -123,8 +114,13 @@ async function* responseEvents(events: Array<Record<string, unknown>>) {
 describe("convertResponsesToolPayload", () => {
   beforeEach(() => {
     // Mimic the OpenClaw host strict-tool policy: native OpenAI routes force
-    // strict=true, proxy-like routes leave the flag unset.
+    // strict=true; compatible routes opt in to sending strict=false.
+    const capabilities = getAiTransportHost().resolveProviderRequestCapabilities({});
     configureAiTransportHost({
+      resolveProviderRequestCapabilities: ({ baseUrl }) => ({
+        ...capabilities,
+        endpointClass: baseUrl === nativeOpenAIModel.baseUrl ? "openai-public" : "custom",
+      }),
       resolveOpenAIStrictToolSetting: (model, options) => {
         if (model.provider === "openai" && model.baseUrl === "https://api.openai.com/v1") {
           return true;
@@ -328,7 +324,7 @@ describe("Responses reasoning effort", () => {
   });
 
   it("passes max through for GPT-5.6 Sol", () => {
-    expect(resolveResponsesReasoningEffort(gpt56SolModel, "max")).toBe("max");
+    expect(resolveOpenAISimpleReasoningEffort(gpt56SolModel, "max")).toBe("max");
 
     const params = {} as never;
     applyCommonResponsesParams(
@@ -362,7 +358,7 @@ describe("Responses reasoning effort", () => {
         model,
         { messages: [] },
         {
-          reasoningEffort: resolveResponsesReasoningEffort(model, reasoning),
+          reasoningEffort: resolveOpenAISimpleReasoningEffort(model, reasoning),
         },
       );
       expect(params.reasoning).toEqual({ effort: expected, summary: "auto" });
@@ -375,7 +371,7 @@ describe("Responses reasoning effort", () => {
       thinkingLevelMap: { xhigh: "xhigh" },
     } satisfies Model<"openai-responses">;
 
-    expect(resolveResponsesReasoningEffort(gpt55WithXHigh, "max")).toBe("xhigh");
+    expect(resolveOpenAISimpleReasoningEffort(gpt55WithXHigh, "max")).toBe("xhigh");
   });
 });
 

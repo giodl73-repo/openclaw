@@ -11,10 +11,8 @@ import {
   resolveSqliteScope,
   runExclusiveSqliteSessionWrite,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
-import {
-  closeOpenClawAgentDatabasesForTest,
-  listOpenClawAgentDatabasesForTest,
-} from "../state/openclaw-agent-db.js";
+import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
+import { listOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.test-support.js";
 import { clearCronJobActive, markCronJobActive } from "./active-jobs.js";
 import { CronService } from "./service.js";
 import { setupCronServiceSuite } from "./service.test-harness.js";
@@ -24,7 +22,7 @@ const gatewayTestState = vi.hoisted(() => ({
   targetBySessionKey: new Map<string, { agentId: string; storePath: string }>(),
 }));
 
-vi.mock("../gateway/call.runtime.js", () => ({
+vi.mock("../gateway/call.js", () => ({
   callGateway: gatewayTestState.callGateway,
 }));
 
@@ -217,10 +215,14 @@ describe("CronService.remove session cleanup", () => {
       sessionKey,
       storePath: sessionStorePath,
     });
-    const heldWriter = runExclusiveSqliteSessionWrite(resolvedSessionScope, async () => {
-      writerEntered.resolve();
-      await releaseWriter.promise;
-    });
+    const heldWriter = runExclusiveSqliteSessionWrite(
+      resolvedSessionScope,
+      async () => {
+        writerEntered.resolve();
+        await releaseWriter.promise;
+      },
+      "session.transcript.batch",
+    );
     await writerEntered.promise;
 
     const removal = cron.remove(job.id);
@@ -241,6 +243,7 @@ describe("CronService.remove session cleanup", () => {
 
     try {
       await vi.advanceTimersByTimeAsync(50);
+      await unrelatedAdd;
       expect(unrelatedAdded).toBe(true);
     } finally {
       releaseWriter.resolve();

@@ -3,19 +3,18 @@ import type {
   SessionCatalog,
   SessionsCatalogListResult,
 } from "../../../../packages/gateway-protocol/src/index.ts";
-import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
+import { createDeferred as deferred } from "../../../../test/helpers/promise.js";
+import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ApplicationGatewaySnapshot } from "../../app/context.ts";
 import {
   loadStoredHiddenSessionCatalogIds,
   setStoredSessionCatalogHidden,
 } from "../../components/app-sidebar-session-types.ts";
-import { TERMINAL_PANEL_TOGGLE_EVENT } from "../../components/panel-toggle-contract.ts";
 import {
   createGateway,
   createGatewayHarness,
   createSessions,
   createSessionsHarness,
-  deferred,
   mountSidebar,
   successfulSessionPatch,
 } from "../app-sidebar.ts";
@@ -203,8 +202,8 @@ describe("AppSidebar multi-select", () => {
       { archived: true },
     );
     expect(harness.patch).not.toHaveBeenCalled();
-    await waitForFast(() => expect(harness.refreshReplacement).toHaveBeenCalledTimes(1));
-    expect(harness.refreshReplacement).toHaveBeenCalledWith("main");
+    await waitForFast(() => expect(harness.reconcileMutation).toHaveBeenCalledTimes(1));
+    expect(harness.reconcileMutation).toHaveBeenCalledWith("main");
   });
 
   it("marks every selected session unread through patchMany", async () => {
@@ -226,56 +225,14 @@ describe("AppSidebar multi-select", () => {
       { unread: true },
     );
     expect(harness.patch).not.toHaveBeenCalled();
-    await waitForFast(() => expect(harness.refreshReplacement).toHaveBeenCalledOnce());
+    await waitForFast(() => expect(harness.reconcileMutation).toHaveBeenCalledOnce());
   });
 
-  it("archives serially when an older Gateway does not advertise patchMany", async () => {
-    const { sidebar, harness, request } = await mountMultiSelect(["sessions.patch"]);
-
-    click(rowLink(sidebar, "agent:main:a"), { altKey: true });
-    click(rowLink(sidebar, "agent:main:b"), { altKey: true });
-    await sidebar.updateComplete;
-    openContextMenu(sidebar, "agent:main:a");
-    await sidebar.updateComplete;
-
-    const menu = await sessionMenu(sidebar);
-    const archive = menu.querySelector<HTMLButtonElement>('[data-shortcut="a"]');
-    expect(archive?.disabled).toBe(false);
-    archive?.click();
-
-    await waitForFast(() => expect(harness.patch).toHaveBeenCalledTimes(2));
-    expect(harness.patch).toHaveBeenNthCalledWith(
-      1,
-      "agent:main:a",
-      { archived: true },
-      {
-        agentId: "main",
-        expectedSessionId: "session:agent:main:a",
-        deferListRefresh: true,
-      },
-    );
-    expect(harness.patch).toHaveBeenNthCalledWith(
-      2,
-      "agent:main:b",
-      { archived: true },
-      {
-        agentId: "main",
-        expectedSessionId: "session:agent:main:b",
-        deferListRefresh: true,
-      },
-    );
-    expect(harness.patchMany).not.toHaveBeenCalled();
-    expect(request.mock.calls.filter(([method]) => method === "sessions.patchMany")).toEqual([]);
-    await waitForFast(() => expect(harness.refreshReplacement).toHaveBeenCalledOnce());
-    expect(harness.refreshReplacement).toHaveBeenCalledWith("main");
-  });
-
-  it("disables batch archive when method metadata is missing", async () => {
-    const rejection = new GatewayRequestError({
-      code: "INVALID_REQUEST",
-      message: "unknown method: sessions.patchMany",
-    });
-    const { sidebar, harness, request } = await mountMultiSelect(null, rejection);
+  it.each([
+    { name: "patchMany is not advertised", methods: ["sessions.patch"] },
+    { name: "method metadata is missing", methods: null },
+  ])("disables batch archive when $name", async ({ methods }) => {
+    const { sidebar, harness, request } = await mountMultiSelect(methods);
 
     click(rowLink(sidebar, "agent:main:a"), { altKey: true });
     click(rowLink(sidebar, "agent:main:b"), { altKey: true });
@@ -292,10 +249,10 @@ describe("AppSidebar multi-select", () => {
     expect(harness.patch).not.toHaveBeenCalled();
     expect(request.mock.calls.filter(([method]) => method === "sessions.patchMany")).toEqual([]);
     expect(harness.patchMany).not.toHaveBeenCalled();
-    expect(harness.refreshReplacement).not.toHaveBeenCalled();
+    expect(harness.reconcileMutation).not.toHaveBeenCalled();
   });
 
-  it("hides an archived current thread immediately without navigating away", async () => {
+  it("hides an archiving current thread immediately without navigating away", async () => {
     const gatewayHarness = createGatewayHarness({} as GatewayBrowserClient);
     const setSessionKeySpy = vi.spyOn(gatewayHarness.gateway, "setSessionKey");
     const harness = createSessionsHarness("main", [
@@ -574,7 +531,7 @@ describe("AppSidebar catalog session rows", () => {
     }
   });
 
-  it("routes terminal-preferred clicks to a typed terminal toggle", async () => {
+  it("routes terminal-preferred clicks to the main terminal page", async () => {
     vi.useFakeTimers();
     try {
       const { sidebar } = await mountWithCatalog(
@@ -585,26 +542,13 @@ describe("AppSidebar catalog session rows", () => {
       sidebar.terminalAvailable = true;
       const navigate = vi.fn();
       sidebar.onNavigate = navigate;
-      let detail: unknown;
-      const listener = (event: Event) => {
-        detail = (event as CustomEvent).detail;
-      };
-      window.addEventListener(TERMINAL_PANEL_TOGGLE_EVENT, listener);
-      try {
-        await sidebar.updateComplete;
-        // The rendered row owns this catalog even if the global selection changes
-        // before its already-rendered click handler runs.
-        (sidebar as unknown as { newSessionAgentId: string }).newSessionAgentId = "jarvis";
-        (sidebar.querySelector('[data-session-key*="thread-1"] a') as HTMLElement).click();
-      } finally {
-        window.removeEventListener(TERMINAL_PANEL_TOGGLE_EVENT, listener);
-      }
-      expect(detail).toEqual({
-        open: true,
-        agentId: "main",
-        catalog: { catalogId: "codex", hostId: "gateway:local", threadId: "thread-1" },
+      await sidebar.updateComplete;
+      (sidebar.querySelector('[data-session-key*="thread-1"] a') as HTMLElement).click();
+      expect(navigate).toHaveBeenCalledWith("terminal", {
+        pathname: "/terminal",
+        search: "?catalog=codex&host=gateway%3Alocal&thread=thread-1",
+        hash: "",
       });
-      expect(navigate).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

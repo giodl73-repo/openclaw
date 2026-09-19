@@ -9,8 +9,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { vitestWorkerBuildEntries } from "../scripts/lib/vitest-worker-build-entries.mts";
+import { createRuntimeProcessBuildEntries } from "../scripts/lib/runtime-process-core-build-entries.mts";
+import {
+  legacyFinalizerBuildSources,
+  vitestWorkerBuildEntries,
+} from "../scripts/lib/vitest-worker-build-entries.mts";
+import { vitestWorkerDeclarationEntries } from "../scripts/lib/vitest-worker-declarations.mts";
+import { schtasksNativeEntrypoints } from "../src/daemon/schtasks-native-entrypoints.test-support.ts";
 import productionConfig from "./knip.config.ts";
+
+// Audit native entrypoints on every host without opting into their compilation.
+const nativeSchtasksAuditEntries = createRuntimeProcessBuildEntries(
+  Object.values(schtasksNativeEntrypoints),
+);
 
 const TEST_ENTRY_GLOB = "**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}!";
 
@@ -40,6 +51,12 @@ const ROOT_TEST_ENTRY_GLOBS = [
   "src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}!",
   "scripts/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}!",
   "test/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts}!",
+  // The PR artifact Vitest suite launches this standalone Node regression by path.
+  "test/scripts/pr-review-artifacts.node.mjs!",
+  // tsgo:test:root checks these compile-only contracts without runtime imports.
+  "test/type-contracts/**/*.ts!",
+  // The module-generation test launches this Bun regression directly from its source path.
+  "src/plugins/plugin-module-generation.bun.test-support.ts!",
   // ExecHostTransportProofTests.swift launches this isolated native client by path.
   "src/infra/exec-host.native.test-support.ts!",
   // The Windows CLI lifetime test launches this isolated probe by path.
@@ -48,6 +65,8 @@ const ROOT_TEST_ENTRY_GLOBS = [
   "test/fixtures/qa-gateway-rpc-proxy.mjs!",
   // ClawSweeper's paired consumer proof launches this cross-repository fixture by path.
   "test/fixtures/mantis-request-producer.mts!",
+  // Prior-release fixture generation invokes this CLI from the selected release checkout.
+  "test/fixtures/state-corpus/generate.mjs!",
   // Vitest loads these by configuration or module alias rather than imports.
   "test/setup*.ts!",
   "test/non-isolated-runner.ts!",
@@ -79,6 +98,8 @@ const ROOT_TEST_ENTRY_GLOBS = [
   "test/fixtures/ts-topology/basic/**/*.{js,mjs,cjs,ts,mts,cts}!",
   // The focused Oxlint test invokes these deliberate violations by path.
   "test/fixtures/oxlint-boundary-guards/*.ts!",
+  // The ACP reset proof spawns this adapter by path from the proof driver.
+  "test/fixtures/acp-reset-timeout-adapter.ts!",
 ] as const;
 
 const workspaces = Object.fromEntries(
@@ -99,9 +120,16 @@ const workspaces = Object.fromEntries(
         : {}),
       entry: [
         ...settings.entry,
-        // Path-launched workers need entries relative to their owning workspace;
-        // root entries cannot make a plugin's compiled child reachable to Knip.
-        ...Object.values(vitestWorkerBuildEntries).flatMap((source) => {
+        // Compiler registries emit entry modules, including declarations
+        // imported by generated child scripts. Keep workspace-relative entries.
+        ...[
+          ...Object.values({
+            ...nativeSchtasksAuditEntries,
+            ...vitestWorkerBuildEntries,
+            ...vitestWorkerDeclarationEntries,
+          }),
+          ...legacyFinalizerBuildSources,
+        ].flatMap((source) => {
           const relative = path.relative(workspace, source).replaceAll("\\", "/");
           return relative.startsWith("../") ? [] : [`${relative}!`];
         }),

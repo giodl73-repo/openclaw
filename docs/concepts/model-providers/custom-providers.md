@@ -43,7 +43,7 @@ Kimi model IDs:
 ```json5
 {
   agents: {
-    defaults: { model: { primary: "moonshot/kimi-k2.6" } },
+    defaults: { model: { primary: "moonshot/kimi-k3" } },
   },
   models: {
     mode: "merge",
@@ -52,7 +52,7 @@ Kimi model IDs:
         baseUrl: "https://api.moonshot.ai/v1",
         apiKey: "${MOONSHOT_API_KEY}",
         api: "openai-completions",
-        models: [{ id: "kimi-k2.6", name: "Kimi K2.6" }],
+        models: [{ id: "kimi-k3", name: "Kimi K3" }],
       },
     },
   },
@@ -377,9 +377,13 @@ Example (OpenAI-compatible):
     - `cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`
     - `maxTokens`: no fixed default. For OpenAI-compatible Completions, an unknown output limit omits both `max_tokens` and `max_completion_tokens`, letting the provider apply its default.
 
+    Anthropic and Mistral requests preserve an explicit request output limit when the model's `maxTokens` is unknown. Anthropic manual thinking must fit within that request limit when no model output capacity is available.
+
     An omitted `contextWindow` remains unset so authored native-window metadata is unambiguous. When neither discovery nor per-model context metadata is available, context-budget callers use the standard `200000`-token fallback.
 
     Recommended: set explicit values that match your proxy/model limits.
+
+    Model-selection metadata keeps capabilities tied to the API and endpoint that supplied them. A configured route change discards metadata from the previous route, while an explicit `thinkingLevelMap` is applied to the configured model.
 
   </Accordion>
   <Accordion title="Proxy-route shaping rules">

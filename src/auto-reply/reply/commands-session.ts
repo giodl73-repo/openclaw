@@ -23,7 +23,6 @@ import { logVerbose } from "../../globals.js";
 import { getSessionBindingService } from "../../infra/outbound/session-binding-service.js";
 import type { SessionBindingRecord } from "../../infra/outbound/session-binding-service.js";
 import {
-  buildRestartSuccessContinuation,
   clearRestartSentinel,
   formatDoctorNonInteractiveHint,
   type RestartSentinelPayload,
@@ -74,7 +73,7 @@ function buildRestartCommandSentinel(params: HandleCommandsParams): RestartSenti
     deliveryContext,
     threadId,
     message: "/restart",
-    continuation: buildRestartSuccessContinuation({ sessionKey }),
+    continuation: null,
     doctorHint: formatDoctorNonInteractiveHint(),
     stats: {
       mode: "gateway.restart",
@@ -326,27 +325,16 @@ export const handleFastCommand: CommandHandler = defineAuthorizedTextCommand(
     const targetSessionEntry = params.sessionStore?.[params.sessionKey] ?? params.sessionEntry;
     const resetsToDefault = isSessionDefaultDirectiveValue(rawMode);
     const nextMode = resetsToDefault ? undefined : normalizeFastMode(rawMode);
-    if (nextMode === undefined) {
-      if (resetsToDefault) {
-        if (targetSessionEntry && params.sessionStore && params.sessionKey) {
-          delete targetSessionEntry.fastMode;
-          if (
-            !(await persistCommandSession({
-              ...params,
-              sessionEntry: targetSessionEntry,
-              touchedFields: ["fastMode"],
-            }))
-          ) {
-            return sessionEntryPersistenceConflictReply();
-          }
-        }
-        return sessionCommandReply("⚙️ Fast mode reset to default.");
-      }
+    if (nextMode === undefined && !resetsToDefault) {
       return sessionCommandReply("⚙️ Usage: /fast status|auto|on|off|default");
     }
 
     if (targetSessionEntry && params.sessionStore && params.sessionKey) {
-      targetSessionEntry.fastMode = nextMode;
+      if (resetsToDefault) {
+        delete targetSessionEntry.fastMode;
+      } else {
+        targetSessionEntry.fastMode = nextMode;
+      }
       if (
         !(await persistCommandSession({
           ...params,
@@ -359,9 +347,11 @@ export const handleFastCommand: CommandHandler = defineAuthorizedTextCommand(
     }
 
     return sessionCommandReply(
-      nextMode === "auto"
-        ? "⚙️ Fast mode set to auto."
-        : `⚙️ Fast mode ${nextMode ? "enabled" : "disabled"}.`,
+      resetsToDefault
+        ? "⚙️ Fast mode reset to default."
+        : nextMode === "auto"
+          ? "⚙️ Fast mode set to auto."
+          : `⚙️ Fast mode ${nextMode ? "enabled" : "disabled"}.`,
     );
   },
 );
@@ -539,9 +529,8 @@ export const handleRestartCommand: CommandHandler = defineGatewayControlCommand(
       let sentinelWritten = false;
       scheduleGatewaySigusr1Restart({
         reason: "/restart",
-        // Sibling session-routing guard: /restart writes a session-scoped sentinel
-        // with continuation, so the scheduler must own the pending slot under the
-        // same key to avoid cross-session continuation overwrite (#86742).
+        // The routed restart acknowledgement and scheduler must own the same
+        // pending session key to avoid cross-session overwrite (#86742).
         sessionKey: sentinelPayload?.sessionKey,
         emitHooks: sentinelPayload
           ? {

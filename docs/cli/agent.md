@@ -10,6 +10,11 @@ title: "Agent"
 
 Run one agent turn through the Gateway. The explicit `--local` flag and `agent exec` are the embedded execution paths.
 
+Gateway-backed turns are operator input. An agent's `exec` subprocess carrying
+`OPENCLAW_SHELL=exec` cannot use this command to report back to another session;
+use its attributed session tool or normal subagent completion instead. This
+does not change operator terminal use or the separate embedded execution paths.
+
 Pass at least one session selector: `--to`, `--session-key`, `--session-id`, or `--agent`. Explicitly blank or whitespace-only selector values are rejected before local or Gateway dispatch, even when another selector supplies a valid target. Omit an unused selector instead of passing an empty value.
 
 A completed turn exits `0`. Error, timeout, and cancellation outcomes exit `1`, after any text or JSON result is written. A received `SIGINT` or `SIGTERM` instead preserves the signal-specific exit status described below.
@@ -26,7 +31,7 @@ openclaw agent exec --message-file task.md --cwd ./repo
 cat task.md | openclaw agent exec --message-file - --json
 ```
 
-By default, the command creates a temporary state directory and removes it after confirmed cleanup. It runs against your ordinary OpenClaw config, so configured providers, credentials, and `agentRuntime` harness selection apply exactly as they do elsewhere. `--cwd` defaults to the process working directory and is passed as both the agent workspace and tool working directory.
+By default, the command creates a temporary state directory and removes it after confirmed cleanup, including accepted database work and the run's database resources. It runs against your ordinary OpenClaw config, so configured providers, credentials, and `agentRuntime` harness selection apply exactly as they do elsewhere. `--cwd` defaults to the process working directory and is passed as both the agent workspace and tool working directory.
 
 Config is layered in three parts, entirely in memory: exec composes the run config and publishes it as this process's runtime config rather than writing a copy to disk. Exec defaults apply only where your config leaves a setting unset: workspace bootstrap files are skipped, the agent sandbox is off, the `coding` tool profile is selected, filesystem tools are restricted to `--cwd`, and exec runs under the full execution policy a headless turn needs. Anything your config sets wins over those defaults, so a configured sandbox, shell env, or tool profile is never downgraded, and exec host routing stays with the sandbox when your config enables one. The invocation itself always wins last: the run is scoped to `--cwd` and never bootstraps.
 
@@ -46,7 +51,7 @@ Select a primary and ordered fallback chain with repeatable flags:
 
 ```bash
 openclaw agent exec "Implement the change" \
-  --model openai/gpt-5.6-sol \
+  --model openai/gpt-6-astra \
   --fallback anthropic/claude-sonnet-4-6 \
   --fallback google/gemini-3.1-pro-preview
 ```
@@ -87,7 +92,7 @@ Plain output writes only the final assistant text to stdout. Diagnostics use std
   "assistantTurns": 2,
   "bridgeCalls": { "search": 1, "describe": 0, "call": 3 },
   "toolSummary": { "calls": 2, "tools": ["read", "write"], "totalToolTimeMs": 48 },
-  "model": "gpt-5.6-sol",
+  "model": "gpt-6-astra",
   "provider": "openai",
   "sessionId": "019..."
 }
@@ -146,6 +151,86 @@ For cells that return an agent envelope, `elapsedMs` measures the agent process 
 
 This is evaluation-only evidence, not a CI or release gate. Results do not change model capabilities, runtime routing, fallback, or repair policy.
 
+#### Gateway tasks and follow-up interviews
+
+The same matrix can exercise a disposable built Gateway and then interview the
+agent in a new run of the same conversation. These tasks are opt-in, require
+`--mode code`, and currently use explicit OpenAI models with `OPENAI_API_KEY`.
+The default matrix above is unchanged.
+
+| Task                      | Independent behavior check                                                                                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoices-auto-retention` | Return an oversized unfamiliar export, then calculate from its automatically retained reference in a later cell, with one fetch and bounded model-visible data. The prompt does not ask the agent to save it. |
+| `inventory-join`          | Solve a natural reorder-summary request across nested, heterogeneous inventory and supplier data, including missing quantities and unavailable prices.                                                        |
+| `automation-contracts`    | Use checked TypeScript for a disabled job's create/read/update/history/delete flow, then verify that pre-existing jobs remain unchanged.                                                                      |
+| `process-contracts`       | Start one supplied finite helper, use the real process tools through checked TypeScript, and verify its output and successful exit.                                                                           |
+| `partial-failure`         | A synthetic tool records an effect before returning malformed declared output. Verify one dispatch, useful validation details, and a subsequent read of actual state.                                         |
+| `checked-cell-cache`      | Complete three separate checked cells. This records live outcomes, not inferred compiler-cache hits.                                                                                                          |
+
+Build clean baseline and candidate checkouts first. Use the same harness,
+models, prompts, fixtures, thinking setting, timeout, and repetitions for both:
+
+```bash
+pnpm qa:code-mode-models -- --model openai/gpt-5.6-luna --mode code \
+  --task invoices-auto-retention --task inventory-join --repetitions 1 \
+  --thinking low --runtime-dir ../baseline \
+  --output-dir artifacts/code-mode/baseline --allow-failures
+
+pnpm qa:code-mode-models -- --model openai/gpt-5.6-luna --mode code \
+  --task invoices-auto-retention --task inventory-join --repetitions 1 \
+  --thinking low --runtime-dir ../candidate \
+  --output-dir artifacts/code-mode/candidate \
+  --baseline-results artifacts/code-mode/baseline/results.jsonl --allow-failures
+```
+
+`--runtime-dir` uses existing build artifacts without rebuilding. It requires a
+clean committed checkout and both build stamps matching that commit and recording
+clean build inputs. On a revision with provenance-capable stamp writers, run
+`pnpm build` in the clean checkout to refresh stale or older stamps. Historical
+revisions without those writers are unsupported as frozen runtimes; rebuilding
+them alone cannot add this provenance. The matrix
+records source and artifact hashes and refuses a comparison when paired cells
+or their workload fingerprints differ. Add `--model` for another model and
+repeat task selectors to include more scenarios. Failed trials remain in the
+results; `--allow-failures` changes only the command's exit status.
+
+Each Gateway owns temporary home, state, workspace, configuration, and a free
+loopback port. The process receives only its selected provider key and required
+host paths. Synthetic plugin tools implement the fixture exports and mutation
+receipt; automation and process operations use the real built-ins. Operator
+Gateways, stored operator credentials, real channels, and real devices are not used.
+Each scenario exposes only its required tools. A Gateway catalog preflight
+checks fixture availability before any paid model call; missing capabilities
+are harness failures, rather than failed model tasks.
+
+Per-cell artifacts include actual task/interview transcripts, tool-effect
+receipts, checks, and sanitized diagnostics. Task receipts are captured before
+the interview; separate task and interview receipt files preserve that boundary
+alongside the complete ledger. The process helper's exact written source bytes
+are part of its workload fingerprint. Checked-cell tasks validate each cell's
+returned value, including completion through `wait`, and require that completion
+before the next cell starts. Preview-completeness checks use the observed metadata
+for probed references; missing or conflicting metadata remains unknown.
+Keep transcripts local unless their
+publication is explicitly requested. Interview claims about sample coverage,
+freshness, lifetime, limits, and retry safety must be reviewed against these
+records: structured answers alone do not establish understanding. A prior
+result reference is tested in the interview's new admitted run when one was
+actually observed; it must not become durable conversation state.
+
+Gateway rows separate startup, task, and interview timing. Their ordinary
+`assistantTurns`, `usage`, and `costUsd` describe the task; interview measurements
+are separate. Missing cost or usage remains unavailable. Summary and comparison
+output also separate observed task-behavior checks from interview-consistency
+checks; neither replaces manual assessment of the interview. The original
+overall pass flags and comparison deltas still require complete success.
+`taskBehavior.deltas` reports task-only differences when both paired task-behavior
+checks pass and the requested model identities are verified, even if an interview has inconsistent flags. Missing traces or
+check results remain unavailable, and all original failures are retained.
+These are observations, not statistical
+speed guarantees. Compiler cache microbenchmarks need their own controlled
+measurements because model latency and worker-pool routing obscure cache hits.
+
 ### `agent exec` options
 
 - `[message]`: positional prompt text
@@ -173,7 +258,7 @@ This is evaluation-only evidence, not a CI or release gate. Results do not chang
 - `--session-id <id>`: explicit session id
 - `--agent <id>`: agent id; overrides routing bindings
 - `--model <id>`: model override for this run (`provider/model` or model id)
-- `--thinking <level>`: agent thinking level (`off`, `minimal`, `low`, `medium`, `high`, plus provider-supported custom levels such as `xhigh`, `adaptive`, or `max`)
+- `--thinking <level>`: agent thinking level (`off`, `minimal`, `low`, `medium`, `high`, plus provider/runtime-supported levels such as `xhigh`, `adaptive`, `max`, or `ultra`)
 - `--verbose <on|off>`: persist verbose level for the session
 - `--channel <channel>`: delivery channel; omit to use the main session channel
 - `--reply-to <target>`: delivery target override
@@ -219,7 +304,7 @@ openclaw agent --agent ops --message "Run locally" --local
 - `--session-key` selects an explicit session key. Agent-prefixed keys must use `agent:<agent-id>:<session-key>`, and `--agent` must match the key's agent id when both are given. Bare non-sentinel keys scope to `--agent` when supplied, or to the configured default agent otherwise; for example `--agent ops --session-key incident-42` routes to `agent:ops:incident-42`. The literal keys `global` and `unknown` stay unscoped only when no `--agent` is supplied.
 - `--json` reserves stdout for the JSON response; Gateway, plugin, and `--local` diagnostics go to stderr so scripts can parse stdout directly.
 - After transient handshake retries are exhausted, a Gateway timeout or closed connection fails the command; the CLI never silently reruns the turn embedded. Transport loss is ambiguous — the Gateway may have accepted and may still finish the turn — so the stderr hint says to check `openclaw gateway status` and the session transcript before retrying or rerunning with `--local`, to avoid executing the turn twice. When the Gateway accepted the run before the transport error, the hint names the accepted run ID, and `--json` failures keep the canonical `ok: false` envelope with `runId` and `origin: "gateway"` fields alongside `error.type`/`error.message`.
-- `SIGTERM`/`SIGINT` interrupt a waiting Gateway-backed request; if the Gateway already accepted the run, the CLI also sends `chat.abort` for that run id before exiting. `--local` runs receive the same signal but do not send `chat.abort`. A launcher child that terminates from the first forwarded `SIGINT` or `SIGTERM` exits with status 130 or 143, respectively. If the internal run-dedup key already has an active run for this session, the response reports `status: "in_flight"` and the non-JSON CLI prints a stderr diagnostic instead of an empty reply. For external cron/systemd wrappers, keep a hard-kill backstop such as `timeout -k 60 600 openclaw agent ...` so the supervisor can reap the process if shutdown cannot drain.
+- `SIGTERM`/`SIGINT` interrupt a waiting Gateway-backed request; if the Gateway already accepted the run, the CLI also sends `chat.abort` for that run id before exiting. `--local` runs receive the same signal but do not send `chat.abort`. On Unix, startup wrappers preserve the runtime child's actual termination signal, including `SIGKILL` after shutdown escalation; shells report `SIGINT` and `SIGTERM` as statuses 130 and 143. Explicit numeric returns stay numeric, including a handled shutdown returning `0`. Windows retains its numeric termination behavior. If the internal run-dedup key already has an active run for this session, the response reports `status: "in_flight"` and the non-JSON CLI prints a stderr diagnostic instead of an empty reply. For external cron/systemd wrappers, keep a hard-kill backstop such as `timeout -k 60 600 openclaw agent ...` so the supervisor can reap the process if shutdown cannot drain.
 - When this command triggers `models.json` regeneration, SecretRef-managed provider credentials are persisted as non-secret markers (for example env var names, `secretref-env:ENV_VAR_NAME`, or `secretref-managed`), never resolved secret plaintext. Marker writes come from the active source config snapshot, not from resolved runtime secret values.
 
 ## JSON failures

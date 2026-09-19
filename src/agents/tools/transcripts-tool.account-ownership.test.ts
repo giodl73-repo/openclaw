@@ -1,9 +1,12 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
-import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
+import {
+  closeOpenClawStateDatabaseAsync,
+  closeOpenClawStateDatabaseForTest,
+} from "../../state/openclaw-state-db.js";
 import { createTranscriptsAutoStartService } from "../../transcripts/auto-start.js";
-import { activeSessions } from "../../transcripts/capture.js";
+import { clearTranscriptCapturesForTest } from "../../transcripts/capture.test-support.js";
 import type { TranscriptSourceProvider } from "../../transcripts/provider-types.js";
 import { TranscriptsStore } from "../../transcripts/store.js";
 import { createTranscriptsTool } from "./transcripts-tool.js";
@@ -67,9 +70,10 @@ function discordAccountOwnership(
 }
 
 describe("transcripts tool account ownership", () => {
-  afterEach(() => {
+  afterEach(async () => {
+    await clearTranscriptCapturesForTest();
     vi.useRealTimers();
-    activeSessions.clear();
+    await closeOpenClawStateDatabaseAsync();
     closeOpenClawStateDatabaseForTest();
   });
 

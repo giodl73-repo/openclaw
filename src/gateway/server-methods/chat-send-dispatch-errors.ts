@@ -1,7 +1,10 @@
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
+import { describeFailoverError } from "../../agents/failover-error.js";
+import { renderFailoverCodeUserCopy } from "../../agents/failover/user-copy.js";
 import { clearAgentRunContext } from "../../infra/agent-run-registry.js";
 import type { UserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
-import { setGatewayDedupeEntry } from "../agent-turn/agent-job.js";
+import { captureAgentJobSession, setGatewayDedupeEntry } from "../agent-turn/agent-job.js";
+import { ExpectedProfileMismatchError } from "../expected-profile.js";
 import { chatAbortMarkerTimestampMs } from "../server-chat-state.js";
 import { persistGatewaySessionLifecycleEvent } from "../session-lifecycle-state.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "../session-request-agent.js";
@@ -28,12 +31,19 @@ type PendingDispatchLifecycleError = {
 };
 
 /** Finalize a chat.send that throws before detached dispatch owns cleanup. */
+type ChatSendJobAdmission = Pick<
+  AdmittedChatSend,
+  "cleanupAdmittedRun" | "lifecycleGeneration" | "restartSafeAdmission"
+> & {
+  sessionBinding: Pick<
+    AdmittedChatSend["sessionBinding"],
+    "sessionKey" | "sessionId" | "agentId" | "lifecycleGeneration"
+  >;
+};
+
 export async function handleChatSendSetupError(params: {
   cacheResult?: boolean;
-  admission: Pick<
-    AdmittedChatSend,
-    "cleanupAdmittedRun" | "lifecycleGeneration" | "restartSafeAdmission"
-  >;
+  admission: ChatSendJobAdmission;
   context: GatewayRequestContext;
   error: unknown;
   respond: RespondFn;
@@ -42,7 +52,18 @@ export async function handleChatSendSetupError(params: {
 }): Promise<void> {
   const { cleanupAdmittedRun, lifecycleGeneration, restartSafeAdmission } = params.admission;
   const { agentId, clientRunId, sessionKey } = params.session;
-  const errorMessage = String(params.error);
+  const jobSessionBinding = params.admission.sessionBinding;
+  if (params.error instanceof ExpectedProfileMismatchError) {
+    // Selection failure belongs to this request, not the run's recorded outcome.
+    // Release only this admission; never poison a receipt or replay cache.
+    cleanupAdmittedRun();
+    clearAgentRunContext(clientRunId, lifecycleGeneration);
+    params.context.removeChatRun(clientRunId, clientRunId, sessionKey);
+    params.respond(false, undefined, params.error.error);
+    return;
+  }
+  const errorMessage =
+    renderFailoverCodeUserCopy(describeFailoverError(params.error).code) ?? String(params.error);
   const failureDisposition = classifyAcceptedChatSendFailure({
     error: params.error,
     phase: "pre-ack",
@@ -83,6 +104,7 @@ export async function handleChatSendSetupError(params: {
     setGatewayDedupeEntry({
       dedupe: params.context.dedupe,
       key: `chat:${clientRunId}`,
+      session: captureAgentJobSession(jobSessionBinding),
       entry: { ts: Date.now(), ok: false, payload, error },
     });
   }
@@ -100,10 +122,7 @@ export async function handleChatSendSetupError(params: {
 
 /** Own dispatch rejection projection and post-cleanup lifecycle persistence. */
 export function createChatSendDispatchErrorLifecycle(params: {
-  admission: Pick<
-    AdmittedChatSend,
-    "activeRunAbort" | "cleanupAdmittedRun" | "lifecycleGeneration" | "restartSafeAdmission"
-  >;
+  admission: ChatSendJobAdmission & Pick<AdmittedChatSend, "activeRunAbort">;
   context: GatewayRequestContext;
   isAgentRunStarted: () => boolean;
   isQueuedFollowupEnqueued: () => boolean;
@@ -129,12 +148,35 @@ export function createChatSendDispatchErrorLifecycle(params: {
   const { activeRunAbort, cleanupAdmittedRun, lifecycleGeneration, restartSafeAdmission } =
     admission;
   const { agentId, backingSessionId, cfg, clientRunId, now, rawSessionKey, sessionKey } = session;
+  const jobSessionBinding = admission.sessionBinding;
   let pendingDispatchLifecycleError: PendingDispatchLifecycleError | undefined;
   let persistDispatchErrorUserTurn: (() => Promise<void>) | undefined;
   let publishDispatchError: (() => void) | undefined;
 
+  const recordAbortedResult = () => {
+    const abortMarker = context.chatRunState.runs.get(clientRunId)?.abortMarker;
+    if (!activeRunAbort.controller.signal.aborted || abortMarker === undefined) {
+      return;
+    }
+    const endedAt = chatAbortMarkerTimestampMs(abortMarker);
+    setGatewayDedupeEntry({
+      dedupe: context.dedupe,
+      key: `chat:${clientRunId}`,
+      session: captureAgentJobSession(jobSessionBinding),
+      entry: {
+        ts: endedAt,
+        ok: true,
+        payload: buildAbortedChatSendPayload({
+          runId: clientRunId,
+          stopReason: activeRunAbort.entry?.abortStopReason ?? "rpc",
+          endedAt,
+        }),
+      },
+    });
+  };
+
   const handleError = async (err: unknown) => {
-    const errorMessage = String(err);
+    const errorMessage = renderFailoverCodeUserCopy(describeFailoverError(err).code) ?? String(err);
     const failureDisposition =
       params.classifyFailure?.(err) ??
       classifyAcceptedChatSendFailure({ error: err, phase: "post-ack" });
@@ -147,6 +189,7 @@ export function createChatSendDispatchErrorLifecycle(params: {
         setGatewayDedupeEntry({
           dedupe: context.dedupe,
           key: `chat:${clientRunId}`,
+          session: captureAgentJobSession(jobSessionBinding),
           entry: {
             ts: Date.now(),
             ok: true,
@@ -159,6 +202,8 @@ export function createChatSendDispatchErrorLifecycle(params: {
           sessionKey,
           agentId,
         });
+      } else {
+        recordAbortedResult();
       }
       return;
     }
@@ -177,20 +222,7 @@ export function createChatSendDispatchErrorLifecycle(params: {
       // chat.abort has already emitted the canonical terminal lifecycle and
       // retained its registration until that durable projection settles.
       // A competing restart-admission write can strand an acknowledged abort.
-      const endedAt = chatAbortMarkerTimestampMs(abortMarkerAtDispatchReject);
-      setGatewayDedupeEntry({
-        dedupe: context.dedupe,
-        key: `chat:${clientRunId}`,
-        entry: {
-          ts: endedAt,
-          ok: true,
-          payload: buildAbortedChatSendPayload({
-            runId: clientRunId,
-            stopReason: activeRunAbort.entry?.abortStopReason ?? "rpc",
-            endedAt,
-          }),
-        },
-      });
+      recordAbortedResult();
       context.logGateway.warn(
         `chat.send post-dispatch threw after abort for runId=${clientRunId}: ${formatForLog(err)}`,
       );
@@ -265,6 +297,7 @@ export function createChatSendDispatchErrorLifecycle(params: {
         setGatewayDedupeEntry({
           dedupe: context.dedupe,
           key: `chat:${clientRunId}`,
+          session: captureAgentJobSession(jobSessionBinding),
           entry: {
             ts: Date.now(),
             ok: false,
@@ -373,5 +406,5 @@ export function createChatSendDispatchErrorLifecycle(params: {
     }
   };
 
-  return { finalize, handleError };
+  return { finalize, handleError, recordAbortedResult };
 }

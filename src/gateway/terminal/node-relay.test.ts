@@ -1,20 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { withTestTimeout } from "../../../test/helpers/promise.js";
+import { createDeferred, withTestTimeout } from "../../../test/helpers/promise.js";
 import { type NodeInvokeResult, NodeRegistry } from "../node-registry.js";
 import { createNodeRelayBackend } from "./node-relay.js";
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
-
 describe("createNodeRelayBackend", () => {
   it("waits for pairing validation and dispatch instead of the final node exit", async () => {
-    const pairingState = deferred<{ identity: string; generation: string }>();
+    const pairingState = createDeferred<{ identity: string; generation: string }>();
     const frames: string[] = [];
     const resolveCurrentPairingState = vi.fn(async () => await pairingState.promise);
     const registry = new NodeRegistry({
@@ -78,7 +70,7 @@ describe("createNodeRelayBackend", () => {
     "codex.terminal.start.v1",
     "anthropic.claude.terminal.start.v1",
   ])("%s relays progress, input, resize, cancellation, and exit", async (command) => {
-    const invokeResult = deferred<NodeInvokeResult>();
+    const invokeResult = createDeferred<NodeInvokeResult>();
     let onProgress: ((chunk: string) => void) | undefined;
     let signal: AbortSignal | undefined;
     const sendInvokeInput = vi.fn();
@@ -248,7 +240,12 @@ describe("createNodeRelayBackend", () => {
     expect(surrogateData).toHaveBeenCalledWith("y".repeat(capChars - 1));
   });
 
-  it("never splits a surrogate pair at the input chunk boundary", async () => {
+  it.each([
+    ["a".repeat(2047), "😀b"],
+    ["界".repeat(682), "界b"],
+    [`\ud800x\udc00${"a".repeat(2041)}`, "a".repeat(7)],
+    ["\0".repeat(2048), "\u001b[31m"],
+  ])("preserves UTF-8-bounded input chunks %#", async (firstChunk, secondChunk) => {
     const sendInvokeInput = vi.fn();
     const registry = {
       invoke: vi.fn((params: { onDispatchReady?: (id: string) => void }) => {
@@ -265,7 +262,8 @@ describe("createNodeRelayBackend", () => {
       command: "codex.terminal.resume.v1",
       params: {},
     });
-    const input = `${"a".repeat(2047)}😀b`;
+    const expectedChunks = [firstChunk, secondChunk];
+    const input = expectedChunks.join("");
 
     backend.write(input);
 
@@ -273,6 +271,7 @@ describe("createNodeRelayBackend", () => {
       (call) => (call[1] as { kind: "data"; data: string }).data,
     );
     expect(chunks.join("")).toBe(input);
-    expect(chunks).toEqual(["a".repeat(2047), "😀b"]);
+    expect(chunks).toEqual(expectedChunks);
+    expect(chunks.every((chunk) => Buffer.byteLength(chunk, "utf8") <= 2048)).toBe(true);
   });
 });

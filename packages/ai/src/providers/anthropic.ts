@@ -366,7 +366,6 @@ export const streamSimpleAnthropic: StreamFunction<
     return streamAnthropic(model, context, {
       ...base,
       thinkingEnabled: mandatoryAdaptiveThinking,
-      ...(mandatoryAdaptiveThinking ? { effort: "high" as const } : {}),
     } satisfies AnthropicCompactionOptions);
   }
 
@@ -385,7 +384,7 @@ export const streamSimpleAnthropic: StreamFunction<
   // Do not coerce to 0 here, or the thinking budget would become the entire max_tokens value.
   const adjusted = adjustMaxTokensForThinking(
     base.maxTokens,
-    model.maxTokens,
+    model.maxTokens ?? base.maxTokens,
     reasoning,
     options?.thinkingBudgets,
   );

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { createDeferredCore, type Deferred } from "../../shared/deferred.js";
+import { truncateUtf8Prefix } from "../../utils/utf8-truncate.js";
 import type { ConnectedRfbStream, DesktopRfbAttachment } from "./attachment.js";
 
 const DEFAULT_LINGER_MS = 60_000;
@@ -23,6 +24,7 @@ export class DesktopSessionStoppedError extends Error {
 
 type DesktopSessionObserver = {
   control: boolean;
+  operatorName?: string;
   /** Epoch the observer token was minted against; a stale token must not reach a newer entry. */
   ownerEpoch: number;
   close(code: number, reason: string): void;
@@ -60,6 +62,7 @@ type DesktopSessionEntry = {
   readySettled: boolean;
   observers: Set<ObserverEntry>;
   observerReservations: Set<symbol>;
+  activities: Set<symbol>;
   controller?: ObserverEntry;
   lingerTimer?: ReturnType<typeof setTimeout>;
   stopped: boolean;
@@ -78,6 +81,18 @@ export function createDesktopSessionRegistry(
   const entries = new Map<string, DesktopSessionEntry>();
   const owners = new Set<DesktopSessionEntry>();
   const claimedOwnerEpochs = new Map<string, number>();
+  const controlListeners = new Set<{
+    sourceKey: string;
+    ownerEpoch: number;
+    changed(controlled: boolean): void;
+  }>();
+  const notifyControl = (entry: DesktopSessionEntry) => {
+    for (const listener of controlListeners) {
+      if (listener.sourceKey === entry.sourceKey && listener.ownerEpoch === entry.ownerEpoch) {
+        listener.changed(entry.controller !== undefined);
+      }
+    }
+  };
 
   const claimOwnerEpoch = (sourceKey: string, ownerEpoch: number): boolean => {
     const claimedEpoch = claimedOwnerEpochs.get(sourceKey);
@@ -123,12 +138,14 @@ export function createDesktopSessionRegistry(
       }
       entry.observers.clear();
       entry.controller = undefined;
+      notifyControl(entry);
       for (const pending of entry.pendingStreams.values()) {
         pending.reservation.release();
         pending.stream.destroy();
       }
       entry.pendingStreams.clear();
       entry.observerReservations.clear();
+      entry.activities.clear();
       if (!entry.readySettled) {
         entry.readySettled = true;
         entry.ready.reject(new DesktopSessionStoppedError());
@@ -167,7 +184,12 @@ export function createDesktopSessionRegistry(
   };
 
   const scheduleLinger = (entry: DesktopSessionEntry): void => {
-    if (!isCurrent(entry) || entry.observers.size > 0 || entry.observerReservations.size > 0) {
+    if (
+      !isCurrent(entry) ||
+      entry.observers.size > 0 ||
+      entry.observerReservations.size > 0 ||
+      entry.activities.size > 0
+    ) {
       return;
     }
     clearTimeout(entry.lingerTimer);
@@ -203,6 +225,7 @@ export function createDesktopSessionRegistry(
       readySettled: false,
       observers: new Set(),
       observerReservations: new Set(),
+      activities: new Set(),
       pendingStreams: new Map(),
       stopped: false,
       ...(request.teardown ? { teardown: request.teardown } : {}),
@@ -271,12 +294,17 @@ export function createDesktopSessionRegistry(
       previous.released = true;
       entry.observers.delete(previous);
       entry.controller = undefined;
-      closeObserver(previous, 4000, "control-taken");
+      // WebSocket close reasons allow 123 UTF-8 bytes, including the takeover marker.
+      const reason = observer.operatorName
+        ? `control-taken:${observer.operatorName}`
+        : "control-taken";
+      closeObserver(previous, 4000, truncateUtf8Prefix(reason, 123));
     }
     const attached: ObserverEntry = { ...observer, released: false };
     entry.observers.add(attached);
     if (attached.control) {
       entry.controller = attached;
+      notifyControl(entry);
     }
     return {
       release() {
@@ -287,6 +315,7 @@ export function createDesktopSessionRegistry(
         entry.observers.delete(attached);
         if (entry.controller === attached) {
           entry.controller = undefined;
+          notifyControl(entry);
         }
         scheduleLinger(entry);
       },
@@ -318,6 +347,26 @@ export function createDesktopSessionRegistry(
         released = true;
         entry.observerReservations.delete(reservationId);
         scheduleLinger(entry);
+      },
+    };
+  }
+
+  /** Keep an active desktop consumer alive independently of browser observers. */
+  function retainActivity(sourceKey: string, ownerEpoch: number) {
+    const entry = entries.get(sourceKey);
+    if (!entry || !entry.readySettled || entry.stopped || entry.ownerEpoch !== ownerEpoch) {
+      return undefined;
+    }
+    const activity = Symbol("desktop-activity");
+    entry.activities.add(activity);
+    clearTimeout(entry.lingerTimer);
+    entry.lingerTimer = undefined;
+    return {
+      isCurrent: () => isCurrent(entry) && entry.activities.has(activity),
+      release() {
+        if (entry.activities.delete(activity)) {
+          scheduleLinger(entry);
+        }
       },
     };
   }
@@ -407,6 +456,32 @@ export function createDesktopSessionRegistry(
     claimStream,
     hasPendingStream,
     reserveObserver,
+    retainActivity,
+    hasActivity: (sourceKey: string, ownerEpoch: number) => {
+      const entry = entries.get(sourceKey);
+      return (
+        entry?.ownerEpoch === ownerEpoch &&
+        !entry.stopped &&
+        (entry.observers.size > 0 ||
+          entry.observerReservations.size > 0 ||
+          entry.activities.size > 0)
+      );
+    },
+    hasController: (sourceKey: string, ownerEpoch: number) => {
+      const entry = entries.get(sourceKey);
+      return entry?.ownerEpoch === ownerEpoch && !entry.stopped && entry.controller !== undefined;
+    },
+    onControlChanged: (
+      sourceKey: string,
+      ownerEpoch: number,
+      changed: (controlled: boolean) => void,
+    ) => {
+      const listener = { sourceKey, ownerEpoch, changed };
+      controlListeners.add(listener);
+      return () => {
+        controlListeners.delete(listener);
+      };
+    },
     claimOwnerEpoch,
     isOwnerEpochCurrent: (sourceKey: string, ownerEpoch: number) =>
       claimedOwnerEpochs.get(sourceKey) === ownerEpoch,

@@ -26,6 +26,7 @@ import {
 import { t } from "../../i18n/index.ts";
 import { resolveScrollBehavior } from "../../lib/scroll-behavior.ts";
 import { APPEARANCE_SETTINGS_TARGET_IDS } from "./route-data.ts";
+import { renderSessionSources } from "./session-sources.ts";
 import {
   renderChatPreferencesSection,
   renderLanguageSection,
@@ -173,7 +174,7 @@ function renderTypography(props: ConfigProps, themeLabel: string) {
     labelStyle: `font-family: ${metadata.stack}`,
   }));
   return html`
-    <section class="settings-section">
+    <section id=${APPEARANCE_SETTINGS_TARGET_IDS.typography} class="settings-section">
       <div class="settings-section__header">
         <h2 class="settings-section__heading">${t("configView.appearance.typography")}</h2>
       </div>
@@ -580,7 +581,7 @@ export function renderAppearanceSection(
       </section>
 
       ${renderSidebarPreferencesSection(props)} ${renderLobsterPetSection(props)}
-      ${renderChatPreferencesSection(props, inputs.chatMessageWidth)}
+      ${renderChatPreferencesSection(props, inputs.chatMessageWidth)} ${renderSessionSources(props)}
 
       <section id=${APPEARANCE_SETTINGS_TARGET_IDS.connection} class="settings-section">
         <div class="settings-section__header">

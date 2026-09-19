@@ -27,6 +27,7 @@ import {
 import {
   createCanonicalSubagentRunFixture,
   createSubagentRegistryTestDeps,
+  settleSubagentRegistryPersistenceWork,
 } from "./subagent-registry.persistence.test-support.js";
 import {
   activateSubagentRegistry,
@@ -81,6 +82,7 @@ export function useSubagentRestartRecoveryFixture() {
 
   const dispatchAgent = vi.fn(acceptRecoveryDispatch);
   const gatewayRuntime: GatewayRecoveryRuntime = {
+    dispatchSessionMethod: vi.fn(),
     dispatchAgent: dispatchAgent as GatewayRecoveryRuntime["dispatchAgent"],
     waitForAgent: vi.fn(async () => ({
       status: "pending",
@@ -118,9 +120,10 @@ export function useSubagentRestartRecoveryFixture() {
   });
 
   afterEach(async () => {
+    await settleSubagentRegistryPersistenceWork();
     testing.setDepsForTest();
     resetSubagentRegistryForTests({ persist: false });
-    await cleanupSessionStateForTest();
+    await cleanupSessionStateForTest({ stateDir: tempStateDir ?? undefined });
     resetTaskRegistryForTests({ persist: false });
     resetTaskFlowRegistryForTests({ persist: false });
     if (tempStateDir) {

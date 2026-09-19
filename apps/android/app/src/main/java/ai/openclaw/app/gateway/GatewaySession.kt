@@ -391,9 +391,12 @@ class GatewaySession(
     val endpointStableId: String,
     private val isCurrentImpl: () -> Boolean = { true },
     private val commitIfCurrentImpl: ((block: () -> Unit) -> Boolean)? = null,
+    private val advertisedMethods: Set<String> = emptySet(),
     private val requestImpl: suspend (method: String, paramsJson: String?, timeoutMs: Long, withEnqueue: (() -> Unit) -> Unit) -> String,
   ) {
     fun isCurrent(): Boolean = isCurrentImpl()
+
+    fun supportsMethod(method: String): Boolean = method in advertisedMethods
 
     fun commitIfCurrent(block: () -> Unit): Boolean {
       commitIfCurrentImpl?.let { return it(block) }
@@ -432,6 +435,7 @@ class GatewaySession(
     val options: GatewayConnectOptions,
     val tls: GatewayTlsParams?,
     val bootstrapHandoff: GatewayBootstrapHandoff?,
+    val onReady: (() -> Unit)?,
   ) {
     var recoveringStoredBootstrap = false
 
@@ -475,10 +479,11 @@ class GatewaySession(
     options: GatewayConnectOptions,
     tls: GatewayTlsParams? = null,
     bootstrapHandoff: GatewayBootstrapHandoff? = null,
+    onReady: (() -> Unit)? = null,
   ) {
     val connectionToClose: Connection?
     synchronized(notificationLock) {
-      val target = DesiredConnection(endpoint, token, bootstrapToken, password, options, tls, bootstrapHandoff)
+      val target = DesiredConnection(endpoint, token, bootstrapToken, password, options, tls, bootstrapHandoff, onReady)
       synchronized(lifecycleLock) {
         desired?.cleanupDeadline?.cancel()
         desired = target
@@ -803,6 +808,18 @@ class GatewaySession(
     return GatewayLoadedImage(bytes = loaded.bytes, mimeType = loaded.mimeType)
   }
 
+  internal suspend fun loadSourceFavicon(
+    expectedEndpointStableId: String,
+    config: GatewaySourcePreviewConfig,
+    hostname: String,
+    withEnqueue: (() -> Unit) -> Unit,
+  ): GatewayLoadedImage? {
+    if (!config.automaticallyFetchFavicons) return null
+    val conn = readyConnection(expectedEndpointStableId) ?: return null
+    val image = conn.loadSourceFavicon(config, hostname, guardRequestEnqueue(conn, withEnqueue))
+    return synchronized(lifecycleLock) { image.takeIf { currentConnection === conn && conn.isReady() } }
+  }
+
   suspend fun loadMediaArtifact(
     expectedEndpointStableId: String?,
     sessionKey: String,
@@ -873,6 +890,7 @@ class GatewaySession(
       val conn = readyConnection(expectedEndpointStableId) ?: return@synchronized null
       RequestLease(
         endpointStableId = conn.target.endpoint.stableId,
+        advertisedMethods = conn.advertisedMethods,
         isCurrentImpl = { currentConnection === conn && conn.isReady() },
         commitIfCurrentImpl = { block ->
           synchronized(lifecycleLock) {
@@ -1012,6 +1030,9 @@ class GatewaySession(
   private inner class Connection(
     val target: DesiredConnection,
   ) {
+    var advertisedMethods: Set<String> = emptySet()
+      private set
+
     private val connectionJob = SupervisorJob(scope.coroutineContext[Job])
     private val connectionScope = CoroutineScope(scope.coroutineContext + connectionJob)
     private val state = AtomicReference(ConnectionState.CONNECTING)
@@ -1038,6 +1059,8 @@ class GatewaySession(
         }
       }
     private val client: OkHttpClient = buildClient()
+    private val sourceFaviconLoader by lazy { GatewaySourceFaviconLoader(client) }
+    private var controlUiReadCredentials: List<String> = emptyList()
     private val listener = Listener()
     private var socket: WebSocket? = null
 
@@ -1163,6 +1186,20 @@ class GatewaySession(
         retryPreparingPlayback = playbackRendition,
       )
     }
+
+    suspend fun loadSourceFavicon(
+      config: GatewaySourcePreviewConfig,
+      hostname: String,
+      withEnqueue: (() -> Unit) -> Unit,
+    ): GatewayLoadedImage? =
+      sourceFaviconLoader.load(
+        gatewayUrl = "${if (tlsConfig != null) "https" else "http"}://${formatGatewayAuthority(target.endpoint.host, target.endpoint.port)}",
+        basePath = config.basePath,
+        hostname = hostname,
+        headers = mediaTransportHeaders(),
+        credentials = controlUiReadCredentials,
+        withEnqueue = withEnqueue,
+      )
 
     fun bufferedMedia(
       bytes: ByteArray,
@@ -1349,7 +1386,11 @@ class GatewaySession(
 
     fun isReady(): Boolean = state.get() == ConnectionState.READY
 
-    fun markReady(): Boolean = state.compareAndSet(ConnectionState.CONNECTING, ConnectionState.READY)
+    fun markReady(methods: Set<String>?): Boolean {
+      if (!state.compareAndSet(ConnectionState.CONNECTING, ConnectionState.READY)) return false
+      advertisedMethods = methods.orEmpty().toSet()
+      return true
+    }
 
     fun retire(): WebSocket? =
       synchronized(lifecycleLock) {
@@ -1641,6 +1682,11 @@ class GatewaySession(
       val authObj = obj["auth"].asObjectOrNull()
       val deviceToken = authObj?.get("deviceToken").asStringOrNull()
       val authRole = authObj?.get("role").asStringOrNull() ?: target.options.role
+      controlUiReadCredentials =
+        listOfNotNull(deviceToken, selectedAuth.authDeviceToken, selectedAuth.authToken, selectedAuth.authPassword)
+          .map(String::trim)
+          .filter(String::isNotEmpty)
+          .distinct()
       val authScopes =
         authObj
           ?.get("scopes")
@@ -2124,12 +2170,16 @@ class GatewaySession(
       val connected = conn.connect()
       synchronized(notificationLock) {
         synchronized(lifecycleLock) {
-          if (currentConnection !== conn || desired !== target || job?.isActive != true || !conn.markReady()) return@withContext
+          if (currentConnection !== conn || desired !== target || job?.isActive != true || !conn.markReady(connected.hello.methods)) return@withContext
           // Ready metadata precedes callbacks; retries requested by a callback remain queued.
           pluginSurfaceUrls = connected.pluginSurfaceUrls
           sessionRouting = connected.sessionRouting
           drainReconnectSignals()
           onConnected(connected.hello)
+          // The callback can replace or disconnect this intent; only its current socket publishes readiness.
+          if (currentConnection === conn && desired === target && job?.isActive == true && conn.isReady()) {
+            target.onReady?.invoke()
+          }
         }
       }
       conn.awaitClose()

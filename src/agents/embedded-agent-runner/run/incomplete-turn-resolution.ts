@@ -1,4 +1,5 @@
 /** Resolves incomplete-turn payloads, continuation evidence, and run liveness. */
+import { hasOnlyAssistantReasoningContent } from "@openclaw/ai/internal/shared";
 import { isProviderRefusalAssistantError } from "@openclaw/llm-core/diagnostics";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
@@ -13,7 +14,6 @@ import { formatUserFacingAssistantErrorText } from "../../embedded-agent-helpers
 import type { MessagingToolSend } from "../../embedded-agent-messaging.types.js";
 import { renderAuthProfileFailoverCopy } from "../../failover/user-copy.js";
 import { buildProviderAuthRecoveryHint } from "../../provider-auth-recovery-hint.js";
-import { hasOnlyAssistantReasoningContent } from "../../replay-turn-classification.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import { hasCommittedMessagingToolDeliveryEvidence } from "../delivery-evidence.js";
 import type { EmbeddedRunLivenessState } from "../types.js";
@@ -24,7 +24,7 @@ import {
 } from "./attempt-terminal-evidence.js";
 import {
   classifyAssistantTurn,
-  hasOnlySilentAssistantReply,
+  hasExplicitSilentAssistantReply,
   isIncompleteTerminalAssistantTurn,
   joinAssistantTexts,
   type IncompleteTurnAttempt,
@@ -101,7 +101,7 @@ export function resolveIncompleteTurnPayloadText(params: {
   }
 
   if (
-    hasOnlySilentAssistantReply(params.attempt.assistantTexts) ||
+    hasExplicitSilentAssistantReply(params.attempt) ||
     params.attempt.hasToolMediaBlockReply ||
     hasCommittedMessagingToolDeliveryEvidence(params.attempt)
   ) {
@@ -177,7 +177,7 @@ export function shouldRetryMissingAssistantTurn(params: {
     return false;
   }
 
-  if (hasOnlySilentAssistantReply(params.attempt.assistantTexts)) {
+  if (hasExplicitSilentAssistantReply(params.attempt)) {
     return false;
   }
 
@@ -331,11 +331,14 @@ export function resolveReplayInvalidFlag(params: {
   incompleteTurnText?: string | null;
 }): boolean {
   const terminal = projectAgentRunAttemptTerminal(params.attempt.terminal);
+  const replaySafeProviderRefusal =
+    params.attempt.replayMetadata.replaySafe &&
+    isProviderRefusalAssistantError(resolveCurrentAttemptAssistant(params.attempt));
   return (
     !params.attempt.replayMetadata.replaySafe ||
     terminal.promptErrorSource === "compaction" ||
     terminal.timedOutDuringCompaction ||
-    Boolean(params.incompleteTurnText)
+    (Boolean(params.incompleteTurnText) && !replaySafeProviderRefusal)
   );
 }
 

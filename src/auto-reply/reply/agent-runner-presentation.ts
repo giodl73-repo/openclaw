@@ -13,7 +13,7 @@ import {
 } from "../tokens.js";
 import type { ReplyPayload } from "../types.js";
 import type { AgentTurnParams } from "./agent-runner-execution.types.js";
-import { createBlockReplyDeliveryHandler } from "./reply-delivery.js";
+import { createBlockReplyDeliveryHandler, type DirectBlockDelivery } from "./reply-delivery.js";
 import type { ReplyMediaContext } from "./reply-media-paths.js";
 import { hasCommittedReplyOperationOutcome } from "./reply-run-registry.js";
 
@@ -35,8 +35,7 @@ type AgentTurnPresentation = {
 export function createAgentTurnPresentation(params: {
   turn: AgentTurnParams;
   replyMediaContext: ReplyMediaContext;
-  directlySentBlockKeys: Set<string>;
-  directlySentBlockPayloads: Array<ReplyPayload | undefined>;
+  directBlockDeliveries: DirectBlockDelivery[];
   heartbeatState: { didLogStrip: boolean };
 }): AgentTurnPresentation {
   const classifyStreamingPartial = (payload: ReplyPayload): { text?: string; skip: boolean } => {
@@ -146,8 +145,7 @@ export function createAgentTurnPresentation(params: {
         commentaryPayloadsEnabled: params.turn.opts?.commentaryPayloadsEnabled,
         blockStreamingEnabled: params.turn.blockStreamingEnabled,
         blockReplyPipeline,
-        directlySentBlockKeys: params.directlySentBlockKeys,
-        directlySentBlockPayloads: params.directlySentBlockPayloads,
+        directBlockDeliveries: params.directBlockDeliveries,
       })
     : undefined;
 

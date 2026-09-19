@@ -3,6 +3,7 @@ import { normalizeThinkLevel } from "../../../../src/auto-reply/thinking.shared.
 import type { FastMode, GatewaySessionRow, SessionsListResult } from "../../api/types.ts";
 import { resolveChatModelOverrideValue } from "../../lib/chat/model-select-state.ts";
 import { formatUiError } from "../../lib/format-error.ts";
+import { isSessionRuntimePinned } from "../../lib/model-runtime-choice.ts";
 import { isSessionRunActive } from "../../lib/session-run-state.ts";
 import {
   DEFAULT_SESSION_LIST_QUERY,
@@ -205,9 +206,6 @@ export function flushChatQueueAfterIdleSessionReconciliation(
   previousSessionsResult: SessionsListResult | null | undefined,
   flushQueue: () => void,
 ) {
-  if (host.chatQueue.length === 0) {
-    return;
-  }
   void Promise.allSettled([historyRefresh, sessionsRefresh]).then((results) => {
     const historyRefreshSettled = results[0];
     const sessionsRefreshSettled = results[1];
@@ -375,6 +373,7 @@ export async function switchChatModel(
   host: ChatModelSettingsHost,
   nextModel: string,
   targetSessionKey = host.sessionKey,
+  agentRuntime?: string | null,
 ): Promise<boolean> {
   if (!host.client || !host.connected) {
     return false;
@@ -392,7 +391,16 @@ export async function switchChatModel(
     sessionKey: targetSessionKey,
     sessionsResult: host.sessionsResult ?? null,
   });
-  if (currentOverride === nextModel) {
+  const runtimeSelection =
+    activeRow?.runtimeSelectionLocked && agentRuntime === null ? undefined : agentRuntime;
+  const runtimeUnchanged =
+    runtimeSelection === undefined ||
+    (!activeRow?.runtimeSelectionLocked &&
+      (runtimeSelection === null
+        ? !isSessionRuntimePinned(activeRow?.agentRuntime)
+        : isSessionRuntimePinned(activeRow?.agentRuntime) &&
+          activeRow?.agentRuntime?.id === runtimeSelection));
+  if (currentOverride === nextModel && runtimeUnchanged) {
     return true;
   }
   const modelOwnerAgentId = scopedAgentParamsForSession(host, targetSessionKey).agentId;
@@ -415,6 +423,7 @@ export async function switchChatModel(
         targetSessionKey,
         {
           model: nextModel || null,
+          ...(runtimeSelection !== undefined ? { agentRuntime: runtimeSelection } : {}),
         },
         {
           ...scopedAgentParamsForSession(host, targetSessionKey),

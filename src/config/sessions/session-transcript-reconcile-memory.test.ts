@@ -1,6 +1,7 @@
 import fs from "node:fs";
-import { Worker, type WorkerOptions } from "node:worker_threads";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Worker } from "node:worker_threads";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred, withTestTimeout } from "../../../test/helpers/promise.js";
 import {
   closeOpenClawAgentDatabaseByPath,
@@ -34,7 +35,14 @@ import {
   waitForSessionTranscriptIndexReconcilesInStateDir,
   waitForSessionTranscriptProjection,
 } from "./session-transcript-reconcile.js";
+import { useReconcileWorkerObserver } from "./session-transcript-reconcile.test-support.js";
+import { transcriptMessage } from "./transcript-message.test-support.js";
 
+vi.mock("node:worker_threads", async () =>
+  (await import("./session-transcript-reconcile.test-support.js")).createObservedWorkerThreads(),
+);
+
+const observer = useReconcileWorkerObserver();
 const agentId = "secondary";
 const sessionId = "memory-reconcile";
 const sessionKey = "agent:secondary:dashboard:incognito-reconcile";
@@ -86,17 +94,12 @@ describe("incognito transcript reconciliation", () => {
       const { scope, options } = target(environment === "ambient" ? undefined : explicit.env);
       const turn = await persistSessionTranscriptTurn(scope, {
         messages: [
-          { eventId: "root", parentId: null, message: { role: "user", content: "root" } },
-          {
-            eventId: "abandoned",
-            parentId: "root",
-            message: { role: "assistant", content: "🦞".repeat(262_144) },
-          },
-          {
-            eventId: "active",
-            parentId: "root",
-            message: { role: "assistant", content: "active" },
-          },
+          transcriptMessage("root", null, { role: "user", content: "root" }),
+          transcriptMessage("abandoned", "root", {
+            role: "assistant",
+            content: "🦞".repeat(262_144),
+          }),
+          transcriptMessage("active", "root", { role: "assistant", content: "active" }),
         ],
         touchSessionEntry: false,
       });
@@ -238,10 +241,14 @@ describe("incognito transcript reconciliation", () => {
       const database = openOpenClawAgentDatabase(options);
       const blocked = createDeferred();
       const release = createDeferred();
-      const blocker = runExclusiveSqliteSessionWrite(options, async () => {
-        blocked.resolve();
-        await release.promise;
-      });
+      const blocker = runExclusiveSqliteSessionWrite(
+        options,
+        async () => {
+          blocked.resolve();
+          await release.promise;
+        },
+        "sessions.transcript-index.preflight",
+      );
       await blocked.promise;
       let pending: Promise<unknown>;
       if (mode === "direct") {
@@ -284,26 +291,27 @@ describe("incognito transcript reconciliation", () => {
       const release = createDeferred();
       let blocker: Promise<void> | undefined;
       let worker: Worker | undefined;
-      const params = {
-        ...options,
-        createWorker: (filename: string | URL, workerOptions: WorkerOptions) => {
-          worker = new Worker(filename, workerOptions);
-          worker.on("message", (workerMessage: { type: string }) => {
-            if (workerMessage.type === (stage === "pending" ? "active-chunk" : stage) && !blocker) {
-              if (stage === "pending") {
-                startSessionTranscriptIndexReconcile(params);
-              }
-              // Enter the real FIFO ahead of the owner handler, then dispose
-              // immediately before its queued write could acquire a database.
-              blocker = runExclusiveSqliteSessionWrite(options, async () => {
+      const params = options;
+      observer.onTask = ({ worker: created, observeMessage }) => {
+        worker = created;
+        observeMessage((workerMessage: { type: string }) => {
+          if (workerMessage.type === (stage === "pending" ? "active-chunk" : stage) && !blocker) {
+            if (stage === "pending") {
+              startSessionTranscriptIndexReconcile(params);
+            }
+            // Enter the real FIFO ahead of the owner handler, then dispose
+            // immediately before its queued write could acquire a database.
+            blocker = runExclusiveSqliteSessionWrite(
+              options,
+              async () => {
                 blocked.resolve();
                 await release.promise;
                 closeOpenClawAgentDatabaseByPath(database.path);
-              });
-            }
-          });
-          return worker;
-        },
+              },
+              "sessions.transcript-index.preflight",
+            );
+          }
+        });
       };
       let pending: Promise<unknown>;
       if (stage === "pending") {
@@ -332,7 +340,7 @@ describe("incognito transcript reconciliation", () => {
     20_000,
   );
 
-  it("joins the final memory sweep after the worker exits naturally", async () => {
+  it("joins the final memory sweep after the pooled task completes", async () => {
     const { scope, options } = target(explicit.env);
     await replaceTranscriptEvents(scope, [message("seed")]);
     const database = openOpenClawAgentDatabase(options);
@@ -341,27 +349,32 @@ describe("incognito transcript reconciliation", () => {
       .run(sessionId);
     const blocked = createDeferred();
     const release = createDeferred();
-    const exited = createDeferred<number>();
+    const completed = createDeferred();
     let blocker: Promise<void> | undefined;
     let worker: Worker | undefined;
     let settled = false;
-    const outcome = reconcileSessionTranscriptIndexes({
-      ...options,
-      createWorker: (filename, workerOptions) => {
-        worker = new Worker(filename, workerOptions);
-        worker.once("exit", exited.resolve);
-        worker.on("message", (workerMessage: { type: string }) => {
-          if (workerMessage.type === "done") {
-            // Memory's port can close while its final parent write waits in the FIFO.
-            blocker = runExclusiveSqliteSessionWrite(options, async () => {
+    observer.onTask = ({ worker: created, taskId, observeMessage }) => {
+      worker = created;
+      worker.on("message", (reply: { taskId: number; status: string }) => {
+        if (reply.taskId === taskId && reply.status === "ok") {
+          completed.resolve();
+        }
+      });
+      observeMessage((workerMessage: { type: string }) => {
+        if (workerMessage.type === "done") {
+          // Memory's port can close while its final parent write waits in the FIFO.
+          blocker = runExclusiveSqliteSessionWrite(
+            options,
+            async () => {
               blocked.resolve();
               await release.promise;
-            });
-          }
-        });
-        return worker;
-      },
-    }).then(
+            },
+            "sessions.transcript-index.preflight",
+          );
+        }
+      });
+    };
+    const outcome = reconcileSessionTranscriptIndexes(options).then(
       (value) => {
         settled = true;
         return { value };
@@ -373,10 +386,8 @@ describe("incognito transcript reconciliation", () => {
     );
     try {
       await withTestTimeout(blocked.promise, 10_000, "memory final sweep did not reach its fence");
-      expect(
-        await withTestTimeout(exited.promise, 10_000, "memory worker did not exit naturally"),
-      ).toBe(0);
-      expect(worker?.threadId).toBe(-1);
+      await withTestTimeout(completed.promise, 10_000, "memory task did not complete");
+      expect(worker?.threadId).toBeGreaterThan(0);
       expect(settled).toBe(false);
     } finally {
       release.resolve();
@@ -401,51 +412,56 @@ describe("incognito transcript reconciliation", () => {
       .prepare("UPDATE session_transcript_index_state SET needs_rebuild = 1 WHERE session_id = ?")
       .run(sessionId);
     const joined = createDeferred();
-    const release = createDeferred();
-    const workers: Worker[] = [];
-    startSessionTranscriptIndexReconcile({
-      ...options,
-      createWorker: (filename, workerOptions) => {
-        const worker = new Worker(filename, workerOptions);
-        workers.push(worker);
-        if (workers.length === 1) {
-          const terminate = worker.terminate.bind(worker);
-          worker.terminate = async () => {
-            const code = await terminate();
+    const workers = new Set<Worker>();
+    let tasks = 0;
+    let finishPrevious: (() => void) | undefined;
+    observer.onTask = ({ worker, taskId }) => {
+      workers.add(worker);
+      tasks += 1;
+      if (tasks === 1) {
+        const emit = worker.emit.bind(worker);
+        worker.emit = (...args: Parameters<typeof emit>) => {
+          const [event, reply] = args;
+          if (
+            event === "message" &&
+            isRecord(reply) &&
+            reply.taskId === taskId &&
+            reply.status === "ok"
+          ) {
+            finishPrevious = () => {
+              emit(...args);
+            };
             joined.resolve();
-            await release.promise;
-            return code;
-          };
-        }
-        return worker;
-      },
-    });
+            return true;
+          }
+          return emit(...args);
+        };
+      }
+    };
+    startSessionTranscriptIndexReconcile(options);
     const pending = waitForSessionTranscriptIndexReconcile(options);
     try {
       await withTestTimeout(joined.promise, 10_000, "old memory worker did not settle");
       expect(state()).toEqual({ needs_rebuild: 0 });
-      expect(workers[0]?.threadId).toBe(-1);
+      await runExclusiveSqliteSessionWrite(
+        options,
+        async () => undefined,
+        "sessions.transcript-index.preflight",
+      );
+      expect([...workers][0]?.threadId).toBeGreaterThan(0);
       closeOpenClawAgentDatabaseByPath(database.path);
       await persistSessionTranscriptTurn(scope, {
         messages: [
-          { eventId: "root", parentId: null, message: { role: "user", content: "root" } },
-          {
-            eventId: "abandoned",
-            parentId: "root",
-            message: { role: "assistant", content: "abandoned" },
-          },
-          {
-            eventId: "active",
-            parentId: "root",
-            message: { role: "assistant", content: "active" },
-          },
+          transcriptMessage("root", null, { role: "user", content: "root" }),
+          transcriptMessage("abandoned", "root", { role: "assistant", content: "abandoned" }),
+          transcriptMessage("active", "root", { role: "assistant", content: "active" }),
         ],
         touchSessionEntry: false,
       });
       expect(getOpenClawAgentDatabaseIfOpen(options)).not.toBe(database);
       expect(state()).toEqual({ needs_rebuild: 1 });
     } finally {
-      release.resolve();
+      finishPrevious?.();
       await pending;
     }
     expect(state()).toEqual({ needs_rebuild: 0 });
@@ -454,7 +470,9 @@ describe("incognito transcript reconciliation", () => {
         ({ event }) => event,
       ),
     ).toEqual([expect.objectContaining({ id: "root" }), expect.objectContaining({ id: "active" })]);
-    expect(workers.map((worker) => worker.threadId)).toEqual([-1, -1]);
+    expect(tasks).toBe(2);
+    expect(workers.size).toBe(1);
+    expect([...workers][0]?.threadId).toBeGreaterThan(0);
     expectNoDiskState();
   }, 20_000);
 });

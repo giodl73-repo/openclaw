@@ -50,6 +50,9 @@ import { redactToolDetail } from "../logging/redact.js";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
 import { truncateUtf16Safe } from "../utils.js";
 
+export { projectAgentActivityItem } from "../agents/agent-activity-presentation.js";
+export { projectAgentToolActivity } from "../infra/agent-activity-events.js";
+
 /** Default truncation limit for user-facing tool progress output. */
 export const TOOL_PROGRESS_OUTPUT_MAX_CHARS = 8_000;
 
@@ -140,6 +143,8 @@ export type { AgentHarnessQuestionGatewayCall } from "../agents/harness/gateway-
 type EmbeddedRunAttemptParamsBase = Omit<
   CoreEmbeddedRunAttemptParams,
   | "admittedRunContext"
+  | "disableToolSearch"
+  | "sessionReadScopeKey"
   | "authoredContextTokenCap"
   | "contextEngineLogicalTurnLease"
   | "onContextEngineTurnCandidate"
@@ -298,9 +303,9 @@ export {
   resolveMainSessionDelegationMode,
 } from "../agents/delegation-guidance.js";
 export { buildHarnessVisibleReplyGuidance } from "../auto-reply/source-reply-delivery-mode.js";
+export { buildCredentialSafetyPrompt } from "../agents/credential-safety-prompt.js";
 export { buildUiPresentationPrompt } from "../agents/ui-presentation-prompt.js";
 export { normalizeQuestionTimeoutSeconds } from "../agents/tools/ask-user-tool-normalization.js";
-export { buildCredentialSafetyPrompt } from "../agents/transcript-credential-safety.js";
 export { resolveAttemptFsWorkspaceOnly } from "../agents/embedded-agent-runner/run/attempt-prompt-helpers.js";
 export { resolveAttemptSpawnWorkspaceDir } from "../agents/embedded-agent-runner/run/attempt-thread-helpers.js";
 export { buildEmbeddedAttemptToolRunContext } from "../agents/embedded-agent-runner/run/attempt-tool-run-context.js";
@@ -369,6 +374,7 @@ export async function detectAndLoadAgentHarnessPromptImages(params: {
   sandbox?: { root: string; bridge: SandboxFsBridge };
 }): Promise<{
   images: ImageContent[];
+  imageFactIndexes: Array<number | null>;
   detectedRefs: Array<{ raw: string; resolved: string; type: "path" | "media-uri" }>;
   loadedCount: number;
   skippedCount: number;

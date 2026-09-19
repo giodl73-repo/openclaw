@@ -352,8 +352,9 @@ See [Audit records](/cli/audit) for the full field reference and query filters.
 
 ## Message lifecycle events
 
-Set [`logging.audit.messages`](/gateway/config-observability#audit) to choose what
-is recorded, then restart the Gateway:
+Choose message audit metadata in **Settings → Advanced → Logging**, or set
+[`logging.audit.messages`](/gateway/config-observability#audit), then restart
+the Gateway:
 
 - `off` (default): no message records.
 - `direct`: only messages in direct conversations.
@@ -514,6 +515,16 @@ same tuple again; a mismatch is `unknown`, not reassigned by context or run
 correlation alone.
 
 ## Querying
+
+The Gateway runs `audit.list` and `audit.activity.list` queries on the shared
+state database worker so SQLite work does not block request handling. Filters
+and the retention cutoff are captured when each read starts; sequence cursors,
+result limits, and the existing `operator.read` permission are unchanged.
+
+`audit.run.inspect` uses the existing read-only worker for identity discovery
+and receipt queries. Missing databases and optional audit tables remain absent;
+inspection does not migrate state or join the audit writer queue. Each request
+captures its selectors, cursors, limits, and retention clock before yielding.
 
 - CLI: [`openclaw audit`](/cli/audit) with filters for agent, session, run,
   kind, status, direction, channel, time bounds, and cursor paging.

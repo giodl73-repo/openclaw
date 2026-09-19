@@ -75,11 +75,7 @@ import {
   resolveIMessageAttachmentRoots,
   resolveIMessageRemoteAttachmentRoots,
 } from "../media-contract.js";
-import {
-  getCachedIMessagePrivateApiStatus,
-  imessageRpcSupportsMethod,
-  probeIMessage,
-} from "../probe.js";
+import { imessageRpcSupportsMethod, probeIMessage, probeIMessagePrivateApi } from "../probe.js";
 import {
   hasIMessageQuestionReactionTarget,
   maybeResolveIMessageQuestionReaction,
@@ -473,7 +469,7 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
     dbPath,
     remoteHost,
   });
-  const recoveryCursorRowid = loadIMessageRecoveryCursor(
+  const recoveryCursorRowid = await loadIMessageRecoveryCursor(
     accountInfo.accountId,
     recoveryCursorDbIdentity,
     { migrateLegacyCatchup: !catchupCfg.enabled, watermarkRowid: recoveryBoundaryRowid },
@@ -501,7 +497,7 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
     return min;
   }
 
-  function advanceRecoveryCursorAfterDurableEnqueue(rowid: number): void {
+  async function advanceRecoveryCursorAfterDurableEnqueue(rowid: number): Promise<void> {
     if (catchupCfg.enabled) {
       return;
     }
@@ -513,7 +509,7 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
       holdFloor !== null && maxDurableRowid >= holdFloor ? holdFloor - 1 : maxDurableRowid;
 
     if (nextCursorRowid >= 0 && nextCursorRowid > latestAdvancedRecoveryCursorRowid) {
-      advanceIMessageRecoveryCursor(
+      await advanceIMessageRecoveryCursor(
         accountInfo.accountId,
         recoveryCursorDbIdentity,
         nextCursorRowid,
@@ -937,10 +933,14 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
     const storePath = resolveStorePath(cfg.session?.store, {
       agentId: decision.route.agentId,
     });
-    const privateApiStatus = getCachedIMessagePrivateApiStatus(cliPath);
+    // A bridge stall invalidates the process-wide capability snapshot before
+    // recovery re-injects the helper. Re-resolve a missing/expired snapshot so
+    // later inbound turns can resume typing and read receipts without waiting
+    // for an unrelated action or a gateway restart to populate the cache.
+    const privateApiStatus = await probeIMessagePrivateApi(cliPath, probeTimeoutMs);
     const supportsTyping = imessageRpcSupportsMethod(privateApiStatus, "typing");
     const supportsRead = imessageRpcSupportsMethod(privateApiStatus, "read");
-    if (privateApiStatus?.available === true) {
+    if (privateApiStatus.available) {
       // Surface a single warning per restart when the bridge is up but we
       // had to gate off typing/read because the imsg build pre-dates the
       // capability list. Otherwise the user sees no typing bubble / no
@@ -1488,7 +1488,7 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
       return { kind: "deferred" };
     },
     onDurableEnqueue: async (facts) => {
-      advanceRecoveryCursorAfterDurableEnqueue(facts.rowid);
+      await advanceRecoveryCursorAfterDurableEnqueue(facts.rowid);
       await maybeAdvanceLiveCatchupCursor({ id: facts.rowid, created_at: facts.createdAt });
     },
     onDurableEnqueueFailure: (rowid) => {

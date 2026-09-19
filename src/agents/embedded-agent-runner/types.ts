@@ -12,7 +12,7 @@ import type { ContextEngineSessionTarget } from "../../context-engine/types.js";
 import type { DiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
 import type { AcceptedSessionSpawn } from "../accepted-session-spawn.js";
 import type { AgentRunTerminalReceipt } from "../agent-run-terminal-receipt.js";
-import type { AgentRunTerminalReplySnapshot } from "../agent-run-terminal-reply.js";
+import type { AgentRunTerminalReplySnapshot } from "../agent-run-terminal-reply.types.js";
 import type {
   MessagingToolSend,
   MessagingToolSourceReplyPayload,
@@ -50,6 +50,11 @@ export type EmbeddedAgentMeta = {
   contextTokens?: number;
   contextTokensSource?: "runtime" | "runtime-configured" | "resolved";
   agentHarnessId?: string;
+  /** Sanitized provider-policy refusal attached to this physical attempt. */
+  providerRefusal?: {
+    provider?: string;
+    category?: string;
+  };
   /** Runtime-owned selection, independent of the final response or credential source. */
   runtimeModelSelection?: ModelRef;
   /** Redacted credential source selected for the terminal physical model attempt. */
@@ -131,6 +136,11 @@ type ExecutionTrace = {
   attempts?: TraceAttempt[];
   fallbackUsed?: boolean;
   runner?: "embedded" | "cli";
+  providerPolicyRetry?: {
+    category: "cyber";
+    provider: string;
+    model: string;
+  };
 };
 
 type RequestShapingTrace = {
@@ -152,6 +162,8 @@ export type ToolSummaryTrace = {
   calls: number;
   tools: string[];
   failures?: number;
+  /** Latest tool failure not cleared by same-tool success, independent of reply presentation. */
+  unresolvedError?: { toolName: string };
   totalToolTimeMs?: number;
 };
 

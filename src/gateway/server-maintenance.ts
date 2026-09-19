@@ -60,6 +60,7 @@ import { hasRegisteredChatRunForSessionKey } from "./server-methods/session-acti
 import { PENDING_CHAT_SEND_DEDUPE_PREFIX, type DedupeEntry } from "./server-shared.js";
 import { formatError } from "./server-utils.js";
 import { setBroadcastHealthUpdate } from "./server/health-state.js";
+import { startSessionColdStorageMaintenance } from "./session-cold-storage-maintenance.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "./session-request-agent.js";
 
 // Hourly sweep plus a one-day grace bounds orphan storage without racing the
@@ -114,6 +115,8 @@ export function startGatewayMaintenanceTimers(params: {
   dedupeCleanup: ReturnType<typeof setInterval>;
   startMediaCleanup: () => void;
   stopMediaCleanup: () => Promise<MediaCleanupStopResult>;
+  stopSessionColdStorageMaintenance: () => Promise<void>;
+  stopTelemetryChecks: () => Promise<void>;
   worktreeCleanup: ReturnType<typeof setInterval>;
   skillUsageCleanup: () => void;
 } {
@@ -130,27 +133,20 @@ export function startGatewayMaintenanceTimers(params: {
   const restartChannelsIfIdle = async (
     mode: "new-thaw" | "deferred-retry",
   ): Promise<HostThawChannelRestartOutcome> => {
+    const snapshot = createGatewayActiveWorkSnapshot(params.activeWorkInspectors, {
+      ignoreTerminalSessions: true,
+    });
+    if (!snapshot.idle) {
+      return { status: "retry", reason: "active-work" };
+    }
+    // Inspection and admission commit are synchronous: no new work can enter
+    // between them, and a busy tick never changes the admission phase.
     let invalidated = false;
     const admission = tryBeginGatewaySuspendAdmission(() => {
       invalidated = true;
     });
     if (!admission) {
       return { status: "retry", reason: "admission-closed" };
-    }
-    let snapshot: ReturnType<typeof createGatewayActiveWorkSnapshot>;
-    try {
-      snapshot = createGatewayActiveWorkSnapshot(params.activeWorkInspectors, {
-        ignoreTerminalSessions: true,
-      });
-    } catch (error) {
-      // Inspection runs while admission is preparing. Never strand that global
-      // fence closed when an inspector fails before the restart can commit.
-      admission.rollback();
-      throw error;
-    }
-    if (!snapshot.idle) {
-      admission.rollback();
-      return { status: "retry", reason: "active-work" };
     }
     if (!admission.commit()) {
       return { status: "retry", reason: "admission-closed" };
@@ -178,16 +174,32 @@ export function startGatewayMaintenanceTimers(params: {
   });
 
   let nextTelemetryCheckAtMs = Date.now() + generateSecureInt(TELEMETRY_MAINTENANCE_INTERVAL_MS);
+  let telemetryStopped = false;
+  let telemetryCheckInFlight: Promise<void> | undefined;
+  const performTelemetryCheck = () => {
+    telemetryCheckInFlight ??= checkTelemetryUpdate(params.getRuntimeConfig, {
+      surface: "gateway",
+    })
+      .then(() => undefined)
+      .catch(() => {})
+      .finally(() => {
+        telemetryCheckInFlight = undefined;
+      });
+  };
+  const stopTelemetryChecks = async () => {
+    telemetryStopped = true;
+    await telemetryCheckInFlight;
+  };
   // periodic keepalive
   const tickInterval = setInterval(() => {
     void hostThawRecovery.tick();
     const now = Date.now();
-    if (!params.isNixMode && now >= nextTelemetryCheckAtMs) {
+    if (!telemetryStopped && !params.isNixMode && now >= nextTelemetryCheckAtMs) {
       nextTelemetryCheckAtMs =
         now +
         TELEMETRY_MAINTENANCE_INTERVAL_MS +
         generateSecureInt(TELEMETRY_MAINTENANCE_INTERVAL_MS);
-      void checkTelemetryUpdate(params.getRuntimeConfig(), { surface: "gateway" }).catch(() => {});
+      performTelemetryCheck();
     }
     const payload = { ts: now };
     params.broadcast("tick", payload);
@@ -277,6 +289,7 @@ export function startGatewayMaintenanceTimers(params: {
   const dedupeCleanup = setInterval(() => {
     const AGENT_RUN_SEQ_MAX = 10_000;
     const now = Date.now();
+    params.chatRunState.toolEventRecipients.pruneExpired(now);
     void performDevicePairSetupCompletionGc(now);
     if (now - deliveryQueueMediaGcStartedAtMs >= DELIVERY_QUEUE_MEDIA_GC_INTERVAL_MS) {
       void performDeliveryQueueMediaGc();
@@ -544,12 +557,19 @@ export function startGatewayMaintenanceTimers(params: {
     return stopMediaCleanupPromise;
   };
 
+  const sessionColdStorageMaintenance = startSessionColdStorageMaintenance({
+    getRuntimeConfig: params.getRuntimeConfig,
+    onError: (message) => params.logHealth.error(`transcript cold storage failed: ${message}`),
+  });
+
   return {
     tickInterval,
     healthInterval,
     dedupeCleanup,
+    stopTelemetryChecks,
     startMediaCleanup,
     stopMediaCleanup,
+    stopSessionColdStorageMaintenance: sessionColdStorageMaintenance.stop,
     worktreeCleanup,
     skillUsageCleanup,
   };

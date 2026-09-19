@@ -3,6 +3,7 @@ import {
   setReplyPayloadMetadata,
   type ReplyPayloadMetadata,
 } from "../../../auto-reply/reply-payload.js";
+import { isSilentReplyText } from "../../../auto-reply/tokens.js";
 import {
   SessionTranscriptWriterClaimReboundError,
   withOwnedSessionTranscriptWrites,
@@ -33,9 +34,14 @@ import {
   resolveRuntimeModelAttempt,
   runEmbeddedSettledTurnFinalizationWithBackend,
 } from "./backend.js";
-import { resolveSettledToolBatchEvidence } from "./incomplete-turn-recovery.js";
+import { resolveFinalAssistantVisibleText } from "./helpers.js";
+import {
+  resolveSettledToolBatchEvidence,
+  shouldTreatEmptyAssistantReplyAsSilent,
+} from "./incomplete-turn-recovery.js";
 import type { createEmbeddedRunLaneController } from "./lane-controller.js";
 import {
+  isEmbeddedRunTerminalTimeout,
   resolveEmbeddedRunAttemptTerminalOutcome,
   type EmbeddedRunTerminalState,
 } from "./terminal-outcome.js";
@@ -127,8 +133,6 @@ export async function prepareTerminalWithSettledTurnFinalization(input: {
   if (!assertFinalizationActive) {
     throw new Error("admitted run authority is no longer active");
   }
-  const settledFailureSignal = prepared.failureSignal;
-  const settledTerminalToolFailure = prepared.terminalToolFailure;
   const committedSessionTarget = resolveCommittedSessionTarget({
     preparedAttempt: input.finalization.preparedAttempt,
     sessionTarget: input.finalization.sessionTarget,
@@ -142,10 +146,15 @@ export async function prepareTerminalWithSettledTurnFinalization(input: {
 
   const runParams = input.terminalBase.runParams;
   const errorContext = input.terminalBase.activeErrorContext;
-  // A host summary cannot replace a tool failure. Keep its original warning
-  // when recovery produces no answer, including for silent helper runs.
+  // A host summary cannot replace a tool failure or an owner-recorded timeout.
+  // Keep the original outcome when recovery produces no answer, including for
+  // silent helper runs; a synthetic fallback would otherwise clear the timeout
+  // and report an aborted run as a delivered success.
+  const preserveOriginalTerminal =
+    Boolean(initial.attempt.lastToolError) ||
+    isEmbeddedRunTerminalTimeout(initial.terminalState.outcome);
   const terminalFallbackAllowed =
-    input.finalization.preparedAttempt.silentExpected !== true && !initial.attempt.lastToolError;
+    input.finalization.preparedAttempt.silentExpected !== true && !preserveOriginalTerminal;
   log.warn(
     `settled post-tool turn lacked a final answer: runId=${runParams.runId} sessionId=${runParams.sessionId} ` +
       `provider=${errorContext.provider}/${errorContext.model} — running isolated finalization`,
@@ -174,6 +183,24 @@ export async function prepareTerminalWithSettledTurnFinalization(input: {
       });
       assertFinalizationActive();
       attempt = finalization.attempt;
+      // The harness retains authored silence as an empty result; only the host
+      // owns the optional terminal reply contract and the settled tool failures.
+      if (
+        finalization.outcome === "empty" &&
+        runParams.terminalReplyExpectation === "optional" &&
+        !initial.attempt.lastToolError &&
+        shouldTreatEmptyAssistantReplyAsSilent({
+          allowEmptyAssistantReplyAsSilent: runParams.allowEmptyAssistantReplyAsSilent,
+          terminalReplyExpectation: runParams.terminalReplyExpectation,
+          onlyExplicitSilentReply: true,
+          payloadCount: 0,
+          aborted: input.finalization.abortSignal.aborted,
+          timedOut: isEmbeddedRunTerminalTimeout(initial.terminalState.outcome),
+          attempt,
+        })
+      ) {
+        finalization.outcome = "answered";
+      }
       mergeUsageIntoAccumulator(input.terminalBase.usageAccumulator, attempt.attemptUsage);
       mergeAttemptRunStatsIntoAccumulator(input.terminalBase.usageAccumulator, attempt);
       lastRunPromptUsage = attempt.attemptUsage ?? lastRunPromptUsage;
@@ -256,9 +283,9 @@ export async function prepareTerminalWithSettledTurnFinalization(input: {
       transcriptIdempotencyKey,
     });
   }
-  // Only an actual recovery replaces a failed tool turn's terminal ownership.
+  // Only an actual recovery replaces a failed or timed-out turn's terminal ownership.
   const completion =
-    finalizationOutcome !== "answered" && initial.attempt.lastToolError
+    finalizationOutcome !== "answered" && preserveOriginalTerminal
       ? initial
       : {
           attempt,
@@ -290,7 +317,7 @@ export async function prepareTerminalWithSettledTurnFinalization(input: {
       setReplyPayloadMetadata(payload, { sessionWriterDeliveryAuthority });
     }
   });
-  // A failure-honest final answer cannot turn a settled cron denial into success.
+  // Tool-free finalization cannot resolve failures from the settled tools.
   prepared = {
     ...finalizedPrepared,
     // Do not offer the private diagnostic to stranded-reply recovery as an
@@ -299,8 +326,9 @@ export async function prepareTerminalWithSettledTurnFinalization(input: {
     runParams.sourceReplyDeliveryMode === "message_tool_only"
       ? { finalAssistantVisibleText: "", finalAssistantRawText: "" }
       : {}),
-    failureSignal: settledFailureSignal,
-    terminalToolFailure: settledTerminalToolFailure,
+    attemptToolSummary: prepared.attemptToolSummary,
+    failureSignal: prepared.failureSignal,
+    terminalToolFailure: prepared.terminalToolFailure,
   };
   return {
     ...completion,
@@ -429,7 +457,13 @@ function buildSettledTurnFinalizationAttemptResult(input: {
   runtimePlan?: EmbeddedRunAttemptParams["runtimePlan"];
 }): EmbeddedRunAttemptWithReceiptEvidence {
   const { result, settledAttempt } = input;
-  const text = input.outcome === "empty" ? "" : resolveSettledTurnFinalizationText(result);
+  const authoredText = resolveFinalAssistantVisibleText(result.assistant) ?? "";
+  const text =
+    input.outcome === "empty"
+      ? isSilentReplyText(authoredText)
+        ? authoredText
+        : ""
+      : resolveSettledTurnFinalizationText(result);
   // Finalization replaces terminal ownership, not host-private facts from settled tools.
   // Its response model does not replace the original runtime-owned selection.
   // Replay, abort, and lifecycle state remain finalizer-local.

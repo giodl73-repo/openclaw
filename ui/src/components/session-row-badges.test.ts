@@ -87,20 +87,36 @@ describe("sidebar initial connection", () => {
   });
 });
 
+describe("session workspace badge", () => {
+  it("shows one text label and removes it when the workspace identity is unknown", () => {
+    for (const [workspaceKind, label] of [
+      ["worktree", "Worktree"],
+      ["checkout", "Checkout"],
+    ] as const) {
+      render(renderSessionRowBadges({ workspaceKind }), container);
+      expect(container.querySelectorAll(".session-row-workspace")).toHaveLength(1);
+      expect(container.textContent?.trim()).toBe(label);
+    }
+    render(renderSessionRowBadges({}), container);
+    expect(container.querySelector(".session-row-workspace")).toBeNull();
+  });
+});
+
 describe("session row placement badges", () => {
-  it("names the service and profile without losing conflict or disk attention", () => {
+  it("names the service, profile, and machine without losing conflict or disk attention", () => {
     render(
       renderSessionRowBadges({
         placementState: "active",
         placementProviderId: "machine0",
         placementProfileId: "team",
+        placementMachine: { class: "medium", os: "linux", osLabel: "Linux", cpu: 4, memoryGb: 16 },
         workspaceConflictCount: 2,
         diskSpaceStatus: "warning",
       }),
       container,
     );
     const label =
-      "machine0 · team · active · 2 workspace conflicts · Cloud session disk space is low";
+      "machine0 · team · Linux · medium · 4 vCPU · 16 GB · active · 2 workspace conflicts · Cloud session disk space is low";
     const badge = container.querySelector(".session-row-badge--cloud");
     expect(badge?.getAttribute("aria-label")).toBe(label);
     expectTooltipText(badge, label);

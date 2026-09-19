@@ -11,8 +11,15 @@ including final notes when ready. Code SHA may also be the Release SHA. Use
 Run deterministic source preflight, then validate the exact Code SHA:
 
 ```bash
-node scripts/full-release-validation-at-sha.mjs --sha <code-sha> --target-ref release/YYYY.M.PATCH --workflow-sha <tooling-sha>
+PUBLICATION_SELECTION='{"route":"normal","npmDistTag":"latest","publishOpenclawNpm":true,"pluginPublishScope":"all-publishable","plugins":[]}'
+node scripts/full-release-validation-at-sha.mjs \
+  --sha <code-sha> --target-ref release/YYYY.M.PATCH --workflow-sha <tooling-sha> \
+  -f validation_purpose=publish -f publication_selection_json="$PUBLICATION_SELECTION"
 ```
+
+Choose `npmDistTag=beta` for a beta or `route=prepared` for the prepared button.
+Keep that intended selection on later notes-only parents. This admits committed
+publication source, not registry eligibility or publication authority.
 
 Record and reuse the full trusted Tooling SHA. Beta-publish uses
 `release_profile=beta`, `run_release_soak=false`; require `npm-beta-v1` for a
@@ -38,9 +45,12 @@ release profile's required gates. No second commit or validation run is needed
 solely to name a Release SHA.
 
 If notes change after Code qualification, use `$openclaw-changelog-update`
-with current main for canonical PR provenance and commit only `CHANGELOG.md`.
-The complete Code-to-Release delta must be exactly that file to optionally use
-`changelog-only-release-v1`. That path requires green Code product evidence
+with current main for canonical PR provenance and commit the selected
+`CHANGELOG/YYYY.M.PATCH.md`, with any matching record and root index updates.
+The complete Code-to-Release delta must include that entry and only those
+paths, without renames or deletions, to optionally use
+`split-changelog-release-v1`. Historical root-only receipts retain
+`changelog-only-release-v1`. The split path requires green Code product evidence
 and fresh Release SHA npm qualification/Docker preparation; it does not reuse
 the earlier package bytes. Any other source change requires fresh product
 qualification.

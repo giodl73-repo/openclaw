@@ -1,18 +1,112 @@
+import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import type { SessionsListResult } from "../../api/types.ts";
 import type { createSessionEventRefreshCoordinator } from "./event-refresh-coordinator.ts";
+import { sessionMatchesArchivedFilter } from "./navigation.ts";
 import type {
   SessionGateway,
   SessionListOptions,
   SessionListScope,
   SessionListSnapshot,
   SessionRefreshOptions,
+  SessionRefreshOutcome,
 } from "./session-capability.ts";
-import { normalizeAgentId } from "./session-key.ts";
+import {
+  normalizeAgentId,
+  areUiSessionKeysEquivalent,
+  isSubagentSessionKey,
+  parseAgentSessionKey,
+} from "./session-key.ts";
 import {
   buildSessionListParams,
   DEFAULT_SESSION_LIST_QUERY,
   normalizeManagedSessionListQuery,
 } from "./session-requests.ts";
+import {
+  matchesExistingSession,
+  parseSessionChangedEvent,
+  reconcileSessionChangedRow,
+} from "./session-row-reconcile.ts";
+
+const ROW_SNAPSHOT_REASONS = new Set([
+  "patch",
+  "send",
+  "steer",
+  "agent.run.started",
+  "agent.input.settled",
+  "run-capacity",
+  "chat.title",
+]);
+
+/** Only a held member moving within a known roster can replace a list read. */
+export function canApplySessionListSnapshot(
+  result: SessionsListResult | null,
+  payload: unknown,
+  options: SessionListOptions,
+): boolean {
+  const parsed = parseSessionChangedEvent(payload);
+  if (!result || !parsed || !isPrimarySessionListQuery({ ...options, archivedFilter: "active" })) {
+    return false;
+  }
+  const [info, event] = parsed;
+  if (
+    !asOptionalRecord(event.session) ||
+    event.catalogChanged === true ||
+    event.phase === "reset" ||
+    (info.reason !== null && !ROW_SNAPSHOT_REASONS.has(info.reason)) ||
+    (options.offset ?? 0) > 0
+  ) {
+    return false;
+  }
+  const existing = result.sessions.find((row) =>
+    matchesExistingSession(row, info.key, info.agentId ?? options.agentId ?? null),
+  );
+  const next = reconcileSessionChangedRow(existing, payload, {
+    resultAgentId: options.agentId,
+    archivedFilter: "all",
+  }).admittedRow;
+  if (
+    !existing ||
+    !next ||
+    !sessionMatchesArchivedFilter(existing, options.archivedFilter ?? "active") ||
+    existing.sessionId !== next.sessionId ||
+    existing.kind !== next.kind ||
+    (existing.archived === true) !== (next.archived === true) ||
+    (existing.pinned === true) !== (next.pinned === true) ||
+    existing.pinnedAt !== next.pinnedAt ||
+    JSON.stringify(existing.owner) !== JSON.stringify(next.owner) ||
+    JSON.stringify(existing.createdActor) !== JSON.stringify(next.createdActor)
+  ) {
+    return false;
+  }
+  // A child's snapshot does not refresh its ancestors' aggregate activity or
+  // child links. Keep those Gateway-owned facts behind an authoritative read.
+  if (
+    isSubagentSessionKey(existing.key) ||
+    [existing, next].some(
+      (row) => row.spawnedBy || row.controlOwnerSessionKey || row.parentSessionKey,
+    ) ||
+    result.sessions.some((row) =>
+      row.childSessions?.some((key) => areUiSessionKeysEquivalent(key, existing.key)),
+    )
+  ) {
+    return false;
+  }
+  // A member whose rank only improves cannot evict another member. Missing rows,
+  // pin/archive/owner changes and backwards clocks need authoritative admission.
+  if (info.updatedAt === null || info.updatedAt < (existing.updatedAt ?? 0)) {
+    return false;
+  }
+  // Owner-first and retained selection can add rows outside the shared page.
+  // Promoting one can displace its boundary despite already being displayed.
+  return !(
+    info.updatedAt !== existing.updatedAt &&
+    result.sessions.length >
+      (result.nextOffset ??
+        result.limitApplied ??
+        options.limit ??
+        DEFAULT_SESSION_LIST_QUERY.limit)
+  );
+}
 
 export function isForegroundReplacement(options: SessionRefreshOptions): boolean {
   return options.append !== true && options.backgroundHydrate !== true;
@@ -24,18 +118,137 @@ export function sessionListAgentMatcher(agentId?: string | null) {
     !normalized || !queryAgentId?.trim() || normalizeAgentId(queryAgentId) === normalized;
 }
 
+/** Capture membership before event reconciliation can remove or move a known child. */
+export function sessionListEventMatcher(payload: unknown) {
+  const parsed = parseSessionChangedEvent(payload);
+  const info = parsed?.[0];
+  const event = parsed?.[1] ?? asOptionalRecord(payload);
+  const source = parsed?.[2];
+  const agentId =
+    info?.agentId ??
+    parseAgentSessionKey(info?.key)?.agentId ??
+    (typeof event?.agentId === "string" ? event.agentId : undefined);
+  const matchesAgent = sessionListAgentMatcher(agentId);
+  const owners = [
+    source?.controlOwnerSessionKey,
+    source?.spawnedBy,
+    source?.parentSessionKey,
+    event?.parentSessionKey,
+  ];
+  return (entry: ManagedSessionList): boolean => {
+    const parent = entry.scope.spawnedBy;
+    if (parent && info && areUiSessionKeysEquivalent(info.key, parent)) {
+      return true;
+    }
+    if (!matchesAgent(sessionListQueryAgentId(entry.query))) {
+      return false;
+    }
+    if (!parent || !info) {
+      return true;
+    }
+    if (
+      entry.snapshot.result?.sessions.some((row) =>
+        areUiSessionKeysEquivalent(row.key, info.key),
+      ) ||
+      owners.some((owner) => typeof owner === "string" && areUiSessionKeysEquivalent(owner, parent))
+    ) {
+      return true;
+    }
+    // An incomplete window cannot rule out a former child beyond its loaded page,
+    // even when a move event names its new parent explicitly.
+    const result = entry.snapshot.result;
+    return (
+      !result ||
+      result.hasMore === true ||
+      (result.totalCount ?? result.sessions.length) > result.sessions.length
+    );
+  };
+}
+
+export type SessionRefreshAttempt = {
+  options: SessionRefreshOptions;
+  matchesRequestedQuery: boolean;
+  result: SessionsListResult | null;
+  outcome: SessionRefreshOutcome;
+};
+
+/** Return only outcomes whose accepted request reconciled this mutation's scope. */
+export function sessionMutationRefreshOutcome(
+  attempt: SessionRefreshAttempt | null,
+  agentId: string | null | undefined,
+): SessionRefreshOutcome | null {
+  if (!attempt) {
+    return null;
+  }
+  if (attempt.outcome.status === "failed" || !agentId?.trim()) {
+    return attempt.matchesRequestedQuery ? attempt.outcome : null;
+  }
+  const result = attempt.result;
+  const complete =
+    result &&
+    !result.hasMore &&
+    (result.totalCount ?? result.sessions.length) <= result.sessions.length;
+  return !attempt.options.append &&
+    sessionListAgentMatcher(agentId)(attempt.options.agentId) &&
+    (attempt.options.agentId?.trim() || complete)
+    ? attempt.outcome
+    : null;
+}
+
 export type QueuedSessionRefresh = {
   options: SessionRefreshOptions;
+  intent: "explicit" | "automatic" | "reconcile" | (() => string | null);
+  foreground?: boolean;
+  bootstrap?: boolean;
+  errorOwner: { options: SessionRefreshOptions; isCurrent?: () => boolean };
   completions: Array<{
     options: SessionRefreshOptions;
-    complete: (refresh: Promise<SessionsListResult | null> | null) => void;
+    reconcile: boolean;
+    complete: (refresh: Promise<SessionRefreshAttempt | null> | null) => void;
   }>;
 };
+
+export function coalesceSessionRefresh(
+  current: QueuedSessionRefresh | null,
+  next: QueuedSessionRefresh,
+  snapshot: SessionGateway["snapshot"],
+): QueuedSessionRefresh {
+  if (!current) {
+    return next;
+  }
+  // Explicit intent remains authoritative over automatic hydration and weaker queries.
+  if (
+    (next.intent !== "automatic" || current.intent === "automatic") &&
+    (next.intent !== "reconcile" ||
+      current.intent === "automatic" ||
+      current.intent === "reconcile") &&
+    (isForegroundReplacement(next.options) || !isForegroundReplacement(current.options))
+  ) {
+    current.options = next.options;
+    current.intent = next.intent;
+    current.foreground = next.foreground;
+    current.bootstrap = next.bootstrap;
+    current.errorOwner = next.errorOwner;
+  } else if (
+    next.intent === "reconcile" &&
+    isSameSessionListQuery(
+      prepareSessionRefreshOptions(current.options, snapshot),
+      prepareSessionRefreshOptions(next.options, snapshot),
+      false,
+    )
+  ) {
+    // Reconciliation may own a matching query's error without replacing selection.
+    current.errorOwner = next.errorOwner;
+  }
+  current.completions.push(...next.completions);
+  return current;
+}
 
 export type ManagedSessionListRefresh = {
   append: boolean;
   offset?: number;
   invalidated?: true;
+  background?: true;
 };
 
 export type ObservedSessionList = {
@@ -46,6 +259,8 @@ export type ObservedSessionList = {
 };
 
 export type ManagedSessionList = ObservedSessionList & {
+  /** A live primary window may be reused for selection until its next invalidation. */
+  warmPrimary?: boolean;
   key: string;
   query: ReturnType<typeof normalizeManagedSessionListQuery>;
   retainedLimit: number;
@@ -111,20 +326,36 @@ export function prepareSessionRefreshOptions(
   return { ...prepared, ownerFirst: true };
 }
 
+export function queuedSessionRefreshCompletion(
+  queued: QueuedSessionRefresh | null,
+  options: SessionRefreshOptions,
+): Promise<SessionRefreshAttempt | null> | null {
+  return queued
+    ? new Promise((resolve) => {
+        queued.completions.push({ options, reconcile: false, complete: resolve });
+      })
+    : null;
+}
+
 export function completeSessionRefreshWaiters(
   queued: QueuedSessionRefresh,
-  nextOptions: SessionRefreshOptions,
-  next: Promise<SessionsListResult | null> | null,
+  next: Promise<SessionRefreshAttempt | null>,
+  reconciled: Promise<SessionRefreshAttempt | null>,
   snapshot: SessionGateway["snapshot"],
 ): void {
-  // Coalescing shares completion timing, but only equivalent queries share the result.
-  queued.completions.forEach(({ options, complete }) => {
-    const sameQuery = isSameSessionListQuery(
-      prepareSessionRefreshOptions(options, snapshot),
-      nextOptions,
-      false,
+  queued.completions.forEach(({ options, reconcile, complete }) => {
+    const requested = prepareSessionRefreshOptions(options, snapshot);
+    // Public results match their own query; reconciliation also needs the accepted scope.
+    complete(
+      (reconcile ? reconciled : next).then((attempt) =>
+        attempt
+          ? {
+              ...attempt,
+              matchesRequestedQuery: isSameSessionListQuery(requested, attempt.options, false),
+            }
+          : null,
+      ),
     );
-    complete(sameQuery ? next : (next?.then(() => null) ?? null));
   });
 }
 

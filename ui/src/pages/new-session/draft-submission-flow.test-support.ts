@@ -10,6 +10,7 @@ import type { NewSessionRouteData } from "./location.ts";
 import { TestReactiveControllerHost } from "./reactive-controller-host.test-support.ts";
 
 type FixtureOptions = {
+  gateway?: ApplicationContext["gateway"];
   takePreparedTitle?: () => string | undefined;
   phase?: "connected" | "connecting";
   agents?: unknown[];
@@ -34,7 +35,7 @@ export function createDraftFixture(options: FixtureOptions = {}) {
   const client = { recoveryScope: "principal-a", recoveryScopeReady: true, request };
   const phase = options.phase ?? "connected";
   const context = {
-    gateway: {
+    gateway: options.gateway ?? {
       subscribeEvents: () => () => undefined,
       connection: { gatewayUrl: "ws://gateway.example" },
       snapshot: {
@@ -80,6 +81,8 @@ export function createDraftFixture(options: FixtureOptions = {}) {
     chatSubmissions: createChatSubmissions(),
     agentSelection: { state: { selectedId: "main" }, set: vi.fn() },
     config: { current: { cliAgentsEnabled: true, terminalEnabled: true } },
+    basePath: "",
+    replace: vi.fn(),
     navigateAndWait: vi.fn(async () => undefined),
     preload: vi.fn(async () => undefined),
   } as unknown as ApplicationContext;
@@ -115,7 +118,8 @@ export function createDraftFixture(options: FixtureOptions = {}) {
       onPendingPlacementReset: () => flow?.releasePendingPlacementOwner(),
       onRecoveryReady: (gatewayUrl, recoveryScope) =>
         flow?.restorePendingPlacementRecovery(gatewayUrl, recoveryScope),
-      onAdoptAgentDefaults: () => place?.adoptAgentDefaults(),
+      onAdoptAgentDefaults: () =>
+        place?.adoptAgentDefaults({ preserveSelectedAgent: true, preserveSelectedFolder: true }),
     },
   );
   const browser = new DraftPlaceBrowser(
@@ -147,7 +151,7 @@ export function createDraftFixture(options: FixtureOptions = {}) {
     {
       requestUpdate: vi.fn(),
       onError: (error) => flow?.setError(error),
-      onClearError: (error) => flow?.clearErrorIf(error),
+      onClearError: (error) => flow?.clearError(error),
     },
   );
   const requestUpdate = vi.fn();

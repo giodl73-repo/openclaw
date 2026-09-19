@@ -37,12 +37,25 @@ export type ManagedWorktreeRecord = {
   runEndCleanup?: ManagedWorktreeRunEndCleanup;
 };
 
+type WorktreeSourceCurrent = {
+  assertCurrent: () => void;
+  /** Checkout custody for rollback within this callback, independent of caller/source freshness. */
+  assertCheckoutCurrent?: () => void;
+  signal?: AbortSignal;
+};
+
+export type WorktreeSourceStage = <T>(
+  run: (current: WorktreeSourceCurrent) => T | Promise<T>,
+) => Promise<T>;
+
 export type CreateManagedWorktreeParams = {
   repoRoot: string;
   name?: string;
   /** Derived default name; collisions receive a stable numeric suffix. */
   suggestedName?: string;
   baseRef?: string;
+  /** Repository-owned source cone lists; selection never requests dependency setup. */
+  profiles?: string[];
   /** Verified immutable checkout point when baseRef retains the publication target. */
   checkoutCommit?: string;
   ownerKind?: ManagedWorktreeOwnerKind;
@@ -53,6 +66,24 @@ export type CreateManagedWorktreeParams = {
   onProgress?: (phase: "checkout" | "setup") => void;
   /** Synchronous caller-authority guard checked at allocation commit boundaries. */
   commitGuard?: () => void;
+  /** Revalidate the selected source for one operation without retaining its guard afterward. */
+  withSource?: WorktreeSourceStage;
+  /** Cleanup retains checkout custody without requiring a retired source selection. */
+  withRollback?: <T>(run: (assertCurrent: () => void) => Promise<T>) => Promise<T>;
+};
+
+export type CreateEmptyManagedWorktreeParams = Omit<
+  CreateManagedWorktreeParams,
+  "repoRoot" | "baseRef" | "checkoutCommit" | "profiles"
+> & {
+  ownerKind: "session";
+  ownerId: string;
+};
+
+export type ManagedWorktreeCreationOutcome = {
+  record: ManagedWorktreeRecord;
+  /** This allocation created or restored the checkout instead of reusing a live one. */
+  materialized: boolean;
 };
 
 export type RemoveManagedWorktreeResult = {

@@ -1,3 +1,5 @@
+import { posix } from "node:path";
+
 /**
  * @typedef {"docs" | "source" | "package" | "ui" | "extension" | "app" | "rootTest" | "testFixture" | "rootTooling" | "rootGlobal" | "legacyRootAsset" | "unknown"} ChangedPathSurface
  */
@@ -16,9 +18,12 @@ const SURFACE_PATTERNS = [
   ["app", /^(?:apps\/|Swabble\/|appcast\.xml$)/u],
   ["rootTest", /^test\//u],
   ["testFixture", /^test-fixtures\//u],
-  // This hidden helper only reports maintainer activity; it has no product consumers.
+  // These hidden helpers own maintainer reports and release artifact validation.
   // Match the reviewed leaf exactly so unreviewed skill executables still fail safe.
-  ["rootTooling", /^\.agents\/skills\/openclaw-pr-maintainer\/scripts\/github-activity\.sh$/u],
+  [
+    "rootTooling",
+    /^\.agents\/skills\/(?:openclaw-pr-maintainer\/scripts\/github-activity\.sh|openclaw-changelog-update\/scripts\/verify-release-notes\.mjs)$/u,
+  ],
   [
     "rootTooling",
     /^(?:scripts\/|test\/vitest\/|\.github\/|\.vscode\/|config\/|deploy\/|git-hooks\/|Dockerfile\.sandbox(?:-(?:browser|common))?$|Makefile$|docker-setup\.sh$|setup-podman\.sh$|openclaw\.podman\.env$|skills\/pyproject\.toml$|vitest(?:\..+)?\.config\.ts$|tsconfig.*\.json$|\.dockerignore$|\.gitignore$|\.jscpd\.json$|\.npmignore$|\.pre-commit-config\.yaml$|\.swiftformat$|\.swiftlint\.yml$|\.oxlint.*|\.oxfmt.*)/u,
@@ -61,4 +66,28 @@ export function getChangedPathFacts(inputPath) {
     isTestOnly: TEST_ONLY_PATH_RE.test(path),
     isNativeOnly: NATIVE_ONLY_PATH_RE.test(path),
   };
+}
+
+/** @param {string} arg */
+export function isTestFileTarget(arg) {
+  return /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(arg);
+}
+
+/** @param {string} arg */
+export function isTestSupportFileTarget(arg) {
+  if (/(?:^|\/)(?:test-helpers|test-support)(?:\/|$)/u.test(arg)) {
+    return true;
+  }
+  const basename = posix.basename(arg).replace(/\.[cm]?[jt]sx?$/u, "");
+  return /(?:^|[._-])(?:suite|test-(?:helpers|support))(?:[._-]|$)/u.test(basename);
+}
+
+// Artifact and Docker gates retain narrower target-ownership rules than the isTestOnly fact.
+/** @param {string} changedPath */
+export function isTestOnlyPath(changedPath) {
+  return (
+    isTestFileTarget(changedPath) ||
+    isTestSupportFileTarget(changedPath) ||
+    changedPath.startsWith("test/")
+  );
 }

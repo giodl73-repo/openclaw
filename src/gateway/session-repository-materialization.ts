@@ -22,7 +22,7 @@ import { withSessionRepositoryCheckpoint } from "./worker-environments/session-r
 import { prepareWorkerGitHubBinding } from "./worker-environments/worker-github-binding.js";
 import { applyStagedWorkerWorkspace } from "./worker-environments/workspace-reconcile-apply.js";
 
-/** Called only by an explicit Gateway move, after the source result is accepted. */
+/** Explicit Gateway moves and failed-placement recovery restore only accepted source results. */
 export async function materializeSessionRepositoryWorkspaceOnGateway(params: {
   cfg: OpenClawConfig;
   sessionId: string;
@@ -156,6 +156,7 @@ export async function materializeSessionRepositoryWorkspaceOnGateway(params: {
     }
   }
   const prepared = await prepareSessionWorktree({
+    cfg: params.cfg,
     target: {
       agentId: params.agentId,
       key: initial.canonicalKey,
@@ -210,6 +211,7 @@ export async function materializeSessionRepositoryWorkspaceOnGateway(params: {
           assertCurrent();
           const applied = await applyStagedWorkerWorkspace({
             ...snapshot,
+            acceptance: { kind: "reconcile" },
             root,
             // The checkout is unbound until verification. Failed preparation rolls it
             // back; a crash leaves the immutable checkpoint available for a fresh retry.

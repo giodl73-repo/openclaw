@@ -1,7 +1,12 @@
+import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
 import { SIDEBAR_SESSION_ROSTER_LIMIT } from "../../../../src/shared/session-list-limits.ts";
 import { createDeferred } from "../../../../test/helpers/promise.js";
-import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
+import {
+  GatewayRequestError,
+  type GatewayBrowserClient,
+  type GatewayEventFrame,
+} from "../../api/gateway.ts";
 import type { SessionsListResult } from "../../api/types.ts";
 import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import {
@@ -108,6 +113,8 @@ describe("session list requests", () => {
 
     try {
       await sessions.refresh({ agentId: "main", force: true });
+      void sessions.refresh({ agentId: "main", force: true });
+      expect(sessions.state.loading).toBe(true);
       const wire = JSON.stringify({
         sessionKey: child.key,
         agentId: "main",
@@ -495,10 +502,7 @@ describe("session list requests", () => {
   });
 
   it("discards a list rejection from a retired same-client connection", async () => {
-    let rejectStale!: (error: Error) => void;
-    const staleRequest = new Promise<SessionsListResult>((_resolve, reject) => {
-      rejectStale = reject;
-    });
+    const { promise: staleRequest, reject: rejectStale } = createDeferred<SessionsListResult>();
     const request = vi.fn(async () => staleRequest);
     const { sessions, reconnect } = sessionHarness(request);
     const retiredRequest = sessions.list({ boardFace: "dashboard" });
@@ -540,10 +544,8 @@ describe("session list requests", () => {
   });
 
   it("coalesces concurrent managed-list demand while preserving later forced refreshes", async () => {
-    let resolveRequest!: (result: SessionsListResult) => void;
-    const pendingResult = new Promise<SessionsListResult>((resolve) => {
-      resolveRequest = resolve;
-    });
+    const { promise: pendingResult, resolve: resolveRequest } =
+      createDeferred<SessionsListResult>();
     const request = vi
       .fn()
       .mockImplementationOnce(async () => pendingResult)
@@ -580,10 +582,8 @@ describe("session list requests", () => {
   ])(
     "honors a forced $description refresh requested during an existing load",
     async ({ query }) => {
-      let resolveRequest!: (result: SessionsListResult) => void;
-      const pendingResult = new Promise<SessionsListResult>((resolve) => {
-        resolveRequest = resolve;
-      });
+      const { promise: pendingResult, resolve: resolveRequest } =
+        createDeferred<SessionsListResult>();
       const request = vi
         .fn()
         .mockImplementationOnce(async () => pendingResult)
@@ -612,11 +612,93 @@ describe("session list requests", () => {
     },
   );
 
+  it.each(["before", "after"] as const)(
+    "absorbs only invalidations preceding a queued managed replacement (%s)",
+    async (eventTiming) => {
+      vi.useFakeTimers();
+      const first = createDeferred<SessionsListResult>();
+      const second = createDeferred<SessionsListResult>();
+      const secondStarted = createDeferred();
+      const row = (version: number) => ({
+        key: "agent:main:managed-refresh",
+        sessionId: "managed-refresh",
+        kind: "direct" as const,
+        archived: true,
+        updatedAt: version,
+        label: `Read ${version}`,
+      });
+      let managedCalls = 0;
+      const client = createTestGatewayClient((method, params) => {
+        if (method !== "sessions.list") {
+          throw new Error(`Unexpected request: ${method}`);
+        }
+        if (asNullableRecord(params)?.archived !== true) {
+          return sessionsResult([], 0);
+        }
+        managedCalls += 1;
+        if (managedCalls === 1) {
+          return first.promise;
+        }
+        if (managedCalls === 2) {
+          secondStarted.resolve();
+          return second.promise;
+        }
+        return sessionsResult([row(3)], 3);
+      });
+      const { gateway, emitEvent } = createGatewayHarness(client);
+      const sessions = createTestSessionCapability(gateway);
+      const query = { agentId: "main", archivedFilter: "archived" as const, limit: 17 };
+      const readThreeObserved = createDeferred();
+      const unsubscribe = sessions.subscribeList(query, (next) => {
+        if (next.result?.sessions[0]?.label === "Read 3") {
+          readThreeObserved.resolve();
+        }
+      });
+      const event = {
+        type: "event",
+        event: "sessions.changed",
+        payload: { ...row(1), sessionKey: row(1).key, agentId: "main", reason: "update" },
+      } as const satisfies GatewayEventFrame;
+      try {
+        const initial = sessions.refreshList(query);
+        const forced = sessions.refreshList({ ...query, force: true });
+        if (eventTiming === "before") {
+          emitEvent(event);
+        }
+        first.resolve(sessionsResult([row(1)], 1));
+        await secondStarted.promise;
+        expect(managedCalls).toBe(2);
+        if (eventTiming === "after") {
+          emitEvent(event);
+        }
+        await vi.advanceTimersByTimeAsync(SESSION_EVENT_REFRESH_DEBOUNCE_MS);
+        second.resolve(sessionsResult([row(2)], 2));
+        await Promise.all([initial, forced]);
+        await vi.advanceTimersByTimeAsync(999);
+        expect(managedCalls).toBe(2);
+        expect(sessions.listSnapshot(query).result?.sessions[0]?.label).toBe("Read 2");
+        await vi.advanceTimersByTimeAsync(1);
+        if (eventTiming === "after") {
+          expect(managedCalls).toBe(3);
+          await readThreeObserved.promise;
+        }
+        expect.soft(managedCalls).toBe(eventTiming === "before" ? 2 : 3);
+        expect(sessions.listSnapshot(query).result?.sessions[0]?.label).toBe(
+          eventTiming === "before" ? "Read 2" : "Read 3",
+        );
+      } finally {
+        first.resolve(sessionsResult([], 1));
+        second.resolve(sessionsResult([], 2));
+        unsubscribe();
+        sessions.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("does not queue forced filtered pagination behind an in-flight replacement", async () => {
-    let resolveRequest!: (result: SessionsListResult) => void;
-    const pendingResult = new Promise<SessionsListResult>((resolve) => {
-      resolveRequest = resolve;
-    });
+    const { promise: pendingResult, resolve: resolveRequest } =
+      createDeferred<SessionsListResult>();
     const firstPage = listResult(["agent:main:first", "agent:main:second"], 4);
     const request = vi
       .fn()
@@ -645,10 +727,8 @@ describe("session list requests", () => {
   });
 
   it("retains an in-flight managed query while its route subscriber is replaced", async () => {
-    let resolveRequest!: (result: SessionsListResult) => void;
-    const pendingResult = new Promise<SessionsListResult>((resolve) => {
-      resolveRequest = resolve;
-    });
+    const { promise: pendingResult, resolve: resolveRequest } =
+      createDeferred<SessionsListResult>();
     const request = vi.fn(async () => pendingResult);
     const { sessions } = sessionHarness(request);
     const query = { agentId: "main", archivedFilter: "all" as const, limit: 50 };
@@ -799,10 +879,7 @@ describe("session list requests", () => {
   });
 
   it("retires stale filtered snapshots across same-client reconnects without losing subscribers", async () => {
-    let resolveStale!: (result: SessionsListResult) => void;
-    const staleResult = new Promise<SessionsListResult>((resolve) => {
-      resolveStale = resolve;
-    });
+    const { promise: staleResult, resolve: resolveStale } = createDeferred<SessionsListResult>();
     let archivedRequests = 0;
     const request = vi.fn(async (method: string, params?: { archived?: boolean }) => {
       if (method === "sessions.subscribe") {
@@ -861,7 +938,12 @@ describe("session list requests", () => {
       });
       const { sessions, publish } = sessionHarness(request);
       const query = { hasBoard: true };
-      const unsubscribe = sessions.subscribeList(query, () => undefined);
+      const recoveredObserved = createDeferred();
+      const unsubscribe = sessions.subscribeList(query, (next) => {
+        if (next.result?.sessions[0]?.key === "agent:main:recovered") {
+          recoveredObserved.resolve();
+        }
+      });
       try {
         await sessions.refreshList(query);
         fail = true;
@@ -890,7 +972,13 @@ describe("session list requests", () => {
           expect(request.mock.calls.filter(([, params]) => params?.hasBoard)).toHaveLength(2);
           pending.reject(error);
           await refresh;
+          await vi.advanceTimersByTimeAsync(999);
+          expect(request.mock.calls.filter(([, params]) => params?.hasBoard)).toHaveLength(2);
+          expect(sessions.listSnapshot(query).result?.sessions[0]?.key).toBe("agent:main:original");
+          await vi.advanceTimersByTimeAsync(1);
+          expect(request.mock.calls.filter(([, params]) => params?.hasBoard)).toHaveLength(3);
         }
+        await recoveredObserved.promise;
         expect(sessions.listSnapshot(query).result?.sessions[0]?.key).toBe("agent:main:recovered");
         expect(sessions.listSnapshot(query).error).toBeNull();
         expect(request.mock.calls.filter(([, params]) => params?.hasBoard)).toHaveLength(3);

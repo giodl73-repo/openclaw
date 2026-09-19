@@ -1,4 +1,3 @@
-// Slack plugin module implements prepare behavior.
 import {
   resolveAckReaction,
   shouldAckReaction as shouldAckReactionGate,
@@ -12,6 +11,9 @@ import {
   matchesMentionWithExplicit,
   recordDroppedChannelInboundHistory,
   resolveInboundMentionDecision,
+  resolveGroupThreadMentionFacts,
+  resolveGroupThreadConfig,
+  isGroupThreadRouteExclusive,
   resolveEnvelopeFormatOptions,
   resolveUnmentionedGroupInboundPolicy,
   toInboundMediaFactsWithMetadata,
@@ -78,7 +80,7 @@ import { resolveSlackThreadStarter, type SlackThreadStarter } from "../thread.js
 import { qualifySlackRoutePeerId } from "../workspace-routing.js";
 import {
   discardSlackPreflightMedia,
-  findCaptionlessSlackAudioFile,
+  findSlackPreflightAudioFile,
   formatSlackAudioTranscriptForAgent,
   resolveSlackPreflightAudioTranscript,
   sendSlackPreflightAudioTranscriptEcho,
@@ -875,20 +877,36 @@ export async function prepareSlackMessage(params: {
     });
   let routing = resolveMessageRouting(seedTopLevelRoomThreadBySource);
 
+  const groupThreadPeerId = isDirectMessage
+    ? qualifySlackRoutePeerId({
+        id: message.user ?? "unknown",
+        kind: "user",
+        eventScope: opts.eventScope,
+      })
+    : message.channel;
+  const groupThreadConfigured =
+    !isGroupThreadRouteExclusive({
+      sessionKey: routing.sessionKey,
+      acpBinding: Boolean(routing.configuredBinding),
+    }) &&
+    resolveGroupThreadConfig({ cfg, channel: "slack", peerId: groupThreadPeerId })?.qualified ===
+      true;
+  let groupThread: ReturnType<typeof resolveGroupThreadMentionFacts>;
   let mentionCheckTranscript: string | undefined;
   const resolveWasMentioned = (mentionRegexes: RegExp[]) =>
-    opts.wasMentioned ??
-    (!isDirectMessage &&
-      matchesMentionWithExplicit({
-        text: messageText,
-        mentionRegexes,
-        explicit: {
-          hasAnyMention,
-          isExplicitlyMentioned: explicitlyMentioned,
-          canResolveExplicit: Boolean(ctx.botUserId),
-        },
-        transcript: mentionCheckTranscript,
-      }));
+    Boolean(groupThread?.mentionedAgentIds.length) ||
+    (opts.wasMentioned ??
+      (!isDirectMessage &&
+        matchesMentionWithExplicit({
+          text: messageText,
+          mentionRegexes,
+          explicit: {
+            hasAnyMention,
+            isExplicitlyMentioned: explicitlyMentioned,
+            canResolveExplicit: Boolean(ctx.botUserId),
+          },
+          transcript: mentionCheckTranscript,
+        })));
   const buildPolicyMentionRegexes = (agentId: string | undefined) =>
     resolveCachedMentionRegexes(ctx, agentId, {
       provider: "slack",
@@ -1095,7 +1113,8 @@ export async function prepareSlackMessage(params: {
   if (message["_ambiguousThreadReply"]) {
     return drop("ambiguous-thread", message.parent_user_id);
   }
-  let canDetectMention = Boolean(ctx.botUserId) || mentionRegexes.length > 0;
+  let canDetectMention =
+    groupThreadConfigured || Boolean(ctx.botUserId) || mentionRegexes.length > 0;
   // Strip Slack mentions (<@U123>) before command detection so "@Labrador /new" is recognized
   const textForCommandDetection = stripSlackMentionsForCommandDetection(message.text ?? "");
   const hasControlCommandInMessage = hasControlCommand(textForCommandDetection, cfg);
@@ -1193,14 +1212,17 @@ export async function prepareSlackMessage(params: {
 
   let preflightAudioTranscript: string | undefined;
   let preflightAudioMedia: SlackMediaResult | undefined;
-  const preflightAudioFile = findCaptionlessSlackAudioFile(message);
+  const preflightAudioFile = findSlackPreflightAudioFile(message, {
+    allowCaptioned: groupThreadConfigured,
+  });
   const shouldPreflightAudioMention =
-    isRoom &&
     !isBotMessage &&
-    shouldRequireMention &&
     cfg.tools?.media?.audio?.enabled !== false &&
-    messageIngress.activationAccess.shouldSkip &&
-    mentionRegexes.length > 0 &&
+    (groupThreadConfigured ||
+      (isRoom &&
+        shouldRequireMention &&
+        messageIngress.activationAccess.shouldSkip &&
+        mentionRegexes.length > 0)) &&
     Boolean(preflightAudioFile);
   if (shouldPreflightAudioMention && preflightAudioFile) {
     // Scope the provider call to the session that will own an admitted root,
@@ -1229,11 +1251,8 @@ export async function prepareSlackMessage(params: {
       : null;
     if (preflightResult) {
       mentionCheckTranscript = preflightResult.transcript;
-      wasMentioned = resolveWasMentioned(mentionRegexes);
-      if (wasMentioned) {
-        preflightAudioTranscript = preflightResult.transcript;
-        preflightAudioMedia = preflightMedia?.[preflightResult.mediaIndex];
-      }
+      preflightAudioTranscript = preflightResult.transcript;
+      preflightAudioMedia = preflightMedia?.[preflightResult.mediaIndex];
     }
     if (!preflightAudioTranscript) {
       await discardSlackPreflightMedia(preflightMedia);
@@ -1241,11 +1260,29 @@ export async function prepareSlackMessage(params: {
     }
   }
 
+  groupThread = resolveGroupThreadMentionFacts({
+    cfg,
+    channel: "slack",
+    peerId: groupThreadPeerId,
+    text: [messageText, mentionCheckTranscript].filter(Boolean).join("\n"),
+    sessionKey: routing.sessionKey,
+    acpBinding: Boolean(routing.configuredBinding),
+  });
+  wasMentioned = resolveWasMentioned(mentionRegexes);
+
   // Runtime bindings already pin the root and later thread replies to the same
   // target session. A spoken regex mention needs the same seeded root routing
   // as a typed mention, or its later thread replies would use another session.
   if (canSeedMentionedRoomThread && wasMentioned) {
     routing = getSeededMentionRouting();
+    if (
+      isGroupThreadRouteExclusive({
+        sessionKey: routing.sessionKey,
+        acpBinding: Boolean(routing.configuredBinding),
+      })
+    ) {
+      groupThread = undefined;
+    }
     mentionRegexes = buildPolicyMentionRegexes(routing.route.agentId);
     wasMentioned = resolveWasMentioned(mentionRegexes);
     ({
@@ -1259,7 +1296,7 @@ export async function prepareSlackMessage(params: {
       sessionKey,
       historyKey,
     } = routing);
-    canDetectMention = Boolean(ctx.botUserId) || mentionRegexes.length > 0;
+    canDetectMention = Boolean(groupThread) || Boolean(ctx.botUserId) || mentionRegexes.length > 0;
   }
   if (preflightAudioTranscript && !wasMentioned) {
     await discardSlackPreflightMedia(
@@ -1696,6 +1733,7 @@ export async function prepareSlackMessage(params: {
       },
     },
     extra: {
+      GroupThread: groupThread,
       GroupSubject: groupSessionSubject,
       ChannelPromptContext: channelMetadata ? [channelMetadata] : undefined,
       ChannelStructuredContext:

@@ -1,26 +1,35 @@
+import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
 import { createInMemoryTaskRegistryStore } from "../test-utils/task-registry-store.js";
+import { publishTaskRecordAfterAtomicStore } from "./task-registry-publication.js";
 import {
   getTaskById,
+  listTaskRecordsForOwnerTree,
   listTaskRecordPage,
+  listTasksForAgentId,
+  deleteTaskRecordById,
   resetTaskRegistryForTests,
 } from "./task-registry-query.js";
 import { markTaskTerminalById } from "./task-registry-record-api.js";
+import {
+  readTaskRegistryRevision,
+  reloadTaskRegistryFromStoreAsync,
+  tasks as authoritativeTasks,
+} from "./task-registry-state.js";
 import { configureTaskRegistryRuntime } from "./task-registry.store.js";
 import type { TaskRecord } from "./task-registry.types.js";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   resetTaskRegistryForTests();
 });
 
 function configureTaskSnapshot(tasks: Iterable<TaskRecord>): void {
   const snapshotTasks = new Map([...tasks].map((task) => [task.taskId, task]));
   configureTaskRegistryRuntime({
-    store: {
-      ...createInMemoryTaskRegistryStore(),
-      loadSnapshot: () => ({ tasks: snapshotTasks, deliveryStates: new Map() }),
-    },
+    store: createInMemoryTaskRegistryStore({ tasks: snapshotTasks, deliveryStates: new Map() }),
   });
 }
 
@@ -33,11 +42,221 @@ async function readTaskPage(params: Parameters<typeof listTaskRecordPage>[0]) {
   return result.value;
 }
 
+describe("listTasksForAgentId", () => {
+  it("clones only selected details from a 10000-task registry", () => {
+    const records = Array.from({ length: 10_000 }, (_, index): TaskRecord => ({
+      taskId: `task-${index}`,
+      runtime: "cli",
+      requesterSessionKey: "agent:main:main",
+      ownerKey: "agent:main:main",
+      scopeKind: "session",
+      agentId: `agent-${index % 100}`,
+      executionOwner: { host: "worker.example", pid: 123, startIdentity: 1 },
+      task: "Agent task selection",
+      status: "queued",
+      deliveryStatus: "not_applicable",
+      notifyPolicy: "silent",
+      createdAt: Math.floor(index / 200),
+      detail: { nested: { value: `detail-${index}` } },
+    }));
+    const store = createInMemoryTaskRegistryStore({
+      tasks: new Map(records.map((task) => [task.taskId, task])),
+      deliveryStates: new Map(),
+    });
+    configureTaskRegistryRuntime({ store });
+    getTaskById("task-0");
+    const revision = readTaskRegistryRevision();
+    const read = vi.spyOn(store, "loadSnapshot");
+    const write = vi.spyOn(store, "upsertTaskWithDeliveryState");
+    const clone = vi.spyOn(globalThis, "structuredClone");
+
+    const selected = listTasksForAgentId(" agent-17 ");
+    const detailClones = clone.mock.calls.length;
+    clone.mockRestore();
+
+    // Agent selection keeps insertion order within a creation-time tie, unlike
+    // the generic task list's reverse-insertion ordering.
+    const expected = Array.from({ length: 50 }, (_, index) => 49 - index).flatMap((group) => [
+      records[group * 200 + 17],
+      records[group * 200 + 117],
+    ]);
+    expect(selected).toEqual(expected);
+    expect(selected).toHaveLength(100);
+    expect(authoritativeTasks.size).toBe(10_000);
+    expect(readTaskRegistryRevision()).toBe(revision);
+    expect(read).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+
+    const first = expectDefined(selected[0], "selected task");
+    const stored = expectDefined(authoritativeTasks.get(first.taskId), "authoritative task");
+    expect(first).not.toBe(stored);
+    expect(first.detail).not.toBe(stored.detail);
+    expect(first.executionOwner).not.toBe(stored.executionOwner);
+    (first.detail as { nested: { value: string } }).nested.value = "edited";
+    expectDefined(first.executionOwner, "selected execution owner").host = "edited.example";
+    expect(getTaskById(first.taskId)).toEqual(expected[0]);
+    expect(stored).toEqual(expected[0]);
+    expect(detailClones).toBe(100);
+  });
+
+  it("keeps exact agent matching and observes reloaded records", async () => {
+    const task: TaskRecord = {
+      taskId: "trimmed",
+      runtime: "cli",
+      requesterSessionKey: "agent:worker:main",
+      ownerKey: "agent:worker:main",
+      scopeKind: "session",
+      agentId: " worker ",
+      task: "Agent matching",
+      status: "queued",
+      deliveryStatus: "not_applicable",
+      notifyPolicy: "silent",
+      createdAt: 1,
+    };
+    configureTaskSnapshot([
+      task,
+      { ...task, taskId: "case-sensitive", agentId: "Worker" },
+      { ...task, taskId: "requester-only", agentId: undefined, requesterAgentId: "worker" },
+    ]);
+    expect(listTasksForAgentId(" worker ")).toEqual([task]);
+    expect(listTasksForAgentId("Worker").map((row) => row.taskId)).toEqual(["case-sensitive"]);
+    expect(listTasksForAgentId(" \t ")).toEqual([]);
+    expect(listTasksForAgentId("missing")).toEqual([]);
+
+    const replacement = { ...task, taskId: "replacement", detail: { version: 2 } };
+    configureTaskSnapshot([replacement]);
+    await reloadTaskRegistryFromStoreAsync(captureOpenClawStateWorkerContext());
+    expect(listTasksForAgentId("worker")).toEqual([replacement]);
+    expect(getTaskById(task.taskId)).toBeUndefined();
+  });
+});
+
+describe("listTaskRecordsForOwnerTree", () => {
+  it("preserves insertion order and detached snapshots across owner changes, cycles, and removal", () => {
+    const root = "agent:main:root";
+    const child = "agent:main:child";
+    const record = (taskId: string, ownerKey: string): TaskRecord => ({
+      taskId,
+      runtime: "cli",
+      ownerKey,
+      requesterSessionKey: ownerKey,
+      scopeKind: "session",
+      task: taskId,
+      status: "queued",
+      deliveryStatus: "not_applicable",
+      notifyPolicy: "silent",
+      createdAt: 1,
+    });
+    const descendant = {
+      ...record("descendant", child),
+      childSessionKey: root,
+      detail: { nested: { value: "original" } },
+      executionOwner: { host: "fixture", pid: 1, startIdentity: 1 },
+    };
+    const parent = { ...record("parent", root), childSessionKey: child };
+    const unrelated = record("unrelated", "agent:main:other");
+    configureTaskSnapshot([descendant, unrelated, parent]);
+    const owners = new Set([root]);
+    const before = listTaskRecordsForOwnerTree(owners);
+    expect(before.map((task) => task.taskId)).toEqual(["descendant", "parent"]);
+    expect(owners).toEqual(new Set([root]));
+    const selected = expectDefined(before[0], "descendant snapshot");
+    expect(selected.detail).not.toBe(authoritativeTasks.get("descendant")?.detail);
+    selected.detail = { changed: true };
+    expectDefined(selected.executionOwner, "fixture execution owner").pid = 2;
+    expect(getTaskById("descendant")).toMatchObject({
+      detail: { nested: { value: "original" } },
+      executionOwner: { pid: 1 },
+    });
+    // Atomic publication owns index rebinding; candidate reads must observe its current edges.
+    publishTaskRecordAfterAtomicStore({ ...parent, ownerKey: unrelated.ownerKey });
+    expect(listTaskRecordsForOwnerTree(owners)).toEqual([]);
+    publishTaskRecordAfterAtomicStore(parent);
+    publishTaskRecordAfterAtomicStore({ ...descendant, detail: { changed: "canonical" } });
+    expect(before[0]?.detail).toEqual({ changed: true });
+    expect(listTaskRecordsForOwnerTree(owners)[0]?.detail).toEqual({ changed: "canonical" });
+    deleteTaskRecordById(parent.taskId);
+    expect(listTaskRecordsForOwnerTree(owners)).toEqual([]);
+    publishTaskRecordAfterAtomicStore({ ...parent, scopeKind: "system" });
+    expect(listTaskRecordsForOwnerTree(owners)).toEqual([]);
+  });
+});
+
 describe("listTaskRecordPage", () => {
+  it("keeps missing indexed IDs bounded across a yielded registry replacement", async () => {
+    let workMs = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => workMs);
+    const sessionKey = "agent:main:reset";
+    const records = Array.from({ length: 97 }, (_, index): TaskRecord => ({
+      taskId: `task-${index}`,
+      runtime: "cli",
+      requesterSessionKey: sessionKey,
+      ownerKey: sessionKey,
+      scopeKind: "session",
+      task: "Before replacement",
+      status: "running",
+      deliveryStatus: "not_applicable",
+      notifyPolicy: "silent",
+      createdAt: 1,
+    }));
+    configureTaskSnapshot(records);
+    getTaskById("task-0");
+    let reads = 0;
+    const readsPerTurn: number[] = [];
+    const get = authoritativeTasks.get.bind(authoritativeTasks);
+    const spy = vi.spyOn(authoritativeTasks, "get").mockImplementation((id) => {
+      reads += 1;
+      workMs += 1;
+      return get(id);
+    });
+    let replaced = false;
+    let replacement: Promise<void> | undefined;
+    const preparedAfterReplacement: string[] = [];
+    const tick = () => {
+      readsPerTurn.push(reads);
+      reads = 0;
+      if (!replaced) {
+        configureTaskSnapshot([
+          { ...expectDefined(records[0], "replacement fixture"), taskId: "replacement" },
+        ]);
+        replacement = reloadTaskRegistryFromStoreAsync(captureOpenClawStateWorkerContext());
+        replaced = true;
+      }
+      pending = setImmediate(tick);
+    };
+    let pending = setImmediate(tick);
+    try {
+      const page = await readTaskPage({
+        offset: 0,
+        limit: 10,
+        sessionKey,
+        prepareFilter: (batch) => {
+          if (replaced) {
+            preparedAfterReplacement.push(...batch.map((task) => task.taskId));
+          }
+          return () => true;
+        },
+      });
+      readsPerTurn.push(reads);
+      expect(page.tasks.map((task) => task.taskId)).toEqual(["replacement"]);
+      expect(preparedAfterReplacement).toEqual(["replacement"]);
+      expect(Math.max(...readsPerTurn)).toBeLessThanOrEqual(32);
+    } finally {
+      clearImmediate(pending);
+      try {
+        await replacement;
+      } finally {
+        spy.mockRestore();
+      }
+    }
+  });
+
   it.each([
     { scope: "sparse", matching: 1 },
     { scope: "dense", matching: 65 },
   ])("keeps $scope session pages independent of unrelated task activity", async ({ matching }) => {
+    let workMs = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => workMs);
     configureTaskSnapshot(
       Array.from({ length: 65 }, (_, index): TaskRecord => ({
         taskId: `task-${index}`,
@@ -66,6 +285,10 @@ describe("listTaskRecordPage", () => {
         offset: 0,
         limit: 1,
         sessionKey: "agent:main:requested",
+        prepareFilter: () => {
+          workMs += 20;
+          return () => true;
+        },
       });
       if (matching === 1) {
         expect(page.ok).toBe(true);
@@ -83,15 +306,15 @@ describe("listTaskRecordPage", () => {
   });
 
   it.each([
-    { count: 32, mutationTurn: 1, completes: true },
-    { count: 64, mutationTurn: 2, completes: true },
-    { count: 33, mutationTurn: 1, completes: false },
-    { count: 65, mutationTurn: 2, completes: false },
+    { cost: "cheap", workPerSliceMs: 0 },
+    { cost: "expensive", workPerSliceMs: 20 },
   ])(
-    "finishes complete batches but yields unfinished work ($count tasks)",
-    async ({ count, mutationTurn, completes }) => {
+    "keeps $cost task scans responsive and consistent under continuing activity",
+    async ({ workPerSliceMs }) => {
+      let workMs = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => workMs);
       configureTaskSnapshot(
-        Array.from({ length: count }, (_, index): TaskRecord => ({
+        Array.from({ length: 512 }, (_, index): TaskRecord => ({
           taskId: `task-${index}`,
           runtime: "cli",
           requesterSessionKey: "agent:main:main",
@@ -105,26 +328,35 @@ describe("listTaskRecordPage", () => {
           lastEventAt: 1,
         })),
       );
-      let turn = 0;
       let mutations = 0;
       const update = () => {
-        turn += 1;
-        if (turn >= mutationTurn) {
-          mutations += 1;
-          markTaskTerminalById({
-            taskId: "task-0",
-            status: "succeeded",
-            endedAt: mutations + 1,
-          });
-        }
+        mutations += 1;
+        markTaskTerminalById({
+          taskId: "task-0",
+          status: "succeeded",
+          endedAt: mutations + 1,
+        });
         pending = setImmediate(update);
       };
-      let pending = setImmediate(update);
+      let pending: ReturnType<typeof setImmediate> | undefined;
+      update();
       try {
-        const page = await listTaskRecordPage({ offset: 0, limit: count });
-        if (completes) {
+        const page = await listTaskRecordPage({
+          offset: 0,
+          limit: 25,
+          prepareFilter: () => {
+            workMs += workPerSliceMs;
+            return () => true;
+          },
+        });
+        if (workPerSliceMs === 0) {
           expect(page.ok).toBe(true);
-          expect(mutations).toBe(0);
+          expect(mutations).toBe(1);
+          if (page.ok) {
+            expect(page.value.tasks).toHaveLength(25);
+            expect(page.value.tasks[0]).toMatchObject({ taskId: "task-0", endedAt: 2 });
+            expect(page.value.hasMore).toBe(true);
+          }
         } else {
           expect(page).toEqual({ ok: false, error: "registry_changed" });
           expect(mutations).toBeGreaterThanOrEqual(3);
@@ -151,6 +383,8 @@ describe("listTaskRecordPage", () => {
       failLater: true,
     },
   ])("handles yielded task pages with $name", async ({ continuation, mutate, failLater }) => {
+    let workMs = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => workMs);
     const tasks = Array.from({ length: 1_024 }, (_, index): TaskRecord => ({
       taskId: `task-${String(index).padStart(5, "0")}`,
       runtime: "cli",
@@ -175,7 +409,7 @@ describe("listTaskRecordPage", () => {
       tasks.slice(25, 50).map((task) => task.taskId),
     );
 
-    let examined = 0;
+    let preparedSlices = 0;
     let scheduled = false;
     let mutation: TaskRecord | null | undefined;
     const accessFailure = new Error("canonical-store collision in a later slice");
@@ -183,14 +417,15 @@ describe("listTaskRecordPage", () => {
       offset: continuation ? 25 : 0,
       limit: 25,
       ...(continuation ? { expectedRevision: first.revision } : {}),
-      prepareFilter: (batch) => {
-        examined += batch.length;
-        if (failLater && examined > 32) {
+      prepareFilter: () => {
+        preparedSlices += 1;
+        workMs += 20;
+        if (failLater && preparedSlices > 1) {
           throw accessFailure;
         }
         if (mutate && !scheduled) {
           scheduled = true;
-          // The ordinary completion runs only when this scan reaches its existing yield.
+          // The ordinary completion runs when this expensive slice yields.
           queueMicrotask(() => {
             mutation = markTaskTerminalById({
               taskId: "task-01023",
@@ -210,7 +445,7 @@ describe("listTaskRecordPage", () => {
     expect(mutation).toMatchObject({ taskId: "task-01023", status: "succeeded" });
     if (continuation) {
       expect(page).toEqual({ ok: false, error: "cursor_stale" });
-      expect(examined).toBe(32);
+      expect(preparedSlices).toBe(1);
     } else {
       expect(page.ok).toBe(true);
       if (page.ok) {
@@ -224,6 +459,8 @@ describe("listTaskRecordPage", () => {
   });
 
   it("keeps large page scans responsive and sorts only the selected window", async () => {
+    let workMs = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => workMs);
     const total = 10_000;
     const offset = 13;
     const limit = 7;
@@ -274,7 +511,14 @@ describe("listTaskRecordPage", () => {
       setImmediate(() => {
         eventLoopTurnRan = true;
       });
-      const page = await readTaskPage({ offset, limit });
+      const page = await readTaskPage({
+        offset,
+        limit,
+        prepareFilter: () => {
+          workMs += 20;
+          return () => true;
+        },
+      });
 
       expect(page.tasks.map((task) => task.taskId)).toEqual(expectedTaskIds);
       expect(page.hasMore).toBe(true);

@@ -1,4 +1,4 @@
-// Session transcript facade resolves transcript files, appends mirror messages, and reads tails.
+// Session transcript facade appends mirror messages and reads tails.
 import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import type { AgentMessage } from "../../agents/runtime/index.js";
 import type { SessionManager } from "../../agents/sessions/session-manager.js";
@@ -30,23 +30,26 @@ import {
 import { resolveDefaultSessionStorePath, resolveSessionStorePathCore } from "./paths.js";
 import {
   loadSessionEntryReadOnly,
-  loadTranscriptEvents,
   isSessionTranscriptProjectionUnavailableError,
   persistSessionTranscriptTurn,
   readActiveTranscriptEntryAnchor,
+  readLatestSessionTranscriptMessageEvent,
   readLatestTranscriptAssistantText,
   readSessionTranscriptMessageEventPage,
   resolveSessionEntrySelection,
   updateSessionEntry,
+  waitForSessionTranscriptProjection,
   type SessionTranscriptTurnPersistOptions,
   type SessionTranscriptTurnWriteContext,
   type SessionTranscriptTurnExpectedState,
   type TranscriptEntryAnchor,
+  type TranscriptEvent,
 } from "./session-accessor.js";
 import type {
   SessionLifecycleRevisionExpectation,
   SessionTranscriptTurnLifecyclePatch,
 } from "./session-transcript-turn-lifecycle.types.js";
+import { recordAssistantManagedMediaUrls } from "./transcript-assistant-delivery.js";
 import {
   applyBeforeMessageWriteToAssistant,
   type AssistantBeforeMessageWrite,
@@ -59,10 +62,6 @@ import {
   readPreferredUpstreamUserText,
 } from "./transcript-recent-window.js";
 import { streamSessionTranscriptLinesReverse } from "./transcript-stream.js";
-import {
-  scanSessionTranscriptTree,
-  selectSessionTranscriptTreePathNodes,
-} from "./transcript-tree.js";
 import type { InternalSessionEntry as SessionEntry } from "./types.js";
 
 type SessionTranscriptAppendTarget = {
@@ -159,8 +158,6 @@ class SessionTranscriptAgentScopeMismatchError extends Error {
 
 export type LatestAssistantTranscriptText = AssistantTranscriptText;
 
-export { resolveSessionTranscriptFile } from "./transcript-file-resolve.js";
-
 function parseAssistantTranscriptText(
   line: string,
   options?: { excludeTranscriptOnlyOpenClawAssistant?: boolean },
@@ -198,11 +195,11 @@ type SessionConversationTranscriptTarget = {
   sqliteScope?: SqliteSessionFileMarker;
 };
 
-function parseRecentConversationText(
-  line: string,
+function extractRecentConversationText(
+  event: TranscriptEvent,
   options: ReadRecentSessionConversationTextOptions = {},
 ): SessionRecentConversationText | undefined {
-  const parsed = JSON.parse(line) as {
+  const parsed = event as {
     id?: unknown;
     message?: unknown;
   };
@@ -282,26 +279,29 @@ async function readRecentUserAssistantTextFromSqliteTranscript(
       sessionId: scope.sessionId,
       storePath: scope.storePath,
     };
-    const recent: SessionRecentConversationText[] = [];
-    for (let offset = 0; recent.length < limit; offset += pageSize) {
-      const page = readSessionTranscriptMessageEventPage(readScope, {
-        maxMessages: pageSize,
-        offset,
-      });
-      if (page.events.length === 0) {
-        break;
-      }
-      for (const event of page.events.toReversed()) {
-        const entry = parseRecentConversationText(JSON.stringify(event.event), options);
-        if (entry && isWithinTranscriptWindow(entry.timestamp, options)) {
-          recent.push(entry);
-          if (recent.length >= limit) {
-            break;
+    const { readRestoredSessionTranscript } = await import("./session-cold-storage-read.js");
+    return await readRestoredSessionTranscript(readScope, () => {
+      const recent: SessionRecentConversationText[] = [];
+      for (let offset = 0; recent.length < limit; offset += pageSize) {
+        const page = readSessionTranscriptMessageEventPage(readScope, {
+          maxMessages: pageSize,
+          offset,
+        });
+        if (page.events.length === 0) {
+          break;
+        }
+        for (const event of page.events.toReversed()) {
+          const entry = extractRecentConversationText(event.event, options);
+          if (entry && isWithinTranscriptWindow(entry.timestamp, options)) {
+            recent.push(entry);
+            if (recent.length >= limit) {
+              break;
+            }
           }
         }
       }
-    }
-    return recent.toReversed();
+      return recent.toReversed();
+    });
   } catch (error) {
     if (isSessionTranscriptProjectionUnavailableError(error)) {
       return [];
@@ -365,18 +365,15 @@ export async function readLatestAssistantTextFromSessionTranscript(
       }
     | undefined,
 ): Promise<LatestAssistantTranscriptText | undefined> {
-  if (target && typeof target === "object") {
-    return readLatestTranscriptAssistantText(target);
+  const sqliteScope =
+    target && typeof target === "object" ? target : parseSqliteSessionFileMarker(target);
+  if (sqliteScope) {
+    const { readRestoredSessionTranscript } = await import("./session-cold-storage-read.js");
+    return readRestoredSessionTranscript(sqliteScope, () =>
+      readLatestTranscriptAssistantText(sqliteScope),
+    );
   }
-  const sessionFile = target;
-  const sqliteMarker = parseSqliteSessionFileMarker(sessionFile);
-  if (sqliteMarker) {
-    return readLatestTranscriptAssistantText({
-      agentId: sqliteMarker.agentId,
-      sessionId: sqliteMarker.sessionId,
-      storePath: sqliteMarker.storePath,
-    });
-  }
+  const sessionFile = typeof target === "string" ? target : undefined;
   if (!sessionFile?.trim()) {
     return undefined;
   }
@@ -458,7 +455,10 @@ export async function appendAssistantMessageToSessionTranscript(params: {
     config: params.config,
     ...(params.beforeMessageWrite ? { beforeMessageWrite: params.beforeMessageWrite } : {}),
     message: {
-      role: "assistant" as const,
+      ...recordAssistantManagedMediaUrls(
+        { role: "assistant" as const, openclawDelivery: { mediaUrls: [] } },
+        params.mediaUrls,
+      ),
       content,
       ...(displayContent ? { [ASSISTANT_DISPLAY_CONTENT_FIELD]: displayContent } : {}),
       api: OPENCLAW_TRANSCRIPT_ARTIFACT_API,
@@ -584,17 +584,20 @@ export async function appendExactAssistantMessageToSessionTranscript(params: {
         reason: "blocked by before_message_write",
       };
     }
-    const identifiedDeliveryMirror =
-      Boolean(explicitIdempotencyKey) && isIdentifiedDeliveryMirror(params.message);
     const target: SessionTranscriptAppendTarget = {
       ...(transcriptAgentId ? { agentId: transcriptAgentId } : {}),
       sessionId: currentEntry.sessionId,
       sessionKey: resolved.normalizedKey,
       storePath,
     };
+    if (isRedundantDeliveryMirror(params.message) && !explicitIdempotencyKey) {
+      // Reconciliation needs the writer queue. Wait before entering it, then
+      // read the current projected tail again inside the guarded append.
+      await waitForSessionTranscriptProjection(target);
+    }
     let latestEquivalentAssistantId: string | undefined;
-    // Identified delivery mirrors, including suppressed finals, dedupe only by
-    // key so same-text markers from different source ids remain separate rows.
+    // Keyed mirrors use strict replay identity; text-only suppression must not
+    // hide conflicting media or collapse distinct source messages.
     const turn = await persistSessionTranscriptTurn(
       {
         sessionId: currentEntry.sessionId,
@@ -641,7 +644,7 @@ export async function appendExactAssistantMessageToSessionTranscript(params: {
               : {}),
             shouldAppend: async (appendTarget) => {
               latestEquivalentAssistantId =
-                isRedundantDeliveryMirror(params.message) && !identifiedDeliveryMirror
+                isRedundantDeliveryMirror(params.message) && !explicitIdempotencyKey
                   ? await findLatestEquivalentAssistantMessageId(
                       appendTarget,
                       preparedUnkeyedMessage as SessionTranscriptAssistantMessage,
@@ -741,41 +744,23 @@ async function readLatestVisibleTranscriptMessage(scope: {
   sessionKey?: string;
   storePath: string;
 }): Promise<{ id?: string; message: unknown } | undefined> {
-  const events = await loadTranscriptEvents(scope).catch(() => []);
-  const tree = scanSessionTranscriptTree(events);
-  const visiblePath = selectSessionTranscriptTreePathNodes(tree, tree.leafId);
-  const visibleEvents =
-    visiblePath.length > 0
-      ? visiblePath.map((node) => node.entry)
-      : tree.hasLeafControl
-        ? []
-        : events;
-  for (const event of visibleEvents.toReversed()) {
+  try {
+    const event = readLatestSessionTranscriptMessageEvent(scope)?.event;
     if (!event || typeof event !== "object" || Array.isArray(event)) {
-      continue;
+      return undefined;
     }
     const record = event as { id?: unknown; message?: unknown };
     if (record.message === undefined) {
-      continue;
+      return undefined;
     }
     return {
       ...(typeof record.id === "string" ? { id: record.id } : {}),
       message: record.message,
     };
+  } catch {
+    // Mirror deduplication remains best-effort when transcript reads are unavailable.
+    return undefined;
   }
-  return undefined;
-}
-
-function isIdentifiedDeliveryMirror(message: SessionTranscriptAssistantMessage): boolean {
-  const marker = (message as { openclawDeliveryMirror?: InternalSessionTranscriptDeliveryMirror })
-    .openclawDeliveryMirror;
-  return (
-    isRedundantDeliveryMirror(message) &&
-    (marker?.kind === "channel-final" ||
-      marker?.kind === "channel-final-suppressed" ||
-      marker?.kind === "message-tool-source-reply" ||
-      marker?.kind === CRON_DIRECT_DELIVERY_CONTEXT_KIND)
-  );
 }
 
 function extractAssistantMessageText(message: AgentMessage): string | null {

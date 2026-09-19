@@ -6,11 +6,13 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { managedWorktrees } from "../agents/worktrees/service.js";
 import { loadSessionEntry, upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
-import { registerClonedProjectRegistry } from "../projects/project-registry.js";
+import * as backoff from "../infra/backoff.js";
+import { registerClonedProjectRegistry } from "../projects/project-registry.test-support.js";
 import {
   openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
 } from "../state/openclaw-state-db.js";
+import { OpenClawStateLeaseError } from "../state/openclaw-state-lease.js";
 import { getSessionRepositoryWorkspaceStore } from "../state/session-repository-workspaces.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { executeGitHubPublication } from "./github-publication-executor.js";
@@ -443,7 +445,15 @@ it("can hold publisher exclusion during an existing reclaim claim without taking
     const { seedActivePlacement, REQUEST } =
       await import("./worker-environments/placement-dispatch-test-fixtures.js");
     const { placementTurnOwner } = await import("./worker-environments/placement-record.js");
-    const placements = createWorkerSessionPlacementStore({ database: openOpenClawStateDatabase() });
+    const { seedAttachedPlacementEnvironment } =
+      await import("./worker-environments/placement-test-fixtures.js");
+    const database = openOpenClawStateDatabase();
+    const placements = createWorkerSessionPlacementStore({ database });
+    seedAttachedPlacementEnvironment(database, {
+      environmentId: "handoff-worker",
+      sessionId: REQUEST.sessionId,
+      ownerEpoch: 1,
+    });
     const active = seedActivePlacement(placements, {
       environmentId: "handoff-worker",
       ownerEpoch: 1,
@@ -470,13 +480,25 @@ it("can hold publisher exclusion during an existing reclaim claim without taking
       assertOwned();
       entered = true;
       expect(placements.validateWorkspaceResultClaim(claim)).toBe(true);
+      const wait = vi.spyOn(backoff, "sleepWithAbort");
       await expect(
         placements.withWorkspaceExclusion(REQUEST.sessionId, async () => {}),
-      ).rejects.toThrow();
+      ).rejects.toThrow("another operation holds the lease");
+      expect(wait).not.toHaveBeenCalled();
       assertOwned();
       expect(placements.validateWorkspaceResultClaim(claim)).toBe(true);
     });
     expect(entered).toBe(true);
     expect(placements.validateWorkspaceResultClaim(claim)).toBe(true);
+    for (const code of ["OPENCLAW_STATE_LEASE_TIMEOUT", "STATE_LEASE_BUSY"] as const) {
+      const operationFailure = new OpenClawStateLeaseError("Nested operation refused admission", {
+        code,
+      });
+      await expect(
+        placements.withWorkspaceExclusion(REQUEST.sessionId, async () => {
+          throw operationFailure;
+        }),
+      ).rejects.toBe(operationFailure);
+    }
   });
 });

@@ -1,11 +1,7 @@
 // MCP loopback HTTP server.
 // Exposes Gateway-scoped tools to local MCP clients over bearer-auth loopback.
 import crypto from "node:crypto";
-import {
-  createServer as createHttpServer,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http";
+import { createServer as createHttpServer, type ServerResponse } from "node:http";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { withAgentQuestionAnswerAuthority } from "../agents/harness/host-private-capabilities.js";
 import { acknowledgeInternalToolResult } from "../agents/runtime/internal-hooks.js";
@@ -19,19 +15,26 @@ import { getRuntimeConfig } from "../config/io.js";
 import { resolveSessionEntryAccessTarget } from "../config/sessions/session-accessor.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { isRequestBodyLimitError, readRequestBodyWithLimit } from "../infra/http-body.js";
+import {
+  createHttpRequestAbortSignal,
+  sendHttpRequestRejection,
+} from "../infra/http-request-lifecycle.js";
 import { logDebug, logWarn } from "../logger.js";
+import { runOutsideGatewayRootWorkAdmission } from "../process/gateway-work-admission.js";
 import {
   AGENT_HARNESS_SESSION_KEY_RESERVED_MESSAGE,
   isAgentHarnessSessionKey,
   isAgentHarnessSessionStoreEntryProtected,
 } from "../sessions/agent-harness-session-key.js";
+import { AsyncWorkScope, runWithTrackedCancellation } from "../shared/async-work-scope.js";
 import {
   registerMcpLoopbackClientGrantRevocationListener,
   revokeMcpLoopbackClientGrantsForRuntime,
 } from "./mcp-grant-store.js";
-import { handleMcpJsonRpc } from "./mcp-http.handlers.js";
 import {
   clearActiveMcpLoopbackRuntimeByOwnerToken,
+  getActiveMcpLoopbackRuntime,
   markMcpLoopbackRequestClassified,
   markMcpLoopbackRequestFinished,
   markMcpLoopbackRequestStarted,
@@ -44,19 +47,17 @@ import {
 } from "./mcp-http.loopback-runtime.js";
 import { jsonRpcError, type JsonRpcRequest } from "./mcp-http.protocol.js";
 import {
-  isMcpHttpBodyTooLargeError,
-  isMcpHttpBodyTimeoutError,
-  readMcpHttpBody,
   resolveMcpCliCaptureKey,
   resolveMcpHttpBodyTimeoutMs,
   resolveMcpRequestContext,
   validateMcpLoopbackRequest,
 } from "./mcp-http.request.js";
-import { McpLoopbackToolCache } from "./mcp-http.runtime.js";
 
 // Loopback MCP server exposes gateway-scoped tools to local MCP clients over a
 // bearer-token HTTP endpoint bound to 127.0.0.1. Only one active server/runtime
 // is registered per process.
+
+const MAX_MCP_BODY_BYTES = 1_048_576;
 
 let closeActiveMcpLoopbackServer: (() => Promise<void>) | undefined;
 let activeMcpLoopbackServerPromise: Promise<void> | null = null;
@@ -129,41 +130,16 @@ function logMcpLoopbackTraffic(step: string, details: Record<string, unknown>): 
   console.error(`[mcp-loopback] ${step} ${JSON.stringify(details)}`);
 }
 
-// Abort tool calls when the request disconnects before completion, but keep
-// completed responses alive through normal response close notifications.
-function createRequestAbortSignal(req: IncomingMessage, res: ServerResponse) {
-  const controller = new AbortController();
-  const abort = () => {
-    if (!controller.signal.aborted) {
-      controller.abort();
-    }
-  };
-  const abortIfRequestIncomplete = () => {
-    if (!req.complete) {
-      abort();
-    }
-  };
-  const abortIfResponseStillOpen = () => {
-    if (!res.writableEnded) {
-      abort();
-    }
-  };
-  req.once("close", abortIfRequestIncomplete);
-  res.once("close", abortIfResponseStillOpen);
-  if (req.destroyed && !req.complete) {
-    abort();
-  }
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      req.off("close", abortIfRequestIncomplete);
-      res.off("close", abortIfResponseStillOpen);
-    },
-  };
-}
-
 /** Starts a new MCP loopback HTTP server and registers its bearer tokens. */
-async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
+async function startMcpLoopbackServer(
+  port: number,
+  work: AsyncWorkScope,
+): Promise<() => Promise<void>> {
+  // Shutdown preloads this module even when no MCP listener is needed.
+  const [{ handleMcpJsonRpc }, { McpLoopbackToolCache }] = await Promise.all([
+    import("./mcp-http.handlers.js"),
+    import("./mcp-http.runtime.js"),
+  ]);
   const ownerToken = crypto.randomBytes(32).toString("hex");
   const nonOwnerToken = crypto.randomBytes(32).toString("hex");
   const toolCache = new McpLoopbackToolCache();
@@ -208,12 +184,16 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
     // an accepted request is still uploading, and retries must not outrun it.
     const cliCaptureKey = resolveMcpCliCaptureKey(req, auth);
     const cliRequestCaptureHandle = markMcpLoopbackRequestStarted(cliCaptureKey);
-    const requestAbort = createRequestAbortSignal(req, res);
-    void (async () => {
+    const requestAbort = createHttpRequestAbortSignal(req, res);
+    void work.track(async () => {
       let parsed: unknown;
       let cliCaptureHandles: Array<ReturnType<typeof markMcpLoopbackToolCallStarted>> = [];
       try {
-        const body = await readMcpHttpBody(req, { timeoutMs: resolveMcpHttpBodyTimeoutMs() });
+        const body = await readRequestBodyWithLimit(req, {
+          maxBytes: MAX_MCP_BODY_BYTES,
+          timeoutMs: resolveMcpHttpBodyTimeoutMs(),
+          destroyOnLimit: false,
+        });
         parsed = parseMcpJsonBody(body);
         if (Array.isArray(parsed) && parsed.length === 0) {
           markMcpLoopbackRequestClassified(cliRequestCaptureHandle);
@@ -253,7 +233,10 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
         }
         const cfg = getRuntimeConfig();
         const requestContext = resolveMcpRequestContext(req, cfg, auth);
-        const authorizeToolCall = boundClientGrant?.isCurrent;
+        const authorizeToolCall = () =>
+          !work.isClosing &&
+          getActiveMcpLoopbackRuntime()?.ownerToken === ownerToken &&
+          (boundClientGrant?.isCurrent() ?? true);
         const harnessEntry = isAgentHarnessSessionKey(requestContext.sessionKey)
           ? resolveSessionEntryAccessTarget({ cfg, sessionKey: requestContext.sessionKey }).entry
           : undefined;
@@ -289,6 +272,7 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
             toolCache.resolve({
               context: requestContext,
               rootedExecution: boundClientGrant?.rootedExecution,
+              messageActionTurnCapability: boundClientGrant?.messageActionTurnCapability,
               cfg,
               signal: requestAbort.signal,
               ...(boundClientGrant?.toolAuth
@@ -300,6 +284,10 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
                   }
                 : {}),
               ...(boundGrantToken ? { grantToken: boundGrantToken } : {}),
+              // Same liveness check `authorizeToolCall` applies after the hook,
+              // handed to run-contract tools so a revocation that lands while a
+              // call is in flight also fails the durable write.
+              isGrantCurrent: authorizeToolCall,
               yieldContextCacheKey: yieldContext?.cacheKey,
               onYield: yieldContext?.onYield,
               ...(boundClientGrant?.skillLibraryAuthoring
@@ -351,7 +339,7 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
           const cliCaptureHandle = cliCaptureHandles[messageIndex];
           let response: object | null;
           try {
-            const handleRequest = async () =>
+            const handleRequest = async (signal: AbortSignal) =>
               await handleMcpJsonRpc({
                 message,
                 tools: scopedTools.tools,
@@ -374,7 +362,7 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
                     agentId: scopedTools.agentId,
                   }),
                 },
-                signal: requestAbort.signal,
+                signal,
                 authorizeToolCall,
                 onToolCallPrepared: cliCaptureHandle
                   ? ({ toolName: preparedToolName, args }) => {
@@ -397,6 +385,8 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
               ? createAdmittedGatewayToolCallerIdentity({
                   admittedRunContext: boundClientGrant.admittedRunContext,
                   receiptAuthority: boundClientGrant.isCurrent,
+                  cronAuthorityCheck: boundClientGrant.cronAuthorityCheck,
+                  mintCronRequesterGrant: boundClientGrant.mintCronRequesterGrant,
                   agentId: scopedTools.agentId,
                   sessionKey: requestContext.sessionKey,
                   turnSourceChannel: requestContext.messageProvider,
@@ -410,7 +400,9 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
                   turnSourceThreadId: requestContext.currentThreadTs,
                 })
               : undefined;
-            response = await withGatewayToolCallerIdentity(callerIdentity, handleRequest);
+            response = await withGatewayToolCallerIdentity(callerIdentity, () =>
+              runWithTrackedCancellation(requestAbort.signal, handleRequest),
+            );
           } finally {
             markMcpLoopbackToolCallFinished(cliCaptureHandle);
           }
@@ -447,21 +439,33 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
           }
         });
       } catch (error) {
-        logWarn(`mcp-loopback: request handling failed: ${formatErrorMessage(error)}`);
-        logMcpLoopbackTraffic("request-failed", {
-          message: formatErrorMessage(error),
-        });
+        const message = isRequestBodyLimitError(error)
+          ? {
+              PAYLOAD_TOO_LARGE: `Request body exceeds ${MAX_MCP_BODY_BYTES} bytes`,
+              REQUEST_BODY_TIMEOUT: "Request body timed out",
+              CONNECTION_CLOSED: "Request body connection closed",
+            }[error.code]
+          : formatErrorMessage(error);
+        logWarn(`mcp-loopback: request handling failed: ${message}`);
+        logMcpLoopbackTraffic("request-failed", { message });
         if (!res.headersSent) {
-          if (isMcpHttpBodyTooLargeError(error)) {
-            res.writeHead(413, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "payload_too_large" }), () => {
-              req.destroy();
-            });
-          } else if (isMcpHttpBodyTimeoutError(error)) {
-            res.writeHead(408, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "request_body_timeout" }), () => {
-              req.destroy();
-            });
+          // Capture settles when rejection is queued; the transport owner joins socket cleanup.
+          if (isRequestBodyLimitError(error, "PAYLOAD_TOO_LARGE")) {
+            void sendHttpRequestRejection(
+              req,
+              res,
+              413,
+              JSON.stringify({ error: "payload_too_large" }),
+              "application/json",
+            );
+          } else if (isRequestBodyLimitError(error, "REQUEST_BODY_TIMEOUT")) {
+            void sendHttpRequestRejection(
+              req,
+              res,
+              408,
+              JSON.stringify({ error: "request_body_timeout" }),
+              "application/json",
+            );
           } else if (isMcpJsonParseError(error)) {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify(jsonRpcError(null, -32700, "Parse error")));
@@ -483,7 +487,7 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
         }
         markMcpLoopbackRequestFinished(cliRequestCaptureHandle);
       }
-    })();
+    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -508,17 +512,21 @@ async function startMcpLoopbackServer(port = 0): Promise<() => Promise<void>> {
   setActiveMcpLoopbackRuntime({ port: address.port, ownerToken, nonOwnerToken });
   logDebug(`mcp loopback listening on 127.0.0.1:${address.port}`);
 
-  return () => {
+  return async () => {
     // Stop admitting this runtime's child grants before draining accepted
     // requests. A delayed old-server close cannot revoke a successor runtime.
     clearActiveMcpLoopbackRuntimeByOwnerToken(ownerToken);
     revokeMcpLoopbackClientGrantsForRuntime(ownerToken);
     unregisterGrantRevocation();
     toolCache.clear();
-    return new Promise<void>((resolve, reject) => {
-      httpServer.close((error) => (error ? reject(error) : resolve()));
-      closeActiveSseResponses();
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((error) => (error ? reject(error) : resolve()));
+        closeActiveSseResponses();
+      });
+    } finally {
+      await work.drain();
+    }
   };
 }
 
@@ -528,9 +536,18 @@ export async function ensureMcpLoopbackServer(port = 0): Promise<void> {
     return;
   }
   if (!activeMcpLoopbackServerPromise) {
-    activeMcpLoopbackServerPromise = startMcpLoopbackServer(port)
+    // The listener owns its context until Gateway close; callers own only requests.
+    // Inheriting the first turn's scope poisons later tool calls when that turn closes.
+    const work = new AsyncWorkScope();
+    activeMcpLoopbackServerPromise = runOutsideGatewayRootWorkAdmission(() =>
+      work.run(() => startMcpLoopbackServer(port, work)),
+    )
       .then((close) => {
         closeActiveMcpLoopbackServer = close;
+      })
+      .catch(async (error: unknown) => {
+        await work.drain();
+        throw error;
       })
       .finally(() => {
         activeMcpLoopbackServerPromise = null;

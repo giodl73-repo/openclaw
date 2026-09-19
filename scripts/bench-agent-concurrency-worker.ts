@@ -225,8 +225,13 @@ async function configureSpawnRuntime(
       persistSubagentRunsToDisk: () => {},
       persistSubagentRunsToDiskOrThrow: () => {},
     });
+    const { createInMemoryTaskRegistryStore, createInMemoryTaskFlowRegistryStore } =
+      await import("../src/test-utils/task-registry-store.js");
+    const inMemoryFlowStore = createInMemoryTaskFlowRegistryStore();
     taskStore.configureTaskRegistryRuntime({
       store: {
+        ...createInMemoryTaskRegistryStore(undefined, inMemoryFlowStore),
+        // Memory mode measures runtime projection with empty, no-op task persistence.
         loadSnapshot: () => ({ tasks: new Map(), deliveryStates: new Map() }),
         upsertTaskWithDeliveryState: () => {},
         deleteTaskWithDeliveryState: () => {},
@@ -235,12 +240,7 @@ async function configureSpawnRuntime(
       },
     });
     flowStore.configureTaskFlowRegistryRuntime({
-      store: {
-        loadSnapshot: () => ({ flows: new Map() }),
-        upsertFlow: () => {},
-        deleteFlow: () => {},
-        close: () => {},
-      },
+      store: inMemoryFlowStore,
     });
     return;
   }

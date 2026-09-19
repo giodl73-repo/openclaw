@@ -23,10 +23,14 @@ import {
   runNodeStep,
   runNodeStepsInParallel,
 } from "../../scripts/prepare-extension-package-boundary-artifacts.mts";
+import { resolveTestNodeExecPath } from "../../src/test-utils/node-process.js";
 import { waitForChildClose, waitForDead, waitForPidFile } from "../helpers/process-wait.js";
 import { startProcessWatchdogFixture } from "../helpers/process-watchdog.js";
 import { runQaGatewayFixture } from "../helpers/qa-gateway-cleanup.js";
+import { exitedDescendantReaper } from "./exited-descendant-reaper.test-support.js";
 import { createScriptTestHarness } from "./test-helpers.js";
+
+const testNodeExecPath = resolveTestNodeExecPath();
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -132,31 +136,10 @@ process.exitCode = await runManagedCommand({
       );
       // Linux may reap orphaned tool services after the leader's close. Adopt
       // them here and defer reaping until the real supervisor has settled.
-      const reaper = `
-import ctypes, os, subprocess, sys
-if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
-    raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
-try:
-    result = subprocess.run(sys.argv[1:])
-finally:
-    reaped = 0
-    while True:
-        try:
-            pid, code = os.waitpid(-1, os.WNOHANG)
-        except ChildProcessError:
-            break
-        if pid == 0 or code != 0:
-            raise RuntimeError("tool descendant did not exit successfully")
-        reaped += 1
-    print("successfully reaped:", reaped)
-    if reaped == 0:
-        raise RuntimeError("fixture did not retain an exited descendant")
-sys.exit(result.returncode)
-`;
       let output = "";
       const code = await runManagedCommand({
         bin: "python3",
-        args: ["-c", reaper, process.execPath, runnerPath],
+        args: ["-c", exitedDescendantReaper, process.execPath, runnerPath],
         stdio: ["ignore", "pipe", "pipe"],
         timeoutMs: 10_000,
         onReady(child) {
@@ -176,7 +159,7 @@ sys.exit(result.returncode)
       runner,
       resistant,
       abort,
-      bin = process.execPath,
+      bin = testNodeExecPath,
     }: {
       runner: "managed" | "managed-inherit" | "preparation";
       resistant: boolean;
@@ -199,7 +182,7 @@ sys.exit(result.returncode)
 import fs from 'node:fs';
 import { runTsxCliShim } from ${JSON.stringify(moduleUrl("scripts/lib/tsx-cli-shim.mjs"))};
 ${publish(0)}
-await runTsxCliShim(import.meta.url, { implementation: './implementation.mts', forceKillDelayMs: 10000 });
+await runTsxCliShim(import.meta.url, { implementation: './implementation.mts', detached: true, forceKillDelayMs: 10000 });
 `,
     );
     fs.writeFileSync(
@@ -493,7 +476,7 @@ setInterval(() => {}, 1_000);
       });
       expect(runTaskkill).toHaveBeenNthCalledWith(1, taskkillPath, ["/PID", "12345", "/T"], {
         killSignal: "SIGKILL",
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         timeout: 10_000,
       });
 
@@ -503,7 +486,7 @@ setInterval(() => {}, 1_000);
       });
       expect(runTaskkill).toHaveBeenNthCalledWith(2, taskkillPath, ["/PID", "12345", "/T", "/F"], {
         killSignal: "SIGKILL",
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
         timeout: 10_000,
       });
       expect(child.kill).not.toHaveBeenCalled();
@@ -539,7 +522,7 @@ setInterval(() => {}, 1_000);
     withDefaultWindowsSystemRoot(() => {
       const child = {
         kill: vi.fn(),
-        pid: 12345,
+        pid: process.pid,
       };
       const runTaskkill = vi
         .fn()
@@ -551,23 +534,33 @@ setInterval(() => {}, 1_000);
         runTaskkill,
       });
 
-      expect(runTaskkill).toHaveBeenNthCalledWith(1, taskkillPath, ["/PID", "12345", "/T"], {
-        killSignal: "SIGKILL",
-        stdio: "ignore",
-        timeout: 10_000,
-      });
-      expect(runTaskkill).toHaveBeenNthCalledWith(2, taskkillPath, ["/PID", "12345", "/T", "/F"], {
-        killSignal: "SIGKILL",
-        stdio: "ignore",
-        timeout: 10_000,
-      });
+      expect(runTaskkill).toHaveBeenNthCalledWith(
+        1,
+        taskkillPath,
+        ["/PID", String(child.pid), "/T"],
+        {
+          killSignal: "SIGKILL",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 10_000,
+        },
+      );
+      expect(runTaskkill).toHaveBeenNthCalledWith(
+        2,
+        taskkillPath,
+        ["/PID", String(child.pid), "/T", "/F"],
+        {
+          killSignal: "SIGKILL",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 10_000,
+        },
+      );
       expect(child.kill).not.toHaveBeenCalled();
     });
   });
 
   it("preserves stdio-only taskkill and falls back after both trusted attempts fail", () => {
     withDefaultWindowsSystemRoot(() => {
-      const child = { kill: vi.fn(() => true), pid: 12345 };
+      const child = { kill: vi.fn(() => true), pid: process.pid };
       const runTaskkill = vi.fn(() => ({ error: undefined, status: 1 }));
 
       expect(
@@ -576,13 +569,23 @@ setInterval(() => {}, 1_000);
           runTaskkill,
           taskkillTimeoutMs: null,
         }),
-      ).toEqual({ processTreeState: "indeterminate" });
-      expect(runTaskkill).toHaveBeenNthCalledWith(1, taskkillPath, ["/PID", "12345", "/T"], {
-        stdio: "ignore",
-      });
-      expect(runTaskkill).toHaveBeenNthCalledWith(2, taskkillPath, ["/PID", "12345", "/T", "/F"], {
-        stdio: "ignore",
-      });
+      ).toEqual({ processTreeState: "indeterminate", error: expect.any(Error) });
+      expect(runTaskkill).toHaveBeenNthCalledWith(
+        1,
+        taskkillPath,
+        ["/PID", String(child.pid), "/T"],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      expect(runTaskkill).toHaveBeenNthCalledWith(
+        2,
+        taskkillPath,
+        ["/PID", String(child.pid), "/T", "/F"],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
       expect(child.kill).toHaveBeenCalledWith("SIGTERM");
     });
   });
@@ -635,7 +638,7 @@ setInterval(() => {}, 1_000);
     }
   });
 
-  it("preserves distinct group permission policies and verifies the leader when requested", () => {
+  it("preserves indeterminate group state after the leader exits", () => {
     const permissionError = Object.assign(new Error("group signal denied"), { code: "EPERM" });
     const child = { exitCode: null, pid: 12345, signalCode: null };
     const kill = vi.spyOn(process, "kill").mockImplementation((pid) => {
@@ -653,15 +656,12 @@ setInterval(() => {}, 1_000);
         inspectManagedProcessGroup(child, { errorPolicy: "indeterminate", platform: "linux" }),
       ).toBe("indeterminate");
       expect(
-        inspectManagedProcessGroup(child, { errorPolicy: "verify-leader", platform: "linux" }),
-      ).toBe("live");
-      expect(kill).toHaveBeenCalledWith(12345, 0);
-      expect(
         inspectManagedProcessGroup(
           { ...child, exitCode: 0 },
-          { errorPolicy: "verify-leader", platform: "linux" },
+          { errorPolicy: "indeterminate", platform: "linux" },
         ),
-      ).toBe("dead");
+      ).toBe("indeterminate");
+      expect(kill).not.toHaveBeenCalledWith(12345, 0);
     } finally {
       kill.mockRestore();
     }
@@ -672,7 +672,7 @@ setInterval(() => {}, 1_000);
 
     expect(
       inspectManagedProcessGroup(child, { errorPolicy: "alive-on-eperm", platform: "win32" }),
-    ).toBe("dead");
+    ).toBe("indeterminate");
     expect(
       inspectManagedProcessGroup(child, {
         errorPolicy: "alive-on-eperm",
@@ -695,6 +695,8 @@ setInterval(() => {}, 1_000);
     policy?: Parameters<typeof inspectManagedProcessGroup>[1]["errorPolicy"];
     platform?: NodeJS.Platform;
     running?: boolean;
+    remainingMs?: number;
+    snapshotTimeoutMs?: number;
   }>([
     { snapshot: "empty", afterSnapshot: "ESRCH", expected: "dead" },
     { snapshot: "live", afterSnapshot: "ESRCH", expected: "dead" },
@@ -711,18 +713,55 @@ setInterval(() => {}, 1_000);
       policy: "indeterminate",
       expected: "indeterminate",
     },
-    { snapshot: "empty", afterSnapshot: "EPERM", policy: "verify-leader", expected: "dead" },
     {
       snapshot: "empty",
       afterSnapshot: "EIO",
       policy: "indeterminate",
       expected: "indeterminate",
     },
-    { snapshot: "empty", afterSnapshot: "EIO", expected: "dead" },
+    { snapshot: "empty", afterSnapshot: "EIO", expected: "indeterminate" },
     { snapshot: "zombie", afterSnapshot: null, platform: "darwin", expected: "live" },
     { snapshot: "zombie", afterSnapshot: null, running: true, expected: "live" },
+    {
+      snapshot: "zombie",
+      afterSnapshot: null,
+      remainingMs: 20,
+      snapshotTimeoutMs: 20,
+      expected: "dead",
+    },
+    {
+      snapshot: "zombie",
+      afterSnapshot: null,
+      remainingMs: 10_000,
+      snapshotTimeoutMs: 5_000,
+      expected: "dead",
+    },
+    {
+      snapshot: "zombie-leader",
+      afterSnapshot: null,
+      remainingMs: 20,
+      snapshotTimeoutMs: 20,
+      expected: "live",
+    },
+    {
+      snapshot: "failed",
+      afterSnapshot: "ESRCH",
+      remainingMs: 20,
+      snapshotTimeoutMs: 20,
+      expected: "dead",
+    },
+    { snapshot: "zombie", afterSnapshot: null, remainingMs: 0, expected: "live" },
+    { snapshot: "zombie", afterSnapshot: null, remainingMs: -1, expected: "live" },
+    { snapshot: "zombie", afterSnapshot: "ESRCH", remainingMs: 0, expected: "dead" },
+    {
+      snapshot: "zombie",
+      afterSnapshot: "EPERM",
+      remainingMs: 0,
+      policy: "indeterminate",
+      expected: "indeterminate",
+    },
   ])(
-    "checks current group state after $snapshot snapshot ($afterSnapshot, $policy, $platform, $running)",
+    "checks current group state after $snapshot snapshot ($afterSnapshot, $policy, $platform, $running, budget $remainingMs)",
     ({
       snapshot,
       afterSnapshot,
@@ -730,10 +769,19 @@ setInterval(() => {}, 1_000);
       policy = "alive-on-eperm",
       platform = "linux",
       running,
+      remainingMs,
+      snapshotTimeoutMs = 5_000,
     }) => {
       let inspected = false;
+      let probes = 0;
+      const clock =
+        remainingMs === undefined ? undefined : vi.spyOn(Date, "now").mockReturnValue(1_000);
       const kill = vi.spyOn(process, "kill").mockImplementation(() => {
-        if (inspected && afterSnapshot) {
+        probes += 1;
+        if (
+          (inspected || (remainingMs !== undefined && remainingMs <= 0 && probes > 1)) &&
+          afterSnapshot
+        ) {
           throw Object.assign(new Error("group lookup failed"), { code: afterSnapshot });
         }
         return true;
@@ -767,16 +815,31 @@ setInterval(() => {}, 1_000);
           };
         });
       try {
+        const options = {
+          errorPolicy: policy,
+          platform,
+          ...(remainingMs === undefined ? {} : { deadlineAt: Date.now() + remainingMs }),
+        };
         expect(
           inspectManagedProcessGroup(
             { pid: 12345, exitCode: running ? null : 0, signalCode: null },
-            { errorPolicy: policy, platform },
+            options,
           ),
         ).toBe(expected);
-        expect(ps).toHaveBeenCalledTimes(platform === "linux" && !running ? 1 : 0);
+        const snapshotExpected =
+          platform === "linux" && !running && (remainingMs === undefined || remainingMs > 0);
+        expect(ps).toHaveBeenCalledTimes(snapshotExpected ? 1 : 0);
+        if (snapshotExpected) {
+          expect(ps).toHaveBeenCalledWith(
+            "ps",
+            ["-s", "12345", "-L", "-o", "pgid=,state="],
+            expect.objectContaining({ timeout: snapshotTimeoutMs, killSignal: "SIGKILL" }),
+          );
+        }
       } finally {
         ps.mockRestore();
         kill.mockRestore();
+        clock?.mockRestore();
       }
     },
   );
@@ -796,6 +859,125 @@ setInterval(() => {}, 1_000);
       kill.mockRestore();
     }
   });
+
+  it.each([
+    { mode: "waiter", cleanupDrainTimeoutMs: undefined },
+    { mode: "normal exit", cleanupDrainTimeoutMs: undefined },
+    { mode: "normal exit", cleanupDrainTimeoutMs: 37 },
+    { mode: "zombie normal exit", cleanupDrainTimeoutMs: undefined },
+    { mode: "graceful abort", cleanupDrainTimeoutMs: undefined },
+    { mode: "force on leader exit", cleanupDrainTimeoutMs: undefined },
+  ] as const)(
+    "includes Linux snapshot work in the $mode deadline (drain: $cleanupDrainTimeoutMs)",
+    ({ mode, cleanupDrainTimeoutMs }) => {
+      const dir = createTempDir("openclaw-managed-probe-deadline-");
+      // Deliberately failed mock cleanup owns its claim separately from real fixture jobs.
+      createVitestResourceOwner(dir);
+      const script = path.join(dir, "controller.mjs");
+      fs.writeFileSync(
+        script,
+        `
+import assert from "node:assert/strict";
+import cp from "node:child_process";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
+const mode = ${JSON.stringify(mode)};
+const cleanupDrainTimeoutMs = ${JSON.stringify(cleanupDrainTimeoutMs)};
+let now = 1_000, live = true;
+const probes = [], signals = [];
+const child = Object.assign(new EventEmitter(), {
+  pid: 12345, exitCode: 0, signalCode: null,
+  stdin: null, stdout: null, stderr: null,
+  kill() { throw new Error("must signal the owned group"); },
+});
+Date.now = () => now;
+process.kill = (pid, signal) => {
+  assert.equal(pid, -child.pid);
+  if (!live) throw Object.assign(new Error("group gone"), { code: "ESRCH" });
+  if (signal !== 0) {
+    signals.push({ signal, at: now });
+    if (signal === "SIGKILL" && mode !== "normal exit") {
+      live = false;
+      child.exitCode = null;
+      child.signalCode = "SIGKILL";
+      child.emit("exit", null, "SIGKILL");
+      child.emit("close", null, "SIGKILL");
+    }
+  }
+  return true;
+};
+cp.spawn = () => child;
+cp.spawnSync = (bin, args, options) => {
+  assert.equal(bin, "ps");
+  assert.ok(args.includes("-L"));
+  assert.ok(Number.isInteger(options.timeout) && options.timeout > 0);
+  probes.push({ at: now, timeout: options.timeout });
+  if (mode === "zombie normal exit") {
+    now += 1;
+    return { pid: 12346, output: [], status: 0, signal: null, stdout: "12345 Z\\n", stderr: "" };
+  }
+  now += options.timeout;
+  return { pid: 12346, output: [], status: null, signal: "SIGKILL",
+    stdout: "", stderr: "", error: Object.assign(new Error("snapshot timed out"), { code: "ETIMEDOUT" }) };
+};
+syncBuiltinESMExports();
+const { runManagedCommand, waitForManagedProcessGroupExit } =
+  await import(${JSON.stringify(pathToFileURL(path.resolve("scripts/lib/managed-child-process.mts")).href)});
+const started = now;
+let outcome;
+if (mode === "waiter") {
+  outcome = await waitForManagedProcessGroupExit(child, 20, {
+    errorPolicy: "indeterminate", platform: "linux", clampPollToDeadline: true, pollIntervalMs: 1,
+  });
+} else {
+  const abort = new AbortController();
+  outcome = await runManagedCommand({
+    bin: "mocked-owned-child", platform: "linux", shell: false, stdio: "ignore",
+    requireProcessTreeExit: true, signal: abort.signal, abortKillGraceMs: 100,
+    cleanupDrainTimeoutMs,
+    ...(mode === "force on leader exit" ? {
+      timeoutMs: 0, timeoutKillGraceMs: 100, timeoutForceKillOnLeaderExit: true,
+    } : {}),
+    onReady() {
+      if (mode === "normal exit" || mode === "zombie normal exit") {
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      } else if (mode === "graceful abort") abort.abort();
+    },
+  }).catch(error => error.code);
+}
+console.log(JSON.stringify({ mode, elapsed: now - started, outcome, probes, signals }));
+if (mode === "waiter") {
+  assert.equal(outcome, false, "budget exhaustion must not establish death");
+  assert.ok(now - started <= 20, "terminal probe must not refresh the waiter's allowance");
+  assert.equal(probes.length, 1);
+} else if (mode === "normal exit") {
+  assert.equal(outcome, "EPROCESSGROUP_CLEANUP_FAILED");
+  assert.ok(now - started <= (cleanupDrainTimeoutMs ?? 5_000), "preliminary snapshot must be charged to finalization");
+  assert.ok(signals.some(entry => entry.signal === "SIGKILL"));
+} else if (mode === "zombie normal exit") {
+  assert.equal(outcome, 0, "completed zombie-only group remains a successful normal exit");
+  assert.deepEqual(signals, []);
+  assert.ok(probes.length > 0);
+} else {
+  const forceBudget = mode === "graceful abort" ? 100 : 0;
+  assert.equal(outcome, mode === "graceful abort" ? "ABORT_ERR" : "ETIMEDOUT");
+  const forced = signals.find(entry => entry.signal === "SIGKILL");
+  assert.ok(forced && forced.at - started <= forceBudget, "snapshot must not delay escalation");
+  assert.equal(live, false);
+}
+`,
+      );
+      const result = spawnSync(testNodeExecPath, [script], {
+        encoding: "utf8",
+        env: { ...process.env, TMPDIR: dir, TMP: dir, TEMP: dir },
+        timeout: 10_000,
+        killSignal: "SIGKILL",
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    },
+  );
 
   it("signals the direct child when process-group ownership is disabled", () => {
     const child = { kill: vi.fn(() => true), pid: 12345 };
@@ -1156,7 +1338,7 @@ setInterval(() => {}, 1_000);
         ["/PID", String(childPid), "/T", "/F"],
         {
           killSignal: "SIGKILL",
-          stdio: "ignore",
+          stdio: ["ignore", "pipe", "pipe"],
           timeout: 10_000,
         },
       );

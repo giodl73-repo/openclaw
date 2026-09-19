@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import { createDeferredCore } from "./deferred.js";
 import { resolveGlobalSingleton } from "./global-singleton.js";
 
@@ -6,6 +6,10 @@ import { resolveGlobalSingleton } from "./global-singleton.js";
 const currentWorkScope = resolveGlobalSingleton(
   Symbol.for("openclaw.asyncWorkScope"),
   () => new AsyncLocalStorage<AsyncWorkScope>(),
+);
+const detachedAsyncContext = resolveGlobalSingleton(
+  Symbol.for("openclaw.detachedAsyncContext"),
+  () => new AsyncResource("openclaw.detached-async-context"),
 );
 
 /** Joins cooperating descendants even when their caller returns a cached value first. */
@@ -18,6 +22,10 @@ export class AsyncWorkScope {
     return this.controller.signal;
   }
 
+  get hasPendingWork(): boolean {
+    return this.pending.size > 0;
+  }
+
   get isClosing(): boolean {
     return this.phase !== "open";
   }
@@ -27,11 +35,14 @@ export class AsyncWorkScope {
     if (this.phase === "closed") {
       throw new Error("Async work scope is closed");
     }
-    const operation = this.registerWork<void>();
+    // Synchronous work is removed in finally and needs no promise cleanup reactions.
+    const operation = createDeferredCore();
+    this.pending.add(operation.promise);
     try {
       return currentWorkScope.run(this, run);
     } finally {
       operation.resolve();
+      this.pending.delete(operation.promise);
     }
   }
 
@@ -82,10 +93,10 @@ export class AsyncWorkScope {
     run: () => T | Promise<T>,
   ): Promise<T> {
     let scopes = selectScopes();
-    do {
-      await Promise.allSettled(scopes.flatMap((scope) => [...scope.pending]));
+    while (scopes.some((scope) => scope.pending.size > 0)) {
+      await Promise.allSettled(scopes.flatMap((scope) => Array.from(scope.pending)));
       scopes = selectScopes();
-    } while (scopes.some((scope) => scope.pending.size > 0));
+    }
     return run();
   }
 
@@ -111,6 +122,62 @@ export function captureAsyncWorkTracker(): typeof trackAsyncWork {
   return async (run) => await (scope ? scope.track(run) : currentWorkScope.exit(run));
 }
 
+/** Starts work its caller does not own, so the caller's scope neither waits for it nor closes under it. */
+export function runOutsideAsyncWorkScope<T>(run: () => T): T {
+  return currentWorkScope.exit(run);
+}
+
+/** Runs under the context-free async root initialized before managed work can begin. */
+export function runInDetachedAsyncContext<T>(run: () => T): T {
+  return detachedAsyncContext.runInAsyncScope(run);
+}
+
 export function getAsyncWorkSignal(): AbortSignal | undefined {
   return currentWorkScope.getStore()?.signal;
+}
+
+/** Preserves cancellation context until cooperating work ends, without delaying its result. */
+export async function runWithTrackedCancellation<T>(
+  signal: AbortSignal,
+  run: (signal: AbortSignal) => T | Promise<T>,
+): Promise<T> {
+  const parentWork = currentWorkScope.getStore();
+  if (!parentWork) {
+    return await run(signal);
+  }
+  const result = createDeferredCore<T>();
+  // The parent owns cleanup before invocation, but the caller only waits for its result.
+  void parentWork
+    .track(async () => {
+      const work = new AsyncWorkScope();
+      const controller = new AbortController();
+      const context = work.run(() => AsyncLocalStorage.snapshot());
+      const abort = () => context(() => controller.abort(signal.reason));
+      const closeWork = () => context(() => work.beginClose(parentWork.signal.reason));
+      signal.addEventListener("abort", abort, { once: true });
+      parentWork.signal.addEventListener("abort", closeWork, { once: true });
+      if (signal.aborted) {
+        abort();
+      }
+      if (parentWork.signal.aborted) {
+        closeWork();
+      }
+      try {
+        result.resolve(await work.track(() => run(controller.signal)));
+      } catch (error) {
+        result.reject(error);
+      } finally {
+        try {
+          await AsyncWorkScope.runWhenAllIdle(
+            () => [work],
+            () => context(() => work.drain()),
+          );
+        } finally {
+          signal.removeEventListener("abort", abort);
+          parentWork.signal.removeEventListener("abort", closeWork);
+        }
+      }
+    })
+    .catch(result.reject);
+  return await result.promise;
 }

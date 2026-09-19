@@ -2,7 +2,7 @@
 
 import { nothing, render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WizardStep } from "../../api/types.ts";
+import type { SystemAgentSetupDetectResult, WizardStep } from "../../api/types.ts";
 import { i18n } from "../../i18n/index.ts";
 import {
   detected,
@@ -52,9 +52,9 @@ describe("renderModelSetup", () => {
     expect(text(container)).toContain("Found on this Gateway");
     expect(text(container)).toContain("Codex CLI");
     expect(text(container)).toContain("openai/gpt-5 · Signed in locally");
-    expect(text(container)).toContain("Found, but needs attention");
+    expect(text(container)).toContain("Other detected software");
     expect(text(container)).toContain("This local runtime must be configured outside OpenClaw");
-    expect(text(container)).toContain("Connect an AI provider");
+    expect(text(container)).toContain("Set up and verify a model");
     expect(text(container)).toContain("Run a model locally");
     expect(text(container)).toContain("LM Studio");
     expect(text(container)).toContain("Connect with an API key or token");
@@ -358,17 +358,13 @@ describe("renderModelSetup", () => {
     expect(onSuccessClose).toHaveBeenCalledOnce();
   });
 
-  it("only rechecks unavailable runtimes without a supported setup route", () => {
-    const onDetect = vi.fn();
-    const container = mount(props({ onDetect }));
-    const buttons = container.querySelectorAll<HTMLButtonElement>(
-      '[data-unavailable-candidate="pi-cli"] button',
-    );
-
-    expect([...buttons].map((button) => button.textContent?.trim())).toEqual(["Check again"]);
-    buttons[0]?.click();
-
-    expect(onDetect).toHaveBeenCalledOnce();
+  it("explains software without a setup route instead of offering an ineffective retry", () => {
+    const container = mount(props());
+    const unavailable = container.querySelector('[data-unavailable-candidate="pi-cli"]')!;
+    expect(unavailable.closest("details")).not.toBeNull();
+    expect(unavailable.closest("details")?.open).toBe(false);
+    expect(unavailable.querySelector("button")).toBeNull();
+    expect(text(unavailable)).toContain("configured outside OpenClaw");
   });
 
   it("derives prepare rows from accepted choice ids and hides usable local candidates", () => {
@@ -695,25 +691,38 @@ describe("renderModelSetup", () => {
     expect(onVerify).toHaveBeenCalledOnce();
   });
 
-  it("does not repeat the current route among detected candidates", () => {
+  it("keeps saved replacement credentials selectable without repeating the current route", () => {
+    const onActivateCandidate = vi.fn();
+    const savedCandidate: SystemAgentSetupDetectResult["candidates"][number] = {
+      kind: "saved-auth:openai:replacement",
+      brandId: "openai",
+      label: "Saved OpenAI credentials",
+      detail: "Saved for retry after a failed setup test",
+      modelRef: "openai/gpt-5",
+      recommended: false,
+      credentials: true,
+    };
     const container = mount(
       props({
+        onActivateCandidate,
         page: {
           phase: "ready",
           result: {
             ...detected,
-            configuredModel: "openai/gpt-5.6-sol",
+            configuredModel: savedCandidate.modelRef,
             setupComplete: true,
             candidates: [
               {
                 kind: "existing-model",
                 brandId: "openai",
                 label: "Current model",
-                detail: "openai/gpt-5.6-sol — already configured",
-                modelRef: "openai/gpt-5.6-sol",
+                detail: "openai/gpt-5 — already configured",
+                modelRef: savedCandidate.modelRef,
                 recommended: false,
                 credentials: true,
               },
+              { ...savedCandidate, kind: "provider-auto:openai", label: "OpenAI" },
+              savedCandidate,
               {
                 kind: "claude-cli",
                 brandId: "claude",
@@ -730,8 +739,16 @@ describe("renderModelSetup", () => {
     );
 
     expect(container.querySelector('[data-candidate-kind="existing-model"]')).toBeNull();
+    expect(container.querySelector('[data-candidate-kind="provider-auto:openai"]')).toBeNull();
     expect(container.querySelector('[data-candidate-kind="claude-cli"]')).not.toBeNull();
-    expect(text(container)).toContain("Selected model OpenAI gpt-5.6-sol");
+    expect(text(container)).toContain("Selected model OpenAI gpt-5");
+    const retry = container.querySelector<HTMLButtonElement>(
+      '[data-candidate-kind="saved-auth:openai:replacement"] button',
+    );
+    expect(retry).not.toBeNull();
+    expect(retry!.disabled).toBe(false);
+    retry!.click();
+    expect(onActivateCandidate).toHaveBeenCalledExactlyOnceWith(savedCandidate);
   });
 
   it("renders connection verification progress", () => {
@@ -823,7 +840,7 @@ describe("renderModelSetup", () => {
       deviceCode: { code: "ABCD-EFGH" },
     });
 
-    const copy = container.querySelector<HTMLButtonElement>(".wizard-step__device-code button");
+    const copy = container.querySelector<HTMLButtonElement>(".wizard-step__sign-in button");
     copy?.click();
 
     const feedback = copied ? "Copied!" : "Copy failed";
@@ -872,7 +889,7 @@ describe("renderModelSetup", () => {
       },
       "personal",
     );
-    expect(select.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+    expect(select.querySelectorAll(".wizard-step__actions button")).toHaveLength(2);
     expect(text(select)).toContain("Your account");
 
     const confirm = wizardStep({ id: "confirm", type: "confirm", message: "Continue?" });
@@ -913,6 +930,48 @@ describe("renderModelSetup", () => {
     expect(container.querySelector('[role="status"]')).not.toBeNull();
     expect(container.querySelector(".wizard-step__spinner")).not.toBeNull();
     expect(container.querySelector(".wizard-step__progress button")).toBeNull();
+  });
+
+  it("shows the browser sign-in link during gateway progress without requiring an answer", () => {
+    const onWizardAnswer = vi.fn();
+    const onWizardCancel = vi.fn();
+    const destination = "https://provider.example/oauth?state=state-1";
+    const container = mount(
+      props({
+        wizard: {
+          phase: "step",
+          authChoice: "provider-auth",
+          step: {
+            id: "browser-sign-in",
+            type: "progress",
+            executor: "gateway",
+            externalUrl: destination,
+            message: "Waiting for sign-in",
+          },
+          busy: false,
+          validationError: null,
+        },
+        onWizardAnswer,
+        onWizardCancel,
+      }),
+    );
+
+    const wizard = container.querySelector(".model-setup-wizard")!;
+    const link = wizard.querySelector<HTMLAnchorElement>("a");
+    expect(link?.href).toBe(destination);
+    expect(link?.target).toBe("_blank");
+    expect(link?.rel).toBe("noreferrer");
+    expect(link?.textContent?.trim()).toBe("Open sign-in");
+    expect(wizard.querySelector('[role="status"]')?.textContent).toContain("Waiting for sign-in");
+    expect(
+      [...wizard.querySelectorAll("button")].map((button) => button.textContent?.trim()),
+    ).toEqual(["Copy link", "Cancel"]);
+    expect(onWizardAnswer).not.toHaveBeenCalled();
+    [...wizard.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Cancel")
+      ?.click();
+    expect(onWizardCancel).toHaveBeenCalledOnce();
+    expect(onWizardAnswer).not.toHaveBeenCalled();
   });
 
   it("keeps a Continue action for client progress", () => {

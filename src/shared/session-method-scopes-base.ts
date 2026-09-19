@@ -5,14 +5,19 @@ export type SessionMutationOperatorScope = "operator.write" | "operator.admin";
 
 const SESSIONS_PATCH_WRITE_SCOPE_MUTATIONS: ReadonlySet<string> = new Set([
   "label",
+  "autoLabel",
   "icon",
   "color",
   "category",
   "boardFace",
+  "boardPresentation",
   "pinned",
   "archived",
   "unread",
   "model",
+  "agentRuntime",
+  "thinkingLevel",
+  "fastMode",
   "permissionMode",
 ]);
 

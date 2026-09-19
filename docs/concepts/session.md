@@ -208,6 +208,15 @@ Accepting, queueing, or preparing a resume request alone does not refresh it.
 CLI backends that do not report turn acceptance refresh the budget only after
 observed assistant output or tool activity; silent startup does not refresh it.
 
+When replaying an interrupted turn, recovery preserves its recorded tool calls
+and results, including nested tool activity, and reuses the original user message.
+A completed reply or a later user message closes that turn to replay.
+
+Messages sent while restart recovery is waiting to start stay pending. Once
+recovery starts, they follow the session's normal message queue policy. You do
+not need to resend a message just because recovery is waiting for capacity.
+Stopping or replacing the session still cancels pending work.
+
 If automatic recovery is exhausted, the transcript remains available. Use
 **Resume in new session** in WebChat, or `/new` or `/reset` in other channels,
 to start a replacement session.
@@ -264,6 +273,11 @@ Session store reads do not prune or cap entries during Gateway startup, so
 startup and isolated cron sessions do not pay for a full store cleanup.
 `openclaw sessions cleanup --enforce` applies the cap immediately.
 
+Ordinary entry writes also arm background maintenance at the next age boundary,
+with a periodic recheck every 30 minutes while the store remains open. This lets
+eligible sessions age out without further traffic. Writes that cannot change
+age or count maintenance outcomes skip candidate scans.
+
 `maxEntries` defaults to 5000 unarchived session rows. Archived rows do not consume
 the cap. Existing explicit limits remain unchanged.
 When pressure exceeds the cap, cleanup archives the oldest eligible ordinary
@@ -273,9 +287,11 @@ removed. Pinned root sessions, active or admitted work, model-locked sessions, a
 durable external conversation pointers are protected; the unarchived total can
 therefore remain above the cap when protected rows alone exceed it.
 
-Only root sessions can be pinned; child/subagent sessions live in their parent's
-tree and reject pin requests. Existing child pins disappear and no longer protect
-the session from maintenance.
+Root sessions and sessions auto-parented to the agent's Home root can be pinned;
+genuine child sessions and subagent runs reject pin requests. Persistent child
+sessions retain their sidebar nesting; subagent runs appear in transcript activity
+and Tasks views. Existing child pins disappear and no longer protect the session
+from maintenance.
 
 Gateway model-run probe sessions are short-lived by default. Rows matching
 `agent:*:explicit:model-run-<uuid>` use fixed `24h` retention, but cleanup is
@@ -309,6 +325,19 @@ until physical usage exceeds `maxDiskBytes`; disk-budget cleanup may then delete
 the oldest cap archives after cheaper artifacts and unreferenced history are
 exhausted. Sessions without a recorded archive reason remain protected.
 
+After skipping a history generation or archived session, disk-budget cleanup
+rechecks physical usage before considering another deletion. A measurement
+failure stops the sweep.
+
+Background disk-budget checks run at most every 30 minutes on entry writes.
+Delete and reset operations can request a check sooner, but repeated requests
+coalesce to at most one forced check per minute per store. If cleanup exhausts
+eligible history and the store remains over budget, automatic checks back off
+for 30 minutes and log one warning until the pressure clears or the budget changes.
+The warning recommends raising `session.maintenance.maxDiskBytes` or exporting
+and deleting unneeded sessions. Checks resume on subsequent activity;
+`openclaw sessions cleanup --enforce` remains available immediately.
+
 If you previously used DM isolation and later returned `session.dmScope` to
 `main`, preview stale peer-keyed DM rows with
 `openclaw sessions cleanup --dry-run --fix-dm-scope`. Applying the same flag
@@ -326,7 +355,9 @@ Preview any maintenance run with `openclaw sessions cleanup --dry-run`.
 | `/status` in chat          | Context usage, model, and toggles               |
 | `/context list`            | What is in the system prompt                    |
 
-## Further reading
+<a id="further-reading" />
+
+## Related
 
 - [Session search](/concepts/session-search) - full-text recall across past transcripts
 - [Session Pruning](/concepts/session-pruning) - trimming tool results
@@ -335,11 +366,8 @@ Preview any maintenance run with `openclaw sessions cleanup --dry-run`.
 - [Session Management Deep Dive](/reference/session-management-compaction) -
   store schema, transcripts, send policy, origin metadata, and advanced config
 - [Multi-Agent](/concepts/multi-agent) - routing and session isolation across agents
-- [Background Tasks](/automation/tasks) - how detached work creates task records with session references
-- [Channel Routing](/channels/channel-routing) - how inbound messages are routed to sessions
-
-## Related
-
-- [Session pruning](/concepts/session-pruning)
-- [Session tools](/concepts/session-tool)
+- [Multi-agent sandbox and tools](/tools/multi-agent-sandbox-tools) - per-agent sandbox and tool restrictions, including session visibility
+- [Transcript hygiene](/reference/transcript-hygiene) - in-memory, provider-specific transcript sanitization applied before a run
 - [Command queue](/concepts/queue)
+- [Background Tasks](/automation/tasks) - how detached work creates task records with session references
+- [Channel routing](/channels/channel-routing) - how inbound messages are routed to sessions

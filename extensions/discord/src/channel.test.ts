@@ -288,7 +288,7 @@ describe("discordPlugin outbound", () => {
         hasRepliedRef,
       }),
     ).toEqual({
-      currentChannelId: "987654321",
+      currentChannelId: "channel:987654321",
       currentChatType: "direct",
       currentMessagingTarget: "user:123456789",
       currentMessageId: "message-1",
@@ -622,6 +622,36 @@ describe("discordPlugin outbound", () => {
       expect(permissions.missingRequired).toEqual(["Connect", "Speak", "ReadMessageHistory"]);
       expect(diagnostics?.lines?.map((line) => line.text).join("\n")).toContain(
         "Missing required: Connect, Speak, ReadMessageHistory",
+      );
+    } finally {
+      fetchPermissionsSpy.mockRestore();
+    }
+  });
+
+  it("reports thread permissions in targeted capabilities diagnostics", async () => {
+    const fetchPermissionsSpy = vi
+      .spyOn(sendModule, "fetchChannelPermissionsDiscord")
+      .mockResolvedValueOnce({
+        channelId: "333",
+        guildId: "123",
+        permissions: ["ViewChannel", "SendMessages"],
+        raw: "0",
+        isDm: false,
+        channelType: ChannelType.GuildPublicThread,
+      });
+    try {
+      const cfg = createCfg();
+      const diagnostics = await discordPlugin.status!.buildCapabilitiesDiagnostics!({
+        account: resolveAccount(cfg),
+        timeoutMs: 5000,
+        cfg,
+        target: "channel:333",
+      });
+
+      const permissions = recordField(diagnostics?.details?.permissions, "permissions");
+      expect(permissions.missingRequired).toEqual(["SendMessagesInThreads"]);
+      expect(diagnostics?.lines?.map((line) => line.text).join("\n")).toContain(
+        "Missing required: SendMessagesInThreads",
       );
     } finally {
       fetchPermissionsSpy.mockRestore();

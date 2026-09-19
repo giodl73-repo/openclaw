@@ -1,12 +1,12 @@
-// Discord plugin module implements thread bindings.state behavior.
 import { recordOutboundMessageIdentity } from "openclaw/plugin-sdk/outbound-echo-runtime";
+import type { PluginStateEntry } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { normalizeAccountId, resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
   normalizeOptionalStringifiedId,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
-import * as threadBindingRuntime from "openclaw/plugin-sdk/thread-bindings-session-runtime";
+import { resolveThreadBindingExpiry } from "openclaw/plugin-sdk/thread-bindings-session-runtime";
 import { getDiscordRuntime } from "../runtime.js";
 import type {
   PersistedThreadBindingRecord,
@@ -23,6 +23,7 @@ type ThreadBindingsGlobalState = {
   reusableWebhooksByAccountChannel: Map<string, { webhookId: string; webhookToken: string }>;
   persistByAccountId: Map<string, boolean>;
   loadedBindings: boolean;
+  loadingBindings?: Promise<void>;
   loadedPersistentBindings: boolean;
   persistenceAvailable: boolean;
   lastPersistedAtMs: number;
@@ -250,31 +251,6 @@ function resolveTimestampExpiry(timestamp: number, durationMs: number): number |
   return Number.isFinite(at) && at > 0 ? at + durationMs : undefined;
 }
 
-// Published 2026.9.2 has lifecycle normalization but not prepared expiry selection.
-// Remove this fallback when the declared plugin API floor excludes that host.
-const threadBindingExpirySdk: Partial<
-  Pick<typeof threadBindingRuntime, "resolveThreadBindingExpiry">
-> = threadBindingRuntime;
-
-function resolveThreadBindingExpiryForHost(
-  params: Parameters<typeof threadBindingRuntime.resolveThreadBindingExpiry>[0],
-): ReturnType<typeof threadBindingRuntime.resolveThreadBindingExpiry> {
-  if (threadBindingExpirySdk.resolveThreadBindingExpiry) {
-    return threadBindingExpirySdk.resolveThreadBindingExpiry(params);
-  }
-  const { inactivityExpiresAt, maxAgeExpiresAt } = params;
-  if (
-    inactivityExpiresAt != null &&
-    (maxAgeExpiresAt == null || inactivityExpiresAt <= maxAgeExpiresAt)
-  ) {
-    return { expiresAt: inactivityExpiresAt, reason: "idle-expired" };
-  }
-  if (maxAgeExpiresAt != null) {
-    return { expiresAt: maxAgeExpiresAt, reason: "max-age-expired" };
-  }
-  return {};
-}
-
 export function resolvePreparedThreadBindingLifecycle(params: {
   record: ThreadBindingRecord;
   idleTimeoutMs: number;
@@ -291,7 +267,7 @@ export function resolvePreparedThreadBindingLifecycle(params: {
   return {
     idleTimeoutMs,
     maxAgeMs,
-    ...resolveThreadBindingExpiryForHost({
+    ...resolveThreadBindingExpiry({
       inactivityExpiresAt: resolveTimestampExpiry(params.record.lastActivityAt, idleTimeoutMs),
       maxAgeExpiresAt: resolveTimestampExpiry(params.record.boundAt, maxAgeMs),
     }),
@@ -471,27 +447,15 @@ export function saveBindingsToDisk(params: { force?: boolean; minIntervalMs?: nu
   }
 }
 
-export function ensureBindingsLoaded() {
-  if (THREAD_BINDINGS_STATE.loadedBindings) {
-    return;
-  }
+function beginBindingsLoad() {
   THREAD_BINDINGS_STATE.loadedBindings = true;
   BINDINGS_BY_THREAD_ID.clear();
   BINDINGS_BY_SESSION_KEY.clear();
   REUSABLE_WEBHOOKS_BY_ACCOUNT_CHANNEL.clear();
   THREAD_BINDINGS_STATE.loadedPersistentBindings = false;
+}
 
-  const entries = (() => {
-    try {
-      return openThreadBindingsStore().entries();
-    } catch {
-      THREAD_BINDINGS_STATE.persistenceAvailable = false;
-      return null;
-    }
-  })();
-  if (!entries) {
-    return;
-  }
+function restoreBindings(entries: PluginStateEntry<PersistedThreadBindingRecord>[]) {
   THREAD_BINDINGS_STATE.persistenceAvailable = true;
   THREAD_BINDINGS_STATE.loadedPersistentBindings = entries.length > 0;
   for (const entry of entries) {
@@ -500,6 +464,59 @@ export function ensureBindingsLoaded() {
       continue;
     }
     setBindingRecord(normalized);
+  }
+}
+
+export function ensureBindingsLoaded() {
+  if (THREAD_BINDINGS_STATE.loadedBindings) {
+    return;
+  }
+  beginBindingsLoad();
+  let entries: PluginStateEntry<PersistedThreadBindingRecord>[];
+  try {
+    entries = openThreadBindingsStore().entries();
+  } catch {
+    THREAD_BINDINGS_STATE.persistenceAvailable = false;
+    return;
+  }
+  restoreBindings(entries);
+}
+
+async function loadBindingsAsync() {
+  let entries: PluginStateEntry<PersistedThreadBindingRecord>[];
+  try {
+    entries = await getDiscordRuntime()
+      .state.openKeyedStore<PersistedThreadBindingRecord>({
+        namespace: THREAD_BINDINGS_NAMESPACE,
+        maxEntries: THREAD_BINDINGS_MAX_ENTRIES,
+      })
+      .entries();
+  } catch {
+    if (!THREAD_BINDINGS_STATE.loadedBindings) {
+      beginBindingsLoad();
+      THREAD_BINDINGS_STATE.persistenceAvailable = false;
+    }
+    return;
+  }
+  // A synchronous compatibility caller can initialize and mutate the registry while we wait.
+  if (THREAD_BINDINGS_STATE.loadedBindings) {
+    return;
+  }
+  beginBindingsLoad();
+  restoreBindings(entries);
+}
+
+export async function ensureBindingsLoadedAsync(): Promise<void> {
+  if (THREAD_BINDINGS_STATE.loadedBindings) {
+    return;
+  }
+  const loading = (THREAD_BINDINGS_STATE.loadingBindings ??= loadBindingsAsync());
+  try {
+    await loading;
+  } finally {
+    if (THREAD_BINDINGS_STATE.loadingBindings === loading) {
+      delete THREAD_BINDINGS_STATE.loadingBindings;
+    }
   }
 }
 

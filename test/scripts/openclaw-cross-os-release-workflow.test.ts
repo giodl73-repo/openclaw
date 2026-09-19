@@ -1,9 +1,14 @@
 // Openclaw Cross Os Release Workflow tests cover openclaw cross os release workflow script behavior.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { createReleaseCheckSelection } from "../../scripts/plan-release-workflow-matrix.mjs";
+import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.ts";
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 const WORKFLOW_PATH = ".github/workflows/openclaw-cross-os-release-checks-reusable.yml";
 const RELEASE_CHECKS_PATH = ".github/workflows/openclaw-release-checks.yml";
@@ -223,10 +228,10 @@ describe("cross-OS release checks workflow", () => {
     const install = step(prepare, "Install workflow validation dependencies");
 
     expect(install).toMatchObject({
-      if: "inputs.candidate_artifact_name != '' || inputs.mode != 'fresh'",
       "working-directory": "workflow",
       run: "pnpm install --frozen-lockfile --prefer-offline --ignore-scripts",
     });
+    expect(install.if).toBeUndefined();
     expect(step(prepare, "Build candidate artifact once").if).toBe(
       "inputs.candidate_artifact_name == ''",
     );
@@ -237,6 +242,7 @@ describe("cross-OS release checks workflow", () => {
         (candidate) => candidate.name === "Install workflow validation dependencies",
       ) ?? -1;
     for (const dependentStep of [
+      "Resolve provider-owned companion requirements",
       "Resolve provided candidate package",
       "Capture baseline metadata",
     ]) {
@@ -386,13 +392,10 @@ describe("cross-OS release checks workflow", () => {
       package_required: "${{ steps.inputs.outputs.package_required }}",
     });
     const capture = step(resolveTarget, "Capture selected inputs");
-    expect(capture.run).toContain("cross_os_scheduled=false");
-    expect(capture.run).toContain("docker_required=false");
-    expect(capture.run).toContain("package_required=false");
-    expect(capture.run).toContain("group_selected cross-os && cross_os_scheduled=true");
     expect(capture.run).toContain(
-      '"$live_e2e_scheduled" == "true" && -z "$repo_live_suite_filter"',
+      "import { createReleaseCheckSelection } from './workflow/scripts/plan-release-workflow-matrix.mjs'",
     );
+    expect(capture.run).toContain("JSON.stringify(createReleaseCheckSelection({");
 
     const producer = job(workflow, "prepare_release_package");
     expect(producer.if).toBe("needs.resolve_target.outputs.package_required == 'true'");
@@ -411,6 +414,33 @@ describe("cross-OS release checks workflow", () => {
     expect(job(workflow, "docker_e2e_release_checks").if).toBe(
       "needs.resolve_target.outputs.docker_required == 'true'",
     );
+    for (const [rerunGroup, phase, repoLiveSuiteFilter, crossOs, docker, packageRequired] of [
+      ["install-smoke", "all", "", false, false, false],
+      ["cross-os", "all", "", true, false, true],
+      ["package", "all", "", false, false, true],
+      ["live-e2e", "all", "", false, true, true],
+      ["live-e2e", "all", "repo-e2e", false, false, false],
+      ["cross-os", "independent", "", false, false, false],
+    ] as const) {
+      const selected = createReleaseCheckSelection({ rerunGroup, phase, repoLiveSuiteFilter });
+      expect(selected, `${rerunGroup}/${phase}/${repoLiveSuiteFilter}`).toMatchObject({
+        cross_os_scheduled: crossOs,
+        docker_required: docker,
+        package_required: packageRequired,
+      });
+      const context = {
+        needs: {
+          resolve_target: {
+            outputs: Object.fromEntries(
+              Object.entries(selected).map(([key, value]) => [key, String(value)]),
+            ),
+          },
+        },
+      };
+      expect(runInNewContext(producer.if!, context)).toBe(packageRequired);
+      expect(runInNewContext(job(workflow, "cross_os_release_checks").if!, context)).toBe(crossOs);
+      expect(runInNewContext(job(workflow, "docker_e2e_release_checks").if!, context)).toBe(docker);
+    }
   });
 
   it("downloads and re-exports exact candidate artifacts only by immutable id", () => {
@@ -674,7 +704,20 @@ describe("cross-OS release checks workflow", () => {
     expect(JSON.parse(result.stdout)).toEqual(expected);
   });
 
-  it("executes the release harness directly with Node", () => {
+  it("executes the release harness directly with Node without installed packages", () => {
+    // Lane tooling has no installed packages. Keep the fixture outside the checkout
+    // so a developer's node_modules cannot satisfy an accidental runtime import.
+    const fixture = tempDirs.make("cross-os-no-packages-");
+    for (const source of [
+      "package.json",
+      "scripts",
+      "packages/normalization-core",
+      "src/infra/file-read.ts",
+    ]) {
+      const target = join(fixture, source);
+      mkdirSync(dirname(target), { recursive: true });
+      cpSync(source, target, { recursive: true });
+    }
     const wrapper = readFileSync(WRAPPER_PATH, "utf8");
     const script = readFileSync(SCRIPT_PATH, "utf8");
     const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
@@ -707,11 +750,13 @@ describe("cross-OS release checks workflow", () => {
         "windows-2025",
       ],
       {
-        cwd: process.cwd(),
+        cwd: fixture,
         encoding: "utf8",
         env: {
           ...process.env,
           OPENCLAW_RELEASE_CHECKS_SCRIPT: SCRIPT_PATH,
+          NODE_OPTIONS: "",
+          NODE_PATH: "",
         },
       },
     );

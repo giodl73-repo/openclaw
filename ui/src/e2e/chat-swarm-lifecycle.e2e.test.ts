@@ -24,6 +24,7 @@ suite.define(() => {
       async ({ page }) => {
         const children = Array.from({ length: viewport.count }, (_, index) => ({
           key: `agent:main:subagent:completed-${index}`,
+          sessionId: `session:agent:main:subagent:completed-${index}`,
           kind: "direct",
           label: "Research worker visibility after reconnect",
           parentSessionKey: sessionKey,
@@ -42,6 +43,7 @@ suite.define(() => {
         };
         const parent = {
           key: sessionKey,
+          sessionId: `session:${sessionKey}`,
           kind: "direct",
           label: "Research comparison",
           updatedAt: 1,
@@ -72,6 +74,8 @@ suite.define(() => {
         // The collector summary owns completion even while child rows are stale.
         const completedParent = {
           ...parent,
+          status: "running",
+          hasActiveRun: true,
           updatedAt: 2,
           swarm: {
             groups: [
@@ -114,14 +118,44 @@ suite.define(() => {
         );
         await summary.focus();
         await page.keyboard.press("Enter");
-        await expect.poll(() => widget.locator(".chat-swarm__tasks").isVisible()).toBe(true);
-        expect(
-          await widget
-            .getByText("Child runs finished. Check the conversation for the final response.")
-            .isVisible(),
-        ).toBe(true);
+        await expect
+          .poll(() =>
+            widget
+              .getByText("Child runs finished. The parent is processing their results.")
+              .isVisible(),
+          )
+          .toBe(true);
         await page.screenshot({
           path: path.join(proofDir, "completed-details.png"),
+          animations: "disabled",
+        });
+
+        // When the parent turn also settles, the card directs to the final response.
+        const settledParent = {
+          ...completedParent,
+          status: "done",
+          hasActiveRun: false,
+          updatedAt: 3,
+        };
+        await gateway.setMethodResponse("sessions.describe", { session: settledParent });
+        await gateway.setMethodResponse(
+          "sessions.list",
+          chatSessionListResponse([settledParent, ...children]),
+        );
+        await gateway.emitGatewayEvent("sessions.changed", {
+          sessionKey,
+          agentId: "main",
+          reason: "swarm",
+        });
+        await expect
+          .poll(() =>
+            widget
+              .getByText("Child runs finished. Check the conversation for the final response.")
+              .isVisible(),
+          )
+          .toBe(true);
+        await page.screenshot({
+          path: path.join(proofDir, "settled-details.png"),
           animations: "disabled",
         });
         await page.keyboard.press("Space");
@@ -147,6 +181,7 @@ suite.define(() => {
       const now = Date.now();
       const parent = {
         key: sessionKey,
+        sessionId: `session:${sessionKey}`,
         kind: "direct",
         label: "Research comparison",
         status: "running",
@@ -172,6 +207,7 @@ suite.define(() => {
       };
       const children = Array.from({ length: 30 }, (_, index) => ({
         key: `agent:${viewport.childAgent}:subagent:research-${index}`,
+        sessionId: `session:agent:${viewport.childAgent}:subagent:research-${index}`,
         kind: "direct",
         label: `Research lane ${index + 1}`,
         parentSessionKey: sessionKey,
@@ -223,6 +259,10 @@ suite.define(() => {
         await group.locator("summary").click();
       }
       await expect.poll(() => widget.locator(".chat-swarm__tasks").isVisible()).toBe(true);
+      const finalChild = widget.getByRole("listitem").filter({ hasText: "Research lane 30" });
+      await expect
+        .poll(() => finalChild.getByRole("img", { name: "Queued", exact: true }).isVisible())
+        .toBe(true);
       await page.screenshot({
         path: path.join(proofDir, "active-details.png"),
         animations: "disabled",
@@ -285,6 +325,11 @@ suite.define(() => {
         .toContain("30 of 30");
       expect(await widget.locator(".chat-swarm__marker--failed").count()).toBe(5);
       expect(await widget.locator(".chat-swarm__marker--done").count()).toBe(25);
+      await expect
+        .poll(() =>
+          finalChild.getByRole("img", { name: "Failed or stopped", exact: true }).isVisible(),
+        )
+        .toBe(true);
       await page.screenshot({ path: path.join(proofDir, "terminal.png"), animations: "disabled" });
       await page.reload();
       await widget.waitFor();

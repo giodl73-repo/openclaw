@@ -9,6 +9,7 @@ import {
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-local-roots";
 import { hasPromptImageInput } from "openclaw/plugin-sdk/session-transcript-runtime";
+import { asOptionalRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { terminateCodexBackgroundTerminals } from "./attempt-client-cleanup.js";
 import { isTerminalTurnStatus } from "./attempt-notifications.js";
 import {
@@ -33,6 +34,7 @@ import {
 } from "./transcript-mirror.js";
 import { createCodexUserInputBridge } from "./user-input-bridge.js";
 import { buildCodexUserInput } from "./user-input.js";
+import { buildResolvedCodexUserPromptMessage } from "./user-prompt-message.js";
 
 export function activateCodexAttemptTurn(
   resources: CodexAttemptResources,
@@ -103,19 +105,6 @@ export function activateCodexAttemptTurn(
     attempt: dynamicToolParams,
   });
   const streamState = { eventEmitted: false, needsTerminalSnapshot: false };
-  emitExecutionPhaseOnce("turn_accepted", { phase: "turn_accepted" });
-  userInputBridgeRef.current = createCodexUserInputBridge({
-    paramsForRun: params,
-    threadId: resourceState.thread.threadId,
-    turnId: activeTurnId,
-    signal: runAbortController.signal,
-  });
-  trajectoryRecorder?.recordEvent("prompt.submitted", {
-    threadId: resourceState.thread.threadId,
-    turnId: activeTurnId,
-    prompt: turnState.codexTurnPromptText,
-    imagesCount: params.images?.length ?? 0,
-  });
   projectorRef.current = new CodexAppServerEventProjector(
     {
       ...projectionParams,
@@ -213,17 +202,12 @@ export function activateCodexAttemptTurn(
       },
     },
   );
-  if (isTerminalTurnStatus(turn.turn.status)) {
-    projectorRef.current.settlement.terminalReceipt = turn.turn;
-    state.terminalTurnNotificationQueued = true;
-    deadlines.beginSettlement(Date.now());
-  }
-  emitLifecycleStart();
   const activeProjector = projectorRef.current;
-  noteProgress("turn:start");
+  let activationFailed = false;
   const abortListener = () => {
     state.abortCleanup = interruptTurn(activeTurnId).then(async (confirmed) => {
       if (
+        !activationFailed &&
         !terminalState.explicitCancellationObserved &&
         !state.permissionChangeRestart &&
         !state.timeout
@@ -249,38 +233,19 @@ export function activateCodexAttemptTurn(
       completeTurn();
     });
   };
-  runAbortController.signal.addEventListener("abort", abortListener, { once: true });
-  if (runAbortController.signal.aborted) {
-    abortListener();
-  }
-  for (const failure of pendingNativePreToolUseFailures.splice(0)) {
-    activeProjector.recordNativeToolPreToolUseFailure(failure);
-  }
   const notifyUserMessagePersisted = createCodexAppServerUserMessagePersistenceNotifier(params);
-  // Buffered async items can persist immediately when the route opens. Commit
-  // their owning user admission first so durable history stays chronological.
-  const promptMirrorPromise = mirrorPromptAtTurnStartBestEffort({
-    params,
-    agentId: sessionAgentId,
-    notifyUserMessagePersisted,
-    sessionKey: contextSessionKey,
-    cwd: effectiveCwd,
-    threadId: resourceState.thread.threadId,
-    turnId: activeTurnId,
-    upstreamUserText: turnState.codexTurnPromptText,
-  });
-  const bindProjection = async () => {
+  const bindProjection = async (promptMirrorPromise: Promise<void>) => {
     state.activeLocalProjections += 1;
     try {
-      await Promise.race([promptMirrorPromise, completion]);
-      if (state.completed) {
-        return;
-      }
-      // Stop and deadlines own activation too; a blocked pre-bind projection
-      // must enter the same bounded finalization and cleanup as an active turn.
       if (resourceState.turnRoute) {
         try {
-          await Promise.race([resourceState.turnRoute.bindTurn(activeTurnId), completion]);
+          // Bind receipt ownership immediately; ordered projection still waits for its user row.
+          await Promise.race([
+            resourceState.turnRoute.bindTurn(activeTurnId, {
+              beforeNotifications: promptMirrorPromise,
+            }),
+            completion,
+          ]);
         } catch (error) {
           if (!state.terminalTurnNotificationQueued && !runAbortController.signal.aborted) {
             throw error;
@@ -290,6 +255,8 @@ export function activateCodexAttemptTurn(
             throw error;
           }
         }
+      } else {
+        await Promise.race([promptMirrorPromise, completion]);
       }
       if (!state.completed && isTerminalTurnStatus(turn.turn.status)) {
         if (!isJsonObject(turn.turn)) {
@@ -353,7 +320,28 @@ export function activateCodexAttemptTurn(
           `failed to hydrate ${result.failedMediaCount} structured image attachment(s) for Codex steering`,
         );
       }
-      return buildCodexUserInput(text, result.images);
+      const source = await buildResolvedCodexUserPromptMessage({
+        ...params,
+        prompt: text,
+        transcriptPrompt: text,
+        userTurnTranscriptRecorder: options.userTurnTranscriptRecorder,
+      });
+      return {
+        input: buildCodexUserInput(text, result.images),
+        message: {
+          ...source,
+          role: "user",
+          content: result.images.length ? [{ type: "text", text }, ...result.images] : text,
+          ...(result.images.length
+            ? {
+                __openclaw: {
+                  ...asOptionalRecord(Reflect.get(source, "__openclaw")),
+                  mediaImageBlockFactIndexes: result.imageFactIndexes,
+                },
+              }
+            : {}),
+        },
+      };
     },
     beforeSubmit: async (items) => {
       // Commit preceding answers and user custody before Codex can act on the
@@ -365,7 +353,8 @@ export function activateCodexAttemptTurn(
       if (transcriptItems.length === 0) {
         return;
       }
-      await promptMirrorPromise;
+      await projectionReady;
+      await notifications.drainNotificationQueue();
       assertSteeringActive();
       const messages = activeProjector.buildSteeringTranscriptPrefix();
       if (params.sessionTarget && messages.length > 0) {
@@ -546,14 +535,6 @@ export function activateCodexAttemptTurn(
     cancel: () => abortExplicitly("cancelled"),
     abort: () => abortExplicitly("aborted"),
   };
-  params.replyOperation?.attachBackend(handle);
-  setActiveEmbeddedRun(
-    params.sessionId,
-    handle,
-    params.sessionKey,
-    params.sessionFile,
-    sessionAgentId,
-  );
   const freezeRunTerminalOutcome = () => {
     if (terminalState.terminalOutcomeFrozen) {
       return;
@@ -561,14 +542,87 @@ export function activateCodexAttemptTurn(
     terminalState.terminalOutcomeFrozen = true;
     params.abortSignal?.removeEventListener("abort", abortFromUpstream);
   };
-  if (
-    !runAbortController.signal.aborted &&
-    params.permissionChange &&
-    !params.permissionChange.applied()
-  ) {
-    state.permissionChangeRestart = "requested";
-    runAbortController.abort("permission-change");
-  }
+  // Return cleanup ownership before callbacks or backend publication can fail.
+  const projectionReady = Promise.resolve().then(async () => {
+    runAbortController.signal.addEventListener("abort", abortListener, { once: true });
+    if (runAbortController.signal.aborted) {
+      abortListener();
+    }
+    try {
+      emitExecutionPhaseOnce("turn_accepted", { phase: "turn_accepted" });
+      userInputBridgeRef.current = createCodexUserInputBridge({
+        paramsForRun: params,
+        onOrdinaryResponse: (response) => activeProjector.recordUserInputResponse(response),
+        threadId: resourceState.thread.threadId,
+        turnId: activeTurnId,
+        signal: runAbortController.signal,
+      });
+      trajectoryRecorder?.recordEvent("prompt.submitted", {
+        threadId: resourceState.thread.threadId,
+        turnId: activeTurnId,
+        prompt: turnState.codexTurnPromptText,
+        imagesCount: params.images?.length ?? 0,
+      });
+      if (isTerminalTurnStatus(turn.turn.status)) {
+        activeProjector.settlement.terminalReceipt = turn.turn;
+        state.terminalTurnNotificationQueued = true;
+        deadlines.beginSettlement(Date.now());
+      }
+      emitLifecycleStart({ provider: projectionParams.provider, model: projectionParams.modelId });
+      noteProgress("turn:start");
+      for (const failure of pendingNativePreToolUseFailures.splice(0)) {
+        activeProjector.recordNativeToolPreToolUseFailure(failure);
+      }
+      if (
+        thread.preserveNativeModel !== true &&
+        thread.connectionScope !== "supervision" &&
+        !params.expectedSessionRuntimeOwnership
+      ) {
+        const route = resourceState.turnRoute;
+        params.registerPluginRuntimeRefreshConsumer?.(
+          () =>
+            resourceState.turnRoute === route &&
+            route?.signal.aborted === false &&
+            turnRuntime.turnIdRef.current === activeTurnId &&
+            !state.completed &&
+            !state.terminalTurnNotificationQueued &&
+            !runAbortController.signal.aborted,
+        );
+      }
+      params.replyOperation?.attachBackend(handle);
+      setActiveEmbeddedRun(
+        params.sessionId,
+        handle,
+        params.sessionKey,
+        params.sessionFile,
+        sessionAgentId,
+      );
+      if (
+        !runAbortController.signal.aborted &&
+        params.permissionChange &&
+        !params.permissionChange.applied()
+      ) {
+        state.permissionChangeRestart = "requested";
+        runAbortController.abort("permission-change");
+      }
+      await bindProjection(
+        mirrorPromptAtTurnStartBestEffort({
+          params,
+          agentId: sessionAgentId,
+          notifyUserMessagePersisted,
+          sessionKey: contextSessionKey,
+          cwd: effectiveCwd,
+          threadId: resourceState.thread.threadId,
+          turnId: activeTurnId,
+          upstreamUserText: turnState.codexTurnPromptText,
+        }),
+      );
+    } catch (error) {
+      activationFailed = true;
+      runAbortController.abort(error);
+      throw error;
+    }
+  });
   return {
     activeTurnId,
     activeProjector,
@@ -578,7 +632,7 @@ export function activateCodexAttemptTurn(
     freezeRunTerminalOutcome,
     notifyUserMessagePersisted,
     abortListener,
-    ready: bindProjection(),
+    ready: projectionReady,
   };
 }
 

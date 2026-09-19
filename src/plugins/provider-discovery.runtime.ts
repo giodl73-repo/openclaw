@@ -6,14 +6,16 @@ import { planEffectiveModelCatalogRows } from "../model-catalog/index.js";
 import { shouldRejectHardlinkedPluginFiles } from "./hardlink-policy.js";
 import { loadManifestMetadataSnapshot } from "./manifest-contract-eligibility.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
+import { getPluginMetadataSnapshotCache, withPluginCache } from "./plugin-cache.js";
 import { withProfile } from "./plugin-load-profile.js";
 import type { PluginMetadataRegistryView } from "./plugin-metadata-snapshot.types.js";
-import { getCachedPluginModuleLoader, preparePluginModule } from "./plugin-module-loader-cache.js";
+import { preparePluginModule } from "./plugin-module-loader-cache.js";
 import { resolvePluginRuntimeArtifact } from "./plugin-runtime-artifact-resolution.js";
 import {
   prefersBuiltPluginArtifacts,
   resolvePluginRuntimeArtifactPreference,
 } from "./plugin-runtime-artifact-selection.js";
+import { getPluginSetupModuleLoader } from "./plugin-setup-module.js";
 import { buildEffectiveManifestProviderConfig } from "./provider-catalog.js";
 import type {
   ProviderDiscoveryPlan,
@@ -99,21 +101,17 @@ function loadProviderDiscoveryProviders(manifest: PluginManifestRecord): Provide
         }),
       }).modulePath
     : source;
-  const moduleLoader = getCachedPluginModuleLoader({
-    modulePath,
-    rootDir,
-    importerUrl: import.meta.url,
-    loaderFilename: import.meta.url,
-    preferBuiltDist: true,
+  const moduleLoader = getPluginSetupModuleLoader(manifest, modulePath, rootDir);
+  return moduleLoader.initialize(() => {
+    const loaded = withProfile(
+      { pluginId: manifest.id, source: modulePath },
+      "provider-discovery-entry",
+      () => moduleLoader(modulePath) as ProviderDiscoveryModule,
+    );
+    return normalizeDiscoveryModule(loaded).map((provider) =>
+      Object.assign({}, provider, { pluginId: manifest.id, pluginRoot: rootDir }),
+    );
   });
-  const loaded = withProfile(
-    { pluginId: manifest.id, source: modulePath },
-    "provider-discovery-entry",
-    () => moduleLoader(modulePath) as ProviderDiscoveryModule,
-  );
-  return normalizeDiscoveryModule(loaded).map((provider) =>
-    Object.assign({}, provider, { pluginId: manifest.id }),
-  );
 }
 
 function hasLiveProviderDiscoveryHook(provider: ProviderPlugin): boolean {
@@ -260,7 +258,12 @@ function resolveProviderDiscoveryEntryPlugins(params: {
   const providers: ProviderPlugin[] = [];
   for (const manifest of entryRecords) {
     try {
-      providers.push(...loadProviderDiscoveryProviders(manifest));
+      // Deferred discovery fills and retires with its snapshot, even outside the producer's scope.
+      providers.push(
+        ...withPluginCache(getPluginMetadataSnapshotCache(metadataSnapshot), () =>
+          loadProviderDiscoveryProviders(manifest),
+        ),
+      );
     } catch {
       // Entry loading is all-or-nothing: discarded results no longer cover their owners.
       // Keep static manifest coverage for the scope-aware full-loader fallback.
@@ -283,6 +286,20 @@ function resolveRuntimeEntryProviders(entryResult: ProviderDiscoveryEntryResult)
   });
 }
 
+function retainSyntheticAuthProviders(
+  providers: ProviderPlugin[],
+  authProviders: ProviderPlugin[],
+): ProviderPlugin[] {
+  const retained = new Set(providers);
+  const result = [...providers];
+  for (const provider of authProviders) {
+    if (!retained.has(provider)) {
+      result.push({ ...provider, catalog: undefined, staticCatalog: undefined });
+    }
+  }
+  return result;
+}
+
 export function planPluginDiscoveryRuntime(
   params: ResolveRuntimePluginDiscoveryProvidersParams,
 ): ProviderDiscoveryPlan {
@@ -296,6 +313,11 @@ export function planPluginDiscoveryRuntime(
           typeof provider.prepareSyntheticAuth === "function")),
   );
   const runtimeEntryProviders = resolveRuntimeEntryProviders(entryResult);
+  const authProviders = params.includeSyntheticAuthProviders
+    ? entryProviders.filter(
+        (provider) => provider.resolveSyntheticAuth || provider.prepareSyntheticAuth,
+      )
+    : [];
   if (params.discoveryEntriesOnly === true) {
     return { kind: "entries", providers: entryProviders };
   }
@@ -305,7 +327,10 @@ export function planPluginDiscoveryRuntime(
     runtimeEntryProviders.length === entryResult.providers.length &&
     entryResult.runtimeManifestCatalogPluginIds.size === 0
   ) {
-    return { kind: "entries", providers: runtimeEntryProviders };
+    return {
+      kind: "entries",
+      providers: retainSyntheticAuthProviders(runtimeEntryProviders, authProviders),
+    };
   }
   let fullPluginIds = params.onlyPluginIds;
   let retainedProviders: ProviderPlugin[] | undefined;
@@ -323,7 +348,10 @@ export function planPluginDiscoveryRuntime(
       ...entryResult.runtimeManifestCatalogPluginIds,
     ]);
     if (fullPluginIds.length === 0) {
-      return { kind: "entries", providers: runtimeEntryProviders };
+      return {
+        kind: "entries",
+        providers: retainSyntheticAuthProviders(runtimeEntryProviders, authProviders),
+      };
     }
     const fullPluginIdSet = new Set(fullPluginIds);
     retainedProviders = runtimeEntryProviders.filter(
@@ -339,7 +367,11 @@ export function planPluginDiscoveryRuntime(
       fullPluginIds = entryPluginIds;
     }
   }
-  return { kind: "runtime", providers: retainedProviders ?? [], pluginIds: fullPluginIds };
+  return {
+    kind: "runtime",
+    providers: retainSyntheticAuthProviders(retainedProviders ?? [], authProviders),
+    pluginIds: fullPluginIds,
+  };
 }
 
 export function resolvePluginDiscoveryProvidersRuntime(
@@ -354,5 +386,27 @@ export function resolvePluginDiscoveryProvidersRuntime(
     env: params.env ?? process.env,
     ...(plan.pluginIds ? { onlyPluginIds: plan.pluginIds } : {}),
   });
-  return [...plan.providers, ...fullProviders];
+  const providers = [...plan.providers];
+  const entryIndices = new Map(
+    providers.map((provider, index) => [normalizeProviderId(provider.id), index]),
+  );
+  for (const provider of fullProviders) {
+    const index = entryIndices.get(normalizeProviderId(provider.id));
+    const entry = index === undefined ? undefined : providers[index];
+    if (index !== undefined && entry && entry.pluginId === provider.pluginId) {
+      // Runtime owns catalog replacement and its auth pair. A lightweight-only
+      // auth contribution survives without keeping a superseded catalog hook.
+      providers[index] =
+        provider.resolveSyntheticAuth || provider.prepareSyntheticAuth
+          ? provider
+          : {
+              ...provider,
+              resolveSyntheticAuth: entry.resolveSyntheticAuth,
+              prepareSyntheticAuth: entry.prepareSyntheticAuth,
+            };
+    } else if (hasProviderCatalogHook(provider)) {
+      providers.push(provider);
+    }
+  }
+  return providers;
 }

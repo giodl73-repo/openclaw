@@ -10,6 +10,7 @@ import {
   type createGatewayChatMetadataLifecycle,
 } from "./server-chat-metadata-lifecycle.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
+import type { GatewaySidecarStopOwner } from "./server-sidecar-owners.js";
 import type { GatewayPostReadySidecarHandle } from "./server-startup-post-attach.js";
 
 type GatewayChatMetadataLifecycle = Awaited<ReturnType<typeof createGatewayChatMetadataLifecycle>>;
@@ -71,19 +72,22 @@ function startSecretStoreExpiryMaintenance(
 export async function attachInitialGatewayLifetimeSidecars(params: {
   chatMetadataLifecycle: GatewayChatMetadataLifecycle;
   gatewayRequestContext: GatewayRequestContext;
-  flushPendingSessionsChangedEvents: (context?: object) => void;
+  flushPendingSessionsChangedEvents: (context?: object) => Promise<void>;
   minimalTestGateway: boolean;
   logWarning: (message: string) => void;
   reconcileGitHubPublications?: () => Promise<void>;
-  sidecars: GatewayPostReadySidecarHandle[];
+  publishSidecars: GatewaySidecarStopOwner["publish"];
 }): Promise<void> {
-  await params.chatMetadataLifecycle.attachContext(params.gatewayRequestContext, params.sidecars);
+  await params.chatMetadataLifecycle.attachContext(
+    params.gatewayRequestContext,
+    params.publishSidecars,
+  );
   const modelAccountConnect = createModelAccountConnectService({
     getConfig: params.gatewayRequestContext.getRuntimeConfig,
     onChanged: () => broadcastChatMetadataChanged(params.gatewayRequestContext),
   });
   params.gatewayRequestContext.modelAccountConnectService = modelAccountConnect;
-  params.sidecars.push({
+  params.publishSidecars({
     stop: async () => {
       await modelAccountConnect.stop();
       if (params.gatewayRequestContext.modelAccountConnectService === modelAccountConnect) {
@@ -101,7 +105,7 @@ export async function attachInitialGatewayLifetimeSidecars(params: {
   if (!params.minimalTestGateway) {
     githubOAuth.start();
   }
-  params.sidecars.push({
+  params.publishSidecars({
     stop: async () => {
       uninstallGitHubOAuth();
       await githubOAuth.stop();
@@ -111,16 +115,16 @@ export async function attachInitialGatewayLifetimeSidecars(params: {
     },
   });
   if (!params.minimalTestGateway) {
-    params.sidecars.push(startSecretStoreExpiryMaintenance(params.logWarning));
+    params.publishSidecars(startSecretStoreExpiryMaintenance(params.logWarning));
   }
   if (params.reconcileGitHubPublications) {
-    params.sidecars.push(
+    params.publishSidecars(
       startGitHubPublicationMaintenance(params.reconcileGitHubPublications, params.logWarning),
     );
   }
-  params.sidecars.push({
-    stop: () => {
-      params.flushPendingSessionsChangedEvents(params.gatewayRequestContext);
+  params.publishSidecars({
+    stop: async () => {
+      await params.flushPendingSessionsChangedEvents(params.gatewayRequestContext);
     },
   });
 }

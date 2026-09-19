@@ -7,12 +7,14 @@ import {
 } from "../../daemon/service-types.js";
 import { resolveSystemdServiceName } from "../../daemon/systemd-service-files.js";
 import { resolveInstallationTarget } from "../../infra/installation-target-context.js";
-import { writeRestartSentinel } from "../../infra/restart-sentinel.js";
 import { getSelfAndAncestorPidsSync } from "../../infra/restart-stale-pids.js";
 import { resolveGatewayRestartDeferralTimeoutMs } from "../../infra/restart.js";
 import { detectRespawnSupervisor } from "../../infra/supervisor-markers.js";
 import { normalizeUpdateChannel } from "../../infra/update-channels.js";
-import { CONTROL_PLANE_UPDATE_HANDOFF_STARTED_REASON } from "../../infra/update-control-plane-sentinel.js";
+import {
+  CONTROL_PLANE_UPDATE_HANDOFF_STARTED_REASON,
+  writeControlPlaneUpdateRestartSentinel,
+} from "../../infra/update-control-plane-sentinel.js";
 import type { DevUpdateTarget } from "../../infra/update-dev-target.js";
 import { resolveUpdateInstallRoot } from "../../infra/update-install-root.js";
 import { createManagedHandoffLeaseStore } from "../../infra/update-managed-service-handoff-lease.js";
@@ -21,7 +23,6 @@ import {
   startManagedServiceUpdateHandoff,
   transferManagedServiceUpdateHandoff,
 } from "../../infra/update-managed-service-handoff.js";
-import { buildUpdateRestartSentinelPayload } from "../../infra/update-restart-sentinel-payload.js";
 import { recordUpdateRunStep } from "../../infra/update-run-ledger.js";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -29,6 +30,7 @@ import { isPidAlive } from "../../shared/pid-alive.js";
 import { formatInstallationTargetCommand } from "../installation-target-format.js";
 import { printResult } from "./progress.js";
 import { resolveNodeRunner, UpdatePreMutationError, type UpdateCommandOptions } from "./shared.js";
+import { releaseUpdateCommandPreflightForHandoff } from "./update-command-executor.js";
 import { resolveOwnedManagedUpdateEnv } from "./update-command-service-env.js";
 
 function parsePositivePid(value: unknown): number | null {
@@ -38,6 +40,9 @@ function parsePositivePid(value: unknown): number | null {
   const trimmed = typeof value === "string" ? value.trim() : "";
   return /^\d+$/u.test(trimmed) ? (parseStrictPositiveInteger(trimmed) ?? null) : null;
 }
+
+/** EX_TEMPFAIL: ownership transferred successfully, but the update is not terminal yet. */
+const UPDATE_HANDOFF_IN_PROGRESS_EXIT_CODE = 75;
 
 const GATEWAY_ANCESTRY_SHELL_GUIDANCE =
   "Run this command from a shell outside the gateway service.";
@@ -156,6 +161,10 @@ export async function handoffUpdateFromGateway(params: {
       "Cannot locate the installed updater; run `openclaw doctor` before retrying.",
     );
   }
+  if (params.opts.run?.executorFence) {
+    releaseUpdateCommandPreflightForHandoff(params.opts.run.executorFence);
+    delete params.opts.run.executorFence;
+  }
   const started = await startManagedServiceUpdateHandoff({
     runId: params.opts.run?.runId,
     root: params.root,
@@ -171,6 +180,7 @@ export async function handoffUpdateFromGateway(params: {
     tag: params.tag,
     devTarget: params.devTarget,
     acceptCapabilities: params.opts.acceptCapabilities,
+    reapplyLocalOverrides: params.opts.reapplyLocalOverrides,
     meta: { runId: params.opts.run?.runId },
   });
   if (started.status === "joined") {
@@ -213,15 +223,15 @@ export async function handoffUpdateFromGateway(params: {
     durationMs: 0,
   };
   try {
-    await writeRestartSentinel(
-      buildUpdateRestartSentinelPayload({
+    await writeControlPlaneUpdateRestartSentinel(
+      {
         result,
         meta: {
           runId: params.opts.run?.runId,
           handoffId: started.handoffId,
           root: started.installRoot,
         },
-      }),
+      },
       env,
     );
     if (!(await transferManagedServiceUpdateHandoff(identity))) {
@@ -244,5 +254,6 @@ export async function handoffUpdateFromGateway(params: {
   if (!params.opts.json) {
     defaultRuntime.log(guidance);
   }
+  process.exitCode = UPDATE_HANDOFF_IN_PROGRESS_EXIT_CODE;
   return true;
 }

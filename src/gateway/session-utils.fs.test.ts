@@ -15,16 +15,20 @@ import {
   createFileBackedSessionManagerForTest,
   openFileBackedSessionManagerForTest,
 } from "../../test/helpers/session-manager-file-fixture.js";
+import { makeAgentAssistantMessage } from "../agents/test-helpers/agent-message-fixtures.js";
+import { createZeroUsageFixture } from "../agents/test-helpers/usage-fixtures.js";
 import { withEnv, withEnvAsync } from "../test-utils/env.js";
 import { projectChatDisplayMessages } from "./chat-display-projection.js";
 import { createToolSummaryPreviewTranscriptLines } from "./session-preview.test-helpers.js";
 import {
   ArchivedTranscriptReader,
+  type ReadRecentSessionMessagesOptions,
+  type ReadSessionMessagesAsyncOptions,
+} from "./session-transcript-archive-reader.js";
+import {
   buildSessionPreviewItems,
   readLatestSessionUsageFromTranscriptFileAsync,
   resolveSessionTranscriptCandidates,
-  type ReadRecentSessionMessagesOptions,
-  type ReadSessionMessagesAsyncOptions,
 } from "./session-utils.fs.js";
 
 function filesystemReader(
@@ -84,29 +88,13 @@ async function readSessionMessagesPageWithStatsAsync(
 }
 
 function buildSessionAssistantMessage(text: string, timestamp: number) {
-  return {
-    role: "assistant" as const,
-    content: [{ type: "text" as const, text }],
+  return makeAgentAssistantMessage({
+    content: [{ type: "text", text }],
     api: "openai",
-    provider: "openai",
     model: "mock-1",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        total: 0,
-      },
-    },
-    stopReason: "stop" as const,
+    usage: createZeroUsageFixture(),
     timestamp,
-  };
+  });
 }
 
 function registerTempSessionStore(

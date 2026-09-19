@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { expectDefined } from "@openclaw/normalization-core";
-import { nothing, render } from "lit";
+import { html, nothing, render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardProvider } from "../../../lib/board/provider.ts";
 import * as messageNormalizer from "../../../lib/chat/message-normalizer.ts";
@@ -22,7 +22,11 @@ import {
   releaseChatMediaResourceSubscriber,
 } from "./chat-message-media.ts";
 import * as chatMessage from "./chat-message.ts";
-import { resetTranscriptSession } from "./chat-thread-interactions.ts";
+import {
+  renderTranscriptSearch,
+  resetTranscriptSession,
+  toggleTranscriptSearch,
+} from "./chat-thread-interactions.ts";
 import { renderChatThread } from "./chat-thread.ts";
 import { projectChatTranscript } from "./chat-transcript-projection.ts";
 import {
@@ -35,6 +39,111 @@ import {
 describe("chat transcript invalidation", () => {
   beforeEach(installTranscriptDomMocks);
   afterEach(resetTranscriptTestDom);
+
+  it.each(["session participants", "history", "pending input"] as const)(
+    "shows your name when a peer arrives through %s and keeps it while search hides the peer",
+    async (peerSource) => {
+      const paneId = `pane-sender-${peerSource}`;
+      const self = { identity: { type: "profile" as const, id: "viewer" }, label: "Alex" };
+      const peer = { identity: { type: "profile" as const, id: "peer" }, label: "Riley" };
+      const ownMessage = {
+        role: "user",
+        content: "Review my draft.",
+        timestamp: 1_000,
+        __openclaw: {
+          id: "own-message",
+          senderId: self.identity.id,
+          senderIdentity: self.identity,
+          senderName: self.label,
+          transport: { clients: [{ id: "openclaw-control-ui", mode: "webchat" }] },
+        },
+      };
+      const peerMessage = {
+        role: "user",
+        content: "Check the example too.",
+        timestamp: 3_000,
+        __openclaw: {
+          id: "peer-message",
+          senderId: peer.identity.id,
+          senderIdentity: peer.identity,
+          senderName: peer.label,
+        },
+      };
+      const props = threadProps(paneId, "agent:main:dashboard:sender-visibility", [
+        ownMessage,
+        { role: "assistant", content: "The draft looks good.", timestamp: 2_000 },
+      ]);
+      props.userId = self.identity.id;
+      props.userName = self.label;
+      props.selectedSession = {
+        key: props.sessionKey,
+        kind: "direct",
+        updatedAt: 1,
+        participants: [self, { identity: { type: "agent", id: "main" }, label: "Molty" }],
+        participantCount: 2,
+      };
+      const transcript = createTestTranscript();
+      const container = document.body.appendChild(document.createElement("div"));
+      const searchContainer = document.body.appendChild(document.createElement("div"));
+      const rerender = () => {
+        render(renderTranscriptSearch(paneId, rerender), searchContainer);
+        render(renderChatThread({ ...props, onRequestUpdate: rerender }, transcript), container);
+        transcript.hostUpdated();
+      };
+      const ownName = () =>
+        container.querySelector(".chat-group.user:not(.chat-group--peer) .chat-sender-name");
+      try {
+        rerender();
+        transcript.hostConnected();
+        await flushDeferredRowPrune();
+        expect(container.textContent).toContain(ownMessage.content);
+        expect(ownName()).toBeNull();
+        expect(container.querySelector(".chat-message-source")).toBeNull();
+
+        if (peerSource === "session participants") {
+          props.selectedSession = {
+            ...props.selectedSession,
+            expandedParticipants: [...props.selectedSession.participants!, peer],
+            participantCount: 3,
+          };
+        } else if (peerSource === "history") {
+          props.messages = [...props.messages, peerMessage];
+        } else {
+          props.pendingInputs = [
+            {
+              id: "queued-peer",
+              runId: "peer-run",
+              acceptedAt: 3_000,
+              state: "queued",
+              message: peerMessage,
+            },
+          ];
+        }
+        rerender();
+        await flushDeferredRowPrune();
+        expect(ownName()?.textContent).toBe("Alex");
+        if (peerSource !== "session participants") {
+          expect(container.querySelector(".chat-group--peer .chat-sender-name")?.textContent).toBe(
+            "Riley",
+          );
+        }
+
+        toggleTranscriptSearch(paneId, rerender);
+        const input = expectDefined(
+          searchContainer.querySelector<HTMLInputElement>("input"),
+          "transcript search",
+        );
+        input.value = ownMessage.content;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await flushDeferredRowPrune();
+        expect(container.textContent).toContain(ownMessage.content);
+        expect(container.textContent).not.toContain(peerMessage.content);
+        expect(ownName()?.textContent).toBe("Alex");
+      } finally {
+        transcript.hostDisconnected();
+      }
+    },
+  );
 
   describe("user video previews", () => {
     const videoUrl = "https://cdn.example/recording.mp4";
@@ -174,16 +283,17 @@ describe("chat transcript invalidation", () => {
         timestamp: index + 1,
         __openclaw: { id: `message-${index}` },
       }));
-      const transcript = {
-        expandedAssistantMessages: new Map(),
-        setContentReady: vi.fn(),
-        syncMessageRows: vi.fn(),
-      } as unknown as Parameters<typeof projectChatTranscript>[1];
+      const transcript = createTestTranscript();
       const props = threadProps("pane-offscreen-history", sessionKey, messages);
-      projectChatTranscript(props, transcript);
+      const project = () =>
+        transcript.renderSession(props.paneId, sessionKey, (session) => {
+          projectChatTranscript(props, session);
+          return html``;
+        });
+      project();
 
       const normalizeSpy = vi.spyOn(messageNormalizer, "normalizeMessage");
-      projectChatTranscript(props, transcript);
+      project();
 
       const historicalMessages = new Set<unknown>(messages);
       expect(normalizeSpy.mock.calls.some(([message]) => historicalMessages.has(message))).toBe(
@@ -280,6 +390,44 @@ describe("chat transcript invalidation", () => {
     },
   );
 
+  it.each(["done", "interrupted"] as const)(
+    "keeps settled history idle when %s status appears, refreshes or clears",
+    async (phase) => {
+      vi.spyOn(Date, "now").mockReturnValue(60_000);
+      const props = threadProps(`pane-terminal-status-${phase}`);
+      const transcript = createTestTranscript();
+      const container = document.body.appendChild(document.createElement("div"));
+      const rerender = () => {
+        render(renderChatThread(props, transcript), container);
+        transcript.hostUpdated();
+      };
+      try {
+        rerender();
+        transcript.hostConnected();
+        await flushDeferredRowPrune();
+        const bubbles = Array.from(container.querySelectorAll(".chat-bubble"));
+        expect(bubbles).toHaveLength(4);
+        const renderGroup = vi.spyOn(chatMessage, "renderMessageGroup");
+
+        for (const occurredAt of [59_000, 59_500, null]) {
+          props.runStatus =
+            occurredAt === null
+              ? null
+              : { phase, runId: "finished-run", sessionKey: props.sessionKey, occurredAt };
+          rerender();
+
+          expect(renderGroup).not.toHaveBeenCalled();
+          const currentBubbles = Array.from(container.querySelectorAll(".chat-bubble"));
+          expect(currentBubbles).toHaveLength(bubbles.length);
+          currentBubbles.forEach((bubble, index) => expect(bubble).toBe(bubbles[index]));
+          expect(container.textContent).toContain("reply two");
+        }
+      } finally {
+        transcript.hostDisconnected();
+      }
+    },
+  );
+
   it("keeps built row identities across an A to B to A presentation reset", () => {
     const paneId = "pane-session-items";
     const messagesA = [{ role: "assistant", content: "session A", timestamp: 1_000 }];
@@ -316,6 +464,67 @@ describe("chat transcript invalidation", () => {
     expect(buildSpy).toHaveBeenCalledTimes(2);
     expect(restoredItemsA).toBe(itemsA);
     expect(restoredItemsA.every((item, index) => item === itemsA[index])).toBe(true);
+  });
+
+  it("keeps history cached during worker setup and clears its notice when placement becomes active", async () => {
+    const props = threadProps("pane-worker-setup", "agent:main:worker-setup", [
+      { role: "user", content: "Earlier request", timestamp: 1_000 },
+      { role: "assistant", content: "Earlier reply", timestamp: 2_000 },
+    ]);
+    props.pendingInputs = [
+      {
+        id: "queued-follow-up",
+        runId: "queued-run",
+        acceptedAt: 3_000,
+        state: "queued",
+        message: { role: "user", content: "Queued follow-up", timestamp: 3_000 },
+      },
+    ];
+    const timing = { generation: 1, createdAtMs: 1, updatedAtMs: 1, stateChangedAtMs: 1 };
+    props.selectedSession = {
+      key: props.sessionKey,
+      kind: "direct",
+      updatedAt: 1,
+      placement: { state: "requested", ...timing },
+    };
+    const transcript = createTestTranscript();
+    const container = document.body.appendChild(document.createElement("div"));
+    const buildSpy = vi.spyOn(chatThreadBuild, "buildChatItems");
+    const rerender = () => {
+      render(renderChatThread(props, transcript), container);
+      transcript.hostUpdated();
+    };
+    try {
+      rerender();
+      transcript.hostConnected();
+      await flushDeferredRowPrune();
+      expect(container.textContent).toContain("Received · waiting for worker setup");
+      expect(container.querySelectorAll('[data-message-text="Queued follow-up"]')).toHaveLength(1);
+      expect(buildSpy).toHaveBeenCalledOnce();
+
+      rerender();
+      expect(buildSpy).toHaveBeenCalledOnce();
+      expect(container.textContent).toContain("Received · waiting for worker setup");
+
+      props.selectedSession = {
+        ...props.selectedSession,
+        placement: {
+          state: "active",
+          ...timing,
+          environmentId: "worker:fixture",
+          activeOwnerEpoch: 1,
+          workerBundleHash: "a".repeat(64),
+          workspaceBaseManifestRef: "base-manifest",
+          remoteWorkspaceDir: "/worker/repo",
+        },
+      };
+      rerender();
+      expect(buildSpy).toHaveBeenCalledTimes(2);
+      expect(container.textContent).not.toContain("Received · waiting for worker setup");
+      expect(container.querySelectorAll('[data-message-text="Queued follow-up"]')).toHaveLength(1);
+    } finally {
+      transcript.hostDisconnected();
+    }
   });
 
   it("keeps settled rows idle across session metadata updates but refreshes their identity gutter", () => {

@@ -345,6 +345,7 @@ describe("check-cli-bootstrap-imports", () => {
       'import fs from "node:fs";\nexport const launcher = Boolean(fs);\n',
     );
 
+    writeFixture(root, "dist/worker/image-processor.worker.mjs", "export {};\n");
     expect(collectWorkerDeployArtifactErrors({ rootDir: root })).toEqual([]);
   });
 
@@ -382,6 +383,7 @@ describe("check-cli-bootstrap-imports", () => {
     );
     writeFixture(root, "dist/worker/workspace-rsync-receiver.mjs", "export {};\n");
     writeFixture(root, "dist/worker/github-exec-launcher.mjs", 'import "yaml";\n');
+    writeFixture(root, "dist/worker/image-processor.worker.mjs", "export {};\n");
     writeFixture(root, "dist/worker/lazy.mjs", "export {};\n");
     writeFixture(
       root,
@@ -453,16 +455,16 @@ describe("gateway run chunk metadata", () => {
     const root = createGatewayBuildFixture();
     const plugin = createGatewayRunChunkMetadataPlugin(root);
     let producerMs = 0;
-    const handler = plugin.generateBundle.handler;
+    const originalHook = { ...plugin.generateBundle };
     plugin.generateBundle.handler = function (...args) {
       const start = performance.now();
       try {
-        return handler.apply(this, args);
+        return originalHook.handler.apply(this, args);
       } finally {
         producerMs += performance.now() - start;
       }
     };
-    const bundles = await build({
+    const { bundles } = await build({
       config: false,
       cwd: root,
       entry: { "cli/run-main": "entry.ts" },
@@ -500,7 +502,7 @@ describe("gateway run chunk metadata", () => {
   it("permits subset builds that do not include the gateway command", async () => {
     const root = createGatewayBuildFixture();
     fs.writeFileSync(join(root, "entry.ts"), "export const unrelated = 1;");
-    const bundles = await build({
+    const { bundles } = await build({
       config: false,
       cwd: root,
       entry: "entry.ts",

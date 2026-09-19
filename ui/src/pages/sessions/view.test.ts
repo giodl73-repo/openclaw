@@ -32,6 +32,7 @@ function buildMultiResult(sessions: SessionsListResult["sessions"]): SessionsLis
 function buildProps(result: SessionsListResult): SessionsProps {
   return {
     loading: false,
+    refreshing: false,
     agentId: "main",
     mainKey: "main",
     result,
@@ -106,6 +107,37 @@ function sessionTableHeaders(container: HTMLElement): Array<string | undefined> 
 const SESSION_TABLE_HEADERS = ["", "Key", "Kind", "Status", "Updated", "Tokens", "Actions"];
 
 describe("sessions view", () => {
+  it("identifies agents on plain chat sessions in a mixed-agent list", async () => {
+    const container = document.createElement("div");
+    render(
+      renderSessions(
+        buildProps(
+          buildMultiResult([
+            { key: "agent:main:chat-one", kind: "direct" },
+            { key: "agent:research:chat-two", kind: "direct" },
+            { key: "legacy-chat", agentId: "research", kind: "direct" },
+          ]),
+        ),
+      ),
+      container,
+    );
+    document.body.append(container);
+    try {
+      await Promise.all(
+        [...container.querySelectorAll("openclaw-agent-row-chip")].map(
+          (chip) => chip.updateComplete,
+        ),
+      );
+      expect(
+        [...container.querySelectorAll(".session-data-row .agent-row-chip")].map((chip) =>
+          chip.getAttribute("data-agent-id"),
+        ),
+      ).toEqual(["main", "research", "research"]);
+    } finally {
+      container.remove();
+    }
+  });
+
   it("renders local calendar date headings with their session rows", async () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 2, 9, 12).getTime());
     const container = document.createElement("div");
@@ -305,7 +337,7 @@ describe("sessions view", () => {
     await Promise.resolve();
 
     expect(container.querySelector<HTMLAnchorElement>(".session-link")?.getAttribute("href")).toBe(
-      "/dashboard/main/12345678",
+      "/dashboard/main/1234567890abcdef1234567890abcdef",
     );
   });
 
@@ -363,6 +395,7 @@ describe("sessions view", () => {
         transcriptSearchQuery: "launch code",
         transcriptSearch: {
           status: "results",
+          sessions: [{ key: "agent:main:launch", kind: "direct", label: "Launch planning" }],
           results: [
             {
               sessionKey: "agent:main:launch",
@@ -376,6 +409,7 @@ describe("sessions view", () => {
           ],
           indexing: true,
           truncated: true,
+          archivedTranscriptsExcluded: 0,
         },
         onNavigateToChat,
       }),

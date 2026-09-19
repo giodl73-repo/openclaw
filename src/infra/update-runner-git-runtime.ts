@@ -29,8 +29,10 @@ async function collectRuntimeDirectories(
       "-z",
       "--",
       "dist",
+      "dist-runtime",
       "node_modules",
       "**/dist",
+      "**/dist-runtime",
       "**/node_modules",
       ":(exclude).artifacts/**",
       ":(exclude).worktrees/**",
@@ -39,7 +41,7 @@ async function collectRuntimeDirectories(
     { cwd: root, timeoutMs },
   );
   if (result.code !== 0) {
-    throw new Error("Cannot enumerate candidate runtime outputs");
+    throw new Error("Cannot enumerate update runtime outputs");
   }
   return (
     result.stdout
@@ -49,7 +51,7 @@ async function collectRuntimeDirectories(
       // Git's --directory can collapse an excluded subtree to its ignored parent.
       .filter(
         (entry) =>
-          ["dist", "node_modules"].includes(path.basename(entry)) &&
+          ["dist", "dist-runtime", "node_modules"].includes(path.basename(entry)) &&
           !entry.split("/").some((part) => part.startsWith(".")),
       )
   );
@@ -110,7 +112,7 @@ export async function prepareGitRuntimePromotion(
       (owned && isPathInside(destinationEntry, relocation.destinationRoot))
     ) {
       throw new Error(
-        "Candidate pnpm virtual store overlaps the source or live checkout; use a dedicated store directory before updating.",
+        "Update pnpm virtual store overlaps the source or live checkout; use a dedicated store directory before updating.",
       );
     }
     stores.set(sourceRoot, storeRelocation);
@@ -142,7 +144,7 @@ export async function prepareGitRuntimePromotion(
       (!roots.some(({ sourceRoot }) => isPathInside(sourceRoot, payload)) &&
         destinations.some((dest) => isPathInside(dest, payload)))
     ) {
-      throw new Error("Candidate pnpm virtual store overlaps a runtime directory being replaced.");
+      throw new Error("Update pnpm virtual store overlaps a runtime directory being replaced.");
     }
   }
   const staged: Array<{ destination: string; temporary: string; previous: boolean }> = [];

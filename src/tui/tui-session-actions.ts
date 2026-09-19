@@ -5,6 +5,7 @@ import type { SessionsPatchResult } from "../../packages/gateway-protocol/src/in
 import { resolveSessionInfoModelSelection } from "../agents/model-selection-display.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import { isAbortError } from "../infra/abort-signal.js";
+import type { AgentHistoryActivity } from "../infra/agent-activity-events.js";
 import {
   agentSessionKeysMatchByRequestKey,
   normalizeAgentId,
@@ -21,6 +22,7 @@ import {
   formatTuiErrorMessage,
   isCommandMarkedMessage,
 } from "./tui-formatters.js";
+import { extractTuiImageSources } from "./tui-images.js";
 import { readTuiSessionUserMessage } from "./tui-session-events.js";
 import {
   sessionInfoUiEquals,
@@ -34,16 +36,13 @@ import {
   reduceTuiSessionProjection,
 } from "./tui-session-projection.js";
 import * as submit from "./tui-submit-state.js";
+import { renderTuiHistoryToolResult } from "./tui-tool-activity.js";
 import type { TuiHistoryLoadResult, TuiOptions, TuiStateAccess } from "./tui-types.js";
-
-type SessionActionBtwPresenter = {
-  clear: () => void;
-};
 
 type SessionActionContext = {
   client: TuiBackend;
   chatLog: ChatLog;
-  btw: SessionActionBtwPresenter;
+  btw: { clear: () => void };
   tui: TUI;
   opts: TuiOptions;
   state: TuiStateAccess;
@@ -471,6 +470,7 @@ export function createSessionActions(context: SessionActionContext) {
       }
       const record = history as {
         messages?: unknown[];
+        activity?: AgentHistoryActivity[];
         sessionId?: string;
         sessionInfo?: SessionInfoEntry &
           Partial<Pick<SessionEntry, "abortedLastRun" | "lastRunError" | "status">> & {
@@ -539,6 +539,9 @@ export function createSessionActions(context: SessionActionContext) {
       chatLog.clearAll();
       btw.clear();
       chatLog.addSystem(`session ${state.currentSessionKey}`);
+      const activityByMessageId = new Map(
+        record.activity?.map((entry) => [entry.messageId, entry.items]),
+      );
       for (const entry of projection.entries) {
         const message = entry.message as Record<string, unknown>;
         if (isCommandMarkedMessage(message)) {
@@ -557,9 +560,17 @@ export function createSessionActions(context: SessionActionContext) {
             } else if (entry.live && liveUserMessage) {
               chatLog.addLiveUser(text, liveUserMessage);
             } else if (liveUserMessage) {
-              chatLog.addUser(text, { messageId: liveUserMessage.messageId });
+              chatLog.addUser(text, {
+                messageId: liveUserMessage.messageId,
+                ...(liveUserMessage.images ? { images: liveUserMessage.images } : {}),
+              });
             } else {
-              chatLog.addUser(text);
+              const images = extractTuiImageSources(message);
+              if (images.length > 0) {
+                chatLog.addUser(text, { images });
+              } else {
+                chatLog.addUser(text);
+              }
             }
           }
           continue;
@@ -569,28 +580,23 @@ export function createSessionActions(context: SessionActionContext) {
             includeThinking: state.showThinking,
           });
           if (text) {
-            chatLog.finalizeAssistant(text);
+            const images = extractTuiImageSources(message);
+            if (images.length > 0) {
+              chatLog.finalizeAssistant(text, undefined, images);
+            } else {
+              chatLog.finalizeAssistant(text);
+            }
           }
           continue;
         }
         if (message.role === "toolResult") {
-          const toolCallId = formatPrimitiveString(message.toolCallId, "");
-          const toolName = formatPrimitiveString(message.toolName, "tool");
-          const component = chatLog.startTool(toolCallId, toolName, {});
-          component.setResult(
-            state.sessionInfo.verboseLevel === "full"
-              ? {
-                  content: Array.isArray(message.content)
-                    ? (message.content as Record<string, unknown>[])
-                    : [],
-                  details:
-                    typeof message.details === "object" && message.details
-                      ? (message.details as Record<string, unknown>)
-                      : undefined,
-                }
-              : { content: [] },
-            { isError: Boolean(message.isError) },
-          );
+          const messageId = entry.identity?.id;
+          renderTuiHistoryToolResult({
+            chatLog,
+            message,
+            items: messageId ? activityByMessageId.get(messageId) : undefined,
+            verboseLevel: state.sessionInfo.verboseLevel,
+          });
         }
       }
       submit.reconcilePendingSubmitHistory(

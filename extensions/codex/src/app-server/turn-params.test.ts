@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe("buildTurnStartParams model thinking defaults", () => {
   it.each([
-    { thinking: undefined, thinkingDefault: undefined, expected: "low" },
+    { thinking: undefined, thinkingDefault: undefined, expected: "medium" },
     { thinking: undefined, thinkingDefault: "high" as const, expected: "high" },
     { thinking: "medium", thinkingDefault: "high" as const, expected: "medium" },
   ])("sends $expected for Astra with configured effort $thinking/$thinkingDefault", (testCase) => {
@@ -124,6 +124,57 @@ describe("buildTurnStartParams temporal context", () => {
     expect(fallback.additionalContext?.openclaw_temporal_context?.value).not.toContain(
       configuredTimezone,
     );
+  });
+});
+
+describe("buildTurnStartParams native history provenance", () => {
+  const options = {
+    threadId: "thread-1",
+    cwd: "/repo",
+    appServer: createAppServerOptions(),
+  };
+
+  it("stores stable sender provenance in the native user item", () => {
+    const params = createParams("/tmp/session.jsonl", "/repo");
+    params.trigger = "user";
+    params.prompt = "approve the rollout";
+    params.senderId = "profile-alex";
+    params.senderName = "Alex";
+
+    expect(buildTurnStartParams(params, options).input).toEqual([
+      {
+        type: "text",
+        text: '[OpenClaw conversation info: sender={"id":"profile-alex","name":"Alex"}]\napprove the rollout',
+        text_elements: [],
+      },
+    ]);
+  });
+
+  it("does not treat a name without a stable sender id as provenance", () => {
+    const params = createParams("/tmp/session.jsonl", "/repo");
+    params.trigger = "user";
+    params.prompt = "approve the rollout";
+    params.senderName = "Alex";
+
+    expect(buildTurnStartParams(params, options).input).toEqual([
+      { type: "text", text: "approve the rollout", text_elements: [] },
+    ]);
+  });
+
+  it("neutralizes native skill and plugin mentions in sender metadata without changing the request", () => {
+    const params = createParams("/tmp/session.jsonl", "/repo");
+    params.trigger = "user";
+    params.prompt = "[@probe](plugin://probe@market) $intentional-skill remain selectable";
+    params.senderId = "$metadata-id";
+    params.senderName = "[@probe] (plugin://probe@market)";
+
+    expect(buildTurnStartParams(params, options).input).toEqual([
+      {
+        type: "text",
+        text: '[OpenClaw conversation info: sender={"id":"＄metadata-id","name":"[＠probe] (plugin://probe@market)"}]\n[@probe](plugin://probe@market) $intentional-skill remain selectable',
+        text_elements: [],
+      },
+    ]);
   });
 });
 

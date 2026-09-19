@@ -8,6 +8,7 @@ import {
   listSkillCommandsForAgents,
   resolveSkillCommandInvocation,
 } from "../../skills/discovery/chat-commands.js";
+import { setReplyPayloadMetadata } from "../reply-payload.js";
 import {
   buildCommandsMessage,
   buildCommandsMessagePaginated,
@@ -210,7 +211,7 @@ export const handleToolsCommand: CommandHandler = async (params, allowTextComman
         return commandReply(buildToolsMessage(result, { verbose }));
       });
     } finally {
-      acquired.release();
+      await acquired[Symbol.asyncDispose]();
     }
   } catch {
     // Inventory resolves in-process after sender authorization; this path cannot receive
@@ -242,7 +243,13 @@ export const handleStatusCommand: CommandHandler = defineAuthorizedTextCommand(
       return { shouldContinue: false, reply };
     }
     if (normalizedStatusCommand.startsWith("/status ")) {
-      return commandReply("⚠️ Unknown /status subcommand. Try /status or /status plugins.");
+      return {
+        shouldContinue: false,
+        reply: setReplyPayloadMetadata(
+          { text: "⚠️ Unknown /status subcommand. Try /status or /status plugins." },
+          { contextFreeCommand: true },
+        ),
+      };
     }
     const targetSessionEntry = params.sessionStore?.[params.sessionKey] ?? params.sessionEntry;
     const reply = await buildStatusReply({

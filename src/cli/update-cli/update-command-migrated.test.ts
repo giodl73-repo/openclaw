@@ -4,14 +4,20 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { createConfigIO } from "../../config/io.js";
 import { asResolvedSourceConfig, asRuntimeConfig } from "../../config/materialize.js";
 import { appendTranscriptEventsInTransaction } from "../../config/sessions/session-accessor.sqlite-transcript-store.js";
+import { createRetainedPackageSwap } from "../../infra/package-update-swap.test-support.js";
+import { hasNodeErrorCode } from "../../infra/path-guards.js";
+import * as temporaryState from "../../infra/tmp-openclaw-dir.js";
 import { readUpdateStateSchemaVersions } from "../../infra/update-candidate-state.js";
 import {
   adoptUpdateRun,
   createUpdateRun,
+  finishUpdateRun,
   recordUpdateRunStep,
 } from "../../infra/update-run-ledger.js";
+import * as childCommands from "../../process/exec.js";
 import { defaultRuntime } from "../../runtime.js";
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../../state/openclaw-agent-db-contract.js";
 import {
@@ -24,10 +30,13 @@ import {
   openOpenClawStateDatabase,
 } from "../../state/openclaw-state-db.js";
 import { createUpdateProgress } from "./progress.js";
+import { withUpdateCommandExecutor } from "./update-command-executor.js";
+import type { MigratedUpdateFinalizationInput } from "./update-command-migrated-types.js";
 import {
   continueMigratedUpdateInFreshProcess,
   inspectActivatedUpdateState,
 } from "./update-command-migrated.js";
+import { taskRecovery } from "./update-command-post-update.test-support.js";
 import { createUpdateRunProgress } from "./update-command-run.js";
 
 // Model the already-running updater's older schema contract. The candidate
@@ -131,6 +140,135 @@ it.each([
   },
 );
 
+it.each([
+  { pending: true, status: "skipped" },
+  { pending: false, status: "error" },
+  { pending: true, status: "error" },
+] as const)(
+  "retains the backup across migrated finalization (readiness pending=$pending, status=$status)",
+  async ({ pending, status }) => {
+    const exitCode = status === "skipped" ? 0 : 1;
+    const reason = status === "skipped" ? "gateway-readiness-unverified" : "doctor-failed";
+    const base = dirs.make("migrated-readiness-pending-");
+    const { transaction, packageRoot } = await createRetainedPackageSwap(base);
+    const env = { OPENCLAW_STATE_DIR: path.join(base, "state") };
+    const run = {
+      runId: createUpdateRun({ trigger: "cli" }, { env }).runId,
+      env,
+      activationTimeoutMs: 90_000,
+    };
+    const configSnapshot = await createConfigIO({ env, observe: false }).readConfigFileSnapshot();
+    const windowsRecovery = taskRecovery();
+    const complete = vi.spyOn(transaction, "complete");
+    const rollback = vi.spyOn(transaction, "rollback");
+    vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+    // Keep the real parent and package owner; model only the completed candidate's JSON reply.
+    vi.spyOn(childCommands, "runUtf8CommandWithTimeout").mockImplementation(
+      async (_argv, options) => {
+        if (typeof options === "number" || typeof options.input !== "string") {
+          throw new Error("Expected serialized finalization input");
+        }
+        const input: MigratedUpdateFinalizationInput = JSON.parse(options.input);
+        const result = {
+          ...input.params.result,
+          status,
+          reason,
+          runId: run.runId,
+          steps: pending
+            ? [
+                {
+                  name: "gateway verification",
+                  command: "gateway verification",
+                  cwd: packageRoot,
+                  durationMs: 90_000,
+                  exitCode: 0,
+                  termination: "timeout",
+                  advisory: {
+                    kind: "recoverable-maintenance",
+                    message:
+                      "Gateway is still starting after 90000ms; left running with readiness unverified.",
+                  },
+                },
+              ]
+            : [],
+        };
+        finishUpdateRun(
+          run.runId,
+          { status: status === "skipped" ? "skipped" : "failed", reason },
+          { env },
+        );
+        await fs.writeFile(
+          input.resultPath,
+          JSON.stringify({ result, exitCode, terminalRunId: run.runId }),
+        );
+        return {
+          stdout: "",
+          stderr: "",
+          code: 0,
+          signal: null,
+          killed: false,
+          termination: "exit",
+          cleanup: "normal",
+        };
+      },
+    );
+
+    const outcome = await continueMigratedUpdateInFreshProcess(
+      {
+        mutationStarted: true,
+        result: { status: "ok", mode: "npm", root: packageRoot, steps: [], durationMs: 1 },
+        root: packageRoot,
+        installKindChanged: false,
+        configSnapshot,
+        requestedChannel: null,
+        storedChannel: "stable",
+        channel: "stable",
+        downgradeRisk: false,
+        shouldRestart: true,
+        opts: { json: true, run },
+        preManagedServiceStop: {
+          stopped: true,
+          inspected: true,
+          runtimeInspected: true,
+          running: true,
+          serviceEnv: env,
+          windowsTaskAutoStartRecovery: windowsRecovery,
+        },
+        packageTransaction: transaction,
+        controlPlaneUpdateSentinelMeta: null,
+        preUpdatePluginInstallRecords: {},
+        startedAt: Date.now(),
+        packageUpdateNodeRunner: process.execPath,
+        updateStepTimeoutMs: 90_000,
+      },
+      [],
+    );
+
+    expect(outcome).toMatchObject({
+      exitCode,
+      result: { status },
+    });
+    expect(outcome.result.reason).toBe(reason);
+    if (pending) {
+      expect(complete).not.toHaveBeenCalled();
+    } else {
+      expect(complete).toHaveBeenCalledExactlyOnceWith(
+        { activationVerified: false },
+        expect.any(Function),
+      );
+    }
+    expect(rollback).not.toHaveBeenCalled();
+    expect(windowsRecovery.complete).toHaveBeenCalledWith(pending);
+    expect(windowsRecovery.complete).not.toHaveBeenCalledWith(!pending);
+    await expect(
+      fs.readFile(path.join(transaction.backupRoot, "package.json"), "utf8"),
+    ).resolves.toContain('"version":"1.0.0"');
+    await expect(fs.readFile(path.join(packageRoot, "package.json"), "utf8")).resolves.toContain(
+      '"version":"2.0.0"',
+    );
+  },
+);
+
 it("refuses state inspection when activation leaves no known runtime root", async () => {
   const result = { status: "error" as const, mode: "npm" as const, steps: [], durationMs: 0 };
   await expect(
@@ -198,11 +336,14 @@ it.each([
 );
 
 it.each([
-  { json: false, parentOwns: false },
-  { json: true, parentOwns: true },
+  { json: false, legacy: false, parentOwns: false },
+  { json: true, legacy: false, parentOwns: true },
+  { json: false, legacy: true, parentOwns: true },
+  { json: true, legacy: false, parentOwns: true, checkWorkMs: 31_000, stepBudgetMs: 120_000 },
+  { json: true, legacy: false, parentOwns: true, checkWorkMs: 31_000, stepBudgetMs: 20_000 },
 ])(
-  "finishes the same real ledger from the candidate after the old updater is fenced by migration (json=$json, parentOwns=$parentOwns)",
-  async ({ json, parentOwns }) => {
+  "fences migrated candidate finalization (json=$json, legacy=$legacy, parentOwns=$parentOwns, check=$checkWorkMs, budget=$stepBudgetMs)",
+  async ({ json, legacy, parentOwns, checkWorkMs, stepBudgetMs }) => {
     const stateDir = await fs.realpath(dirs.make("migrated-update-"));
     const env = {
       ...process.env,
@@ -210,7 +351,29 @@ it.each([
       OPENCLAW_CONFIG_PATH: path.join(stateDir, "openclaw.json"),
       OPENCLAW_TEST_RUNTIME_LOG: "1",
     };
-    const root = process.cwd();
+    const root = legacy ? path.join(stateDir, "legacy-runtime") : process.cwd();
+    const legacyEffect = path.join(stateDir, "legacy-worker-effect");
+    if (legacy) {
+      const worker = path.join(root, "dist", "infra", "update-migrated-finalize.worker.js");
+      await fs.mkdir(path.dirname(worker), { recursive: true });
+      await fs.writeFile(
+        worker,
+        `
+        const fs = require("node:fs");
+        const { DatabaseSync } = require("node:sqlite");
+        if (process.argv[2] === "--check") {
+          process.stdout.write(JSON.stringify({state:${OPENCLAW_STATE_SCHEMA_VERSION + 1}, agent:${OPENCLAW_AGENT_SCHEMA_VERSION}}));
+        } else {
+          const input = JSON.parse(fs.readFileSync(0,"utf8"));
+          fs.writeFileSync(${JSON.stringify(legacyEffect)}, "unfenced effect");
+          const db = new DatabaseSync(${JSON.stringify(path.join(stateDir, "state", "openclaw.sqlite"))});
+          db.prepare("UPDATE update_runs SET status = 'failed', phase = 'finished', finished_at_ms = 1 WHERE run_id = ?").run(input.params.opts.run.runId);
+          db.close();
+          fs.writeFileSync(input.resultPath, JSON.stringify({result:{...input.params.result,runId:input.params.opts.run.runId},exitCode:1,terminalRunId:input.params.opts.run.runId}));
+        }
+      `,
+      );
+    }
     const created = createUpdateRun({ trigger: "cli" }, { env });
     const parentDriver = parentOwns
       ? adoptUpdateRun(created.runId, { env }).origin.driver
@@ -257,62 +420,107 @@ it.each([
       return true;
     });
 
-    const result = await continueMigratedUpdateInFreshProcess(
-      {
-        mutationStarted: true,
-        result: {
-          status: "error",
-          reason: "doctor-failed",
-          mode: "npm",
-          root,
-          steps: [],
-          durationMs: 0,
-        },
-        root,
-        installKindChanged: false,
-        configSnapshot: {
-          path: path.join(stateDir, "openclaw.json"),
-          exists: false,
-          raw: null,
-          parsed: {},
-          sourceConfig: asResolvedSourceConfig({}),
-          resolved: asResolvedSourceConfig({}),
-          valid: true,
-          runtimeConfig: asRuntimeConfig({}),
-          config: asRuntimeConfig({}),
-          issues: [],
-          warnings: [],
-          legacyIssues: [],
-        },
-        requestedChannel: null,
-        storedChannel: "stable",
-        channel: "stable",
-        downgradeRisk: false,
-        shouldRestart: false,
-        opts: { json, run },
-        packageTransaction: {
-          backupRoot: path.join(stateDir, "retained-package"),
-          rollback,
-          complete: async () => {
-            const inspected = new DatabaseSync(database.path, { readOnly: true });
-            try {
-              terminalAtCleanup = inspected
-                .prepare("SELECT status, reason FROM update_runs WHERE run_id = ?")
-                .get(created.runId);
-            } finally {
-              inspected.close();
+    const control = path.join(stateDir, "executor-control");
+    await fs.mkdir(control);
+    vi.spyOn(temporaryState, "resolvePreferredOpenClawTmpDir").mockReturnValue(control);
+    const family = async () =>
+      Promise.all(
+        [database.path, database.path + "-wal", database.path + "-shm"].map((file) =>
+          fs.readFile(file).catch((error: unknown) => {
+            if (hasNodeErrorCode(error, "ENOENT")) {
+              return null;
             }
-          },
+            throw new Error("Could not inspect the isolated database family.", { cause: error });
+          }),
+        ),
+      );
+    const before = legacy ? await family() : undefined;
+    if (checkWorkMs !== undefined) {
+      const nativeCommand = childCommands.runUtf8CommandWithTimeout;
+      vi.spyOn(childCommands, "runUtf8CommandWithTimeout").mockImplementation(
+        async (argv, options): ReturnType<typeof nativeCommand> => {
+          const child = await nativeCommand(argv, options);
+          const allowance = typeof options === "number" ? options : options.timeoutMs;
+          // Keep the native admission/cleanup flow; model cold-start work in this phase only.
+          return argv.at(-1) === "--check" && (allowance ?? Infinity) < checkWorkMs
+            ? { ...child, code: 124, stdout: "", killed: true, termination: "timeout" }
+            : child;
         },
-        controlPlaneUpdateSentinelMeta: null,
-        preUpdatePluginInstallRecords: {},
-        startedAt: Date.now(),
-        packageUpdateNodeRunner: process.execPath,
-        updateStepTimeoutMs: 1_000,
-        rollbackBlockedReason: "state-migrated-no-rollback",
-      },
-      progress.pendingSteps,
-    );
+      );
+    }
+    const work = withUpdateCommandExecutor(run.runId, async (executor) => {
+      const executorFence = await executor.enter(root);
+      return await continueMigratedUpdateInFreshProcess(
+        {
+          mutationStarted: true,
+          result: {
+            status: "error",
+            reason: "doctor-failed",
+            mode: "npm",
+            root,
+            steps: [],
+            durationMs: 0,
+          },
+          root,
+          installKindChanged: false,
+          configSnapshot: {
+            path: path.join(stateDir, "openclaw.json"),
+            exists: false,
+            raw: null,
+            parsed: {},
+            sourceConfig: asResolvedSourceConfig({}),
+            resolved: asResolvedSourceConfig({}),
+            valid: true,
+            runtimeConfig: asRuntimeConfig({}),
+            config: asRuntimeConfig({}),
+            issues: [],
+            warnings: [],
+            legacyIssues: [],
+          },
+          requestedChannel: null,
+          storedChannel: "stable",
+          channel: "stable",
+          downgradeRisk: false,
+          shouldRestart: false,
+          opts: { json, run: { ...run, executorFence } },
+          packageTransaction: {
+            backupRoot: path.join(stateDir, "retained-package"),
+            rollback,
+            complete: async () => {
+              const inspected = new DatabaseSync(database.path, { readOnly: true });
+              try {
+                terminalAtCleanup = inspected
+                  .prepare("SELECT status, reason FROM update_runs WHERE run_id = ?")
+                  .get(created.runId);
+              } finally {
+                inspected.close();
+              }
+            },
+          },
+          controlPlaneUpdateSentinelMeta: null,
+          preUpdatePluginInstallRecords: {},
+          startedAt: Date.now(),
+          packageUpdateNodeRunner: process.execPath,
+          updateStepTimeoutMs: stepBudgetMs ?? 30_000,
+          rollbackBlockedReason: "state-migrated-no-rollback",
+        },
+        progress.pendingSteps,
+      );
+    });
+    if (checkWorkMs !== undefined && stepBudgetMs !== undefined && stepBudgetMs < checkWorkMs) {
+      await expect(work).rejects.toThrow(/delegation capability could not be inspected/);
+      expect(terminalAtCleanup).toBeUndefined();
+      expect(rollback).not.toHaveBeenCalled();
+      return;
+    }
+    if (legacy) {
+      await expect(work).rejects.toThrow(/live executor delegation/);
+      await expect(fs.access(legacyEffect)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await family()).toEqual(before);
+      expect(terminalAtCleanup).toBeUndefined();
+      return;
+    }
+    const result = await work;
     expect(result.automaticTriage).toMatchObject({
       kind: "update",
       phase: "state-migrated-no-rollback",

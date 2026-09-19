@@ -23,6 +23,21 @@ execution, streaming, persistence.
 4. `subscribeEmbeddedAgentSession` bridges runtime events to the `agent` stream: tool events to `stream: "tool"`, assistant deltas to `stream: "assistant"`, lifecycle events to `stream: "lifecycle"` (`phase: "start" | "finishing" | "end" | "error"`).
 5. `agent.wait` (`waitForAgentRun`) waits for **lifecycle end/error** on a `runId` and returns `{ status: ok|error|timeout, startedAt, endedAt, error? }`.
 
+For embedded OpenAI Responses turns, `response.completed` finishes one model
+response. If the provider sends `end_turn: false`, the loop requests another
+response even when the completed response contains only text. Existing
+cancellation, host stop decisions, and intentional tool termination still apply.
+
+Each completed or incomplete Responses response also carries an
+`openai_responses_terminal` entry in the saved assistant message's `diagnostics`.
+It records `eventType` and the provider's `endTurn` signal as
+`true`, `false`, `"absent"`, or `"invalid"`, without retaining malformed values.
+Read it alongside the message's `stopReason` and text phase. These per-response
+facts survive later responses in the same run and require no
+raw-stream logging. They record the provider signal, not whether a host stop or
+cancellation prevented continuation. Older messages without this diagnostic
+cannot establish whether the provider omitted the signal.
+
 The wait result also carries the run's `terminalReply` and, when available,
 `terminalReceipt`. A receipt with `sourceReplyDelivered: true` confirms a final
 reply reached the external source conversation. A2A announcements consume that
@@ -110,9 +125,19 @@ Final payloads are assembled from assistant text (plus optional reasoning), inli
 - Messaging tool duplicates are removed from the final payload list.
 - A fallback tool error warning appears only when a run ends with a tool failure and would otherwise leave the user with no reply. This guard is not configurable; a user-facing reply, including one already delivered by a messaging tool, prevents the warning.
 
+If a required-reply turn ends after a fully settled tool batch without a composed answer, OpenClaw can make a tool-free finalization pass. Earlier tool errors and pre-tool progress do not count as a final answer. This pass does not repeat completed tools. Fatal automation failures, including denied execution, remain failures even when finalization produces an answer.
+
+An explicit `NO_REPLY` in the current attempt's successful canonical answer is intentional silence, even when earlier assistant text was streamed in the same input. It does not trigger another finalization pass or replay superseded text, and it does not retract text already delivered. Pending tools, accepted child runs, and yielded work retain completion ownership; silence does not mark that work finished. Assistant errors and aborts are not intentional silence.
+
 Prompt-segment diagnostics attribute attachment/context blocks and generated inbound metadata separately from user text. A prompt containing only those blocks does not need trailing user text for reply processing to complete.
 
 ## Compaction and retries
+
+When an OpenAI Responses request hits its output limit while generating a tool
+call, the built-in harness finishes already admitted tools and retries from their
+recorded results. The unfinished call never executes. Recovery uses the existing
+bounded session retry budget and remains cancellable; refusals and inconsistent
+terminal responses do not qualify for this continuation.
 
 Auto-compaction emits `compaction` stream events and can trigger a retry. On retry, in-memory buffers and tool summaries reset to avoid duplicate output. See [Compaction](/concepts/compaction).
 

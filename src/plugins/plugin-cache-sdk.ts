@@ -23,17 +23,13 @@ export type PluginRuntimeModuleResolution = {
   error?: string;
 };
 
-export type BundledPackageCacheIdentity = {
-  packageJson: string;
-  packageRoot: string;
-  packageVersion: string;
-  size: number;
-  mtimeMs: number;
-};
-
 type PreparedPluginAliases = {
+  packageRoot: string | null;
   cacheKey: string;
+  sdkRoots: string[];
   getAliasMap: () => PluginSdkAliasMap;
+  hasSourceSdkAliases: () => boolean;
+  getSourceTransformAliasMap: () => PluginSdkAliasMap;
   resolveAlias: (specifier: string) => string | undefined;
 };
 
@@ -49,15 +45,6 @@ type PluginSdkHostFacts = {
   workspaceAliasesByMode: Map<string, PluginSdkAliasMap>;
 };
 
-function createPluginSdkHostFacts(): PluginSdkHostFacts {
-  return {
-    workspaceExports: new Map(),
-    subpathsByOwner: new Map(),
-    bundledAliasesByMode: new Map(),
-    workspaceAliasesByMode: new Map(),
-  };
-}
-
 /** Derived SDK facts share the plugin cache lifetime; none owns a separate expiry. */
 export function createPluginCacheSdk() {
   return {
@@ -67,7 +54,6 @@ export function createPluginCacheSdk() {
     packageSearches: new Map<string, { first?: string | null; all?: string[] }>(),
     argvDirectories: new Map<string, string[]>(),
     devSourceRoots: new Map<string, string | null>(),
-    bundledPackages: new Map<string, BundledPackageCacheIdentity | undefined>(),
     runtimeModules: new Map<string, PluginRuntimeModuleResolution>(),
     usableDistArtifacts: new Map<string, boolean>(),
     normalizedJitiAliases: new Map<string, PluginSdkAliasMap>(),
@@ -75,13 +61,8 @@ export function createPluginCacheSdk() {
       PluginSdkAliasMap,
       {
         normalizedJiti?: PluginSdkAliasMap;
-        normalizedTargets?: PluginSdkAliasMap;
         moduleKey?: string;
       }
-    >(),
-    mergedAliases: new WeakMap<
-      PluginSdkAliasMap,
-      WeakMap<PluginSdkAliasMap, WeakMap<PluginSdkAliasMap, PluginSdkAliasMap>>
     >(),
     native: {
       sdkProviders: new Map<
@@ -107,8 +88,23 @@ export function getPluginSdkHostFacts(
 ): PluginSdkHostFacts {
   let facts = cache.hosts.get(packageRoot);
   if (!facts) {
-    facts = createPluginSdkHostFacts();
+    facts = {
+      workspaceExports: new Map(),
+      subpathsByOwner: new Map(),
+      bundledAliasesByMode: new Map(),
+      workspaceAliasesByMode: new Map(),
+    };
     cache.hosts.set(packageRoot, facts);
+  }
+  return facts;
+}
+
+export function getPluginSdkAliasFacts(sdk: PluginCacheSdk, aliasMap: PluginSdkAliasMap) {
+  const cache = sdk.aliasFacts;
+  let facts = cache.get(aliasMap);
+  if (!facts) {
+    facts = {};
+    cache.set(aliasMap, facts);
   }
   return facts;
 }

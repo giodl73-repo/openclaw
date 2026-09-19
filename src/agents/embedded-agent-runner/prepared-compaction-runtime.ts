@@ -21,10 +21,15 @@ import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { createBundleLspToolRuntime } from "../agent-bundle-lsp-runtime.js";
 import { createBundleMcpToolRuntime } from "../agent-bundle-mcp-tools.js";
-import { createOpenClawCodingTools } from "../agent-tools.js";
+import { createOpenClawCodingToolsInternal } from "../agent-tools.js";
 import { createSkillInstructionDeliveryCache } from "../agent-tools.read.js";
 import { listActiveProcessSessionReferences } from "../bash-process-references.js";
 import { resolveProcessToolScopeKey } from "../bash-process-scope.js";
+import {
+  buildBootstrapBudgetState,
+  buildBootstrapInjectionStats,
+  buildBootstrapPromptWarningNotice,
+} from "../bootstrap-budget.js";
 import {
   makeBootstrapWarn,
   resolveBootstrapContextForRun,
@@ -77,7 +82,15 @@ import { buildEmbeddedSystemPrompt } from "./system-prompt.js";
 import { collectAllowedToolNames } from "./tool-name-allowlist.js";
 import { mapThinkingLevelForProvider } from "./utils.js";
 
-export async function buildPreparedCompactionRuntime(prepared: DirectCompactionPreparation) {
+export type PreparedCompactionCleanup = {
+  disposeToolRuntimes: () => Promise<void>;
+  restoreSkillEnvironment: () => void;
+};
+
+export async function buildPreparedCompactionRuntime(
+  prepared: DirectCompactionPreparation,
+  onCleanupReady: (cleanup: PreparedCompactionCleanup) => void,
+) {
   const {
     params,
     runId,
@@ -137,13 +150,11 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
     skillEnvironmentRestored = true;
     restoreSkillEnv?.();
   };
-  const dispose = async () => {
-    await disposeToolRuntimes();
-    restoreSkillEnvironment();
-  };
+  onCleanupReady({ disposeToolRuntimes, restoreSkillEnvironment });
 
   try {
-    const preparedSkills = prepareEmbeddedSkills({
+    const preparedSkills = await prepareEmbeddedSkills({
+      assertCurrent: () => params.abortSignal?.throwIfAborted(),
       attempt: {
         config: params.config,
         bootstrapWorkspaceDir: params.bootstrapWorkspaceDir,
@@ -155,14 +166,15 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       includeCodeModeSkills: false,
     });
     restoreSkillEnv = preparedSkills.restoreSkillEnv;
-    const { skillsSnapshotForRun, skillUsagePaths, skillsPrompt } = preparedSkills;
+    const { skillsSnapshotForRun, skillReadResources, skillUsagePaths, skillsPrompt } =
+      preparedSkills;
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;
     const contextInjectionMode = resolveContextInjectionMode(params.config, sessionAgentId);
-    const { contextFiles } =
+    const { bootstrapFiles, contextFiles } =
       contextInjectionMode === "never"
-        ? { contextFiles: [] }
+        ? { bootstrapFiles: [], contextFiles: [] }
         : await resolveBootstrapContextForRun({
             workspaceDir: effectiveWorkspace,
             config: params.config,
@@ -175,6 +187,22 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
               warn: (message) => log.warn(message),
             }),
           });
+    // Mirror ordinary-turn bootstrap disclosure so compaction summaries do not
+    // silently omit later workspace files when the aggregate budget is spent.
+    // Resolved once per prepared attempt so thinking-level retries reuse the same
+    // admitted files and notice.
+    const bootstrapInjectionStats = buildBootstrapInjectionStats({
+      bootstrapFiles,
+      injectedFiles: contextFiles,
+    });
+    const bootstrapBudget = buildBootstrapBudgetState({
+      config: params.config,
+      agentId: sessionAgentId,
+      files: bootstrapInjectionStats,
+    });
+    const bootstrapTruncationNotice = buildBootstrapPromptWarningNotice(
+      bootstrapBudget.bootstrapPromptWarning.lines,
+    );
     // Apply contextTokens cap to model so session runtime's auto-compaction
     // threshold uses the effective limit, not the native context window.
     const runtimeModelWithContext = runtimeModel as ProviderRuntimeModel;
@@ -286,34 +314,37 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
     const toolsEnabled = supportsModelTools(effectiveModel);
     const skillInstructionDeliveryCache = createSkillInstructionDeliveryCache();
     const toolsRaw = toolsEnabled
-      ? createOpenClawCodingTools({
-          ...conversationContext,
-          agentId: sessionAgentId,
-          exec: {
-            ...execOverrides,
-            config: params.config,
-            elevated: params.bashElevated,
+      ? createOpenClawCodingToolsInternal(
+          {
+            ...conversationContext,
+            agentId: sessionAgentId,
+            exec: {
+              ...execOverrides,
+              config: params.config,
+              elevated: params.bashElevated,
+            },
+            sandbox,
+            sessionPermissionPolicy,
+            requireWorkspaceOnly: params.requireWorkspaceOnly,
+            clientCaps: params.clientCaps,
+            pinnedWidgetAuthoring: params.pinnedWidgetAuthoring,
+            oneShotCliRun: params.oneShotCliRun,
+            allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
+            webSearchEnabled: params.toolOverrides?.webSearch !== false,
+            abortSignal: runAbortController.signal,
+            sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
+            modelHasVision: effectiveModel.input?.includes("image") ?? false,
+            modelCompat: extractModelCompat(effectiveModel),
+            skillUsagePaths,
+            skillInstructionDeliveryCache,
+            conversationCapabilityProfile: runtimeCapabilityProfile,
+            preparedModelRuntime: params.preparedModelRuntime,
+            modelAuthMode: resolveModelAuthMode(effectiveModel.provider, params.config, undefined, {
+              workspaceDir: effectiveWorkspace,
+            }),
           },
-          sandbox,
-          sessionPermissionPolicy,
-          requireWorkspaceOnly: params.requireWorkspaceOnly,
-          clientCaps: params.clientCaps,
-          pinnedWidgetAuthoring: params.pinnedWidgetAuthoring,
-          oneShotCliRun: params.oneShotCliRun,
-          allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
-          webSearchEnabled: params.toolOverrides?.webSearch !== false,
-          abortSignal: runAbortController.signal,
-          sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
-          modelHasVision: effectiveModel.input?.includes("image") ?? false,
-          modelCompat: extractModelCompat(effectiveModel),
-          skillUsagePaths,
-          skillInstructionDeliveryCache,
-          conversationCapabilityProfile: runtimeCapabilityProfile,
-          preparedModelRuntime: params.preparedModelRuntime,
-          modelAuthMode: resolveModelAuthMode(effectiveModel.provider, params.config, undefined, {
-            workspaceDir: effectiveWorkspace,
-          }),
-        })
+          skillReadResources,
+        )
       : [];
     const runtimePlanModelContext = {
       workspaceDir: effectiveWorkspace,
@@ -346,6 +377,7 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       ? await createBundleLspToolRuntime({
           workspaceDir: effectiveWorkspace,
           cfg: params.config,
+          abortSignal: params.abortSignal,
           reservedToolNames: [
             ...tools.map((tool) => tool.name),
             ...(bundleMcpRuntime?.tools.map((tool) => tool.name) ?? []),
@@ -515,6 +547,7 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
     const buildSystemPromptText = () => {
       const builtSystemPrompt = buildEmbeddedSystemPrompt({
         config: params.config,
+        preparedModelRuntime: params.preparedModelRuntime,
         agentId: sessionAgentId,
         workspaceDir: effectiveWorkspace,
         runtimeCwd: effectiveCwd,
@@ -540,6 +573,7 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
         userTimezone,
         userDate,
         contextFiles,
+        bootstrapTruncationNotice,
         activeProjectKeys,
         preparedMemoryPrompt,
         preparedWatchedSessions,
@@ -577,12 +611,9 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       buildSystemPromptText,
       resolvedMessageProvider,
       sessionAgentId,
-      disposeToolRuntimes,
-      restoreSkillEnvironment,
-      dispose,
     };
   } catch (err) {
-    await dispose();
+    restoreSkillEnvironment();
     throw err;
   }
 }

@@ -9,8 +9,57 @@ type WorkerLifecycleLease = support.WorkerLifecycleLease;
 describe("worker environment service", () => {
   support.setupWorkerEnvironmentServiceSuite();
 
+  it("warms machine catalogs at startup only for nonterminal environment profiles", async () => {
+    const { store } = support.testState;
+    const active = store.createIntent({
+      environmentId: "startup-worker",
+      providerId: "fake",
+      profileId: "development",
+      profileSnapshot: { settings: { region: "test" } },
+      provisionOperationId: "provision:startup",
+    });
+    store.createIntent({
+      environmentId: "terminal-worker",
+      providerId: "fake",
+      profileId: "terminal",
+      profileSnapshot: { settings: { region: "terminal" } },
+      provisionOperationId: "provision:terminal",
+    });
+    store.transition({ environmentId: "terminal-worker", from: "requested", to: "failed" });
+    support.testState.config.cloudWorkers!.profiles!.terminal = {
+      provider: "fake",
+      settings: { region: "terminal" },
+    };
+    const listMachineOptions = vi.fn(async () => [
+      { id: "medium", label: "Medium", cpu: 4, memoryGb: 16, default: true },
+    ]);
+    const listOperatingSystems = vi.fn(async () => [
+      { id: "linux", label: "Linux", default: true },
+    ]);
+    const service = support.createService(
+      support.createProvider({ listMachineOptions, listOperatingSystems }),
+    );
+    service.installReconcileEnvironmentGuard(async () => {});
+    expect(service.readMachineShape(active.environmentId)).toBeUndefined();
+    service.start();
+    await support.waitForFast(() =>
+      expect(service.readMachineShape(active.environmentId)).toEqual({
+        class: "medium",
+        os: "linux",
+        osLabel: "Linux",
+        cpu: 4,
+        memoryGb: 16,
+      }),
+    );
+    expect(listMachineOptions).toHaveBeenCalledExactlyOnceWith({ region: "test" });
+    expect(listOperatingSystems).toHaveBeenCalledExactlyOnceWith({ region: "test" });
+    expect(store.get(active.environmentId)?.profileSnapshot).toEqual(active.profileSnapshot);
+  });
+
   it("maintains configured providers on the existing timer with no environments", async () => {
     vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
     const maintain = vi.fn(async () => {});
     const workerService = support.createService(support.createProvider(), {
       maintainProviders: maintain,
@@ -22,9 +71,11 @@ describe("worker environment service", () => {
     expect(maintain).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(25);
     expect(maintain).toHaveBeenCalledTimes(2);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(setIntervalSpy).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 25);
     await workerService.stop();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0]?.value);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(maintain).toHaveBeenCalledTimes(2);
   });
 
   it("keeps maintenance off reconciliation and allocation while shutdown aborts and drains it", async () => {
@@ -224,12 +275,17 @@ describe("worker environment service", () => {
 
   it("owns and clears one periodic reconciliation timer", async () => {
     vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
     const environmentId = "worker-guarded-reconcile";
     support.seedReady(environmentId);
     const inspect = vi.fn(async () => ({ status: "active" as const }));
     const liveEvents = support.createLiveEvents();
     const unsubscribeTurnClaimClosed = vi.fn();
     const placementStore = {
+      assertWorkerRuntimeRefresh: vi.fn(() => {
+        throw new Error("Runtime refresh is outside this timer fixture");
+      }),
       readWorkerTurnClaim: vi.fn(),
       readWorkerTurnLiveAckCursor: vi.fn(() => 0),
       validateWorkerTurn: vi.fn(() => false),
@@ -256,7 +312,7 @@ describe("worker environment service", () => {
     workerService.start();
     await vi.advanceTimersByTimeAsync(0);
     expect(liveEvents.start).toHaveBeenCalledOnce();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(setIntervalSpy).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 25);
     await vi.advanceTimersByTimeAsync(25);
     expect(guardedEnvironmentIds).toEqual([environmentId, environmentId, environmentId]);
     expect(inspect).toHaveBeenCalledTimes(3);
@@ -268,7 +324,9 @@ describe("worker environment service", () => {
 
     expect(liveEvents.clear).toHaveBeenCalledTimes(2);
     expect(unsubscribeTurnClaimClosed).toHaveBeenCalledOnce();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0]?.value);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(inspect).toHaveBeenCalledTimes(4);
   });
 
   it("closes new guarded reconciliation and drains the admitted operation on uninstall", async () => {

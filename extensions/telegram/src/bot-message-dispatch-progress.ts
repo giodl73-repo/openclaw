@@ -5,7 +5,12 @@ import {
   type ChannelProgressDraftLine,
 } from "openclaw/plugin-sdk/channel-outbound";
 import type { TelegramBotDeps } from "./bot-deps.js";
-import { resetLaneState, rotateAnswerLaneAfterToolProgress } from "./bot-message-dispatch-draft.js";
+import {
+  enqueueDraftEvent,
+  resetLaneState,
+  rotateAnswerLaneAfterToolProgress,
+  rotateAnswerLaneForNewMessage,
+} from "./bot-message-dispatch-draft.js";
 import type {
   TelegramDispatchTurn as Turn,
   TelegramDispatchTurnConfig as TurnConfig,
@@ -79,6 +84,7 @@ export function createProgressState(
     verboseProgressActive: () => false,
   };
   const progressCompositor = createChannelProgressDraftCompositor({
+    preparedItems: true,
     entry: config.telegramCfg,
     mode: config.streamMode,
     active: Boolean(draftState.answerLane.stream),
@@ -88,7 +94,7 @@ export function createProgressState(
     commentaryLinePrefix: "💬 ",
     commentaryItalics: false,
     updateOnLineChange: true,
-    shouldStartNow: (line) => typeof line !== "string" && line?.kind === "tool",
+    shouldStartNow: (line) => typeof line !== "string" && Boolean(line?.toolName),
     update: async (streamText, options) => {
       await prepareAnswerLaneForToolProgress();
       draftState.answerLane.lastPartialText = streamText;
@@ -96,6 +102,7 @@ export function createProgressState(
       draftState.answerLane.finalized = false;
       draftState.answerLane.stream?.updatePreview(
         renderTelegramProgressDraftPreview(options.snapshot, {
+          toolProgress: progressCompositor.previewToolProgressEnabled,
           richMessages: config.telegramCfg.richMessages === true,
           maxLines: resolveChannelProgressDraftMaxLines(config.telegramCfg),
           maxLineChars: resolveChannelProgressDraftMaxLineChars(config.telegramCfg),
@@ -252,21 +259,28 @@ export async function handleItemEvent(
   turn: Turn,
   payload: CallbackPayload<"onItemEvent">,
 ): Promise<boolean> {
-  if (payload.kind === "preamble") {
-    let rendered = false;
-    if (turn.streamMode === "progress") {
-      rendered = await turn.progressCompositor.pushPreambleHeadline(payload.progressText, {
-        itemId: payload.itemId,
-      });
+  let rendered = false;
+  await enqueueDraftEvent(turn, async () => {
+    if (turn.finalAnswerDeliveryStarted || turn.finalAnswerDelivered) {
+      return;
     }
-    if (turn.streamMode === "progress" && turn.progressCompositor.commentaryProgressEnabled) {
-      rendered ||= await turn.progressCompositor.pushCommentaryProgress(payload.progressText, {
-        itemId: payload.itemId,
-      });
+    if (
+      payload.phase === "start" &&
+      payload.kind === "tool" &&
+      turn.answerLane.stream &&
+      turn.streamMode !== "progress" &&
+      !turn.activeAnswerDraftIsToolProgressOnly
+    ) {
+      // A new operation invalidates unaccepted answer text before its progress can render.
+      await rotateAnswerLaneForNewMessage(turn);
+      turn.progressCompositor.resetActivity();
     }
-    return rendered;
-  }
-  return await pushProgressEvent(turn, () => turn.progressCompositor.pushItemEvent(payload));
+    rendered =
+      payload.kind === "preamble"
+        ? await turn.progressCompositor.pushItemEvent(payload)
+        : await pushProgressEvent(turn, () => turn.progressCompositor.pushItemEvent(payload));
+  });
+  return rendered;
 }
 
 export async function handlePlanUpdate(
@@ -276,6 +290,7 @@ export async function handlePlanUpdate(
   return payload.phase === "update" && canPushToolProgress(turn)
     ? await turn.progressCompositor.pushPlanProgress(payload.steps, {
         explanation: payload.explanation,
+        explanationFormat: payload.explanationFormat,
       })
     : false;
 }
@@ -285,20 +300,4 @@ export async function handleApprovalEvent(
   payload: CallbackPayload<"onApprovalEvent">,
 ): Promise<boolean> {
   return await pushProgressEvent(turn, () => turn.progressCompositor.pushApprovalEvent(payload));
-}
-
-export async function handleCommandOutput(
-  turn: Turn,
-  payload: CallbackPayload<"onCommandOutput">,
-): Promise<boolean> {
-  return await pushProgressEvent(turn, () =>
-    turn.progressCompositor.pushCommandOutputEvent(payload),
-  );
-}
-
-export async function handlePatchSummary(
-  turn: Turn,
-  payload: CallbackPayload<"onPatchSummary">,
-): Promise<boolean> {
-  return await pushProgressEvent(turn, () => turn.progressCompositor.pushPatchEvent(payload));
 }

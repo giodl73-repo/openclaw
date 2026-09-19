@@ -89,9 +89,23 @@ A full in-place conversation reset (`/reset` without `soft`, or `sessions.reset`
 
 ## Where the card appears
 
-Channels with progress drafts show the latest checklist in active `partial`, `block`, and `progress` previews, subject to their preview settings and line limits. Card updates supply a completion count, or `Progress updated` for a note without steps; they do not copy the note's Markdown or HTML into tool summaries. Telegram uses native checkboxes with `channels.telegram.richMessages: true` and readable HTML checklists otherwise. See [Streaming and chunking](/concepts/streaming#progress-draft-rendering).
+Channels with progress drafts show the latest checklist in active `partial`, `block`, and `progress` previews, subject to their preview settings and line limits. Cards with steps supply a completion count. Notes without steps supply readable text with Markdown formatting and authored HTML removed, subject to the existing headline limit. A note without readable text supplies `Progress updated`. The full Markdown remains in the durable card. Telegram uses native checkboxes with `channels.telegram.richMessages: true` and readable HTML checklists otherwise. See [Streaming and chunking](/concepts/streaming#progress-draft-rendering).
 
 The current chat keeps exactly one live card, in the collapsible surface inside the composer, at every width. Opening a side panel does not move it out of the conversation. The dashboard widget and the session hovercard are separate read-only placements: hover a session row in the sidebar or a session-reference link in chat to see the same card for that session. All card placements read the same Gateway-backed state and refresh after `progressCard.changed` notifications. A notification is a refresh hint, including a null revision; clients confirm a removal with a read or clear response for that session and agent.
+
+The composer card starts expanded for active work unless **Collapse task progress by default** is enabled. Mounting the card or switching sessions displays its initial state without a fold animation. While reading earlier messages, automatic collapse requires at least two upward scroll gestures totaling at least 320 pixels, followed by 300 milliseconds without scrolling. Wheel bursts separated by more than 200 milliseconds count separately; each touch drag counts as one gesture, including its inertia. Only upward movement consumed by the transcript counts; scrolling inside tool output, canceled input, and programmatic position adjustments do not. Returning to the bottom resets the counts.
+
+Returning to the bottom and progress updates do not reopen an automatically collapsed card. The run completing can reopen it only if you are already at the bottom. Completion while reading history keeps it collapsed, even when you return to the bottom later.
+
+Full open and closed choices are remembered per session in the current Gateway connection until the page reloads. Switching Gateway connections starts with a fresh choice. A manual close prevents automatic reopening. After your first manual reopen during a visit or run, continued upward scrolling can collapse the card again, with a higher threshold: three gestures and 640 pixels, followed by the same 300-millisecond pause. That collapse clears the remembered open choice. A second manual reopen stops automatic collapse for that visit and run. Leaving and returning to the chat, or starting a new run, restores the base thresholds while preserving remembered full open or closed choices.
+
+Drag upward on the composer card’s header, or scroll upward while the pointer is over it, to reveal more of the panel. Move downward to close it. The panel follows the distance you move: stopping holds a partial opening, and reversing moves it back without a timed animation or release snap. This also works with a touch drag on the header. The note and checklist keep their normal scrolling and links.
+
+Click the header, or focus it and press Enter or Space, to open or close the whole card. A partial opening expands fully on activation; an opening already showing the entire panel closes on the first activation, including when reached by a gesture.
+
+A partial opening is a pixel-height choice for the current task: new output, card revisions, and the final response do not finish or undo it. Leaving and returning to that same task in the current Gateway connection retains the height; starting a genuinely new task discards it. Other sessions and Gateway connections do not inherit it. A smaller viewport clamps the retained height to the available panel space.
+
+Taking over the header clears pending transcript-collapse gestures. Revealing a closed card counts as one manual reopen, not one per movement; subsequent genuine transcript gestures still follow the thresholds above. Direct manipulation also pauses transcript following; use **Latest** or scroll back toward the latest messages to resume. **Latest** does not change the chosen card height.
 
 Transient refresh failures retain the last loaded card. The dashboard widget shows a retry notice until a refresh succeeds. If the Gateway reports that the connection no longer participates in the session, clients hide the card until access is restored and a refresh succeeds.
 
@@ -122,3 +136,9 @@ Use the `dashboard` tool to keep the live card on the current session's dashboar
 ```
 
 Omit `props.sessionKey` to follow the dashboard's session. To show another session's card, add `"props": { "sessionKey": "agent:main:release" }`. The current connection must participate in that session; otherwise select an accessible session or change its sharing.
+
+## Related
+
+- [Tools overview](/tools)
+- [`openclaw dashboard`](/cli/dashboard) — open the Control UI from the CLI
+- [Control UI URLs](/web/urls) — reaching the Control UI in a browser

@@ -129,11 +129,11 @@ export async function resolvePreparedCodexCommandAuthority(
   };
 }
 
-export async function resolveCommandAppServerScope(
+export async function resolveCommandAppServerContext(
   deps: CodexCommandDeps,
   ctx: PluginCommandContext,
   pluginConfig: unknown,
-): Promise<CommandAppServerScope> {
+) {
   const authority = await resolvePreparedCodexCommandAuthority(deps, ctx);
   const { target, binding } = authority;
   const fallback = resolveCodexConversationControlScope(ctx);
@@ -146,12 +146,15 @@ export async function resolveCommandAppServerScope(
           agentDir,
           config: ctx.config,
         });
-  const connection = resolveCodexBindingAppServerConnection({
+  const connection = await resolveCodexBindingAppServerConnection({
     binding,
     authProfileId,
     pluginConfig,
+    agentDir,
+    config: ctx.config,
+    assertCurrent: authority.assertCurrent,
   });
-  return {
+  const scope: CommandAppServerScope = {
     agentId: target?.agentId ?? fallback.agentId,
     agentDir,
     ...(connection.clientAuthProfileId !== undefined
@@ -163,6 +166,15 @@ export async function resolveCommandAppServerScope(
     ...(authority.storePath ? { storePath: authority.storePath } : {}),
     assertCurrent: authority.assertCurrent,
   };
+  return { scope, target, binding };
+}
+
+export async function resolveCommandAppServerScope(
+  deps: CodexCommandDeps,
+  ctx: PluginCommandContext,
+  pluginConfig: unknown,
+): Promise<CommandAppServerScope> {
+  return (await resolveCommandAppServerContext(deps, ctx, pluginConfig)).scope;
 }
 
 export function conversationBindingIdentity(

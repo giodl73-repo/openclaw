@@ -9,6 +9,10 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { codexSandboxPolicyForTurn, type CodexAppServerRuntimeOptions } from "./config.js";
+import {
+  neutralizeCodexExplicitMentionSigils,
+  type CodexProjectedImageGroup,
+} from "./context-engine-projection.js";
 import type {
   CodexSandboxPolicy,
   CodexTurnEnvironmentParams,
@@ -27,7 +31,13 @@ import { buildCodexUserInput } from "./user-input.js";
 
 const CODEX_CURRENT_SENDER_FIELD_MAX_CHARS = 256;
 
-function buildCodexCurrentSenderContextValue(params: EmbeddedRunAttemptParams): string | undefined {
+type CodexCurrentSender = {
+  id?: string;
+  name?: string;
+  username?: string;
+};
+
+function readCodexCurrentSender(params: EmbeddedRunAttemptParams): CodexCurrentSender | undefined {
   const metadata = asOptionalRecord(
     asOptionalRecord(params.userTurnTranscriptRecorder?.message as unknown)?.["__openclaw"],
   );
@@ -47,13 +57,29 @@ function buildCodexCurrentSenderContextValue(params: EmbeddedRunAttemptParams): 
     return undefined;
   }
   const bound = (value: string) => truncateUtf16Safe(value, CODEX_CURRENT_SENDER_FIELD_MAX_CHARS);
-  return JSON.stringify({
-    sender: {
-      ...(id ? { id: bound(id) } : {}),
-      ...(name ? { name: bound(name) } : {}),
-      ...(username ? { username: bound(username) } : {}),
-    },
-  });
+  return {
+    ...(id ? { id: bound(id) } : {}),
+    ...(name ? { name: bound(name) } : {}),
+    ...(username ? { username: bound(username) } : {}),
+  };
+}
+
+function buildCodexCurrentSenderContextValue(params: EmbeddedRunAttemptParams): string | undefined {
+  const sender = readCodexCurrentSender(params);
+  return sender ? JSON.stringify({ sender }) : undefined;
+}
+
+export function buildCodexHistoryProvenancePrefix(
+  params: EmbeddedRunAttemptParams,
+): string | undefined {
+  const sender = readCodexCurrentSender(params);
+  // A label is not identity. Native thread history must only attach provenance
+  // when OpenClaw supplied a stable sender id, matching generic compaction.
+  return sender?.id
+    ? neutralizeCodexExplicitMentionSigils(
+        `[OpenClaw conversation info: sender=${JSON.stringify(sender)}]\n`,
+      )
+    : undefined;
 }
 
 export function buildTurnStartParams(
@@ -63,6 +89,7 @@ export function buildTurnStartParams(
     cwd: string;
     appServer: CodexAppServerRuntimeOptions;
     promptText?: string;
+    contextImageGroups?: CodexProjectedImageGroup[];
     explicitSkillInputs?: Array<Extract<CodexUserInput, { type: "skill" }>>;
     sandboxPolicy?: CodexSandboxPolicy;
     environmentSelection?: CodexTurnEnvironmentParams[];
@@ -77,6 +104,7 @@ export function buildTurnStartParams(
     sessionStatusAvailable?: boolean;
     messageToolAvailable?: boolean;
     requireExplicitMessageTarget?: boolean;
+    historyProvenancePrefix?: string;
   },
 ): CodexTurnStartParams {
   const modelSelection = options.preserveNativeTurnSettings
@@ -142,11 +170,18 @@ export function buildTurnStartParams(
   }
   return {
     threadId: options.threadId,
+    ...(params.trigger ? { turnTrigger: params.trigger } : {}),
     // codex-rs/app-server-protocol/src/protocol/v2/turn.rs:292-324 at 91d6f48992ad defines
     // UserInput::Skill; skills/src/selection.rs:60-92 blocks those names from duplicate text
     // selection while leaving unmatched Codex-native-only names scannable.
     input: [
-      ...buildCodexUserInput(options.promptText ?? params.prompt, params.images),
+      ...buildCodexUserInput(
+        options.promptText ?? params.prompt,
+        params.images,
+        options.contextImageGroups,
+        options.historyProvenancePrefix ??
+          (params.trigger === "user" ? buildCodexHistoryProvenancePrefix(params) : undefined),
+      ),
       ...(options.explicitSkillInputs ?? []),
     ],
     ...(additionalContext ? { additionalContext } : {}),
@@ -273,7 +308,7 @@ function buildDefaultCollaborationInstructions(): string {
     "",
     "Use the `request_user_input` tool only when it is listed in the available tools for this turn.",
     "",
-    "In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.",
+    "In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. When a missing preference, constraint, or clarification warrants a question, use `request_user_input_async` if it is available and continue independent work. Answers arrive as ordinary user messages. A suggested or preselected answer is not consent; wait for explicit approval before dependent actions that require it. If neither question tool is available, ask a concise plain-text question. Never write a multiple choice question as a textual assistant message.",
   ].join("\n");
 }
 

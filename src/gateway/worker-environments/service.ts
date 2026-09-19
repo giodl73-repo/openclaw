@@ -1,37 +1,44 @@
 import { onSessionIdentityMutation } from "../../config/sessions/session-accessor.js";
 import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import { withTimeout } from "../../infra/fs-safe.js";
-import { isSqliteLockError } from "../../infra/sqlite-transaction.js";
+import { isSqliteLockError } from "../../infra/sqlite-error-diagnostics.js";
 import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
 import type { WorkerExecutionMode, WorkerProfile } from "../../plugins/types.js";
 import { runTasksWithConcurrency } from "../../utils/run-with-concurrency.js";
 import { workerBootstrapOperationTimeoutMs } from "./bootstrap.js";
+import { createWorkerEnvironmentBuildPreparation } from "./build-preparation.js";
 import type { WorkerInstallationArtifact } from "./bundle.js";
 import { createWorkerCredentialBroker } from "./credential-broker.js";
-import { createWorkerEnvironmentAccess } from "./environment-access.js";
 import {
-  registerWorkerInferenceSessionDrain,
-  type WorkerInferenceSessionDrain,
-} from "./inference-control-internal.js";
+  createWorkerEnvironmentAccess,
+  createWorkerEnvironmentTransportLifecycle,
+  type WorkerEnvironmentNodeTunnel,
+} from "./environment-access.js";
+import { registerWorkerInferenceSessionDrain } from "./inference-control-internal.js";
 import type { WorkerInferenceStore } from "./inference-store.js";
 import { createWorkerInferenceManager, type WorkerInferenceExecutor } from "./inference.js";
 import type { WorkerLiveEventReceiver } from "./live-events.js";
 import type { WorkerNodeDesktopCarrier } from "./node-desktop-carrier.js";
-import type { NodeWorkerTunnelManager } from "./node-worker-tunnel.js";
 import type { WorkerSessionPlacementGate } from "./placement-worker-gate.js";
 import type { WorkerNodePortalCarrier } from "./portal-node-carrier.js";
+import type { WorkerProviderPreparedIntent } from "./preparation-identity.js";
+import { createPreparedWorkerPool } from "./prepared-pool.js";
 import { createWorkerProviderLifecycle } from "./provider-lifecycle.js";
 import type {
   WorkerEnvironmentAbandonment,
   WorkerProviderLifecycleInputOptions,
 } from "./provider-lifecycle.types.js";
+import {
+  createWorkerEnvironmentSessionAttachments,
+  type WorkerEnvironmentSessionAttachmentOptions,
+} from "./session-attachment-service.js";
 import type { WorkerEnvironmentState } from "./state.js";
 import type {
   WorkerEnvironmentRecord,
   WorkerEnvironmentTransitionPatch as TransitionPatch,
 } from "./store.js";
 import type { WorkerTranscriptCommitApplication } from "./transcript-commit.js";
-import { joinWorkerTunnelStops, type WorkerTunnelStopReason } from "./tunnel-contract.js";
+import { joinWorkerTunnelStops } from "./tunnel-contract.js";
 import type { WorkerTunnelManager } from "./tunnel.js";
 import { boundedWorkerError as boundedError } from "./worker-error.js";
 import { createWorkerTurnRpc } from "./worker-turn-rpc.js";
@@ -41,6 +48,8 @@ type WorkerEnvironmentServiceErrorCode =
   | "provider_not_found"
   | "environment_not_found"
   | "invalid_profile"
+  | "invalid_project"
+  | "capacity"
   | "invalid_state"
   | "desktop_app_not_found"
   | "unsupported_platform"
@@ -60,37 +69,38 @@ class WorkerEnvironmentServiceError extends Error {
 const serviceError = (code: WorkerEnvironmentServiceErrorCode, message: string) =>
   new WorkerEnvironmentServiceError(code, message);
 
-type WorkerEnvironmentServiceOptions = WorkerProviderLifecycleInputOptions & {
-  prepareComputer?: (
-    claim: import("./placement-store.js").WorkerSessionTurnClaim,
-  ) => Promise<import("./computer-transport.js").PreparedWorkerComputer | undefined>;
-  executeComputer?: import("./worker-turn-computer-rpc.js").WorkerComputerExecutor;
-  closeComputers?: () => Promise<void>;
-  tunnelManager?: WorkerTunnelManager;
-  nodeTunnelManager?: NodeWorkerTunnelManager;
-  nodeDesktopCarrier?: WorkerNodeDesktopCarrier;
-  nodePortalCarrier?: WorkerNodePortalCarrier;
-  closeWorkerPortals?: (environmentId: string, ownerEpoch?: number) => Promise<void>;
-  stopNodeEnrollmentWaits?: () => void;
-  closeNodeBootstrapArtifacts?: () => Promise<void>;
-  stopNodeWorkerBundleTransfers?: () => void;
-  maintainProviders?: (signal: AbortSignal) => Promise<void>;
-  reconcileIntervalMs?: number;
-  bootstrapCallTimeoutMs?: number;
-  workerCredentialTtlMs?: number;
-  generateWorkerCredential?: (bytes: number) => string;
-  now?: () => number;
-  logger?: { warn: (message: string) => void };
-  applyTranscriptCommit?: WorkerTranscriptCommitApplication;
-  liveEvents?: Pick<
-    WorkerLiveEventReceiver,
-    "apply" | "bindSession" | "clear" | "clearEnvironment" | "rotateCredential" | "start"
-  >;
-  executeInference: WorkerInferenceExecutor;
-  inferenceStore?: WorkerInferenceStore;
-  placementStore?: WorkerSessionPlacementGate;
-  executeSessionTool?: Parameters<typeof createWorkerTurnRpc>[0]["executeSessionTool"];
-};
+type WorkerEnvironmentServiceOptions = WorkerProviderLifecycleInputOptions &
+  WorkerEnvironmentSessionAttachmentOptions & {
+    prepareComputer?: (
+      claim: import("./placement-store.js").WorkerSessionTurnClaim,
+    ) => Promise<import("./computer-transport.js").PreparedWorkerComputer | undefined>;
+    executeComputer?: import("./worker-turn-computer-rpc.js").WorkerComputerExecutor;
+    closeComputers?: () => Promise<void>;
+    tunnelManager?: WorkerTunnelManager;
+    nodeTunnelManager?: WorkerEnvironmentNodeTunnel;
+    nodeDesktopCarrier?: WorkerNodeDesktopCarrier;
+    nodePortalCarrier?: WorkerNodePortalCarrier;
+    closeWorkerPortals?: (environmentId: string, ownerEpoch?: number) => Promise<void>;
+    stopNodeEnrollmentWaits?: () => void;
+    closeNodeBootstrapArtifacts?: () => Promise<void>;
+    stopNodeWorkerBundleTransfers?: () => void;
+    maintainProviders?: (signal: AbortSignal) => Promise<void>;
+    reconcileIntervalMs?: number;
+    bootstrapCallTimeoutMs?: number;
+    workerCredentialTtlMs?: number;
+    generateWorkerCredential?: (bytes: number) => string;
+    now?: () => number;
+    logger?: { warn: (message: string) => void };
+    applyTranscriptCommit?: WorkerTranscriptCommitApplication;
+    liveEvents?: Pick<
+      WorkerLiveEventReceiver,
+      "apply" | "bindSession" | "clear" | "clearEnvironment" | "rotateCredential" | "start"
+    >;
+    executeInference: WorkerInferenceExecutor;
+    inferenceStore?: WorkerInferenceStore;
+    placementStore?: WorkerSessionPlacementGate;
+    executeSessionTool?: Parameters<typeof createWorkerTurnRpc>[0]["executeSessionTool"];
+  };
 
 export type WorkerEnvironmentReconcileCore = (
   signal?: AbortSignal,
@@ -108,35 +118,12 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
   const providerOperations = new KeyedAsyncQueue();
   const activeOperations = new Set<Promise<unknown>>();
   const now = options.now ?? Date.now;
-  const tunnelLifecycle =
-    options.tunnelManager ||
-    options.nodeTunnelManager ||
-    options.nodeDesktopCarrier ||
-    options.nodePortalCarrier
-      ? {
-          stop: async (
-            environmentId: string,
-            ownerEpoch?: number,
-            reason?: WorkerTunnelStopReason,
-          ) => {
-            await joinWorkerTunnelStops([
-              options.tunnelManager?.stop(environmentId, ownerEpoch),
-              options.nodeTunnelManager?.stop(environmentId, ownerEpoch, reason),
-              options.nodeDesktopCarrier?.stop(environmentId, ownerEpoch),
-              options.nodePortalCarrier?.stop(environmentId, ownerEpoch),
-              options.closeWorkerPortals?.(environmentId, ownerEpoch),
-            ]);
-          },
-        }
-      : undefined;
+  const tunnelLifecycle = createWorkerEnvironmentTransportLifecycle(options);
   const inference = createWorkerInferenceManager({
     execute: options.executeInference,
     getConfig: options.getConfig,
     ...(options.inferenceStore ? { store: options.inferenceStore } : {}),
   });
-  const inferenceWithDrain = inference as typeof inference & {
-    beginSessionDrain(sessionId: string): WorkerInferenceSessionDrain;
-  };
   let reconcileInFlight: Promise<void> | undefined;
   let interval: ReturnType<typeof setInterval> | undefined;
   let unsubscribeSessionIdentityMutation: (() => void) | undefined;
@@ -274,10 +261,12 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
 
   const providerLifecycle = createWorkerProviderLifecycle({
     ...options,
+    now,
     store,
     prepareInstallation,
     tunnelManager: tunnelLifecycle,
     credentialBroker,
+    warn,
     callBootstrap,
     callProvider,
     inState,
@@ -302,6 +291,34 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
     serviceError,
     withLock,
   });
+
+  const sessionAttachments = createWorkerEnvironmentSessionAttachments({
+    ...options,
+    providerLifecycle,
+    environmentAccess,
+    isStopping: () => stopping,
+    now,
+    warn,
+    withLock,
+    trackOperation,
+  });
+
+  const preparedPool = createPreparedWorkerPool({
+    store,
+    getConfig: options.getConfig,
+    resolveProvider: options.resolveProvider,
+    prepareIntent: providerLifecycle.prepareIntent,
+    prepareRetention: providerLifecycle.prepareRetention,
+    assertIntentCurrent: providerLifecycle.assertPreparedIntentCurrent,
+    reconcile: async (record, signal, beforeReconcile) => {
+      await providerLifecycle.resumePrepared(record, signal, beforeReconcile);
+    },
+    now,
+    signal: maintenanceAbort.signal,
+    warn,
+  });
+  const schedulePreparedRefill = (environmentId?: string) =>
+    void trackOperation(preparedPool.maintain(environmentId));
 
   const turnRpc = createWorkerTurnRpc({
     ...options,
@@ -385,9 +402,12 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
   };
 
   const reconcilePass = async (environmentId?: string) => {
+    if (environmentId === undefined) {
+      await sessionAttachments.reconcileSessionAttachments();
+    }
     const candidates =
       environmentId === undefined
-        ? store.listForReconcile()
+        ? store.listForReconcile().filter((record) => record.preparation?.consumedAtMs !== null)
         : [store.get(environmentId)].filter((candidate) => candidate !== undefined);
     const tasks = candidates.map(
       (candidate) => () =>
@@ -402,7 +422,7 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
       return;
     }
     try {
-      store.pruneTerminalEnvironments();
+      store.pruneTerminalEnvironments({ canPruneDemand: preparedPool.canPruneDemand });
     } catch (error) {
       // Pruning is opportunistic and retries on the next sweep; lock contention must not
       // turn a healthy worker reconciliation into a startup or periodic-reconcile failure.
@@ -421,6 +441,8 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
       // Shutdown still owns this pass; the installed guard coalesces its exact environment.
       return trackOperation(reconcilePass(environmentId));
     }
+    // Unassigned capacity has no placement owner; provider waits must not hold its fence.
+    schedulePreparedRefill();
     if (options.maintainProviders && !maintenanceInFlight) {
       // Keep cleanup off the placement/reconcile wait path, but retain the actual promise
       // until shutdown has aborted and drained every provider-owned command.
@@ -454,7 +476,11 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
       if (mutation.previous.sessionId && mutation.previous.sessionId !== currentSessionId) {
         inference.cancelSession(mutation.previous.sessionId);
       }
+      sessionAttachments.retireSessionIdentityMutation(mutation);
     });
+    for (const profileId of new Set(store.listForReconcile().map((record) => record.profileId))) {
+      providerLifecycle.warmMachineShape(profileId);
+    }
     options.liveEvents?.start();
     interval = setInterval(
       () => void reconcileOnce().catch(() => warn("Worker environment reconcile sweep failed")),
@@ -466,6 +492,8 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
 
   const stop = async () => {
     stopping = true;
+    sessionAttachments.cancelSessionAttachmentCreations();
+    providerLifecycle.clearMachineShapeListeners();
     maintenanceAbort.abort();
     options.stopNodeEnrollmentWaits?.();
     clearInterval(interval);
@@ -523,14 +551,33 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
     }
   };
   const configuredProfileProviderId = (profileId: string) => {
-    const profile = options.getConfig().cloudWorkers?.profiles?.[profileId];
+    const profiles = options.getConfig().cloudWorkers?.profiles;
+    const profile =
+      profiles && Object.hasOwn(profiles, profileId) ? profiles[profileId] : undefined;
     if (!profile) {
       throw serviceError("profile_not_found", `Unknown worker profile: ${profileId}`);
     }
     return profile.provider;
   };
 
+  const prepareBuild = createWorkerEnvironmentBuildPreparation({
+    store,
+    getConfig: options.getConfig,
+    resolveProvider: options.resolveProvider,
+    projectNamespace: options.projectNamespace,
+    providerLifecycle,
+    signal: maintenanceAbort.signal,
+    now,
+    serviceError,
+    configuredProfileProviderId,
+    requireProviderExecutionMode,
+    schedulePreparedRefill,
+  });
+
   const service = {
+    ...sessionAttachments,
+    prepare: (request: { profileId: string; projectPath: string }, authorize?: () => void) =>
+      trackOperation(prepareBuild(request, authorize)),
     isStopping: () => stopping,
     recordError: saveError,
     list: environmentAccess.list,
@@ -544,15 +591,28 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
       return id ? options.resolveProvider(id)?.requiresNodeEnrollment === true : false;
     },
     get: environmentAccess.get,
+    prepareProjectIntent: (...args: Parameters<typeof providerLifecycle.prepareIntent>) => {
+      providerLifecycle.warmMachineShape(args[0]);
+      return providerLifecycle.prepareIntent(...args);
+    },
+    assertPreparedIntentCurrent: providerLifecycle.assertPreparedIntentCurrent,
+    getPreparedCandidates: (intent: WorkerProviderPreparedIntent) =>
+      preparedPool.candidates(intent).map(environmentAccess.project),
+    schedulePreparedRefill,
     inventoryVersion: store.inventoryVersion,
+    machineShapeVersion: providerLifecycle.machineShapeVersion,
+    subscribeMachineShapeChanged: providerLifecycle.subscribeMachineShapeChanged,
+    readMachineShape: (environmentId: string) => {
+      const record = store.get(environmentId);
+      return record ? providerLifecycle.readMachineShape(record) : undefined;
+    },
     supportsNodePortal: async (environmentId: string, ownerEpoch: number) =>
       (await options.nodePortalCarrier?.supports(environmentId, ownerEpoch)) === true,
     hasPendingNodeEnrollmentSetup: (setupId: string, deviceId: string) =>
       store.hasPendingNodeEnrollmentSetup(setupId, deviceId),
-    listMachineOptions: async (profileId: string) =>
-      providerLifecycle.listMachineOptions(profileId),
-    listOperatingSystems: async (profileId: string) =>
-      providerLifecycle.listOperatingSystems(profileId),
+    listMachineOptions: providerLifecycle.listMachineOptions,
+    listOperatingSystems: providerLifecycle.listOperatingSystems,
+    bindPreparedWorkspace: environmentAccess.bindPreparedWorkspace,
     create: async (
       profileId: string,
       idempotencyKey: string,
@@ -561,18 +621,27 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
       projectPath?: string,
       signal?: AbortSignal,
       os?: string,
+      runSetupScript?: boolean,
+      admittedIntent?: WorkerProviderPreparedIntent,
     ) => {
+      providerLifecycle.warmMachineShape(profileId);
       if (executionMode) {
         requireProviderExecutionMode(configuredProfileProviderId(profileId), executionMode);
       }
       return environmentAccess.project(
-        await providerLifecycle.createWithProfile(profileId, idempotencyKey, {
-          machineClass,
-          os,
-          executionMode,
-          projectPath,
-          signal,
-        }),
+        await providerLifecycle.createWithProfile(
+          profileId,
+          idempotencyKey,
+          {
+            machineClass,
+            os,
+            executionMode,
+            projectPath,
+            runSetupScript,
+            signal,
+          },
+          admittedIntent,
+        ),
       );
     },
     createFromProfileSnapshot: async (
@@ -583,20 +652,29 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
       projectPath?: string,
       signal?: AbortSignal,
       os?: string,
+      runSetupScript?: boolean,
+      admittedIntent?: WorkerProviderPreparedIntent,
     ) => {
+      providerLifecycle.warmMachineShape(profile.profileId);
       requireProviderExecutionMode(profile.providerId, executionMode);
       return environmentAccess.project(
-        await providerLifecycle.createWithProfile(profile.profileId, idempotencyKey, {
-          inherited: {
-            providerId: profile.providerId,
-            profileSnapshot: profile.profileSnapshot,
+        await providerLifecycle.createWithProfile(
+          profile.profileId,
+          idempotencyKey,
+          {
+            inherited: {
+              providerId: profile.providerId,
+              profileSnapshot: profile.profileSnapshot,
+            },
+            machineClass,
+            os,
+            executionMode,
+            projectPath,
+            runSetupScript,
+            signal,
           },
-          machineClass,
-          os,
-          executionMode,
-          projectPath,
-          signal,
-        }),
+          admittedIntent,
+        ),
       );
     },
     destroy: async (environmentId: string, abandonment?: WorkerEnvironmentAbandonment) =>
@@ -605,10 +683,12 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
       environmentAccess.project(
         await providerLifecycle.destroy(environmentId, { retryRequested: false }),
       ),
-    destroyUnattached: async (environmentId: string) =>
-      environmentAccess.project(
+    destroyUnattached: async (environmentId: string) => {
+      preparedPool.cancelPreparation(environmentId);
+      return environmentAccess.project(
         await providerLifecycle.destroy(environmentId, { requireUnattached: true }),
-      ),
+      );
+    },
     observeDesktop: environmentAccess.observeDesktop,
     launchDesktopApp: environmentAccess.launchDesktopApp,
     admitWorker: turnRpc.admitWorker,
@@ -660,9 +740,7 @@ export function createWorkerEnvironmentService(options: WorkerEnvironmentService
     start,
     stop,
   };
-  registerWorkerInferenceSessionDrain(service, (sessionId) =>
-    inferenceWithDrain.beginSessionDrain(sessionId),
-  );
+  registerWorkerInferenceSessionDrain(service, inference.beginSessionDrain);
   return service;
 }
 

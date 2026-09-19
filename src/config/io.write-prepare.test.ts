@@ -1317,13 +1317,20 @@ describe("config io write prepare", () => {
     ).toEqual({ agents: { defaults, entries: { main: {}, ops: {} } }, gateway: { mode: "local" } });
   });
 
-  it("preserves authored Google model params under normalized config keys", () => {
+  it.each([
+    ["google/gemini-3-pro-preview", "google/gemini-3.1-pro-preview"],
+    ["together/moonshotai/Kimi-K2.5", "together/moonshotai/Kimi-K2.6"],
+    ["custom/custom/model", "custom/custom/model"],
+  ])("preserves separate authored model params when writing %s", (authored, canonical) => {
     const params = { thinking: { level: "high" } };
     const sourceConfig = {
       agents: {
         defaults: {
-          model: { primary: "google/gemini-3-pro-preview" },
-          models: { "google/gemini-3-pro-preview": { alias: "Gemini", params } },
+          model: { primary: authored, fallbacks: ["custom/model"] },
+          models: {
+            [authored]: { alias: "Selected", params },
+            "custom/model": { alias: "Control" },
+          },
         },
       },
     };
@@ -1332,9 +1339,10 @@ describe("config io write prepare", () => {
         runtimeConfig: {
           agents: {
             defaults: {
-              model: { primary: "google/gemini-3.1-pro-preview" },
+              model: { primary: canonical, fallbacks: ["custom/model"] },
               models: {
-                "google/gemini-3.1-pro-preview": { alias: "Gemini", params },
+                [canonical]: { alias: "Selected", params },
+                "custom/model": { alias: "Control" },
               },
             },
           },
@@ -1343,8 +1351,8 @@ describe("config io write prepare", () => {
         nextConfig: {
           agents: {
             defaults: {
-              model: { primary: "google/gemini-3.1-pro-preview" },
-              models: { "google/gemini-3.1-pro-preview": {} },
+              model: { primary: canonical, fallbacks: ["custom/model"] },
+              models: { [canonical]: {}, "custom/model": { alias: "Control" } },
             },
           },
         },
@@ -1352,8 +1360,8 @@ describe("config io write prepare", () => {
     ).toEqual({
       agents: {
         defaults: {
-          model: { primary: "google/gemini-3-pro-preview" },
-          models: { "google/gemini-3.1-pro-preview": { params } },
+          model: { primary: authored, fallbacks: ["custom/model"] },
+          models: { [canonical]: { params }, "custom/model": { alias: "Control" } },
         },
       },
     });
@@ -1580,12 +1588,48 @@ describe("config io write prepare", () => {
       tools: { alsoAllow: ["exec", "fetch", "read"] },
     };
     const before = structuredClone(input);
+    const result = applyUnsetPathsForWrite(input, [
+      ["commands", "ownerDisplay"],
+      ["tools", "alsoAllow", "1"],
+    ]);
+    expect(result).toEqual({ gateway: { mode: "local" }, tools: { alsoAllow: ["exec", "read"] } });
+    expect(result).not.toBe(input);
+    expect(result.gateway).toBe(input.gateway);
+    expect(result.tools).not.toBe(input.tools);
+    expect(input).toEqual(before);
+  });
+
+  it.each([
+    {
+      name: "prunes empty objects inside arrays",
+      values: [{ value: "remove" }, { value: "keep" }],
+      paths: [["0", "value"]],
+      expected: [{ value: "keep" }],
+    },
+    {
+      name: "retains emptied arrays",
+      values: ["remove"],
+      paths: [["0"]],
+      expected: [],
+    },
+    {
+      name: "interprets successive indexes against the updated array",
+      values: ["first", "second", "third"],
+      paths: [["0"], ["1"]],
+      expected: ["second"],
+    },
+  ])("$name during explicit unsets", ({ values, paths, expected }) => {
+    const input = { plugins: { entries: { example: { config: { values } } } } };
+    const before = structuredClone(input);
+    const prefix = ["plugins", "entries", "example", "config", "values"];
     expect(
-      applyUnsetPathsForWrite(input, [
-        ["commands", "ownerDisplay"],
-        ["tools", "alsoAllow", "1"],
-      ]),
-    ).toEqual({ gateway: { mode: "local" }, tools: { alsoAllow: ["exec", "read"] } });
+      applyUnsetPathsForWrite(
+        input,
+        paths.map((parts) => [...prefix, ...parts]),
+      ),
+    ).toEqual({
+      plugins: { entries: { example: { config: { values: expected } } } },
+    });
     expect(input).toEqual(before);
   });
 

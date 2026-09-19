@@ -19,7 +19,9 @@ defineDiscordVoiceTests(
     entersStateMock,
     createAudioPlayerMock,
     realtimeSessionMock,
+    logVerboseMock,
     managerModule,
+    configureVoiceStateGateway,
     createClient,
     createManager,
     expectConnectedStatus,
@@ -286,7 +288,7 @@ defineDiscordVoiceTests(
       expect(connection.receiver.subscribe).not.toHaveBeenCalled();
     });
 
-    it("allows configured realtime barge-in when provider input interruption is disabled", async () => {
+    it("waits for decoded speech before interrupting realtime playback", async () => {
       const connection = createConnectionMock();
       joinVoiceChannelMock.mockReturnValueOnce(connection);
       const { bridgeParams, entry, manager, player } = await createJoinedBidiFixture({
@@ -307,7 +309,7 @@ defineDiscordVoiceTests(
 
       await handleSpeakingStart(manager, entry, "u1");
 
-      expect(realtimeSessionMock.handleBargeIn).toHaveBeenCalled();
+      expect(realtimeSessionMock.handleBargeIn).not.toHaveBeenCalled();
       expect(player.stop).not.toHaveBeenCalled();
       const subscribeCall = lastMockCall(
         connection.receiver.subscribe as unknown as MockCallSource,
@@ -318,39 +320,101 @@ defineDiscordVoiceTests(
       bridgeParams?.onEvent?.({ direction: "server", type: "response.done" });
     });
 
-    it("interrupts realtime playback when an already-active speaker keeps talking", async () => {
-      const connection = createConnectionMock();
-      joinVoiceChannelMock.mockReturnValueOnce(connection);
+    it.each([
+      { amplitude: 0, interrupts: false },
+      { amplitude: 8, interrupts: false },
+      { amplitude: 32, interrupts: true },
+    ])(
+      "qualifies decoded input before barge-in (amplitude=$amplitude)",
+      async ({ amplitude, interrupts }) => {
+        const connection = createConnectionMock();
+        joinVoiceChannelMock.mockReturnValueOnce(connection);
+        const { bridgeParams, entry, player } = await createJoinedBidiFixture({
+          allowFrom: ["discord:u1"],
+          voice: {
+            realtime: {
+              bargeIn: true,
+              providers: {
+                openai: {
+                  interruptResponseOnInputAudio: false,
+                },
+              },
+            },
+          },
+        });
+        const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: null });
+
+        bridgeParams?.audioSink?.sendAudio(Buffer.alloc(480));
+        const input = Buffer.alloc(3840);
+        for (let offset = 0; offset < input.length; offset += 2) {
+          input.writeInt16LE(amplitude, offset);
+        }
+        turn.sendInputAudio(input);
+
+        expect(realtimeSessionMock.setMediaTimestamp).toHaveBeenCalledWith(0);
+        expect(realtimeSessionMock.handleBargeIn).toHaveBeenCalledTimes(interrupts ? 1 : 0);
+        if (interrupts) {
+          expect(realtimeSessionMock.setMediaTimestamp).toHaveBeenCalledWith(10);
+          const lastTimestampCall =
+            realtimeSessionMock.setMediaTimestamp.mock.invocationCallOrder.at(-1);
+          const firstBargeInCall = realtimeSessionMock.handleBargeIn.mock.invocationCallOrder[0];
+          expect(expectDefined(lastTimestampCall, "last media timestamp invocation")).toBeLessThan(
+            expectDefined(firstBargeInCall, "first barge-in invocation"),
+          );
+        }
+        expect(player.stop).not.toHaveBeenCalled();
+        expect(realtimeSessionMock.sendAudio).toHaveBeenCalled();
+        bridgeParams?.onEvent?.({ direction: "server", type: "response.done" });
+      },
+    );
+
+    it("retries ongoing speech when the provider declines the first interruption", async () => {
       const { bridgeParams, entry, player } = await createJoinedBidiFixture({
         allowFrom: ["discord:u1"],
         voice: {
           realtime: {
             bargeIn: true,
-            providers: {
-              openai: {
-                interruptResponseOnInputAudio: false,
-              },
-            },
+            providers: { openai: { interruptResponseOnInputAudio: false } },
           },
         },
       });
       const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: null });
+      bridgeParams.audioSink?.sendAudio(Buffer.alloc(48_000));
+      realtimeSessionMock.handleBargeIn
+        .mockImplementationOnce(() => {})
+        .mockImplementationOnce(() => bridgeParams.audioSink?.clearAudio?.());
+      const speech = Buffer.alloc(3840, 1);
 
-      bridgeParams?.audioSink?.sendAudio(Buffer.alloc(480));
+      turn.sendInputAudio(speech);
+      expect(realtimeSessionMock.handleBargeIn).toHaveBeenCalledOnce();
+      expect(player.stop).not.toHaveBeenCalled();
+
+      turn.sendInputAudio(speech);
+      expect(realtimeSessionMock.handleBargeIn).toHaveBeenCalledTimes(2);
+      expect(player.stop).toHaveBeenCalledWith(true);
+      turn.sendInputAudio(speech);
+      expect(realtimeSessionMock.handleBargeIn).toHaveBeenCalledTimes(2);
+      turn.close();
+    });
+
+    it("does not interrupt new playback with speech retained in the input filter", async () => {
+      const { bridgeParams, entry } = await createJoinedBidiFixture({
+        allowFrom: ["discord:u1"],
+        voice: {
+          realtime: {
+            bargeIn: true,
+            providers: { openai: { interruptResponseOnInputAudio: false } },
+          },
+        },
+      });
+      const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: Buffer.alloc(3840, 1) });
+      bridgeParams.audioSink?.sendAudio(Buffer.alloc(48_000));
+
       turn.sendInputAudio(Buffer.alloc(3840));
 
-      expect(realtimeSessionMock.setMediaTimestamp).toHaveBeenCalledWith(0);
-      expect(realtimeSessionMock.setMediaTimestamp).toHaveBeenCalledWith(10);
-      expect(realtimeSessionMock.handleBargeIn).toHaveBeenCalled();
-      const lastTimestampCall =
-        realtimeSessionMock.setMediaTimestamp.mock.invocationCallOrder.at(-1);
-      const firstBargeInCall = realtimeSessionMock.handleBargeIn.mock.invocationCallOrder[0];
-      expect(expectDefined(lastTimestampCall, "last media timestamp invocation")).toBeLessThan(
-        expectDefined(firstBargeInCall, "first barge-in invocation"),
-      );
-      expect(player.stop).not.toHaveBeenCalled();
-      expect(realtimeSessionMock.sendAudio).toHaveBeenCalled();
-      bridgeParams?.onEvent?.({ direction: "server", type: "response.done" });
+      expect(realtimeSessionMock.handleBargeIn).not.toHaveBeenCalled();
+      expect(realtimeSessionMock.sendAudio).toHaveBeenCalledTimes(2);
+      turn.close();
     });
 
     it("does not interrupt realtime provider state when local playback is already idle", async () => {
@@ -390,7 +454,6 @@ defineDiscordVoiceTests(
       const turn = beginSpeakerTurn(entry, { userId: "u1", initialAudio: Buffer.alloc(3840) });
       turn.close();
 
-      expect(realtimeSessionMock.sendAudio).toHaveBeenCalledTimes(2);
       const trailingSilence = realtimeSessionMock.sendAudio.mock.calls.at(-1)?.[0] as
         | Buffer
         | undefined;
@@ -549,6 +612,142 @@ defineDiscordVoiceTests(
         await Promise.all([firstJoin, secondJoin, thirdJoin]);
       }
     });
+
+    it("serializes a join requested synchronously by channel lookup", async () => {
+      const client = createClient();
+      const fetchChannel = expectDefined(
+        client.fetchChannel.getMockImplementation(),
+        "channel lookup",
+      );
+      const manager = createManager(undefined, client);
+      let secondJoin: ReturnType<typeof manager.join> | undefined;
+      client.fetchChannel.mockImplementationOnce((channelId) => {
+        secondJoin = manager.join({ guildId: "g1", channelId: "1002" });
+        return fetchChannel(channelId);
+      });
+
+      const firstResult = await manager.join({ guildId: "g1", channelId: "1001" });
+      const secondResult = await expectDefined(secondJoin, "reentrant join");
+
+      expect(firstResult.ok).toBe(true);
+      expect(secondResult.ok).toBe(true);
+      expect(joinVoiceChannelMock).toHaveBeenCalledTimes(2);
+      expectConnectedStatus(manager, "1002");
+    });
+
+    it("retains prior shutdown when leave immediately cancels a replacement join", async () => {
+      const manager = createManager({
+        voice: { enabled: true, mode: "agent-proxy", realtime: { provider: "openai" } },
+      });
+      await manager.join({ guildId: "g1", channelId: "1001" });
+      const closing = createDeferred<void>();
+      const stopped = createDeferred<void>();
+      realtimeSessionMock.close.mockImplementationOnce(() => {
+        closing.resolve();
+        return stopped.promise;
+      });
+
+      const replacement = manager.join({ guildId: "g1", channelId: "1002" });
+      const leaving = manager.leave({ guildId: "g1" });
+      const successor = manager.join({ guildId: "g1", channelId: "1003" });
+      try {
+        await closing.promise;
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+        expect(joinVoiceChannelMock).toHaveBeenCalledTimes(1);
+        stopped.resolve();
+        const [replacementResult, , successorResult] = await Promise.all([
+          replacement,
+          leaving,
+          successor,
+        ]);
+        expect(replacementResult.ok).toBe(false);
+        expect(successorResult.ok).toBe(true);
+        expect(joinVoiceChannelMock).toHaveBeenCalledTimes(2);
+        expectConnectedStatus(manager, "1003");
+      } finally {
+        stopped.resolve();
+        await Promise.allSettled([replacement, leaving, successor]);
+      }
+    });
+
+    it.each(["occupancy-loss", "cancelled"] as const)(
+      "keeps queued joins behind physical cleanup after %s during startup",
+      async (reason) => {
+        const client = createClient();
+        let voiceStates: Array<Record<string, unknown>> = [
+          {
+            guild_id: "g1",
+            user_id: "human",
+            channel_id: "1001",
+            member: { user: { id: "human", bot: false } },
+          },
+        ];
+        configureVoiceStateGateway(client, () => voiceStates);
+        const connecting = createDeferred<void>();
+        const ready = createDeferred<void>();
+        const closing = createDeferred<void>();
+        const stopped = createDeferred<void>();
+        realtimeSessionMock.connect.mockImplementationOnce(async () => {
+          connecting.resolve();
+          await ready.promise;
+        });
+        realtimeSessionMock.close.mockImplementationOnce(() => {
+          closing.resolve();
+          return stopped.promise;
+        });
+        const manager = createManager(
+          { voice: { enabled: true, mode: "agent-proxy", realtime: { provider: "openai" } } },
+          client,
+        );
+        // Bound the original microtask starvation so its regression failure can finish cleanup.
+        let waits = 0;
+        logVerboseMock.mockImplementation((message: string) => {
+          if (message.includes("waiting for active guild join") && ++waits >= 100) {
+            throw new Error("Voice join starved physical cleanup by awaiting settled work");
+          }
+        });
+        const first = manager.join(
+          { guildId: "g1", channelId: "1001" },
+          { autoJoinWhenOccupied: reason === "occupancy-loss" },
+        );
+        let leaving: ReturnType<typeof manager.leave> | undefined;
+        let joins: Promise<Awaited<ReturnType<typeof manager.join>>[]> | undefined;
+        try {
+          await connecting.promise;
+          if (reason === "occupancy-loss") {
+            voiceStates = [];
+          } else {
+            leaving = manager.leave({ guildId: "g1", channelId: "1001" });
+          }
+          ready.resolve();
+          await closing.promise;
+          const second = manager.join({ guildId: "g1", channelId: "1002" });
+          const third = manager.join({ guildId: "g1", channelId: "1003" });
+          const joined = Promise.all([first, second, third]);
+          joins = joined;
+          void joined.catch(() => undefined);
+          await new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          });
+          expect(joinVoiceChannelMock).toHaveBeenCalledTimes(1);
+          stopped.resolve();
+          const [firstResult, secondResult, thirdResult] = await joined;
+          await leaving;
+          expect(firstResult.ok).toBe(reason === "occupancy-loss");
+          expect(secondResult.ok).toBe(true);
+          expect(thirdResult.ok).toBe(true);
+          expect(joinVoiceChannelMock).toHaveBeenCalledTimes(3);
+          expectConnectedStatus(manager, "1003");
+        } finally {
+          ready.resolve();
+          stopped.resolve();
+          logVerboseMock.mockReset();
+          await Promise.allSettled([first, leaving, joins]);
+        }
+      },
+    );
 
     it("does not start queued joins after the voice manager is destroyed", async () => {
       const connection = createConnectionMock();

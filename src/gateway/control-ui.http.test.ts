@@ -1,6 +1,5 @@
 // Control UI HTTP tests cover static asset serving, bootstrap config, avatar and
 // assistant media routes, pairing helpers, and session-generation metadata.
-import { AsyncLocalStorage, createHook } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
@@ -22,7 +21,7 @@ import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
 import { AVATAR_MAX_DATA_URL_CHARS } from "../shared/avatar-limits.js";
 import { AVATAR_MAX_BYTES } from "../shared/avatar-policy.js";
-import { closeOpenClawStateDatabaseByPath } from "../state/openclaw-state-db.js";
+import { closeOpenClawStateDatabaseByPath } from "../state/openclaw-state-db-cache.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { buildAssistantMediaContentDisposition } from "./assistant-media-content-disposition.js";
@@ -476,7 +475,7 @@ describe("handleControlUiHttpRequest", () => {
     }
   }
 
-  async function withPairedDeviceHome<T>(prefix: string, fn: () => Promise<T>): Promise<T> {
+  async function withControlUiHome<T>(prefix: string, fn: () => Promise<T>): Promise<T> {
     const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
     let databasePath: string | undefined;
     try {
@@ -498,7 +497,7 @@ describe("handleControlUiHttpRequest", () => {
     browserMetadata?: boolean;
     fn: (token: string) => Promise<T>;
   }) {
-    return await withPairedDeviceHome("openclaw-ui-device-token-", async () => {
+    return await withControlUiHome("openclaw-ui-device-token-", async () => {
       const deviceId = "control-ui-device";
       const requested = await requestDevicePairing({
         deviceId,
@@ -539,7 +538,7 @@ describe("handleControlUiHttpRequest", () => {
     scopes: string[];
     fn: (bearer: string) => Promise<T>;
   }) {
-    return await withPairedDeviceHome("openclaw-ui-scoped-device-", async () => {
+    return await withControlUiHome("openclaw-ui-scoped-device-", async () => {
       const deviceId = `control-ui-device-${randomUUID()}`;
       const requested = await requestDevicePairing({
         deviceId,
@@ -795,15 +794,12 @@ describe("handleControlUiHttpRequest", () => {
   });
 
   it.each([
-    { filename: "voice.ogg", disposition: "inline" },
-    { filename: "clip.mp4", disposition: "inline" },
-    { filename: "report.pdf", disposition: "attachment" },
-    {
-      filename: "invoice---123e4567-e89b-12d3-a456-426614174000.pdf",
-      disposition: "attachment",
-    },
-    { filename: "archive.bin", disposition: "attachment" },
-  ])("serves $filename with $disposition disposition", async ({ filename, disposition }) => {
+    ["voice.ogg", "inline"],
+    ["clip.mp4", "inline"],
+    ["report.pdf", "attachment"],
+    ["invoice---123e4567-e89b-12d3-a456-426614174000.pdf", "attachment"],
+    ["archive.bin", "attachment"],
+  ])("serves %s with %s disposition", async (filename, disposition) => {
     await withAllowedAssistantMediaRoot({
       prefix: "ui-media-disposition-",
       fn: async (tmpRoot) => {
@@ -2010,8 +2006,7 @@ describe("handleControlUiHttpRequest", () => {
   });
 
   it("penalizes both credential scopes when a Control UI read token is invalid", async () => {
-    const tempHome = testTempDirs.make("openclaw-ui-invalid-token-");
-    await withEnvAsync({ OPENCLAW_HOME: tempHome }, async () => {
+    await withControlUiHome("openclaw-ui-invalid-token-", async () => {
       await withControlUiRoot({
         fn: async (tmp) => {
           const rateLimiter = createAuthRateLimiterSpy();
@@ -2082,8 +2077,7 @@ describe("handleControlUiHttpRequest", () => {
   });
 
   it("rejects a rate-limited Control UI read when no valid device token is presented", async () => {
-    const tempHome = testTempDirs.make("openclaw-ui-rate-limited-token-");
-    await withEnvAsync({ OPENCLAW_HOME: tempHome }, async () => {
+    await withControlUiHome("openclaw-ui-rate-limited-token-", async () => {
       await withControlUiRoot({
         fn: async (tmp) => {
           const rateLimiter = createAuthRateLimiterSpy();
@@ -3134,27 +3128,30 @@ describe("handleControlUiHttpRequest", () => {
       await withControlUiRoot({
         fn: async (tmp) => {
           await writeAssetFile(tmp, "actual.txt", "inside-ok\n");
-          const requestScope = new AsyncLocalStorage<boolean>();
-          let filesystemOperations = 0;
-          const hook = createHook({
-            init(_id, type) {
-              if (type === "FSREQCALLBACK" && requestScope.getStore()) {
-                filesystemOperations += 1;
-              }
-            },
-          }).enable();
+          const read = vi.spyOn(fsSync, "read");
+          const stat = vi.spyOn(fsSync, "stat");
+          const fstat = vi.spyOn(fsSync, "fstat");
+          const lstat = vi.spyOn(fsSync, "lstat");
           try {
-            const { res, end, handled } = await requestScope.run(true, () =>
-              runControlUiRequest({ url, method: "GET", rootPath: tmp }),
-            );
+            const { res, end, handled } = await runControlUiRequest({
+              url,
+              method: "GET",
+              rootPath: tmp,
+            });
             expect(handled).toBe(true);
             expect(res.statusCode).toBe(200);
             expect(responseBody(end)).toContain(url.startsWith("/assets/") ? "inside-ok" : "<html");
             // Safe open already captured stat; a second queued metadata read adds
             // another event-loop wait before these bytes can reach the browser.
-            expect(filesystemOperations).toBe(1);
+            expect(read).toHaveBeenCalledOnce();
+            expect(stat).not.toHaveBeenCalled();
+            expect(fstat).not.toHaveBeenCalled();
+            expect(lstat).not.toHaveBeenCalled();
           } finally {
-            hook.disable();
+            read.mockRestore();
+            stat.mockRestore();
+            fstat.mockRestore();
+            lstat.mockRestore();
           }
         },
       });
@@ -4018,10 +4015,10 @@ describe("handleControlUiHttpRequest", () => {
     });
   });
 
-  it("does not handle /plugins paths when basePath is empty", async () => {
+  it("does not handle plugin HTTP descendants when basePath is empty", async () => {
     await withControlUiRoot({
       fn: async (tmp) => {
-        for (const pluginPath of ["/plugins", "/plugins/diffs/view/abc/def"]) {
+        for (const pluginPath of ["/plugins/webhook", "/plugins/diffs/view/abc/def"]) {
           const { handled } = await runControlUiRequest({
             url: pluginPath,
             method: "GET",

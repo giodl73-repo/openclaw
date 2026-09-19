@@ -6,6 +6,9 @@ import { createDeferred } from "../../../test/helpers/promise.js";
 import { createTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import * as sqlite from "../../infra/node-sqlite.js";
 import * as integrity from "../../infra/sqlite-integrity-worker.js";
+import * as logging from "../../logging/logger.js";
+import { closeCachedOpenClawAgentDatabase } from "../../state/openclaw-agent-db-lifecycle.js";
+import { invalidateOpenClawAgentDatabaseValidation } from "../../state/openclaw-agent-db-validation-cache.js";
 import {
   closeOpenClawAgentDatabaseByPath,
   closeOpenClawAgentDatabasesAsync,
@@ -57,6 +60,8 @@ afterEach(async () => {
   }
   await Promise.allSettled(pending.splice(0));
   archiveHook.afterMaterialize = undefined;
+  await logging.flushLogger();
+  logging.resetLogger();
   await closeOpenClawAgentDatabasesAsync();
   closeOpenClawAgentDatabasesForTest();
   closeOpenClawStateDatabaseForTest();
@@ -85,6 +90,7 @@ function fixture() {
     env: { OPENCLAW_STATE_DIR: root },
   };
   closeOpenClawAgentDatabaseByPath(database.path);
+  invalidateOpenClawAgentDatabaseValidation(database.path);
   return { scope, databaseOptions };
 }
 
@@ -158,9 +164,13 @@ it.each(["delete", "artifact cleanup"] as const)(
     ).toBe(true);
     let followingWriterEntered = false;
     const following = own(
-      runExclusiveSqliteSessionWrite(f.databaseOptions, async () => {
-        followingWriterEntered = true;
-      }),
+      runExclusiveSqliteSessionWrite(
+        f.databaseOptions,
+        async () => {
+          followingWriterEntered = true;
+        },
+        "session.transcript.batch",
+      ),
     );
     await yieldToEventLoop();
     expect(followingWriterEntered).toBe(false);
@@ -174,6 +184,46 @@ it.each(["delete", "artifact cleanup"] as const)(
     expect(loadSessionEntryReadOnly(f.scope)).toBeUndefined();
   },
 );
+
+it("keeps no-op lifecycle cleanup read-only across a cold ordinary-session fleet", async () => {
+  const root = roots.make("session-lifecycle-clean-fleet-");
+  vi.stubEnv("OPENCLAW_STATE_DIR", root);
+  const fleet = ["first", "second", "third"].map((agentId) => {
+    const storePath = path.join(root, "agents", agentId, "sessions", "sessions.json");
+    const scope = { agentId, storePath, sessionKey: `agent:${agentId}:ordinary` };
+    const entry = { sessionId: `${agentId}-retained`, updatedAt: 1 };
+    replaceSessionEntrySync(scope, entry);
+    return { scope, entry, path: openOpenClawAgentDatabase({ agentId }).path };
+  });
+  const paths = new Set(fleet.map((store) => store.path));
+  const opened = vi.spyOn(sqlite, "openNodeSqliteDatabase");
+  const inspected = vi.spyOn(integrity, "assertSqliteIntegrityInWorker");
+  for (let boot = 0; boot < 2; boot++) {
+    await closeOpenClawAgentDatabasesAsync();
+    closeOpenClawAgentDatabasesForTest();
+    opened.mockClear();
+    inspected.mockClear();
+    for (const { scope, entry } of fleet) {
+      await expect(
+        cleanupSessionLifecycleArtifactsCore({
+          agentId: scope.agentId,
+          storePath: scope.storePath,
+          sessionKeySegmentPrefix: "dreaming-",
+          transcriptContentMarker: "dreaming-marker",
+          orphanTranscriptMinAgeMs: 0,
+        }),
+      ).resolves.toEqual({ removedEntries: 0, archivedTranscriptArtifacts: 0 });
+      expect(loadSessionEntryReadOnly(scope)).toMatchObject(entry);
+    }
+    expect(
+      opened.mock.calls.filter(
+        ([pathname, options]) =>
+          typeof pathname === "string" && paths.has(pathname) && options?.readOnly !== true,
+      ),
+    ).toEqual([]);
+    expect(inspected.mock.calls.filter(([pathname]) => paths.has(pathname))).toEqual([]);
+  }
+});
 
 it("rejects retired authority before evaluating a stale deletion target", async () => {
   const f = fixture();
@@ -232,10 +282,14 @@ it("retains the selected state owner while cold deletion waits in the FIFO", asy
   const releaseBlocker = createDeferred();
   releases.push(() => releaseBlocker.resolve());
   const blocker = own(
-    runExclusiveSqliteSessionWrite(f.databaseOptions, async () => {
-      blockerEntered.resolve();
-      await releaseBlocker.promise;
-    }),
+    runExclusiveSqliteSessionWrite(
+      f.databaseOptions,
+      async () => {
+        blockerEntered.resolve();
+        await releaseBlocker.promise;
+      },
+      "session.transcript.batch",
+    ),
   );
   await blockerEntered.promise;
   const admission = observeColdAdmission(f.databaseOptions.path);
@@ -288,7 +342,10 @@ it("keeps historical preparation asynchronous after materialization evicts its p
   const admission = observeColdAdmission(f.databaseOptions.path);
   archiveHook.afterMaterialize = () => {
     archiveHook.afterMaterialize = undefined;
-    closeOpenClawAgentDatabaseByPath(f.databaseOptions.path);
+    closeCachedOpenClawAgentDatabase(openOpenClawAgentDatabase(f.databaseOptions), {
+      eviction: true,
+    });
+    invalidateOpenClawAgentDatabaseValidation(f.databaseOptions.path);
   };
   const work = own(
     deleteSessionEntryLifecycle({

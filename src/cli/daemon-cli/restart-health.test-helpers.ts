@@ -35,7 +35,25 @@ export const resolveGatewayProbeAuthSafeWithSecretInputs = vi.fn<
   (_opts: unknown) => Promise<{ auth: { token?: string; password?: string } }>
 >(async () => ({ auth: {} }));
 const hasActiveStartupMigrationLease = vi.fn<(_params?: unknown) => boolean>(() => false);
+
+export function createStartupMigrationActivityProbe(isActive: () => boolean) {
+  return vi.fn<
+    typeof import("../../infra/startup-migration-checkpoint.js").hasActiveStartupMigrationLease
+  >((params) => {
+    const active = isActive();
+    if (active) {
+      params?.onActivity?.({
+        owner: "migration-owner",
+        pid: 8000,
+        heartbeatAt: monotonicClock.nowMs,
+      });
+    }
+    return active;
+  });
+}
 export const readActiveGatewayLockIdentity = vi.fn();
+export const readGatewayOwnerLease =
+  vi.fn<typeof import("../../infra/gateway-owner-lease.js").readGatewayOwnerLease>();
 export const resolveGatewayServiceProbeHosts = vi.fn<
   (_params?: unknown) => Promise<readonly string[]>
 >(async () => ["127.0.0.1"]);
@@ -71,10 +89,17 @@ vi.mock("../../gateway/probe-auth.js", () => ({
 vi.mock("../../infra/startup-migration-checkpoint.js", () => ({
   hasActiveStartupMigrationLease: (params: unknown) => hasActiveStartupMigrationLease(params),
   STARTUP_MIGRATION_LEASE_TTL_MS: 5 * 60_000,
+  STARTUP_MIGRATION_HEARTBEAT_INTERVAL_MS: 60_000,
+}));
+
+vi.mock("../../infra/gateway-owner-lease.js", () => ({
+  readGatewayOwnerLease: (params: { env?: NodeJS.ProcessEnv; port?: number }) =>
+    readGatewayOwnerLease(params),
 }));
 
 vi.mock("../../infra/gateway-lock.js", () => ({
-  readActiveGatewayLockIdentity: () => readActiveGatewayLockIdentity(),
+  readActiveGatewayLockIdentity: (params?: { env?: NodeJS.ProcessEnv }) =>
+    readActiveGatewayLockIdentity(params),
   isSameGatewayLockIdentity: (
     previous: { ownerId?: string; pid: number; createdAt: string; startTime?: number },
     current: { ownerId?: string; pid: number; createdAt: string; startTime?: number },
@@ -140,7 +165,6 @@ export async function inspectGatewayRestartWithSnapshot(params: {
   portUsage: PortUsage;
   expectedVersion?: string;
   expectedBuildId?: string;
-  includeUnknownListenersAsStale?: boolean;
 }) {
   const service = makeGatewayService(params.runtime);
   inspectPortUsage.mockResolvedValue(params.portUsage);
@@ -151,15 +175,11 @@ export async function inspectGatewayRestartWithSnapshot(params: {
     probeHosts: ["127.0.0.1"],
     ...(params.expectedVersion === undefined ? {} : { expectedVersion: params.expectedVersion }),
     ...(params.expectedBuildId === undefined ? {} : { expectedBuildId: params.expectedBuildId }),
-    ...(params.includeUnknownListenersAsStale === undefined
-      ? {}
-      : { includeUnknownListenersAsStale: params.includeUnknownListenersAsStale }),
   });
 }
 
-export async function inspectUnknownListenerFallback(params: {
+export async function inspectUnknownListener(params: {
   runtime: { status: "running"; pid: number } | { status: "stopped" };
-  includeUnknownListenersAsStale: boolean;
 }) {
   Object.defineProperty(process, "platform", { value: "win32", configurable: true });
   classifyPortListener.mockReturnValue("unknown");
@@ -171,7 +191,6 @@ export async function inspectUnknownListenerFallback(params: {
       listeners: [{ pid: 10920, command: "unknown" }],
       hints: [],
     },
-    includeUnknownListenersAsStale: params.includeUnknownListenersAsStale,
   });
 }
 
@@ -247,6 +266,8 @@ export function resetRestartHealthMocks() {
   hasActiveStartupMigrationLease.mockReturnValue(false);
   readActiveGatewayLockIdentity.mockReset();
   readActiveGatewayLockIdentity.mockResolvedValue(undefined);
+  readGatewayOwnerLease.mockReset();
+  readGatewayOwnerLease.mockReturnValue(undefined);
   resolveGatewayServiceProbeHosts.mockReset();
   resolveGatewayServiceProbeHosts.mockResolvedValue(["127.0.0.1"]);
 }

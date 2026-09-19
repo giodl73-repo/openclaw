@@ -1,10 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { expectDefined } from "@openclaw/normalization-core";
+import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { readDeliveryMock, getChannelPluginMock } = vi.hoisted(() => ({
-  readDeliveryMock: vi.fn(),
-  getChannelPluginMock: vi.fn(),
+const { readDeliveryMock, getChannelPluginMock, getBootstrapChannelPluginMock } = vi.hoisted(
+  () => ({
+    readDeliveryMock: vi.fn(),
+    getChannelPluginMock: vi.fn(),
+    getBootstrapChannelPluginMock: vi.fn(),
+  }),
+);
+
+vi.mock("../../channels/plugins/bootstrap-registry.js", () => ({
+  getBootstrapChannelPlugin: getBootstrapChannelPluginMock,
 }));
-
 vi.mock("../../config/sessions/delivery-info.js", () => ({
   readExactSessionDeliveryContext: readDeliveryMock,
 }));
@@ -14,11 +24,21 @@ vi.mock("../../channels/plugins/index.js", async (importOriginal) => ({
 }));
 
 import type { PreparedMessageToolCatalog } from "../../channels/plugins/message-action-discovery.js";
+import { resolveBundledChannelMessageToolDiscoveryAdapter } from "../../channels/plugins/message-tool-api.js";
+import type { ChannelMessageActionDiscoveryContext } from "../../channels/plugins/types.public.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { settlePreparedMessageToolCatalog } from "../../plugins/prepared-message-tool-catalog.js";
+import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
+import {
+  createChannelTestPluginBase,
+  createTestRegistry,
+} from "../../test-utils/channel-plugins.js";
 import {
   buildMessageToolDescription,
   buildMessageToolSchema,
   resolveMessageToolActionSchemaActions,
   resolveEffectiveCurrentChannelContext,
+  type MessageToolDiscoveryParams,
 } from "./message-tool-discovery.js";
 
 const canonicalSpace = "spaces/AAQA1bC2dEf";
@@ -31,6 +51,7 @@ const request = { config: {}, action: "send" as const, params: {} };
 
 describe("session-derived message destinations", () => {
   beforeEach(() => {
+    getBootstrapChannelPluginMock.mockReset();
     readDeliveryMock.mockReset();
     readDeliveryMock.mockReturnValue({
       channel: "googlechat",
@@ -54,6 +75,47 @@ describe("session-derived message destinations", () => {
       currentThreadTs: undefined,
     });
   });
+
+  it.each([
+    { name: "selected aliases", selected: true, hasAliases: true, expected: foldedSpace },
+    { name: "selected absence", selected: true, hasAliases: false, expected: canonicalSpace },
+    { name: "unselected bootstrap", selected: false, hasAliases: false, expected: foldedSpace },
+  ])(
+    "uses $name when deciding whether to recover a destination",
+    ({ selected, hasAliases, expected }) => {
+      getBootstrapChannelPluginMock.mockReturnValue({
+        actions: { messageActionTargetAliases: { read: { aliases: ["messageId"] } } },
+      });
+      const channels: PreparedMessageToolCatalog["channels"] = hasAliases
+        ? [
+            {
+              id: "googlechat",
+              reconcilesUnknownSend: false,
+              actions: {
+                describeMessageTool: () => ({ actions: ["read"] }),
+                messageActionTargetAliases: { read: { aliases: ["messageId"] } },
+              },
+            },
+          ]
+        : [];
+      const catalog = {
+        version: 1,
+        channels,
+        getChannel: (id: string) => channels.find((entry) => entry.id === id),
+      };
+      expect(
+        resolveEffectiveCurrentChannelContext(options, {
+          ...request,
+          action: "read",
+          params: { messageId: "message-1" },
+          preparedMessageToolCatalog: selected ? catalog : undefined,
+        }).currentMessagingTarget,
+      ).toBe(expected);
+      if (selected) {
+        expect(getBootstrapChannelPluginMock).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it.each([
     { name: "missing delivery", delivery: undefined },
@@ -180,4 +242,159 @@ describe("message tool discovery cache stability", () => {
       }
     }
   });
+});
+
+describe("scheduled account discovery", () => {
+  const cfg: OpenClawConfig = {
+    channels: {
+      slack: {
+        accounts: {
+          ops: { botToken: "xoxb-scheduled-discovery" },
+          disabled: { enabled: false, botToken: "xoxb-disabled-discovery" },
+        },
+      },
+    },
+  };
+
+  beforeEach(() => {
+    getBootstrapChannelPluginMock.mockReset();
+    getChannelPluginMock.mockReset();
+  });
+  afterEach(() => resetPluginRuntimeStateForTest());
+
+  function registerChannels(foreignContexts?: ChannelMessageActionDiscoveryContext[]) {
+    const slack = {
+      ...createChannelTestPluginBase({ id: "slack" }),
+      actions: expectDefined(
+        resolveBundledChannelMessageToolDiscoveryAdapter("slack"),
+        "Slack public message-tool discovery adapter",
+      ),
+    };
+    const registry = createTestRegistry([
+      { pluginId: "slack", source: "test", plugin: slack },
+      ...(foreignContexts
+        ? [
+            {
+              pluginId: "telegram",
+              source: "test",
+              plugin: {
+                ...createChannelTestPluginBase({ id: "telegram" }),
+                actions: {
+                  describeMessageTool: (context: ChannelMessageActionDiscoveryContext) => {
+                    foreignContexts.push(context);
+                    return {
+                      actions: context.accountId === "disabled" ? ["send", "poll"] : ["send"],
+                      schema: {
+                        visibility: "all-configured",
+                        properties: {
+                          foreignHint: Type.Optional(
+                            Type.String({ description: `Account: ${String(context.accountId)}` }),
+                          ),
+                        },
+                      },
+                    };
+                  },
+                },
+              },
+            },
+          ]
+        : []),
+    ]);
+    setActivePluginRegistry(registry);
+    return expectDefined(settlePreparedMessageToolCatalog(registry), "prepared message catalog");
+  }
+
+  function discover(params: MessageToolDiscoveryParams) {
+    const actions = resolveMessageToolActionSchemaActions(params);
+    const schema = buildMessageToolSchema(params, actions);
+    return {
+      actions,
+      schema,
+      properties: expectDefined(asOptionalRecord(schema.properties), "message schema properties"),
+      description: buildMessageToolDescription(actions),
+    };
+  }
+
+  it.each([
+    { origin: "external", owner: "ops", delivery: "disabled", readable: true },
+    { origin: "external", owner: "disabled", delivery: "ops", readable: false },
+    { origin: "local", owner: "ops", delivery: "disabled", readable: true },
+    { origin: "local", owner: "disabled", delivery: "ops", readable: false },
+  ])(
+    "uses the $origin creator account $owner instead of delivery account $delivery",
+    ({ origin, owner, delivery, readable }) => {
+      registerChannels();
+      const result = discover({
+        cfg,
+        currentChannelProvider: origin === "external" ? "slack" : undefined,
+        currentAccountId: delivery,
+        scheduledAccountScope: {
+          ...(origin === "external" ? { channels: ["slack"] } : {}),
+          accountId: owner,
+        },
+      });
+
+      expect(result.actions.includes("read")).toBe(readable);
+      expect(
+        Value.Check(result.schema, {
+          action: "read",
+          channel: "slack",
+          target: "channel:C123",
+          limit: 1,
+        }),
+      ).toBe(readable);
+      expect(result.properties.topLevel !== undefined).toBe(readable);
+      expect(result.properties.presentation !== undefined).toBe(readable);
+      expect(result.description.includes("read")).toBe(readable);
+    },
+  );
+
+  it.each([
+    [undefined, false],
+    [undefined, true],
+    ["slack", false],
+    ["slack", true],
+    ["telegram", false],
+    ["telegram", true],
+  ] as const)(
+    "preserves foreign discovery for primary %s (prepared catalog: %s)",
+    (currentChannelProvider, prepared) => {
+      const foreignContexts: ChannelMessageActionDiscoveryContext[] = [];
+      const catalog = registerChannels(foreignContexts);
+      const params: MessageToolDiscoveryParams = {
+        cfg,
+        currentChannelProvider,
+        currentAccountId: "disabled",
+        currentChannelId: "delivery-room",
+        currentChatType: "channel",
+        currentThreadTs: "delivery-thread",
+        currentMessageId: "delivery-message",
+        sessionKey: "agent:main:cron:scheduled-read",
+        sessionId: "scheduled-session",
+        ...(prepared ? { preparedMessageToolCatalog: catalog } : {}),
+      };
+      const baseline = discover(params);
+      const baselineContexts = foreignContexts.splice(0);
+      const scoped = discover({
+        ...params,
+        scheduledAccountScope: { channels: ["slack"], accountId: "ops" },
+      });
+
+      expect(scoped.actions).toContain("read");
+      expect(baseline.actions).not.toContain("read");
+      expect(scoped.actions).toContain("poll");
+      expect(baseline.properties).toHaveProperty("foreignHint");
+      expect(scoped.properties.foreignHint).toEqual(baseline.properties.foreignHint);
+      expect(foreignContexts).toEqual(baselineContexts);
+      expect(
+        Value.Check(scoped.schema, {
+          action: "send",
+          channel: "telegram",
+          target: "chat:delivery",
+          message: "hello",
+          foreignHint: "retained",
+        }),
+      ).toBe(true);
+    },
+  );
 });

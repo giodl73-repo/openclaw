@@ -13,7 +13,7 @@ This page covers lint output, check selection, and post-upgrade probes.
 
 Bare `openclaw doctor --json` is read-only and non-interactive: no prompts, repairs, or config/state rewrites. It emits the same default findings as lint mode, but exits `0` after a report is produced so output formatting does not change ordinary Doctor's advisory success contract. Read the payload's `ok` and `findings` fields to determine health.
 
-Explicit `openclaw doctor --lint` is the deployment-preflight posture. Add `--json` for machine-readable output without changing lint's threshold-based exit code.
+Explicit `openclaw doctor --lint` is the deployment-preflight posture. Add `--json` for machine-readable output without changing lint's threshold-based exit code. Policy findings reported here are documented in [`openclaw policy`](/cli/policy).
 
 ```bash
 openclaw doctor --json
@@ -45,6 +45,7 @@ JSON output is the scripting surface:
 
 ```json
 {
+  "schemaVersion": 1,
   "ok": false,
   "checksRun": 5,
   "checksSkipped": 0,
@@ -70,7 +71,25 @@ Explicit lint exit codes:
 
 `--severity-min` controls both which findings print and the exit threshold: `openclaw doctor --lint --severity-min error` can print nothing and exit `0` even when lower-severity `info`/`warning` findings exist.
 
-Bare `openclaw doctor --json` exits `0` once it emits a findings payload, including when `ok` is `false`. Argument errors or runtime failures before a payload can be produced remain nonzero.
+When the updater runs lint, warning-severity findings below its error threshold are retained in a separate JSON `warnings` array. They do not change the lint exit code. The updater records these advisories in its run history, including intentional open channel policies, so they remain available in `openclaw update status`. Ordinary standalone lint keeps the selected output threshold.
+
+A configured Codex plugin that is missing or whose advertised health API cannot be
+verified produces an availability warning under `core/doctor/codex-session-routes`,
+with the plugin name and repair command. Untrusted installations are not imported
+to inspect their health API.
+The updater's `--severity-min error` pass exits `0` for these warnings, using the
+same warning policy as Gateway startup. Invalid configuration, unsafe state
+inspection, and errors reported by an actual health check retain their failures.
+Missing configured `plugins.load.paths` produce a warning under
+`core/doctor/final-config-validation`, with requirement
+`configured-plugin-path-unavailable` and the unavailable path in `source`.
+Permission, I/O, and other inspection failures instead use
+`configured-plugin-path-inspection-failed`, retain the filesystem `errorCode`
+and error message, and provide a recovery hint for the affected path.
+The updater retains the warning and continues. Doctor preserves settings whose
+plugin owner could not be inspected; see [Plugin repair warnings](/install/update-troubleshooting#plugin-repair-warnings).
+
+Bare `openclaw doctor --json` exits `0` once it emits a findings payload, including when `ok` is `false`. Argument errors remain nonzero. If the lint runner fails before producing a report, Doctor exits `2` and emits one redacted `{ ok: false, error: { type: "cli_error", message } }` document on stdout in JSON mode, without generic CLI startup guidance.
 
 `--all` controls which checks are selected before severity filtering. The default lint run excludes checks that are deep, historical, or more likely to surface repairable legacy residue; use `--all` for the complete inventory. `--only <id>` is the most precise selector and can run any registered check by id.
 
@@ -82,6 +101,9 @@ receive `openclaw doctor --fix` guidance, not a guarantee that every backup will
 be retired. Preserved roots require manual review of workspace ownership, backup
 manifests, and workspace migration blockers. If both kinds remain, Doctor reports
 both next steps. Do not delete preserved backups to clear the warning.
+The check uses the configured agent directories and actual filesystem paths even
+when lint reads a private state snapshot. Correctly placed Workshop targets do
+not need relocation merely because lint uses a temporary directory.
 
 ## Check selection
 
@@ -96,6 +118,15 @@ To check model credentials, run `openclaw doctor --lint --only core/doctor/auth-
 This opt-in check inspects shared credentials and each configured agent's local
 auth store, including fleets without a default agent. Shared credential problems
 are reported once; agent-specific cooldowns remain attributed to their local store.
+
+`core/doctor/runtime-tool-schemas` does not probe OAuth-backed MCP servers in read-only
+Doctor reports, including triage and update checks. A probe can rotate a refresh token
+at the external server even when local state writes go to a disposable snapshot.
+Doctor reports this deferral at informational severity; use `--severity-min info` to
+display it. For servers in `mcp.servers`, run `openclaw mcp probe <name>` against the
+serving configuration. Validate plugin-provided servers or agent-local auth profiles
+from an authenticated serving-agent turn so refreshed credentials persist with their
+owner. Non-OAuth MCP schema checks still run.
 
 ## Post-upgrade mode
 

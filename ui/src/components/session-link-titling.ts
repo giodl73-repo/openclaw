@@ -10,7 +10,10 @@ import {
   resolveUiConfiguredMainKey,
 } from "../lib/sessions/session-key.ts";
 import { findLocalSessionReference } from "../pages/chat/route-loader-short-cache.ts";
-import { markdownSessionPublicOrigin, parseMarkdownSessionUrl } from "./markdown-session-links.ts";
+import {
+  markdownSessionPublicOrigin,
+  parseLocalMarkdownSessionUrl,
+} from "./markdown-session-links.ts";
 
 const SESSION_LINK_SELECTOR = "a.markdown-session-link, [data-session-href]";
 const SUCCESS_CACHE_MS = 5 * 60_000;
@@ -122,16 +125,15 @@ export class SessionLinkTitler {
       const parsed = parseAgentSessionKey(rawKey);
       return parsed ? { sessionKey: rawKey, agentId: parsed.agentId, namespace: "chat" } : null;
     }
-    const path = parseMarkdownSessionUrl(
+    const path = parseLocalMarkdownSessionUrl(
       anchor.dataset.sessionHref ?? anchor.getAttribute("href") ?? "",
-      this.context?.basePath,
-      this.mainKey(),
+      {
+        basePath: this.context?.basePath,
+        mainKey: this.mainKey(),
+        publicOrigin: markdownSessionPublicOrigin(this.context),
+      },
     );
-    if (
-      !path ||
-      (path.url.origin !== globalThis.location.origin &&
-        path.url.origin !== markdownSessionPublicOrigin(this.context))
-    ) {
+    if (!path) {
       return null;
     }
     // Keep URL route intent (face, query, fragment) even when its identity is cached.
@@ -242,7 +244,13 @@ export class SessionLinkTitler {
       return;
     }
     anchor.classList.add("markdown-session-link--titled");
-    anchor.textContent = title;
+    // Keep a producer's label node so Lit can still update its text binding.
+    const label =
+      anchor.querySelector<HTMLSpanElement>(":scope > .session-label") ??
+      document.createElement("span");
+    label.className = "session-label";
+    label.textContent = title;
+    anchor.replaceChildren(label);
     anchor.title = target.sessionKey;
   }
 }

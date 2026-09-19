@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { AuthProfileCredential } from "../auth-profiles/types.js";
+import type { ModelFallbackRouteResolution } from "../model-fallback.types.js";
 import {
   prepareModelRuntimeSnapshot,
   type PreparedModelRuntimeSnapshot,
@@ -10,9 +11,11 @@ type ModelResolution = Awaited<ReturnType<typeof resolveModelAsync>>;
 
 /** Resolves embedded-run models through discovery first, then the prepared static catalog. */
 export async function resolveTieredModel(params: {
+  assertCurrent?: () => void;
   provider: string;
   fallbackProvider?: string;
   modelId: string;
+  requestedRouteResolution?: ModelFallbackRouteResolution;
   agentDir: string;
   config?: OpenClawConfig;
   workspaceDir: string;
@@ -26,6 +29,14 @@ export async function resolveTieredModel(params: {
       ? [params.provider, params.fallbackProvider]
       : [params.provider];
   const resolveCandidates = async (options: Parameters<typeof resolveModelAsync>[4]) => {
+    const modelOptions: Parameters<typeof resolveModelAsync>[4] = {
+      ...options,
+      assertCurrent: params.assertCurrent,
+      workspaceDir: params.workspaceDir,
+      authProfileId: params.authProfileId,
+      authProfileMode: params.authProfileMode,
+      modelIdSource: params.requestedRouteResolution === "resolved" ? "selected" : "input",
+    };
     let firstFailure: { provider: string; resolution: ModelResolution } | undefined;
     for (const provider of providers) {
       const resolution = await resolveModelAsync(
@@ -33,10 +44,10 @@ export async function resolveTieredModel(params: {
         params.modelId,
         params.agentDir,
         params.config,
-        options,
+        modelOptions,
       );
       if (resolution.model) {
-        return { provider, resolution };
+        return { provider: resolution.logicalRef.provider, resolution };
       }
       firstFailure ??= { provider, resolution };
     }
@@ -47,9 +58,6 @@ export async function resolveTieredModel(params: {
     allowBundledStaticCatalogFallback: params.staticCatalogOwnsTransport,
     preferBundledStaticCatalogTransport: params.staticCatalogOwnsTransport,
     preparedModelRuntime: params.preparedModelRuntime,
-    workspaceDir: params.workspaceDir,
-    authProfileId: params.authProfileId,
-    authProfileMode: params.authProfileMode,
   });
   if (firstTier.resolution.model || params.staticCatalogOwnsTransport) {
     return firstTier;
@@ -66,9 +74,6 @@ export async function resolveTieredModel(params: {
   // the route metadata needed to explain a provider-declared retirement.
   return await resolveCandidates({
     ...preparedModelRuntime.createStores(),
-    workspaceDir: params.workspaceDir,
-    authProfileId: params.authProfileId,
-    authProfileMode: params.authProfileMode,
     allowBundledStaticCatalogFallback: true,
     preparedModelRuntime,
   });

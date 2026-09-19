@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { embeddedAgentLog, type AgentMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { CURRENT_SESSION_VERSION, SessionManager } from "openclaw/plugin-sdk/agent-sessions";
+import { readCodexSessionContext } from "openclaw/plugin-sdk/codex-session-transcript-runtime";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { WorkerTaskPool } from "openclaw/plugin-sdk/process-runtime";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
@@ -210,13 +211,18 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
     "retains $reason in capture diagnostics (incognito=$incognito)",
     async ({ incognito, reason, count, text }) => {
       const { marker, sessionTarget } = await writeSqliteSession({ incognito });
-      for (let index = 0; index < count; index += 1) {
-        await appendSessionTranscriptMessageByIdentity({
-          ...sessionTarget,
-          message: { role: "user", content: text, timestamp: index + 3 },
-        });
-      }
       const { settledMessages } = settledFixture();
+      const extra = Array.from({ length: count }, (_, index) =>
+        attachCodexMirrorIdentity(
+          {
+            role: "assistant",
+            content: [{ type: "text", text }],
+            timestamp: index + 3,
+          } as AgentMessage,
+          `settled:extra:${index}`,
+        ),
+      );
+      settledMessages.splice(1, 0, ...extra);
       for (const message of settledMessages) {
         await appendSessionTranscriptMessageByIdentity({ ...sessionTarget, message });
       }
@@ -272,47 +278,37 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
       for (const message of settledMessages) {
         await appendSessionTranscriptMessageByIdentity({ ...sessionTarget, message });
       }
-      const originalParse = JSON.parse;
-      let laterPayloadReads = 0;
-      const parse = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
-        if (typeof text === "string" && text.includes(unreadMarker)) {
-          laterPayloadReads += 1;
-        }
-        return originalParse(text, reviver);
+      const captured = await captureCodexSettledTurnFinalizationContext({
+        ...sessionTarget,
+        sessionTarget,
+        sessionFile: marker,
+        model: "gpt-5.6-luna",
+        settledMessages,
+        mirroredMessages: settledMessages,
+        turnId: "settled",
       });
-      try {
-        const captured = await captureCodexSettledTurnFinalizationContext({
-          ...sessionTarget,
-          sessionTarget,
-          sessionFile: marker,
-          model: "gpt-5.6-luna",
-          settledMessages,
-          mirroredMessages: settledMessages,
-          turnId: "settled",
+      {
+        expect(captured).toBeInstanceOf(CodexSettledTurnContext);
+        expect(captured?.data).toContainEqual({
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: upstreamPrompt }],
         });
-        if (oversized) {
-          expect(captured).toBeUndefined();
-        } else {
-          expect(captured).toBeInstanceOf(CodexSettledTurnContext);
-          expect(captured?.data).toContainEqual({
-            type: "message",
-            role: "user",
-            content: [{ type: "input_text", text: upstreamPrompt }],
-          });
-          expect(Object.isFrozen(captured?.data)).toBe(true);
-          expect(captured?.data.at(-1)).toMatchObject({
-            type: "function_call_output",
-            call_id: "sent",
-            output: "Synthetic update sent.",
-          });
-        }
-        // Incognito executes the same worker operation in this process, so this spy observes payload reads.
-        if (incognito) {
-          expect(laterPayloadReads).toBe(0);
-          await expect(fs.access(sessionTarget.storePath)).rejects.toThrow();
-        }
-      } finally {
-        parse.mockRestore();
+        expect(Object.isFrozen(captured?.data)).toBe(true);
+        expect(captured?.data.at(-1)).toMatchObject({
+          type: "function_call_output",
+          call_id: "sent",
+          output: "Synthetic update sent.",
+        });
+      }
+      if (oversized) {
+        expect(captured?.data[0]).toMatchObject({
+          content: [{ text: expect.stringContaining("Earlier conversation was omitted") }],
+        });
+        expect(JSON.stringify(captured?.data)).not.toContain(unreadMarker);
+      }
+      if (incognito) {
+        await expect(fs.access(sessionTarget.storePath)).rejects.toThrow();
       }
     },
   );
@@ -328,13 +324,21 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
     "revalidates before reporting projection rejection ($mutation, oversized=$oversized)",
     async ({ mutation, oversized, reason }) => {
       const { marker, sessionTarget } = await writeSqliteSession();
-      if (oversized) {
-        await appendSessionTranscriptMessageByIdentity({
-          ...sessionTarget,
-          message: { role: "user", content: "x".repeat(65537), timestamp: 3 },
-        });
-      }
       const { settledMessages } = settledFixture();
+      if (oversized) {
+        settledMessages.splice(
+          1,
+          0,
+          attachCodexMirrorIdentity(
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "x".repeat(65537) }],
+              timestamp: 3,
+            } as AgentMessage,
+            "settled:oversized",
+          ),
+        );
+      }
       for (const message of settledMessages) {
         await appendSessionTranscriptMessageByIdentity({ ...sessionTarget, message });
       }
@@ -412,7 +416,7 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
     },
   );
 
-  it("reads incognito native history from the process-held SQLite store", async () => {
+  it("reads incognito model context from the process-held SQLite store", async () => {
     const { marker, sessionTarget } = await writeSqliteSession({ incognito: true });
     const result = await readCodexMirroredSessionHistoryMessages({
       ...sessionTarget,
@@ -426,7 +430,7 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
     await expect(fs.access(sessionTarget.storePath)).rejects.toThrow();
   });
 
-  it("preserves native prompt evidence across explicit model-only reads", async () => {
+  it("preserves native prompt evidence across model-context reads", async () => {
     const { marker, sessionTarget } = await writeSqliteSession();
     const upstreamUserText = "synthetic-native-prompt:" + "x".repeat(1024 * 1024);
     const message = {
@@ -446,13 +450,11 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
       createHash("sha256")
         .update(text ?? "")
         .digest("hex");
-    const before = (await readCodexMirroredSessionHistoryMessages(target))!.at(-1)!;
+    const before = readCodexSessionContext(sessionTarget, (messages) => Array.from(messages)).at(
+      -1,
+    )!;
     expect(hash(readUpstreamUserText(before))).toBe(hash(upstreamUserText));
-    const model = (await readCodexMirroredSessionHistoryMessages(
-      target,
-      undefined,
-      "model-context",
-    ))!.at(-1)!;
+    const model = (await readCodexMirroredSessionHistoryMessages(target))!.at(-1)!;
     expect(readUpstreamUserText(model)).toBeUndefined();
     expect(readMirrorIdentity(model)).toBe("synthetic-native-turn");
     expect(model).toMatchObject({
@@ -460,7 +462,9 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
       timestamp: 3,
       __openclaw: { mirrorOrigin: "codex", turnTainted: true },
     });
-    const after = (await readCodexMirroredSessionHistoryMessages(target))!.at(-1)!;
+    const after = readCodexSessionContext(sessionTarget, (messages) => Array.from(messages)).at(
+      -1,
+    )!;
     expect(hash(readUpstreamUserText(after))).toBe(hash(upstreamUserText));
     expect(readMirrorIdentity(after)).toBe("synthetic-native-turn");
   });
@@ -882,3 +886,48 @@ describe("readCodexMirroredSessionHistoryMessages", () => {
     ]);
   });
 });
+
+it.each([false, true])(
+  "bounds prepared Codex history without truncating native evidence (incognito=%s)",
+  async (incognito) => {
+    const fixture = await writeSqliteSession({ incognito });
+    const source = SessionManager.open(fixture.sessionTarget);
+    for (let index = 0; index < 30; index += 1) {
+      source.appendMessage({
+        role: "user",
+        content: `old-${index}:` + "x".repeat(2048),
+        timestamp: index + 3,
+      });
+    }
+    source.appendMessage({ role: "user", content: "latest question", timestamp: 40 });
+    const target = {
+      sessionFile: fixture.marker,
+      sessionId: fixture.sessionTarget.sessionId,
+      sessionKey: fixture.sessionKey,
+      sessionTarget: fixture.sessionTarget,
+    };
+    const prepared = await readCodexMirroredSessionHistoryMessages(
+      target,
+      undefined,
+      undefined,
+      128,
+    );
+    expect(prepared).toMatchObject([{ role: "user", content: "latest question" }]);
+    const native = readCodexSessionContext(fixture.sessionTarget, (messages) =>
+      Array.from(messages),
+    );
+    expect(native).toHaveLength(33);
+    expect(native?.[2]).toMatchObject({ content: "old-0:" + "x".repeat(2048) });
+    source.appendMessage({
+      role: "user",
+      content: "oversized latest:" + "x".repeat(2048),
+      timestamp: 41,
+    });
+    await expect(
+      readCodexMirroredSessionHistoryMessages(target, undefined, undefined, 128),
+    ).rejects.toThrow(/model-context limit/);
+    expect(
+      readCodexSessionContext(fixture.sessionTarget, (messages) => Array.from(messages)),
+    ).toHaveLength(34);
+  },
+);

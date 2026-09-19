@@ -144,7 +144,14 @@ describe("sidebar entries", () => {
     }
   });
   it("keeps operational destinations visible by default", () => {
-    expect(DEFAULT_SIDEBAR_ENTRIES).toEqual(["route:dashboards", "route:cron", "route:plugins"]);
+    expect(DEFAULT_SIDEBAR_ENTRIES).toEqual([
+      "route:agents-home",
+      "route:dashboards",
+      "route:systems",
+      "route:cron",
+      "route:plugins",
+    ]);
+    expect(isSettingsNavigationRoute("agents-home")).toBe(false);
   });
 
   it("drops retired routes from persisted entries", () => {
@@ -189,6 +196,18 @@ describe("sidebar entries", () => {
     expect(isSettingsNavigationRoute("ai-agents")).toBe(true);
     expect(settingsNavigationOwnerRoute("ai-agents")).toBe("agents");
   });
+
+  it.each(["plugin-settings", "skill-settings"] as const)(
+    "keeps %s visible to admins and read-only operators",
+    (routeId) => {
+      expect(visibleSettingsNavigationGroups(true).flatMap((group) => group.routes)).toContain(
+        routeId,
+      );
+      expect(visibleSettingsNavigationGroups(false).flatMap((group) => group.routes)).toContain(
+        routeId,
+      );
+    },
+  );
 
   it("filters admin-only settings while preserving legacy fail-open visibility", () => {
     const nonAdminRoutes = visibleSettingsNavigationGroups(false).flatMap((group) => group.routes);
@@ -245,6 +264,13 @@ describe("sidebar entries", () => {
     expect(serializeSidebarEntry({ type: "plugin", key: "workboard/board-ops" })).toBe(
       "plugin:workboard/board-ops",
     );
+  });
+
+  it("preserves opaque descriptor IDs in plugin positions", () => {
+    const entries = ["plugin:reports/daily/team:summary", "plugin:reports/日报 summary"];
+    expect(normalizeSidebarEntries(entries)).toEqual(entries);
+    expect(parseSidebarEntry("plugin:reports/")).toBeNull();
+    expect(parseSidebarEntry("plugin:/report")).toBeNull();
   });
 
   it("normalizes persisted entries, dropping malformed and duplicate values", () => {

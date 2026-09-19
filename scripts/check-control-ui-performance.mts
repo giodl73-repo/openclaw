@@ -23,16 +23,26 @@ const DEFAULT_STARTUP_BUDGET_BASELINE_PATH = path.resolve(
 const CONTROL_UI_STARTUP_JS_GZIP_TOLERANCE_BYTES = 512;
 const CONTROL_UI_STARTUP_JS_GZIP_BUILD_VARIANCE_BYTES = 64;
 const CONTROL_UI_STARTUP_CSS_GZIP_TARGET_BYTES = 45 * KIB;
-const CONTROL_UI_CSS_GZIP_GROWTH_BYTES = KIB;
+// Immediate Home and diagnostic frames approved in #147574, including shared header styles.
+const CONTROL_UI_CSS_GZIP_GROWTH_BYTES = 1.5 * KIB;
 // The opaque Mermaid sandbox loads one self-contained classic script only when
 // a diagram is viewed. Keep its size visible without relaxing ordinary chunks.
 const MERMAID_RENDERER_ASSET = /^assets\/mermaid\.min-[\w-]+\.js$/u;
 const MERMAID_RENDERER_GZIP_BYTES = 960 * KIB;
 // Locale catalogs are named Vite chunks loaded only after a language selection.
-// Bound them separately so catalog growth cannot relax ordinary application chunks.
-const CONTROL_UI_LOCALE_ASSET_PREFIXES = CONTROL_UI_LOCALE_ENTRIES.map(
-  ({ locale }) => `assets/${locale}-`,
-);
+// Base and config-hint chunks share one budget because they activate atomically.
+const CONTROL_UI_LOCALE_ASSET_PATTERNS = CONTROL_UI_LOCALE_ENTRIES.flatMap(({ locale }) => [
+  {
+    locale,
+    kind: "base" as const,
+    pattern: new RegExp(`^assets/${escapeRegExp(locale)}-[^/]+\\.js$`, "u"),
+  },
+  {
+    locale,
+    kind: "configHints" as const,
+    pattern: new RegExp(`^assets/locale-config-hints-${escapeRegExp(locale)}-[^/]+\\.js$`, "u"),
+  },
+]);
 const CONTROL_UI_LOCALE_GZIP_BYTES = 300 * KIB;
 
 // Small, explicit headroom over the optimized baseline. Budget changes should
@@ -40,11 +50,10 @@ const CONTROL_UI_LOCALE_GZIP_BYTES = 300 * KIB;
 const controlUiPerformanceBudgets = {
   startupJsRequests: 18,
   startupCssRequests: 1,
-  // 350 KiB maintainer-approved by Vyctor 2026-08-11 for #121686;
-  // #121734 left main 6 B below the prior 319 KiB hard ceiling.
-  startupJsGzipBytes: 350 * KIB,
+  // 355 KiB approved in #149291 for the measured existing bundle; growth allowances stay fixed.
+  startupJsGzipBytes: 355 * KIB,
   // Keep 45 KiB advisory: tiny integrated changes must not exhaust the budget.
-  // The fixed 50 KiB ceiling bounds accumulation of sub-KiB changes.
+  // The fixed 50 KiB ceiling bounds accumulation of small changes.
   startupCssGzipBytes: 50 * KIB,
   largestJsGzipBytes: 215 * KIB,
   // Composer multiline surface (stack #124301) legitimately grew boot CSS;
@@ -120,11 +129,46 @@ function largestAsset(assets: Array<ReturnType<typeof readAssetMetrics>>) {
   )[0]!;
 }
 
-function isControlUiLocaleAsset(file: string): boolean {
-  return (
-    file.endsWith(".js") &&
-    CONTROL_UI_LOCALE_ASSET_PREFIXES.some((prefix) => file.startsWith(prefix))
-  );
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function controlUiLocaleAssetIdentity(
+  file: string,
+): { locale: string; kind: "base" | "configHints" } | null {
+  const match = CONTROL_UI_LOCALE_ASSET_PATTERNS.find(({ pattern }) => pattern.test(file));
+  return match ? { locale: match.locale, kind: match.kind } : null;
+}
+
+function collectControlUiLocaleAssetGroups(
+  assets: Array<ReturnType<typeof readAssetMetrics>>,
+): Array<{
+  locale: string;
+  base: Array<ReturnType<typeof readAssetMetrics>>;
+  configHints: Array<ReturnType<typeof readAssetMetrics>>;
+}> {
+  const groups = new Map<
+    string,
+    {
+      locale: string;
+      base: Array<ReturnType<typeof readAssetMetrics>>;
+      configHints: Array<ReturnType<typeof readAssetMetrics>>;
+    }
+  >();
+  for (const asset of assets) {
+    const identity = controlUiLocaleAssetIdentity(asset.file);
+    if (!identity) {
+      continue;
+    }
+    const group = groups.get(identity.locale) ?? {
+      locale: identity.locale,
+      base: [],
+      configHints: [],
+    };
+    group[identity.kind].push(asset);
+    groups.set(identity.locale, group);
+  }
+  return [...groups.values()];
 }
 
 export function collectControlUiPerformanceMetrics(distDir: string) {
@@ -144,9 +188,12 @@ export function collectControlUiPerformanceMetrics(distDir: string) {
   });
   const jsAssets = assets.filter((asset) => asset.type === "js");
   const mermaidRenderer = jsAssets.filter((asset) => MERMAID_RENDERER_ASSET.test(asset.file));
-  const localeCatalogs = jsAssets.filter((asset) => isControlUiLocaleAsset(asset.file));
+  const localeCatalogs = jsAssets.filter(
+    (asset) => controlUiLocaleAssetIdentity(asset.file) !== null,
+  );
   const ordinaryJsAssets = jsAssets.filter(
-    (asset) => !MERMAID_RENDERER_ASSET.test(asset.file) && !isControlUiLocaleAsset(asset.file),
+    (asset) =>
+      !MERMAID_RENDERER_ASSET.test(asset.file) && controlUiLocaleAssetIdentity(asset.file) === null,
   );
   const cssAssets = assets.filter((asset) => asset.type === "css");
   if (ordinaryJsAssets.length === 0 || cssAssets.length === 0 || startup.length === 0) {
@@ -185,6 +232,7 @@ export function evaluateControlUiPerformanceBudgets(
     startupBudgetBaseline,
     startupJsTolerance,
   );
+  const localeGroups = collectControlUiLocaleAssetGroups(metrics.localeCatalogs);
   const checks: Array<[string, number, number, "count" | "bytes"]> = [
     ["startup JS requests", metrics.startup.js.requests, budgets.startupJsRequests, "count"],
     ["startup CSS requests", metrics.startup.css.requests, budgets.startupCssRequests, "count"],
@@ -208,18 +256,36 @@ export function evaluateControlUiPerformanceBudgets(
     [
       "locale catalog JS assets",
       metrics.localeCatalogs.length,
-      CONTROL_UI_LOCALE_ENTRIES.length,
+      CONTROL_UI_LOCALE_ENTRIES.length * 2,
       "count",
     ],
     [
-      "largest locale catalog JS gzip",
-      Math.max(0, ...metrics.localeCatalogs.map((asset) => asset.gzipBytes)),
+      "locale catalog base JS assets per locale",
+      Math.max(0, ...localeGroups.map((group) => group.base.length)),
+      1,
+      "count",
+    ],
+    [
+      "locale config-hint JS assets per locale",
+      Math.max(0, ...localeGroups.map((group) => group.configHints.length)),
+      1,
+      "count",
+    ],
+    [
+      "largest locale catalog pair JS gzip",
+      Math.max(
+        0,
+        ...localeGroups.map(
+          (group) => summarizeAssets([...group.base, ...group.configHints]).gzipBytes,
+        ),
+      ),
       CONTROL_UI_LOCALE_GZIP_BYTES,
       "bytes",
     ],
     [
       "startup locale catalog JS assets",
-      metrics.startup.assets.filter((asset) => isControlUiLocaleAsset(asset.file)).length,
+      metrics.startup.assets.filter((asset) => controlUiLocaleAssetIdentity(asset.file) !== null)
+        .length,
       0,
       "count",
     ],
@@ -377,9 +443,19 @@ export function formatControlUiPerformanceReport(
     );
   }
   if (metrics.localeCatalogs.length > 0) {
-    const largestLocaleCatalog = largestAsset(metrics.localeCatalogs);
+    const localeGroups = collectControlUiLocaleAssetGroups(metrics.localeCatalogs);
+    const largestLocalePair = localeGroups.toSorted(
+      (left, right) =>
+        summarizeAssets([...right.base, ...right.configHints]).gzipBytes -
+          summarizeAssets([...left.base, ...left.configHints]).gzipBytes ||
+        left.locale.localeCompare(right.locale),
+    )[0]!;
+    const largestLocalePairSummary = summarizeAssets([
+      ...largestLocalePair.base,
+      ...largestLocalePair.configHints,
+    ]);
     lines.push(
-      `  locale catalog JS: ${formatAssetSummary(summarizeAssets(metrics.localeCatalogs))} (largest: ${largestLocaleCatalog.file}, ${formatControlUiPerformanceBytes(largestLocaleCatalog.gzipBytes)} gzip; limits: ${CONTROL_UI_LOCALE_ENTRIES.length} deferred assets, ${formatControlUiPerformanceBytes(CONTROL_UI_LOCALE_GZIP_BYTES)} each; forbidden at startup)`,
+      `  locale catalog JS: ${formatAssetSummary(summarizeAssets(metrics.localeCatalogs))} (largest pair: ${largestLocalePair.locale}, ${formatControlUiPerformanceBytes(largestLocalePairSummary.gzipBytes)} gzip; limits: 1 base + 1 config-hint asset per locale, ${formatControlUiPerformanceBytes(CONTROL_UI_LOCALE_GZIP_BYTES)} combined; forbidden at startup)`,
     );
   }
   if (

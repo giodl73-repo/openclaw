@@ -22,7 +22,10 @@ You can answer from any supported conversation surface:
 - The web Control UI docks a question panel directly above the composer. For
   multi-question prompts, the panel shows one question at a time and advances
   through a short stepper. After resolution, the panel closes and the chat
-  keeps only a compact answer summary.
+  keeps the full question alongside your answer in a compact summary. Skipped
+  or expired questions keep their wording alongside the outcome.
+  Switching between pending questions preserves both selected choices and typed
+  answers, even when typed text matches an option label.
 - The TUI shows a question prompt in both Gateway and local modes. Use arrow
   keys or number keys to choose an option, **Other…** to type an answer, or
   **Skip**. Multi-select prompts let you toggle choices before confirming;
@@ -31,8 +34,10 @@ You can answer from any supported conversation surface:
 - Telegram renders each choice as a full-width native button for one
   single-select question. **Other…** switches to Telegram's reply input without
   resolving the question.
-- Discord and Slack render native buttons for a single-choice, single-question
-  prompt.
+- Discord, Slack, and Mattermost render native buttons for a single-choice,
+  single-question prompt. Mattermost retires its prompt on the tap it accepts;
+  a question that ends elsewhere leaves the buttons in place until someone taps
+  one and is told it was already answered.
 - For a question created by an active OpenClaw run, a plain-text reply works on
   any channel when your current permissions match the creator's. Reply with a
   number, an option label, or your own answer. For multi-select questions,

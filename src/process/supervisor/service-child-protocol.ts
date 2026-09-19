@@ -9,6 +9,8 @@ export type ServiceChildStart = {
   stdinMode: "inherit" | "pipe-open" | "pipe-closed";
   secretFd?: number;
   controlFd?: number;
+  /** Host-owned lineage writer; absent for older hosts retained by update --no-restart. */
+  lineageFd?: number;
   /** Absent only for older Gateway hosts retained by update --no-restart. */
   acknowledgeClosing?: true;
   windowsShellCommand?: string;
@@ -20,6 +22,7 @@ export type ServiceChildControlMessage = {
 } & (
   | { type: "cancel"; signal: "SIGTERM" | "SIGKILL" }
   | { type: "startup-error-ack" }
+  | { type: "lineage-closed" }
   | { type: "closing-ack"; closingSequence: number }
 );
 
@@ -61,8 +64,17 @@ export type ServiceChildAnchorMessage = ServiceChildAnchorPayload & {
   sequence: number;
 };
 
+export type ServiceChildRelayRetirement = {
+  type: "retirement";
+  generation: string;
+  sequence: number;
+  anchorExited: boolean;
+  signalError?: string;
+};
+
 export type ServiceChildRelayMessage =
   | ServiceChildStart
+  | ServiceChildRelayRetirement
   | { type: "relay-error"; generation: string; error: string };
 
 export function encodeServiceChildMessage(

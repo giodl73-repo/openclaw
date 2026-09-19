@@ -4,60 +4,71 @@ import fs from "node:fs";
 import path from "node:path";
 import { cliProcessTestFiles } from "./vitest.cli-process-paths.mjs";
 import { commandsLightTestFiles } from "./vitest.commands-light-paths.mjs";
+import { isDatabaseWorkerCoreTestFile } from "./vitest.database-worker-core-paths.mjs";
+import {
+  gatewayDatabaseWorkerTestFiles,
+  gatewayPluginTestFiles,
+} from "./vitest.gateway-server-paths.mjs";
 import { pluginSdkLightTestFiles } from "./vitest.plugin-sdk-paths.mjs";
 import { isToolingIsolatedTestFile } from "./vitest.tooling-isolated-paths.mjs";
 import { boundaryTestFiles, bundledPluginDependentUnitTestFiles } from "./vitest.unit-paths.mjs";
 
 const normalizeRepoPath = (value) => value.replaceAll("\\", "/");
 
-const unitFastCandidateGlobs = [
-  "packages/memory-host-sdk/**/*.test.ts",
-  "packages/plugin-package-contract/**/*.test.ts",
-  "src/acp/**/*.test.ts",
-  "src/agents/**/*.test.ts",
-  "src/skills/**/*.test.ts",
-  "src/auto-reply/**/*.test.ts",
-  "src/bootstrap/**/*.test.ts",
-  "src/channels/**/*.test.ts",
-  "src/cli/**/*.test.ts",
-  "src/commands/**/*.test.ts",
-  "src/compat/**/*.test.ts",
-  "src/config/**/*.test.ts",
-  "src/daemon/**/*.test.ts",
-  "src/hooks/**/*.test.ts",
-  "src/image-generation/**/*.test.ts",
-  "src/infra/**/*.test.ts",
-  "src/interactive/**/*.test.ts",
-  "src/link-understanding/**/*.test.ts",
-  "src/logging/**/*.test.ts",
-  "packages/markdown-core/src/**/*.test.ts",
-  "packages/media-core/src/**/*.test.ts",
-  "packages/terminal-core/src/**/*.test.ts",
-  "src/media/**/*.test.ts",
-  "src/media-generation/**/*.test.ts",
-  "src/media-understanding/**/*.test.ts",
-  "src/memory-host-sdk/**/*.test.ts",
-  "src/model-catalog/**/*.test.ts",
-  "src/music-generation/**/*.test.ts",
-  "src/node-host/**/*.test.ts",
-  "src/plugin-sdk/**/*.test.ts",
-  "src/plugins/**/*.test.ts",
-  "src/poll-params.test.ts",
-  "src/polls.test.ts",
-  "src/process/**/*.test.ts",
-  "src/proxy-capture/**/*.test.ts",
-  "src/routing/**/*.test.ts",
-  "src/sessions/**/*.test.ts",
-  "src/shared/**/*.test.ts",
-  "src/test-utils/**/*.test.ts",
-  "src/tasks/**/*.test.ts",
-  "src/tts/**/*.test.ts",
-  "src/utils/**/*.test.ts",
-  "src/video-generation/**/*.test.ts",
-  "src/web/**/*.test.ts",
-  "src/wizard/**/*.test.ts",
-  "test/**/*.test.ts",
-];
+// Magic segments may ignore case; prune only complete literal directories.
+const directoryPrefixForGlob = (pattern) => literalGlobPrefix(pattern).replace(/[^/]*$/u, "");
+
+const unitFastCandidatePatterns = prepareGlobPatterns(
+  [
+    "packages/memory-host-sdk/**/*.test.ts",
+    "packages/plugin-package-contract/**/*.test.ts",
+    "src/acp/**/*.test.ts",
+    "src/agents/**/*.test.ts",
+    "src/skills/**/*.test.ts",
+    "src/auto-reply/**/*.test.ts",
+    "src/bootstrap/**/*.test.ts",
+    "src/channels/**/*.test.ts",
+    "src/cli/**/*.test.ts",
+    "src/commands/**/*.test.ts",
+    "src/compat/**/*.test.ts",
+    "src/config/**/*.test.ts",
+    "src/daemon/**/*.test.ts",
+    "src/hooks/**/*.test.ts",
+    "src/image-generation/**/*.test.ts",
+    "src/infra/**/*.test.ts",
+    "src/interactive/**/*.test.ts",
+    "src/link-understanding/**/*.test.ts",
+    "src/logging/**/*.test.ts",
+    "packages/markdown-core/src/**/*.test.ts",
+    "packages/media-core/src/**/*.test.ts",
+    "packages/terminal-core/src/**/*.test.ts",
+    "src/media/**/*.test.ts",
+    "src/media-generation/**/*.test.ts",
+    "src/media-understanding/**/*.test.ts",
+    "src/memory-host-sdk/**/*.test.ts",
+    "src/model-catalog/**/*.test.ts",
+    "src/music-generation/**/*.test.ts",
+    "src/node-host/**/*.test.ts",
+    "src/plugin-sdk/**/*.test.ts",
+    "src/plugins/**/*.test.ts",
+    "src/poll-params.test.ts",
+    "src/polls.test.ts",
+    "src/process/**/*.test.ts",
+    "src/proxy-capture/**/*.test.ts",
+    "src/routing/**/*.test.ts",
+    "src/sessions/**/*.test.ts",
+    "src/shared/**/*.test.ts",
+    "src/test-utils/**/*.test.ts",
+    "src/tasks/**/*.test.ts",
+    "src/tts/**/*.test.ts",
+    "src/utils/**/*.test.ts",
+    "src/video-generation/**/*.test.ts",
+    "src/web/**/*.test.ts",
+    "src/wizard/**/*.test.ts",
+    "test/**/*.test.ts",
+  ],
+  directoryPrefixForGlob,
+);
 export const forcedUnitFastTestFiles = [
   "packages/memory-host-sdk/src/host/batch-http.test.ts",
   "packages/memory-host-sdk/src/host/backend-config.test.ts",
@@ -98,7 +109,6 @@ export const forcedUnitFastTestFiles = [
   "src/entry.version-fast-path.test.ts",
   "src/entry.test.ts",
   "src/flows/doctor-startup-channel-maintenance.test.ts",
-  "src/flows/search-setup.test.ts",
   "src/image-generation/openai-compatible-image-provider.test.ts",
   "src/install-sh-version.test.ts",
   "src/logger.test.ts",
@@ -110,20 +120,16 @@ export const forcedUnitFastTestFiles = [
   "src/node-host/invoke-system-run.test.ts",
   "src/pairing/setup-code.test.ts",
   "src/plugin-activation-boundary.test.ts",
-  "src/plugin-sdk/memory-host-events.test.ts",
   "src/proxy-capture/runtime.test.ts",
   "src/proxy-capture/proxy-server.test.ts",
   "src/proxy-capture/store.sqlite.test.ts",
   "src/talk/agent-consult-runtime.test.ts",
   "src/security/audit-config-basics.test.ts",
-  "src/security/audit-config-symlink.test.ts",
   "src/security/audit-exec-surface.test.ts",
   "src/security/audit-extra.sync.test.ts",
-  "src/security/audit-filesystem-windows.test.ts",
   "src/security/audit-sandbox-docker-config.test.ts",
   "src/security/audit-sandbox-browser.test.ts",
   "src/security/audit-extra.async.test.ts",
-  "src/security/audit-plugins-trust.test.ts",
   "src/security/audit-plugin-readonly-scope.test.ts",
   "src/skills/security/workspace-audit.test.ts",
   "src/security/fix.test.ts",
@@ -148,16 +154,17 @@ export const forcedUnitFastTestFiles = [
   "src/test-utils/temp-home.test.ts",
   "src/utils.test.ts",
   "src/version.test.ts",
+  "test/scripts/pr-ci-sweeper.reopen-timer.test.ts",
 ];
 const forcedUnitFastTestFileSet = new Set(forcedUnitFastTestFiles);
 const unitFastCandidateExactFiles = [...pluginSdkLightTestFiles, ...commandsLightTestFiles];
 const unitFastCandidateExactFileSet = new Set(unitFastCandidateExactFiles);
-const broadUnitFastCandidateGlobs = [
-  "src/**/*.test.ts",
-  "packages/**/*.test.ts",
-  "test/**/*.test.ts",
-];
+const broadUnitFastCandidatePatterns = prepareGlobPatterns(
+  ["src/**/*.test.ts", "packages/**/*.test.ts", "test/**/*.test.ts"],
+  directoryPrefixForGlob,
+);
 const ownerRoutedUnitTestPatterns = [
+  ...gatewayPluginTestFiles,
   ...cliProcessTestFiles,
   // Real Git process-tree fixtures stay in serial tooling even when their
   // subprocess harness moves into shared test support.
@@ -169,6 +176,9 @@ const ownerRoutedUnitTestPatterns = [
   "test/scripts/ci-platform-checkout.test.ts",
   // Command compaction tests need the scoped runtime registry even when their
   // mocks live in a shared helper.
+  // Completion custody tests use real session/task SQLite and process-scoped state cleanup.
+  "src/agents/agent-harness-completion-delivery.test.ts",
+  "src/agents/agent-harness-completion-ownership.test.ts",
   "src/agents/agent-command.compaction-rotation.test.ts",
   "src/agents/agent-command.embedded-maintenance.test.ts",
   "src/agents/embedded-agent-runner/run.incomplete-turn.*.test.ts",
@@ -181,37 +191,41 @@ const ownerRoutedUnitTestPatterns = [
   "src/auto-reply/reply/dispatch-from-config.test.ts",
   "src/auto-reply/reply/dispatch-from-config.delivery.test.ts",
   "src/auto-reply/reply/dispatch-from-config.lifecycle.test.ts",
+  "src/auto-reply/reply/dispatch-from-config.tts-stream.test.ts",
 ];
-const broadUnitFastCandidateSkipGlobs = [
-  "**/*.e2e.test.ts",
-  "**/*.live.test.ts",
-  "test/fixtures/**/*.test.ts",
-  "test/setup-home-isolation.test.ts",
-  // Explicit bundled ownership outranks content-based discovery. Otherwise extracting
-  // a test body can silently move its entry to a config with the wrong mocked setup.
-  ...bundledPluginDependentUnitTestFiles,
-  // Keep these suites in owner configs even when content-based discovery changes.
-  ...ownerRoutedUnitTestPatterns,
-  "src/agents/sandbox.resolveSandboxContext.test.ts",
-  "src/acp/runtime/session-meta.test.ts",
-  "src/channels/plugins/contracts/**/*.test.ts",
-  "src/config/**/*.test.ts",
-  "src/gateway/**/*.test.ts",
-  "src/media-generation/**/*.contract.test.ts",
-  "src/media-generation/runtime-shared.test.ts",
-  "src/music-generation/runtime.test.ts",
-  "src/proxy-capture/runtime.test.ts",
-  "src/plugins/install.npm-spec.test.ts",
-  "src/plugins/contracts/**/*.test.ts",
-  "src/pairing/pairing-store.test.ts",
-  "src/plugin-sdk/browser-subpaths.test.ts",
-  "src/security/**/*.test.ts",
-  "src/secrets/**/*.test.ts",
-  "test/helpers/stt-live-audio.test.ts",
-  "test/vitest-extensions-config.test.ts",
-  "test/vitest-unit-paths.test.ts",
-  ...boundaryTestFiles,
-];
+const broadUnitFastCandidateSkipPatterns = prepareGlobPatterns(
+  [
+    "**/*.e2e.test.ts",
+    "**/*.live.test.ts",
+    "test/fixtures/**/*.test.ts",
+    "test/setup-home-isolation.test.ts",
+    // Explicit bundled ownership outranks content-based discovery. Otherwise extracting
+    // a test body can silently move its entry to a config with the wrong mocked setup.
+    ...bundledPluginDependentUnitTestFiles,
+    // Keep these suites in owner configs even when content-based discovery changes.
+    ...ownerRoutedUnitTestPatterns,
+    "src/agents/sandbox.resolveSandboxContext.test.ts",
+    "src/acp/runtime/session-meta.test.ts",
+    "src/channels/plugins/contracts/**/*.test.ts",
+    "src/config/**/*.test.ts",
+    "src/gateway/**/*.test.ts",
+    "src/media-generation/**/*.contract.test.ts",
+    "src/media-generation/runtime-shared.test.ts",
+    "src/music-generation/runtime.test.ts",
+    "src/proxy-capture/runtime.test.ts",
+    "src/plugins/install.npm-spec.test.ts",
+    "src/plugins/contracts/**/*.test.ts",
+    "src/pairing/pairing-store.test.ts",
+    "src/plugin-sdk/browser-subpaths.test.ts",
+    "src/security/**/*.test.ts",
+    "src/secrets/**/*.test.ts",
+    "test/helpers/stt-live-audio.test.ts",
+    "test/vitest-extensions-config.test.ts",
+    "test/vitest-unit-paths.test.ts",
+    ...boundaryTestFiles,
+  ],
+  directoryPrefixForGlob,
+);
 
 const disqualifyingPatterns = [
   {
@@ -298,8 +312,8 @@ function importsStatefulTestHelper(cwd, file, source) {
   return false;
 }
 
-function matchesAnyGlob(file, patterns) {
-  return patterns.some((pattern) => path.matchesGlob(file, pattern));
+function prepareGlobPatterns(patterns, prefixForPattern = literalGlobPrefix) {
+  return patterns.map((pattern) => ({ pattern, prefix: prefixForPattern(pattern) }));
 }
 
 const unitFastCandidateFileByPath = new Map();
@@ -312,8 +326,8 @@ function isUnitFastCandidateFile(file) {
   const candidate =
     forcedUnitFastTestFileSet.has(file) ||
     unitFastCandidateExactFileSet.has(file) ||
-    (matchesAnyGlob(file, unitFastCandidateGlobs) &&
-      !matchesAnyGlob(file, broadUnitFastCandidateSkipGlobs));
+    (matchesCompiledInclude(file, unitFastCandidatePatterns) &&
+      !matchesCompiledInclude(file, broadUnitFastCandidateSkipPatterns));
   // Candidate rules are static for the process lifetime; scoped configs overlap heavily.
   unitFastCandidateFileByPath.set(file, candidate);
   return candidate;
@@ -361,9 +375,9 @@ function collectRepoTestFilesFromGit(cwd) {
       "packages",
       "test",
     ],
-    { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    { cwd, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] },
   );
-  if (result.status !== 0) {
+  if (result.error || result.status !== 0) {
     return null;
   }
   return result.stdout
@@ -476,8 +490,8 @@ function collectUnitFastCandidates(cwd, scope) {
       return (
         forcedUnitFastTestFileSet.has(file) ||
         unitFastCandidateExactFileSet.has(file) ||
-        (matchesAnyGlob(file, broadUnitFastCandidateGlobs) &&
-          !matchesAnyGlob(file, broadUnitFastCandidateSkipGlobs))
+        (matchesCompiledInclude(file, broadUnitFastCandidatePatterns) &&
+          !matchesCompiledInclude(file, broadUnitFastCandidateSkipPatterns))
       );
     })
     .toSorted((a, b) => a.localeCompare(b));
@@ -505,7 +519,9 @@ function analyzeUnitFastTestFile(cwd, file) {
   }
 
   let analysis;
-  if (isToolingIsolatedTestFile(file)) {
+  if (isDatabaseWorkerCoreTestFile(file) || gatewayDatabaseWorkerTestFiles.includes(file)) {
+    analysis = { file, unitFast: false, reasons: ["database-worker-owner"] };
+  } else if (isToolingIsolatedTestFile(file)) {
     // Explicit project ownership wins over inferred eligibility so full-suite
     // configs cannot run the same stateful tooling test in two worker pools.
     analysis = {
@@ -584,10 +600,7 @@ export function getUnitFastTestFilesForIncludePatterns(includePatterns, options 
     scopedUnitFastTestFilesByKey.set(cacheKey, []);
     return [];
   }
-  const compiledPatterns = patterns.map((pattern) => ({
-    pattern,
-    prefix: literalGlobPrefix(pattern),
-  }));
+  const compiledPatterns = prepareGlobPatterns(patterns);
 
   const files = collectUnitFastCandidateInventory(cwd)
     .filter((file) => {

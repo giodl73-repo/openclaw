@@ -17,8 +17,10 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef } from "../config/types.secrets.js";
 import { getShellEnvAppliedKeys } from "../infra/shell-env.js";
 import { canResolveEnvSecretRefInReadOnlyPath } from "../plugin-sdk/secret-ref-readonly.internal.js";
+import { NON_ENV_SECRETREF_MARKER } from "../secrets/provider-credential-values.js";
 import { SecretSurfaceUnavailableError } from "../secrets/runtime-degraded-state.js";
 import { mintSecretSentinel } from "../secrets/sentinel.js";
+import { appendConfigPathSegment } from "../shared/dot-path.js";
 import { normalizeOptionalSecretInput } from "../utils/normalize-secret-input.js";
 import {
   isConfiguredAwsSdkAuthProfileForProvider,
@@ -31,10 +33,10 @@ import {
   CUSTOM_LOCAL_AUTH_MARKER,
   isKnownEnvApiKeyMarker,
   isNonSecretApiKeyMarker,
-  NON_ENV_SECRETREF_MARKER,
   SECRETREF_ENV_HEADER_MARKER_PREFIX,
 } from "./model-auth-markers.js";
 import {
+  resolveAwsSdkEnvVarName,
   resolveDirectProviderCredentialMode,
   type ResolvedProviderAuth,
 } from "./model-auth-runtime-shared.js";
@@ -47,13 +49,14 @@ const MODEL_AUTH_LOCAL_HOST_ALIASES = new Set([
   "host.orb.internal",
 ]);
 
-export function sentinelizeSecretRefProfileApiKey(params: {
+export function projectResolvedProfileAuth(params: {
   apiKey: string;
   enabled?: boolean;
   profileId: string;
   provider: string;
   store: AuthProfileStore;
-}): string {
+  mode: ResolvedProviderAuth["mode"];
+}): ResolvedProviderAuth {
   const credential = params.store.profiles[params.profileId];
   const ref =
     credential?.type === "api_key"
@@ -61,9 +64,15 @@ export function sentinelizeSecretRefProfileApiKey(params: {
       : credential?.type === "token"
         ? coerceSecretRef(credential.tokenRef)
         : null;
-  return ref && params.enabled
-    ? mintSecretSentinel(params.apiKey, { label: `model-auth:${params.provider}` })
-    : params.apiKey;
+  return {
+    apiKey:
+      ref && params.enabled
+        ? mintSecretSentinel(params.apiKey, { label: `model-auth:${params.provider}` })
+        : params.apiKey,
+    profileId: params.profileId,
+    source: `profile:${params.profileId}`,
+    mode: params.mode,
+  };
 }
 
 export function resolveConfigAwareEnvApiKey(
@@ -100,10 +109,12 @@ function resolveProviderSourceConfig(cfg: OpenClawConfig | undefined, provider: 
 export function resolveProviderConfigSecretInput(
   cfg: OpenClawConfig | undefined,
   provider: string,
+  sourceConfig = resolveProviderSourceConfig(cfg, provider),
 ) {
-  const sourceConfig = resolveProviderSourceConfig(cfg, provider);
   const entry = resolveMergedModelProviderEntry(sourceConfig, provider);
-  const path = entry ? `models.providers.${entry.providerKey}.apiKey` : "";
+  const path = entry
+    ? `${appendConfigPathSegment("models.providers", entry.providerKey)}.apiKey`
+    : "";
   const resolvedEnvRef = entry ? getResolvedConfigEnvSecretRef(sourceConfig, path) : null;
   return {
     providerConfig: resolveProviderConfig(cfg, provider),
@@ -324,16 +335,11 @@ type ProviderEntryApiKeyProfileReference =
   | { kind: "marker"; evidence: "environment" | "synthetic" };
 
 export type ProviderEntryApiKeyBindingResolution =
-  | { kind: "none" }
-  | { kind: "literal"; apiKey: string; source: string }
+  | Extract<
+      ProviderEntryApiKeyProfileReference,
+      { kind: "none" | "literal" | "profile-incompatible" }
+    >
   | { kind: "profile-resolved"; auth: ResolvedProviderAuth }
-  | {
-      kind: "profile-incompatible";
-      profileId: string;
-      credentialProvider: string;
-      credentialType: AuthProfileCredential["type"];
-      reason: "credential-class" | "provider-binding";
-    }
   | { kind: "profile-unresolved"; profileId: string; error?: unknown };
 
 function normalizeProviderEntryBaseUrlForBinding(baseUrl: string | undefined): string | undefined {
@@ -405,11 +411,16 @@ export function canUseProfileAsProviderEntryApiKey(params: {
 /** Classifies a provider entry apiKey as literal/profile/marker before resolving secrets. */
 export function resolveProviderEntryApiKeyProfileReference(params: {
   cfg?: OpenClawConfig;
+  sourceConfig?: OpenClawConfig;
   authAliasLookupParams?: ProviderAuthAliasLookupParams;
   provider: string;
   store: AuthProfileStore;
 }): ProviderEntryApiKeyProfileReference {
-  const { providerConfig, ref } = resolveProviderConfigSecretInput(params.cfg, params.provider);
+  const { providerConfig, ref } = resolveProviderConfigSecretInput(
+    params.cfg,
+    params.provider,
+    params.sourceConfig,
+  );
   if (ref) {
     return { kind: "none" };
   }
@@ -427,29 +438,23 @@ export function resolveProviderEntryApiKeyProfileReference(params: {
   if (!credential) {
     return { kind: "literal", apiKey: perEntryRawKey, source: "models.json" };
   }
-  if (!isBearerProfileCredential(credential)) {
+  const reason = !isBearerProfileCredential(credential)
+    ? "credential-class"
+    : !canUseProfileAsProviderEntryApiKey({
+          cfg: params.cfg,
+          authAliasLookupParams: params.authAliasLookupParams,
+          provider: params.provider,
+          credential,
+        })
+      ? "provider-binding"
+      : undefined;
+  if (reason) {
     return {
       kind: "profile-incompatible",
       profileId: perEntryRawKey,
       credentialProvider: credential.provider,
       credentialType: credential.type,
-      reason: "credential-class",
-    };
-  }
-  if (
-    !canUseProfileAsProviderEntryApiKey({
-      cfg: params.cfg,
-      authAliasLookupParams: params.authAliasLookupParams,
-      provider: params.provider,
-      credential,
-    })
-  ) {
-    return {
-      kind: "profile-incompatible",
-      profileId: perEntryRawKey,
-      credentialProvider: credential.provider,
-      credentialType: credential.type,
-      reason: "provider-binding",
+      reason,
     };
   }
   return {
@@ -472,10 +477,7 @@ export async function resolveProviderEntryApiKeyBinding(params: {
   if (reference.kind === "none" || reference.kind === "marker") {
     return { kind: "none" };
   }
-  if (reference.kind === "literal") {
-    return reference;
-  }
-  if (reference.kind === "profile-incompatible") {
+  if (reference.kind === "literal" || reference.kind === "profile-incompatible") {
     return reference;
   }
   try {
@@ -492,18 +494,14 @@ export async function resolveProviderEntryApiKeyBinding(params: {
     const resolvedProfileId = resolved.profileId ?? reference.profileId;
     return {
       kind: "profile-resolved",
-      auth: {
-        apiKey: sentinelizeSecretRefProfileApiKey({
-          apiKey: resolved.apiKey,
-          enabled: params.secretSentinels,
-          profileId: resolvedProfileId,
-          provider: params.provider,
-          store: params.store,
-        }),
+      auth: projectResolvedProfileAuth({
+        apiKey: resolved.apiKey,
+        enabled: params.secretSentinels,
         profileId: resolvedProfileId,
-        source: `profile:${resolvedProfileId}`,
+        provider: params.provider,
+        store: params.store,
         mode: resolved.profileType ? profileTypeToAuthMode(resolved.profileType) : reference.mode,
-      },
+      }),
     };
   } catch (err) {
     if (err instanceof SecretSurfaceUnavailableError) {
@@ -712,35 +710,13 @@ function resolveEnvSourceLabel(params: {
 
 export function resolveAwsSdkAuthInfo(): { mode: "aws-sdk"; source: string } {
   const applied = new Set(getShellEnvAppliedKeys());
-  if (process.env.AWS_BEARER_TOKEN_BEDROCK?.trim()) {
-    return {
-      mode: "aws-sdk",
-      source: resolveEnvSourceLabel({
-        applied,
-        envVars: ["AWS_BEARER_TOKEN_BEDROCK"],
-        label: "AWS_BEARER_TOKEN_BEDROCK",
-      }),
-    };
-  }
-  if (process.env.AWS_ACCESS_KEY_ID?.trim() && process.env.AWS_SECRET_ACCESS_KEY?.trim()) {
-    return {
-      mode: "aws-sdk",
-      source: resolveEnvSourceLabel({
-        applied,
-        envVars: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
-        label: "AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY",
-      }),
-    };
-  }
-  if (process.env.AWS_PROFILE?.trim()) {
-    return {
-      mode: "aws-sdk",
-      source: resolveEnvSourceLabel({
-        applied,
-        envVars: ["AWS_PROFILE"],
-        label: "AWS_PROFILE",
-      }),
-    };
-  }
-  return { mode: "aws-sdk", source: "aws-sdk default chain" };
+  const envVar = resolveAwsSdkEnvVarName();
+  const envVars =
+    envVar === "AWS_ACCESS_KEY_ID" ? [envVar, "AWS_SECRET_ACCESS_KEY"] : envVar ? [envVar] : [];
+  return {
+    mode: "aws-sdk",
+    source: envVar
+      ? resolveEnvSourceLabel({ applied, envVars, label: envVars.join(" + ") })
+      : "aws-sdk default chain",
+  };
 }

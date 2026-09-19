@@ -17,7 +17,10 @@ import {
   findCliTimeoutError,
   isFailoverError,
 } from "../../agents/failover-error.js";
-import { renderAssistantRequestFailureCopy } from "../../agents/failover/assistant-request-failure-copy.js";
+import {
+  renderAssistantRequestFailureCopy,
+  renderFormatErrorCopy,
+} from "../../agents/failover/assistant-request-failure-copy.js";
 import { classifyProviderRequestFacets } from "../../agents/failover/request-error-facets.js";
 import {
   GENERIC_EXTERNAL_RUN_FAILURE_TEXT,
@@ -40,7 +43,7 @@ import { resolveSilentReplyPolicy } from "../../config/silent-reply.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { extractErrorHttpStatus } from "../../shared/assistant-error-format.js";
-import { buildCodexLoginRecovery } from "../codex-login-recovery.js";
+import { buildProviderLoginRecovery } from "../provider-login-recovery.js";
 import {
   copyReplyPayloadMetadata,
   getReplyPayloadMetadata,
@@ -55,10 +58,10 @@ import type { ReplyPayload } from "../types.js";
 
 export function resolveReplyFailoverFacts(error: unknown, message: string) {
   const described = describeFailoverError(error);
-  const status = extractErrorHttpStatus(described.rawError ?? message)?.code ?? described.status;
+  const rawError = described.rawError ?? message;
+  const status = extractErrorHttpStatus(rawError)?.code ?? described.status;
   const reason =
-    described.reason ??
-    classifyFailoverReason(described.rawError ?? message, { provider: described.provider });
+    described.reason ?? classifyFailoverReason(rawError, { provider: described.provider });
   const classification = reason ? ({ kind: "reason", reason } as const) : null;
   return {
     reason: classification?.kind === "reason" ? classification.reason : undefined,
@@ -67,11 +70,12 @@ export function resolveReplyFailoverFacts(error: unknown, message: string) {
     model: described.model,
     status,
     authMode: described.authMode,
+    formatFailureText: reason === "format" ? renderFormatErrorCopy(rawError) : undefined,
     providerRequestError: resolveProviderRequestFailureCopy({
       classification,
       facet: classifyProviderRequestFacets({
         status,
-        message: described.rawError ?? message,
+        message: rawError,
       }),
       status,
       technicalMessage: message,
@@ -301,8 +305,10 @@ export function buildExternalRunFailureReply(
   }
   const oauthRefreshFailure =
     classifyOAuthRefreshFailureError(error) ?? classifyOAuthRefreshFailure(normalizedMessage);
-  const codexLoginRecovery = buildCodexLoginRecovery({
-    provider: oauthRefreshFailure?.provider ?? failoverFacts.provider,
+  const providerLoginRecovery = buildProviderLoginRecovery({
+    provider: oauthRefreshFailure
+      ? (oauthRefreshFailure.provider ?? undefined)
+      : failoverFacts.provider,
     oauthReason: oauthRefreshFailure?.reason,
     failoverReason: failoverFacts.reason,
     authMode: failoverFacts.authMode,
@@ -313,15 +319,15 @@ export function buildExternalRunFailureReply(
     });
     const loginCommandMarkdown = formatOAuthRefreshFailureLoginCommandMarkdown(loginCommand);
     const providerText = oauthRefreshFailure.provider ? ` for ${oauthRefreshFailure.provider}` : "";
-    const retryLoginHint = codexLoginRecovery
-      ? "send `/login codex` from a private chat or Web UI session to pair a new Codex login, or re-auth"
+    const retryLoginHint = providerLoginRecovery
+      ? "send `/login` from a private chat or Control UI session to choose a provider, or re-auth"
       : "re-auth";
     if (oauthRefreshFailure.reason) {
       return {
-        text: codexLoginRecovery
-          ? `⚠️ ${codexLoginRecovery.hint} You can also re-auth with ${loginCommandMarkdown} on the gateway.`
+        text: providerLoginRecovery
+          ? `⚠️ ${providerLoginRecovery.hint} You can also re-auth with ${loginCommandMarkdown} on the gateway.`
           : `⚠️ Model login expired on the gateway${providerText}. Re-auth with ${loginCommandMarkdown} in a terminal, then try again.`,
-        ...(codexLoginRecovery ? { presentation: codexLoginRecovery.presentation } : {}),
+        ...(providerLoginRecovery ? { presentation: providerLoginRecovery.presentation } : {}),
         isGenericRunnerFailure: false,
       };
     }
@@ -333,10 +339,10 @@ export function buildExternalRunFailureReply(
   const authProfileFailoverFailure = buildAuthProfileFailoverFailureText(error);
   if (authProfileFailoverFailure) {
     return {
-      text: codexLoginRecovery
-        ? `${codexLoginRecovery.hint}\n\n${authProfileFailoverFailure}`
+      text: providerLoginRecovery
+        ? `${providerLoginRecovery.hint}\n\n${authProfileFailoverFailure}`
         : authProfileFailoverFailure,
-      ...(codexLoginRecovery ? { presentation: codexLoginRecovery.presentation } : {}),
+      ...(providerLoginRecovery ? { presentation: providerLoginRecovery.presentation } : {}),
       isGenericRunnerFailure: false,
     };
   }
@@ -385,7 +391,8 @@ export function buildExternalRunFailureReply(
   if (codexAppServerFailure) {
     return { text: codexAppServerFailure, isGenericRunnerFailure: false };
   }
-  const classifiedFailure = renderAssistantRequestFailureCopy(failoverFacts);
+  const classifiedFailure =
+    failoverFacts.formatFailureText ?? renderAssistantRequestFailureCopy(failoverFacts);
   if (classifiedFailure) {
     return { text: classifiedFailure, isGenericRunnerFailure: false };
   }

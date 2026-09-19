@@ -4,8 +4,6 @@
  * Converts lightweight HTML into bounded markdown/text without pulling in a full renderer.
  */
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
-import { stripInvisibleUnicode } from "../../infra/unicode-visibility.js";
-import { decodeHtmlEntities } from "../../shared/html-entities.js";
 import {
   RAW_TEXT_TAGS,
   isAsciiWhitespace,
@@ -14,9 +12,11 @@ import {
   findRawTextOpenTagStart,
   startsLikeHtmlTag,
   readTagToken,
-  closeRawTextTagEnd,
+  readRawTextBounds,
   skipRawTextElement,
-} from "./web-fetch-html-tag.js";
+} from "../../../packages/markdown-core/src/html-scanner.js";
+import { stripInvisibleUnicode } from "../../infra/unicode-visibility.js";
+import { decodeHtmlEntities } from "../../shared/html-entities.js";
 import { sanitizeHtml } from "./web-fetch-visibility.js";
 
 /** Output mode requested by web_fetch extraction. */
@@ -304,7 +304,7 @@ function htmlFragmentToMarkdown(html: string): { text: string; title?: string } 
     }
 
     if (RAW_TEXT_TAGS.has(token.name)) {
-      i = closeRawTextTagEnd(html, token.name, i);
+      i = readRawTextBounds(html, token.name, i).end;
       continue;
     }
     if (BLOCK_BREAK_TAGS.has(token.name)) {

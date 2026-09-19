@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parseCLI, type JsonTestResults } from "vitest/node";
 import type { VitestReportCapture } from "../../scripts/lib/vitest-report-capture.mts";
 import { isPidDefinitelyDead } from "../../src/shared/pid-alive.ts";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
@@ -126,6 +127,12 @@ describe.skipIf(process.platform === "win32")("native multi-invocation report ow
         expect(index.merge).toMatchObject({ code: 0, signal: null });
       }
       if (mode === "watchdog") {
+        expect(
+          fs.readFileSync(
+            path.join(path.dirname(path.dirname(result.output)), "cold-started"),
+            "utf8",
+          ),
+        ).toBe("started");
         expect(index.entries[0].attempts).toHaveLength(2);
         expect(index.entries[0].attempts[0].outcome.noOutputTimedOut).toBe(true);
       }
@@ -145,7 +152,7 @@ describe.skipIf(process.platform === "win32")("native multi-invocation report ow
     },
   );
 
-  it("loads each file-backed merge project once and preserves its final identity", async () => {
+  it("loads each file-backed merge project once and preserves its identity and caches", async () => {
     const result = await run("config-load-once");
     expect(result.code, result.stderr).toBe(0);
     expect(inventory(json(result.output))).toEqual(expected);
@@ -158,6 +165,16 @@ describe.skipIf(process.platform === "win32")("native multi-invocation report ow
     ).toEqual(["alpha", "beta"]);
     const replay = json(path.join(result.reportSet!, "aggregate.json.capture.json"));
     const root = path.dirname(path.dirname(result.output));
+    const defaultCache = path.join(root, "node_modules/.vitest-cache");
+    expect(fs.readFileSync(path.join(defaultCache, "canary"), "utf8")).toBe("another cache owner");
+    expect(fs.readFileSync(path.join(defaultCache, "_metadata.json"), "utf8")).toBe(
+      '{"lockfileHash":"unrelated-owner"}',
+    );
+    for (const name of ["alpha", "beta"]) {
+      expect(json(path.join(root, `fs-cache-${name}/_metadata.json`)).lockfileHash).toBeTypeOf(
+        "string",
+      );
+    }
     expect(replay.projects).toEqual(
       (
         [
@@ -259,6 +276,119 @@ describe.skipIf(process.platform === "win32")("native multi-invocation report ow
       expect(fs.readFileSync(path.join(root, "home/canary"), "utf8")).toBe(
         "synthetic caller home\n",
       );
+    },
+  );
+
+  it.each([
+    {
+      name: "scalar empty-inline output",
+      option: "--outputFile=",
+      mode: "failure",
+      entry: undefined,
+      betaOnly: false,
+    },
+    {
+      name: "dotted empty-inline output",
+      option: "--outputFile.json=",
+      mode: "failure",
+      entry: undefined,
+      betaOnly: false,
+    },
+    {
+      name: "nonempty output ending in equals",
+      option: "attached",
+      mode: "failure",
+      entry: "projects",
+      betaOnly: true,
+    },
+    {
+      name: "batch empty-inline output",
+      option: "--outputFile=",
+      mode: "batch-failure",
+      entry: undefined,
+      betaOnly: false,
+    },
+  ] as const)(
+    "preserves real failed tests with $name",
+    { timeout: 60000 },
+    async ({ option, mode, entry, betaOnly }) => {
+      const root = dirs.make("oc-report-output-operand-");
+      const output = path.join(root, "reports", betaOnly ? "result.json=" : "result.json");
+      const outputArgs =
+        option === "attached" ? [`--outputFile=${output}`, "beta.test.ts"] : [option, output];
+      const nativeArgs = [
+        "--reporter=verbose",
+        "--reporter=json",
+        ...outputArgs,
+        "--passWithNoTests",
+      ];
+      const parsed = parseCLI(["vitest", "run", ...nativeArgs]);
+      const requested = parsed.options.outputFile;
+      expect(typeof requested === "string" ? requested : requested?.json).toBe(output);
+      expect(parsed.filter).toEqual(betaOnly ? ["beta.test.ts"] : []);
+      const result = await createVitestReportFixture(root)(mode, {
+        entry,
+        report: false,
+        nativeArgs,
+      });
+      const report: JsonTestResults = json(output);
+      const cases = (betaOnly ? expected.slice(2) : expected).map(([name, status]) => [
+        name,
+        name === "beta/one" ? "failed" : status,
+      ]);
+
+      expect(inventory(report), result.stderr).toEqual(cases);
+      const failed = report.testResults
+        .flatMap((file) => file.assertionResults)
+        .find((test) => test.fullName.trim() === "beta/one");
+      expect(failed?.failureMessages).toEqual(
+        expect.arrayContaining([expect.stringContaining("expected 1 to be 2")]),
+      );
+      expect(result.code, result.stderr).toBe(1);
+      expect(result.signal).toBeNull();
+      const index = json(path.join(result.reportSet!, "index.json"));
+      expect(index.complete).toBe(true);
+      expect(index.requested).toBe(output);
+      expect(index.aggregate).toBe(output);
+      expect(index.merge).toMatchObject({ code: 1, signal: null });
+    },
+  );
+
+  it.each(["--outputFile.blob", "--outputFile.blob="])(
+    "preserves native no-tests refusal after %s",
+    { timeout: 60000 },
+    async (option) => {
+      const root = dirs.make("oc-report-following-option-");
+      const output = path.join(root, "reports", "result.json");
+      const nativeArgs = [
+        "--reporter=json",
+        `--outputFile.json=${output}`,
+        option,
+        "--passWithNoTests=false",
+      ];
+      const parsed = parseCLI(["vitest", "run", ...nativeArgs]);
+      expect(parsed.options.outputFile).toEqual({ json: output, blob: true });
+      expect(parsed.options.passWithNoTests).toBe(false);
+      expect(parsed.filter).toEqual([]);
+
+      const result = await createVitestReportFixture(root)("empty", {
+        entry: "projects",
+        report: false,
+        nativeArgs,
+      });
+      const index = json(path.join(result.reportSet!, "index.json"));
+      const attempt = index.entries[0].attempts[0];
+      const capture: VitestReportCapture = json(`${attempt.json}.capture.json`);
+      expect(capture.passWithNoTests, result.stderr).toBe(false);
+      expect(capture.command).toContain("--passWithNoTests=false");
+      expect(capture.modules).toEqual([]);
+      expect(capture.ended?.reason).toBe("failed");
+      expect(attempt.outcome).toMatchObject({ code: 1, signal: null });
+      expect(result.code, result.stderr).toBe(1);
+      expect(result.signal).toBeNull();
+      expect(index.complete).toBe(false);
+      expect(index.entries[1].attempts).toEqual([]);
+      expect(fs.existsSync(output)).toBe(false);
     },
   );
 

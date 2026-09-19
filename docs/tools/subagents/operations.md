@@ -2,7 +2,7 @@
 summary: "The subagent queue lane, restart recovery, stop scope, and the standing limitations"
 title: "Sub-agent concurrency, recovery, and stopping"
 read_when:
-  - You are tuning sub-agent concurrency or hitting the backlog cap
+  - You are tuning sub-agent concurrency or investigating a delivery backlog
   - A Gateway restart interrupted a sub-agent run
   - You need the exact scope of Stop and /stop
 ---
@@ -14,27 +14,48 @@ Sub-agents use a dedicated in-process queue lane:
 - **Lane name:** `subagent`
 - **Concurrency:** `agents.defaults.subagents.maxConcurrent` (default `8`)
 
-Retained blocked completions also protect the gateway from unbounded fan-out.
-OpenClaw warns when the delivery backlog reaches 25 and blocks new subagent
-spawns at 50 until operators retry or dismiss enough retained deliveries. It
-does not prune results to make room.
+Suspended completion deliveries do not block new work. Native subagents, ACP
+sessions, and visible sessions retain their normal active-run limits and
+authorization checks independently of the delivery backlog. Operators can
+inspect, retry, or dismiss retained deliveries with `openclaw tasks`.
+
+OpenClaw warns when the delivery backlog reaches 25. Within a Gateway process,
+unchanged backlog counts do not repeat the warning every sweep. A count change
+at or above 25, or a return to that threshold after recovery, produces a new
+warning. The backlog size does not discard results or change their retention.
 
 ## Liveness and recovery
 
 OpenClaw does not treat `endedAt` absence as permanent proof that a
-sub-agent is still alive. Unended runs older than the stale-run window
+sub-agent is still alive. When the reading process can verify a current
+execution owner or an exact queued collector reservation, an unended run keeps
+counting regardless of age. Persisted metadata alone does not establish that
+ownership in another process. Other unended runs stop counting as active/pending
+after the stale-run window
 (2 hours, or the configured run timeout plus a short grace period,
-whichever is longer) stop counting as active/pending in `/subagents list`,
-status summaries, descendant completion gating, and per-session
-concurrency checks.
+whichever is longer). These retained counts govern `/subagents list`,
+status summaries, descendant completion gating, and per-session concurrency
+checks; they are not proof that an executor is live.
 
 After a Gateway restart, fresh interrupted sub-agents resume automatically
-from their existing child transcript. Recovery handles both sessions marked
+from their latest execution transcript, including progress made during an earlier
+recovery. Recovery handles both sessions marked
 `abortedLastRun: true` and hard kills that prevented the shutdown marker from
 being written. For a hard kill, the child session must still identify the exact
 running sub-agent from the retired Gateway process, with no newer run or admitted
-work owning that session. Stale interrupted runs are finalized without a resume;
-other stale unended restored runs are pruned.
+work owning that session. Stale interrupted runs and other stale unended restored
+runs are finalized without a resume; detecting a hard kill preserves the last
+observed activity timestamp. Orphaned runs settle their background task
+before cleanup, so retained child sessions do not leave phantom running activity.
+If the task update fails, completion remains available for retry.
+
+When a detached cleanup attempt logs `subagent cleanup finalize failed`, its
+retries use bounded backoff in the current Gateway process. If those retries are
+exhausted, the run remains recorded with incomplete cleanup; inspect the warning
+to identify the failing operation. Unrelated
+sub-agent completions do not restart failed cleanup or reset its retry budget.
+Descendant completion still wakes the current requester ancestors waiting on that
+work. These cleanup retries are separate from [completion delivery](/tools/subagents/announce).
 
 An accepted recovery keeps the original task, Task Flow, requester, and child
 session identities. The task returns to `running` as the replacement execution
@@ -90,6 +111,11 @@ session work, clears its queues, and cancels its active child tree. Session-wide
 `sessions.abort` also requests descendant cancellation; clearing queued follow-ups
 requires `clearQueued: true`. Ordinary `chat.abort` without a `runId` does not
 cascade to children. These operations retain their normal authorization checks.
+
+A typed `/stop` sent through `chat.send` honors `expectedLeafEntryId` and, when
+that branch check is present, `sessionId`. If the check fails during descendant
+cancellation, the Gateway refuses further cancellation and reports
+`active-leaf-changed`. Cancellation already accepted by a child still settles.
 
 Incomplete cancellation is reported as an error, not a clean success. `/stop`
 reports actual stopped and failed child counts. Inspect the remaining

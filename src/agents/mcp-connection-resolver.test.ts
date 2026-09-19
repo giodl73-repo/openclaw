@@ -27,7 +27,6 @@ import {
   resolveRequesterScopedMcpConnections,
 } from "./mcp-connection-resolver.js";
 import { createMcpProofPluginRegistry } from "./mcp-connection-resolver.test-fixtures.js";
-import { clearCurrentProviderAuthState } from "./model-provider-auth.js";
 import { resetPreparedModelRuntimeSnapshotsForTest } from "./prepared-model-runtime.test-support.js";
 
 type AuthenticatedMcpProofEndpoint = {
@@ -248,8 +247,15 @@ describe("mcp connection resolver helpers", () => {
         throw new Error("Expected an authorized MCP connection before plugin disable");
       }
       const sessionId = "gateway-plugin-disable-mcp-proof";
-      const previousRuntime = await getOrCreateSessionMcpRuntime({
+      const previousScope = {
         sessionId,
+        requesterSenderId: "existing-before-disable",
+        agentAccountId: "proof-bot",
+        messageChannel: "telegram",
+      };
+      const previousRuntimeKey = buildMcpRequesterRuntimeCacheKey(previousScope);
+      const previousRuntime = await getOrCreateSessionMcpRuntime({
+        ...previousScope,
         sessionKey: "agent:test:gateway-plugin-disable-mcp-proof",
         workspaceDir: process.cwd(),
         cfg: {
@@ -262,11 +268,8 @@ describe("mcp connection resolver helpers", () => {
             },
           },
         },
-        requesterSenderId: "existing-before-disable",
-        agentAccountId: "proof-bot",
-        messageChannel: "telegram",
       });
-      expect(peekSessionMcpRuntime({ sessionId })).toBeDefined();
+      expect(peekSessionMcpRuntime({ sessionId: previousRuntimeKey })).toBeDefined();
       await expect(previousRuntime.callTool("user-mail", "owner_probe", {})).resolves.toMatchObject(
         { content: [{ type: "text", text: "mail" }] },
       );
@@ -327,6 +330,12 @@ describe("mcp connection resolver helpers", () => {
         },
       };
       let attachedRegistry = previous.registry;
+      const runtime = {
+        operationId: "mcp-plugin-disable",
+        generation: 1,
+        pluginIds: ["active-drive", "startup-mail"],
+        sourceDigests: {},
+      };
       const gatewayReload = createGatewayReloadHandlers({
         deps: {},
         broadcast() {},
@@ -341,12 +350,14 @@ describe("mcp connection resolver helpers", () => {
         async stopChannel() {},
         releaseChannelRouteHandoffs() {},
         pruneInactiveChannelAccountState() {},
-        async reloadPlugins({ beforeReplace, commitRuntime }) {
-          await beforeReplace(new Set());
-          await commitRuntime();
-          attachedRegistry = replacement.registry;
-          setActivePluginRegistry(replacement.registry);
-          return { restartChannels: new Set(), activeChannels: new Set() };
+        async reloadPlugins({ commitRuntime }) {
+          await commitRuntime({
+            publish() {
+              attachedRegistry = replacement.registry;
+              setActivePluginRegistry(replacement.registry);
+            },
+          });
+          return { restartChannels: new Set(), activeChannels: new Set(), runtime };
         },
         logHooks: reloadLog,
         logChannels: reloadLog,
@@ -361,7 +372,10 @@ describe("mcp connection resolver helpers", () => {
         requestRecoveryRestart,
       });
 
-      await expect(gatewayReload.applyHotReload(reloadPlan, nextConfig)).resolves.toBe("applied");
+      await expect(gatewayReload.applyHotReload(reloadPlan, nextConfig)).resolves.toEqual({
+        status: "applied",
+        runtime,
+      });
       expect(refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledWith(nextConfig, {
         allowGatewaySubagentBinding: true,
         catalogMode: "static",
@@ -369,7 +383,9 @@ describe("mcp connection resolver helpers", () => {
       expect(refreshContextWindowCache).toHaveBeenCalledWith(nextConfig);
       expect(requestRecoveryRestart).not.toHaveBeenCalled();
       expect(isPluginRegistryRetired(previous.registry)).toBe(true);
-      expect(peekSessionMcpRuntime({ sessionId })?.peekCatalog()?.tools ?? []).toEqual([]);
+      expect(
+        peekSessionMcpRuntime({ sessionId: previousRuntimeKey })?.peekCatalog()?.tools ?? [],
+      ).toEqual([]);
 
       const legacyRequests = proof.mail.requests;
       await expect(previousRuntime.callTool("user-mail", "owner_probe", {})).rejects.toThrow(
@@ -394,16 +410,21 @@ describe("mcp connection resolver helpers", () => {
       );
 
       const nextSessionId = "gateway-plugin-disable-brand-new-mcp-proof";
-      const nextRuntime = await getOrCreateSessionMcpRuntime({
+      const nextScope = {
         sessionId: nextSessionId,
-        sessionKey: "agent:test:gateway-plugin-disable-brand-new-mcp-proof",
-        workspaceDir: process.cwd(),
-        cfg: nextConfig,
         requesterSenderId: "brand-new-after-disable",
         agentAccountId: "proof-bot",
         messageChannel: "telegram",
+      };
+      const nextRuntime = await getOrCreateSessionMcpRuntime({
+        ...nextScope,
+        sessionKey: "agent:test:gateway-plugin-disable-brand-new-mcp-proof",
+        workspaceDir: process.cwd(),
+        cfg: nextConfig,
       });
-      expect(peekSessionMcpRuntime({ sessionId: nextSessionId })).toBeDefined();
+      expect(
+        peekSessionMcpRuntime({ sessionId: buildMcpRequesterRuntimeCacheKey(nextScope) }),
+      ).toBeDefined();
       await expect(nextRuntime.callTool("user-drive", "owner_probe", {})).resolves.toMatchObject({
         content: [{ type: "text", text: "active-drive" }],
       });
@@ -415,7 +436,6 @@ describe("mcp connection resolver helpers", () => {
       expect(proof.pinnedDrive.requests).toBe(0);
     } finally {
       await disposeAllSessionMcpRuntimes();
-      clearCurrentProviderAuthState();
       await resetPreparedModelRuntimeSnapshotsForTest();
       setGatewaySigusr1RestartPolicy({ allowExternal: previousExternalRestartPolicy });
       await proof.close();

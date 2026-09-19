@@ -161,6 +161,7 @@ internal fun SidebarCollapsibleHeader(
   iconContent: (@Composable () -> Unit)? = null,
   iconTint: Color = palette.text,
   trailingContent: (@Composable () -> Unit)? = null,
+  attention: SidebarAttention? = null,
 ) {
   Row(
     modifier =
@@ -169,6 +170,7 @@ internal fun SidebarCollapsibleHeader(
         .heightIn(min = 44.dp)
         .clip(RoundedCornerShape(10.dp))
         .clickable(role = Role.Button, onClick = onClick)
+        .semantics { stateDescription = if (expanded) nativeString("Expanded") else nativeString("Collapsed") }
         .padding(horizontal = 8.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -209,6 +211,7 @@ internal fun SidebarCollapsibleHeader(
       maxLines = 1,
       overflow = TextOverflow.Ellipsis,
     )
+    attention?.let { SidebarAttentionIndicator(it, palette) }
     trailingContent?.invoke()
   }
 }
@@ -441,6 +444,7 @@ internal fun SidebarSessionRow(
   onClick: () -> Unit,
   onDragCommit: ((Int) -> Unit)? = null,
   onDragActiveChange: (Boolean) -> Unit = {},
+  attention: SidebarAttention? = null,
 ) {
   val activity =
     sidebarSessionActivity(
@@ -450,7 +454,7 @@ internal fun SidebarSessionRow(
       unread = session.unread == true,
     )
   val sessionStateDescription =
-    when (activity) {
+    attention?.status ?: when (activity) {
       SidebarSessionActivity.Failed -> nativeString("Run failed")
       SidebarSessionActivity.Queued -> nativeString("Queued")
       SidebarSessionActivity.Running -> nativeString("Working")
@@ -477,15 +481,17 @@ internal fun SidebarSessionRow(
         overflow = TextOverflow.Ellipsis,
       )
       Text(
-        text = sidebarSessionSubtitle(session, sessionStateDescription),
+        text = attention?.status ?: sidebarSessionSubtitle(session, sessionStateDescription),
         style = ClawTheme.type.caption.copy(fontSize = 11.sp),
         color = palette.muted,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
     }
-    activity?.let {
-      SidebarSessionActivityIndicator(activity = it, palette = palette)
+    if (attention != null) {
+      SidebarAttentionIndicator(attention, palette)
+    } else {
+      activity?.let { SidebarSessionActivityIndicator(activity = it, palette = palette) }
     }
     if (session.pinned == true) {
       Icon(

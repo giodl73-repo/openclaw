@@ -1,16 +1,29 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
+import {
+  loadCronJobsStoreWithConfigJobsReadOnly,
+  resolveCronJobsStorePathFromConfig,
+  saveCronStore,
+} from "../cron/store.js";
+import type { CronJob } from "../cron/types.js";
 import { createCoreHealthChecks } from "../flows/doctor-core-checks.js";
 import { exitCodeFromFindings, runDoctorLintChecks } from "../flows/doctor-lint-flow.js";
-import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
+import { openNodeSqliteDatabase, requireNodeSqlite } from "../infra/node-sqlite.js";
+import { createSkillProposalEvent } from "../skills/workshop/plugin-hooks.js";
 import { resolveWorkshopSkillsDir } from "../skills/workshop/skills-root.js";
+import { appendSkillProposalEvent } from "../skills/workshop/store-sqlite-event.js";
 import { importLegacySkillProposal } from "../skills/workshop/store.js";
 import type { SkillProposalRecord } from "../skills/workshop/types.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+import {
+  closeOpenClawStateDatabaseAsync,
+  openOpenClawStateDatabase,
+} from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+import { readWorkshopMigrationRecords } from "./doctor-skill-workshop-sources.js";
 import {
   inspectLegacySkillWorkshopMigration,
   migrateLegacySkillWorkshopProposals,
@@ -42,6 +55,186 @@ async function snapshotDatabase(databasePath: string) {
 }
 
 describe("read-only Skill Workshop migration inspection", () => {
+  it("runs the registered Workshop check without caller SQL and preserves source artifacts", async () => {
+    await withOpenClawTestState({ layout: "split" }, async (state) => {
+      const config = { agents: { entries: { main: { workspace: state.workspaceDir } } } };
+      const record = createAppliedLegacyProposal({
+        id: "worker-workshop-20260916-1234567890",
+        title: "Saved procedure",
+        description: "Pending relocation",
+        content: "# Preserved\n",
+        target: {
+          skillKey: "saved",
+          skillDir: path.join(state.workspaceDir, "skills", "saved"),
+        },
+      });
+      importLegacySkillProposal({ record, ownerAgentId: "main", store: { env: state.env } });
+      const database = openOpenClawStateDatabase({ env: state.env });
+      const events = ["2026-09-16T02:00:00Z", "2026-09-16T01:00:00Z"].map((occurredAt) =>
+        appendSkillProposalEvent(database.db, {
+          ...createSkillProposalEvent({ record, type: "applied" }),
+          occurredAt,
+        }),
+      );
+      await closeOpenClawStateDatabaseAsync();
+      const databasePath = resolveOpenClawStateSqlitePath(state.env);
+      const before = await snapshotDatabase(databasePath);
+      const filesBefore = (await fs.readdir(state.stateDir, { recursive: true })).toSorted();
+      const native = requireNodeSqlite();
+      const counters = [
+        vi.spyOn(native.DatabaseSync.prototype, "prepare"),
+        vi.spyOn(native.DatabaseSync.prototype, "exec"),
+        ...(["get", "all", "run", "iterate"] as const).map((method) =>
+          vi.spyOn(native.StatementSync.prototype, method),
+        ),
+      ];
+      try {
+        const result = await runDoctorLintChecks(
+          {
+            mode: "lint",
+            runtime: { log() {}, error() {}, exit() {} },
+            cfg: config,
+            env: { ...state.env, OPENCLAW_STATE_DIR: state.path("filesystem") },
+          },
+          { checks: createCoreHealthChecks(), onlyIds: ["core/doctor/skill-workshop-relocation"] },
+        );
+        expect(result.checksRun).toBe(1);
+        expect(result.findings).toEqual([
+          expect.objectContaining({
+            severity: "warning",
+            message: expect.stringContaining(
+              "1 proposal target outside agent directories (main: 1)",
+            ),
+          }),
+        ]);
+        expect(await readWorkshopMigrationRecords(state.env, true)).toEqual({
+          records: [{ record, ownerAgentId: "main" }],
+          appliedEvents: events,
+        });
+        expect(counters.map((counter) => counter.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]);
+      } finally {
+        for (const counter of counters) {
+          counter.mockRestore();
+        }
+      }
+      await closeOpenClawStateDatabaseAsync();
+      expect(await snapshotDatabase(databasePath)).toEqual(before);
+      expect((await fs.readdir(state.stateDir, { recursive: true })).toSorted()).toEqual(
+        filesBefore,
+      );
+      await expect(fs.access(state.path("filesystem"))).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  it("reports each stale automation field after relocation without changing stored state", async () => {
+    await withOpenClawTestState({ label: "workshop-automation-paths" }, async (state) => {
+      const config: OpenClawConfig = {
+        agents: { entries: { main: { workspace: state.workspaceDir } } },
+      };
+      const legacy = path.join(state.workspaceDir, "skills", "relocated");
+      const content = "---\nname: relocated\ndescription: Saved procedure\n---\n\n# Saved\n";
+      const record = createAppliedLegacyProposal({
+        id: "relocated-20260901-1234567890",
+        title: "Saved procedure",
+        description: "Saved procedure",
+        content,
+        target: { skillKey: "relocated", skillDir: legacy },
+      });
+      await fs.mkdir(path.join(legacy, "scripts"), { recursive: true });
+      await fs.writeFile(record.target.skillFile, content);
+      await fs.writeFile(path.join(legacy, "scripts", "check.sh"), "printf ready\n");
+      importLegacySkillProposal({ record, ownerAgentId: "main", store: { env: state.env } });
+      appendSkillProposalEvent(
+        openOpenClawStateDatabase({ env: state.env }).db,
+        createSkillProposalEvent({
+          record,
+          type: "applied",
+          payload: { targetSkillFile: record.target.skillFile },
+        }),
+      );
+      const job = (id: string, payload: CronJob["payload"]): CronJob => ({
+        id,
+        name: id,
+        agentId: "main",
+        enabled: true,
+        createdAtMs: 1,
+        updatedAtMs: 2,
+        schedule: { kind: "every", everyMs: 86400000, anchorMs: 1 },
+        sessionTarget: "isolated",
+        wakeMode: "now",
+        payload,
+        state: { nextRunAtMs: 86400001 },
+      });
+      const jobs = [
+        job("command", {
+          kind: "command",
+          argv: [
+            "/bin/sh",
+            `${legacy}/scripts/check.sh`,
+            `${legacy}-other/check.sh`,
+            `sh ${legacy}/scripts/check.sh`,
+            `${legacy}.other/check.sh`,
+          ],
+          cwd: legacy,
+        }),
+        {
+          ...job("condition", {
+            kind: "agentTurn",
+            message: `Private prose: read ${legacy}/scripts/check.sh.`,
+          }),
+          trigger: {
+            script: `const result = await exec({ command: '/bin/sh ${legacy}/scripts/check.sh' }); json({ fire: false });`,
+          },
+        },
+        job("missing", { kind: "command", argv: ["/bin/sh", `${legacy}/scripts/not-created.sh`] }),
+      ];
+      const storePath = resolveCronJobsStorePathFromConfig(config, state.env);
+      await saveCronStore(storePath, { version: 1, jobs });
+      const before = await loadCronJobsStoreWithConfigJobsReadOnly(storePath, state.env);
+      await migrateLegacySkillWorkshopProposals({ config, env: state.env });
+      await expect(fs.access(legacy)).rejects.toMatchObject({ code: "ENOENT" });
+      await closeOpenClawStateDatabaseAsync();
+      const databasePath = resolveOpenClawStateSqlitePath(state.env);
+      const databaseBefore = await snapshotDatabase(databasePath);
+      const filesBefore = (await fs.readdir(state.stateDir, { recursive: true })).toSorted();
+      const destination = path.join(
+        resolveWorkshopSkillsDir(config, "main", state.env),
+        "relocated",
+      );
+
+      for (let inspection = 0; inspection < 2; inspection += 1) {
+        const result = await runDoctorLintChecks(
+          { mode: "lint", runtime: { log() {}, error() {}, exit() {} }, cfg: config },
+          { checks: createCoreHealthChecks(), onlyIds: ["core/doctor/skill-workshop-relocation"] },
+        );
+        expect(
+          result.findings.map(({ target, path: field }) => `${target}:${field}`).toSorted(),
+        ).toEqual([
+          "command:payload.argv[1]",
+          "command:payload.argv[3]",
+          "command:payload.cwd",
+          "condition:payload.message",
+          "condition:trigger.script",
+          "missing:payload.argv[1]",
+        ]);
+        const find = (id: string, field: string) =>
+          result.findings.find((finding) => finding.target === id && finding.path === field);
+        expect(find("command", "payload.argv[1]")?.fixHint).toContain(
+          `${destination}/scripts/check.sh`,
+        );
+        expect(find("command", "payload.cwd")?.fixHint).toContain(destination);
+        expect(find("missing", "payload.argv[1]")?.fixHint).toContain("unresolved");
+        expect(find("condition", "trigger.script")?.fixHint).toContain("unresolved");
+        expect(find("condition", "payload.message")?.message).not.toContain("Private prose");
+        expect(await loadCronJobsStoreWithConfigJobsReadOnly(storePath, state.env)).toEqual(before);
+        expect(await snapshotDatabase(databasePath)).toEqual(databaseBefore);
+        expect((await fs.readdir(state.stateDir, { recursive: true })).toSorted()).toEqual(
+          filesBefore,
+        );
+      }
+    });
+  });
+
   it("identifies remaining targets after retargeting without recommending an identical repair", async () => {
     await withOpenClawTestState({ label: "workshop-remaining-targets" }, async (state) => {
       const config = { agents: { entries: { main: { workspace: state.workspaceDir } } } };
@@ -64,9 +257,20 @@ describe("read-only Skill Workshop migration inspection", () => {
         return record;
       });
       for (const record of records) {
+        await state.writeText(
+          `skill-workshop/proposals/${record.id}/${record.draftFile}`,
+          "# Saved\n",
+        );
         importLegacySkillProposal({ record, ownerAgentId: "main", store: { env: state.env } });
       }
       const [eligible, blocked] = records;
+      const inspect = () =>
+        runDoctorLintChecks(
+          { mode: "doctor", runtime: { log() {}, error() {}, exit() {} }, cfg: config },
+          { checks: createCoreHealthChecks(), onlyIds: ["core/doctor/skill-workshop-relocation"] },
+        );
+      const beforeRepair = await inspect();
+      expect(beforeRepair.findings[0]?.fixHint).toContain("`openclaw doctor --fix`");
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const migration = await migrateLegacySkillWorkshopProposals({ config, env: state.env });
         if (attempt === 0) {
@@ -77,10 +281,7 @@ describe("read-only Skill Workshop migration inspection", () => {
         expect(migration.warnings.join("\n")).toContain(
           "Legacy workspace setup state requires migration",
         );
-        const result = await runDoctorLintChecks(
-          { mode: "doctor", runtime: { log() {}, error() {}, exit() {} }, cfg: config },
-          { checks: createCoreHealthChecks(), onlyIds: ["core/doctor/skill-workshop-relocation"] },
-        );
+        const result = await inspect();
         expect(result.findings).toHaveLength(1);
         const finding = result.findings[0]!;
         expect(finding.message).toContain(blocked!.id);
@@ -149,10 +350,10 @@ describe("read-only Skill Workshop migration inspection", () => {
             store: { env: state.env },
           });
         }
-        closeOpenClawStateDatabaseForTest();
+        await closeOpenClawStateDatabaseAsync();
         const databasePath = resolveOpenClawStateSqlitePath(state.env);
         const databaseBefore = proposal ? await snapshotDatabase(databasePath) : undefined;
-        const filesBefore = await fs.readdir(state.stateDir, { recursive: true });
+        const filesBefore = (await fs.readdir(state.stateDir, { recursive: true })).toSorted();
 
         const result = await runDoctorLintChecks(
           { mode: "lint", runtime: { log() {}, error() {}, exit() {} }, cfg: config },
@@ -177,7 +378,9 @@ describe("read-only Skill Workshop migration inspection", () => {
             expect(finding.fixHint).toContain("manifests");
           }
         }
-        expect(await fs.readdir(state.stateDir, { recursive: true })).toEqual(filesBefore);
+        expect((await fs.readdir(state.stateDir, { recursive: true })).toSorted()).toEqual(
+          filesBefore,
+        );
         expect(await fs.readFile(state.configPath)).toEqual(configBefore);
         for (const manifest of manifests) {
           expect(await fs.readFile(manifest.file, "utf8")).toBe(manifest.contents);
@@ -227,7 +430,7 @@ describe("read-only Skill Workshop migration inspection", () => {
         } else {
           importLegacySkillProposal({ record, ownerAgentId: "main", store: { env: state.env } });
         }
-        closeOpenClawStateDatabaseForTest();
+        await closeOpenClawStateDatabaseAsync();
         const databasePath = resolveOpenClawStateSqlitePath(state.env);
         const seed = openNodeSqliteDatabase(databasePath);
         try {
@@ -252,7 +455,7 @@ describe("read-only Skill Workshop migration inspection", () => {
           preservedLegacyBackupRootCount: 0,
         });
 
-        closeOpenClawStateDatabaseForTest();
+        await closeOpenClawStateDatabaseAsync();
         expect(await snapshotDatabase(databasePath)).toEqual(before);
         expect(await fs.readFile(skillFile, "utf8")).toBe(content);
       });
@@ -324,7 +527,7 @@ describe("read-only Skill Workshop migration inspection", () => {
           store: { env: state.env },
         });
       }
-      closeOpenClawStateDatabaseForTest();
+      await closeOpenClawStateDatabaseAsync();
       const seed = openNodeSqliteDatabase(resolveOpenClawStateSqlitePath(state.env));
       try {
         for (const sample of cases.filter((entry) => entry.owner === null)) {

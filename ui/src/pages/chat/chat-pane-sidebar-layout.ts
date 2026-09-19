@@ -16,8 +16,10 @@ import type {
   SidebarRegionCallbacks,
 } from "./components/chat-sidebar-region-types.ts";
 import type { SidebarFullMessageLoader } from "./components/chat-sidebar.ts";
+import type { LinkFaviconFetcher } from "./link-favicon-loader.ts";
 import {
   activatePanel,
+  toggleSidebarPanelExpanded,
   closeSlot,
   fitSidebarLayout,
   isSidebarRegionCollapsed,
@@ -49,8 +51,13 @@ const LAZY_SIDEBAR_ELEMENTS: Partial<Record<LazyElementKey, LazyElement>> = {
     "openclaw-terminal-panel",
     () => import("../../components/terminal/terminal-panel-registration.ts"),
   ],
+  "link-reader": [
+    "openclaw-link-reader-panel",
+    () => import("../../components/link-reader-panel.ts"),
+  ],
   browser: ["openclaw-browser-panel", () => import("../../components/browser/browser-panel.ts")],
   desktop: ["openclaw-desktop-panel", () => import("../../components/desktop/desktop-panel.ts")],
+  portal: ["openclaw-portals-page", () => import("../portals/portals-page.ts")],
   companion: ["openclaw-chat-session-rail", () => import("./components/chat-session-rail.ts")],
   discussion: [
     "openclaw-session-discussion",
@@ -115,7 +122,18 @@ export function sidebarRegionCallbacks(params: {
   const { layout, state } = params;
   return {
     activatePanel: (panelId) => {
-      state.updateSidebarLayout(activatePanel(layout, panelId));
+      const slot = layout.columns[0]?.panels.find((panel) => panel.id === panelId)?.slot;
+      if (slot === "dashboard" && !isSidebarSlotVisible(layout, "dashboard")) {
+        params.openPanelSlot(slot);
+      } else {
+        state.updateSidebarLayout(activatePanel(layout, panelId));
+      }
+      state.updateSidebarActivePanel(panelId);
+    },
+    togglePanelExpanded: (panelId) => {
+      state.updateSidebarLayout(toggleSidebarPanelExpanded(layout, panelId), {
+        dashboardPresentation: "personal",
+      });
       state.updateSidebarActivePanel(panelId);
     },
     closeSlot: (slot) => {
@@ -137,6 +155,7 @@ export function sidebarRegionCallbacks(params: {
 }
 
 export function renderSidebarRegion(params: {
+  fetchFavicon?: LinkFaviconFetcher;
   availableWidth: number;
   callbacks: SidebarRegionCallbacks;
   availableSlots: SidebarSlotId[];
@@ -178,7 +197,7 @@ export function renderSidebarRegion(params: {
   return html`<div
     class="sidebar-region ${collapsed ? "sidebar-region--narrow" : ""} ${
       params.layout.expanded ? "sidebar-region--expanded" : ""
-    } sidebar-region--${sidebarDock(params.layout)} ${panelOpen ? "sidebar-region--open" : ""}"
+    } ${params.layout.expanded && params.layout.expandedSide ? "sidebar-region--expanded-side" : ""} sidebar-region--${sidebarDock(params.layout)} ${panelOpen ? "sidebar-region--open" : ""}"
     style=${styleMap({
       "--side-panel-width": `${column?.width ?? 480}px`,
       "--side-panel-height": `${column?.height ?? 360}px`,
@@ -192,6 +211,7 @@ export function renderSidebarRegion(params: {
           : null
         : html`<openclaw-chat-sidebar-region
             .layout=${params.layout}
+            .fetchFavicon=${params.fetchFavicon}
             .panelDefinitions=${panelDefinitions}
             .panelTemplates=${panelTemplates ?? params.panelTemplates}
             .panelActions=${params.panelActions}

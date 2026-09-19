@@ -47,6 +47,7 @@ import {
   hasRuntimeAuthProfileStoreSnapshot,
   updateRuntimeAuthProfileStoreSnapshot,
 } from "./runtime-snapshots.js";
+import { getSetupCredentialRuntimeProfile, isSetupCredentialAccessible } from "./setup-access.js";
 import { loadAuthProfileStoreForSecretsRuntime } from "./store-runtime.js";
 import {
   findPersistedAuthProfileCredential,
@@ -263,6 +264,13 @@ const oauthManager = createOAuthManager({
     }),
 });
 
+export async function waitForActiveOAuthRefreshes(
+  provider: string,
+  profileId?: string,
+): Promise<void> {
+  await oauthManager.waitForActiveOAuthRefreshes(provider, profileId);
+}
+
 /** Clear in-process OAuth refresh queues between isolated tests. */
 function resetOAuthRefreshQueuesForTest(): void {
   oauthManager.resetRefreshQueuesForTest();
@@ -283,7 +291,11 @@ async function tryResolveOAuthProfile(
     return null;
   }
   const cred = store.profiles[profileId];
-  if (!cred || cred.type !== "oauth") {
+  if (
+    !cred ||
+    cred.type !== "oauth" ||
+    !isSetupCredentialAccessible({ profileId, credential: cred, agentDir: params.agentDir })
+  ) {
     return null;
   }
   if (
@@ -342,9 +354,11 @@ function resolveRuntimeAuthProfile(params: {
   profile: AuthProfileCredential;
   defaults: SecretDefaults | undefined;
 }): { profile: AuthProfileCredential; published: boolean } {
-  const runtimeProfile = getRuntimeAuthProfileStoreSnapshotCore(params.agentDir)?.profiles[
-    params.profileId
-  ];
+  const setupProfile = getSetupCredentialRuntimeProfile(params);
+  const runtimeProfile =
+    setupProfile === undefined
+      ? getRuntimeAuthProfileStoreSnapshotCore(params.agentDir)?.profiles[params.profileId]
+      : setupProfile;
   const inputRefKey = authProfileSecretRefKey(params.profile, params.defaults);
   const runtimeRefKey = runtimeProfile
     ? authProfileSecretRefKey(runtimeProfile, params.defaults)
@@ -411,7 +425,14 @@ export async function resolveApiKeyForProfile(
   const storedProfile = isUserModelAuthProfileId(profileId)
     ? findPersistedAuthProfileCredential({ agentDir: params.agentDir, profileId })
     : store.profiles[profileId];
-  if (!storedProfile) {
+  if (
+    !storedProfile ||
+    !isSetupCredentialAccessible({
+      profileId,
+      credential: storedProfile,
+      agentDir: params.agentDir,
+    })
+  ) {
     return null;
   }
   // Claude owns this native login slot. Legacy persisted copies must never

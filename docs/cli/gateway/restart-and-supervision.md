@@ -26,9 +26,71 @@ openclaw gateway restart --wait 30s
 
 `--wait <duration>` overrides the drain budget for a plain (non-safe) restart. Accepts bare milliseconds or unit suffixes `ms`, `s`, `m`, `h`, `d` (e.g. `30s`, `5m`, `1h30m`); `--wait 0` waits indefinitely. Not compatible with `--force` or `--safe`.
 
+Native service stop deadlines still apply: the Gateway caps the drain at 315 seconds
+for systemd's 330-second limit, and 5 seconds for launchd's 20-second limit. Both
+leave time for cancellation and cleanup. These caps also apply to `--wait 0`. Longer model or
+heartbeat timeouts do not extend it. When available, the drain log reports the
+largest observed model request timeout for context.
+
+If work still ignores cancellation at the shutdown deadline under systemd or launchd, the process logs
+the remaining work categories, writes a diagnostic stability bundle, and exits
+with status `0`. It does not reuse that unfinished runtime for an in-process
+restart. This lets a requested stop finish cleanly and lets the service manager
+start a fresh Gateway for a restart.
+
+An explicit server-close failure retains exit status `1`, including when final
+provider cleanup crosses the native shutdown deadline.
+
+Admission-close logs name the shutdown trigger, for example `stop (SIGTERM)` or
+`restart (SIGUSR1: config reload: gateway.bind)`. A signal alone does not identify
+its sender: Node does not expose the sender PID or command. Three occurrences of
+the same signal within five minutes in one process, or three recorded plain
+SIGTERM/SIGINT stops across process lifetimes, produce a hint to check
+`openclaw gateway status --deep` for another supervisor. Deep local status shows
+the last recorded shutdown reason and time for the selected state directory;
+on Linux, it also reports competing user and system service units when inspecting
+the native service. Failure outcomes keep their specific failure reason.
+
+After a downgrade, the Gateway refuses databases whose schema is newer than the
+running build supports. The startup error and `openclaw gateway status --deep`
+report the found and supported schema versions, the writer build when recorded,
+and the refusing build. Run a build at least as new as the writer that supports
+those schemas, or stop the service and restore your pre-upgrade backup. Startup
+retains exit status `78` and parks a managed LaunchAgent when possible. A refused
+shared-state database cannot record a new lifecycle row; the error log explains
+the refusal, and deep status reports it instead of an unavailable shutdown record.
+
+Foreground/manual Gateways and other supervisors retain exit status `1` when
+cleanup cannot finish before the shutdown deadline.
+
 `--force` skips the active-work drain and restarts immediately. Plain `restart` normally uses the service-manager restart path.
 
+During an upgrade, restart records its reason and drain options in the existing
+Gateway state without starting a schema migration while the old Gateway is still
+running. If no state database exists, it logs that intent recording was skipped
+and continues the restart.
+
+When an updater invokes the installed `gateway restart` command, its existing
+update marker enables the five-minute startup watchdog after the managed process
+is observed running. This lets an older updater complete a slow first-hop startup
+without passing a new option. The watchdog includes migration, listener, and health
+phases; phase changes cannot extend its cap. Explicit readiness budgets supplied
+by newer update callers take precedence. Ordinary standalone restarts wait beyond the standard readiness budget only while the same running Gateway advances startup phases or acquires, renews, or completes an observed same-process migration, up to five minutes, then report `still-starting` (exit 2) with the last phase and `openclaw gateway status --deep` as the next step; startup without progress still fails at the standard budget (exit 1), while a newly observed migration lease gets one heartbeat interval plus polling grace before it is considered stalled, and its observed completion earns one fresh readiness window within the same cap. See [Restart recovery](/gateway/restart-recovery).
+
 On Windows, a plain restart launched from a Gateway service process, including an agent's shell command, automatically uses the safe restart path. The running Gateway owns the deferred Scheduled Task handoff, so stopping its process tree cannot kill the caller before relaunch. This requires a reachable Gateway; the command acknowledges the restart request, not successor health. Use `openclaw gateway status` afterward to verify recovery.
+
+The Windows handoff waits for the outgoing Gateway to exit, then requests a task
+launch. It records `restart finished` in `logs/gateway-restart.log` only after a
+different process with the expected executable and Gateway entrypoint listens on
+the configured port. This listener check allows up to three minutes; it does not
+prove channel readiness. A task marked **Running** or a successful launch request
+alone does not count as recovery.
+
+If no replacement listener appears, the log records `restart failed` and a
+profile-aware `openclaw gateway restart --force` command to run from an external
+terminal. The handoff does not end its own Scheduled Task: on installations with
+Job Object containment, doing so could terminate the observer before it records
+the result. A stale running task can still require this external recovery.
 
 On macOS, when `openclaw gateway restart`, `stop`, `install`, or `uninstall` runs inside the managed LaunchAgent's process tree, including an agent's shell command, OpenClaw detects that from launchd's service environment or, when a hand-written plist omits those variables, from process ancestry against the PID launchd reports for the job. Restart hands off to a detached helper so `kickstart -k` cannot kill the caller. Stop, install, and uninstall refuse and ask you to run the command from an external shell.
 
@@ -92,7 +154,7 @@ OPENCLAW_SUPERVISOR_MODE=external \
   openclaw database ownership claim --manager gateway-supervisor --json
 ```
 
-Before claiming, stop and verify every older Gateway, CLI, Doctor, updater, and native app process that can write the shared state database. Pre-contract processes do not understand the ownership row and cannot be retroactively fenced. Claim only after every remaining writer uses ownership-aware code and carries `OPENCLAW_SUPERVISOR_MODE=external`.
+Before claiming, stop and verify every Gateway, CLI, Doctor, updater, and native app process older than 2026.8.1 that can write the shared state database. Processes from before the ownership contract ([#121069](https://github.com/openclaw/openclaw/pull/121069)) do not understand the ownership row and cannot be retroactively fenced. Claim only after every remaining writer uses ownership-aware code and carries `OPENCLAW_SUPERVISOR_MODE=external`.
 
 The claim is idempotent for the same stable manager identifier and refuses a different manager. There is no automatic claim or unclaim path. Once claimed, unmarked writable shared-state opens fail before permissions, schema migration, additive repair, compaction, or other mutation. Read-only access remains available. This is protection against accidental unmarked same-user writers, not an authentication or lease protocol.
 
@@ -119,7 +181,7 @@ External supervisor implementations should also apply these acceptance rules:
 
 ### Gateway profiling
 
-- `OPENCLAW_GATEWAY_STARTUP_TRACE=1` logs phase timings during startup, including per-phase `eventLoopMax` delay and plugin lookup-table timings (installed-index, manifest registry, startup planning, owner-map work).
+- `OPENCLAW_GATEWAY_STARTUP_TRACE=1` logs phase timings during startup, including per-phase `eventLoopMax` delay and plugin lookup-table timings (installed-index, manifest registry, startup planning, owner-map work). The `process.bootstrap` breakdown includes earlier CLI imports, configuration, database admission, session inventory, and workspace readiness. Each bootstrap step records its process-relative `start`, duration, call count, and available fleet counts; repeated calls aggregate under one name. The `ready` trace repeats the step names and totals in `bootstrapSteps`. Nested steps overlap, so their durations should not be added together.
 - `OPENCLAW_GATEWAY_RESTART_TRACE=1` logs `restart trace:` lines for restart signal handling, active-work drain, shutdown phases, next start, ready timing, and memory metrics. Ordinary stops also start a fresh trace with `stop.signal.received` and `stop.drain` timing. Named shutdown steps and coarse close phases emit `.begin` before waiting, then a duration when they settle; an unmatched begin identifies an entered phase that has not settled. These phases do not time every nested cleanup operation individually.
 - `OPENCLAW_DIAGNOSTICS=timeline` with `OPENCLAW_DIAGNOSTICS_TIMELINE_PATH=<path>` writes a best-effort JSONL startup diagnostics timeline for external QA harnesses (equivalent to config `diagnostics.flags: ["timeline"]`; the path is still env-only). Add `OPENCLAW_DIAGNOSTICS_EVENT_LOOP=1` to include event-loop samples.
 - `pnpm build` then `pnpm test:startup:gateway -- --runs 5 --warmup 1` benchmarks Gateway startup against the built CLI entry: first process output, `/healthz`, `/readyz`, startup trace timings, event-loop delay, and plugin lookup-table timing.

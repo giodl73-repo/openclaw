@@ -4,6 +4,7 @@ import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
 } from "../../skills/runtime/env-overrides.js";
+import { resolveSkillResourceCandidates } from "../../skills/runtime/resource-candidates.js";
 import { resolveCodeModeSkills, type CodeModeSkillReader } from "../code-mode-skills.js";
 import type { SandboxContext } from "../sandbox/types.js";
 import { isToolExecutionAllowed } from "../tool-policy-shared.js";
@@ -11,12 +12,14 @@ import type { EmbeddedRunAttemptParams } from "./run/types.js";
 import {
   createSandboxPromptEntryLoader,
   mapSandboxSkillEntriesForPrompt,
-  mapSandboxSkillUsagePaths,
   resolveSandboxSkillRuntimeInputs,
 } from "./sandbox-skills.js";
 
 /** Prepares readable skills and owns environment rollback until the caller takes custody. */
-export function prepareEmbeddedSkills(params: {
+export async function prepareEmbeddedSkills(params: {
+  /** Prompt-only callers can skip process-wide environment overrides. */
+  applySkillEnvironment?: boolean;
+  assertCurrent?: () => void;
   attempt: Pick<
     EmbeddedRunAttemptParams,
     | "config"
@@ -43,11 +46,13 @@ export function prepareEmbeddedSkills(params: {
       skillUsagePaths: undefined,
       skillsPrompt: "",
       skillsSnapshotForRun: undefined,
+      skillReadResources: undefined,
       codeModeSkills: [],
     };
   }
   const {
     skillsEligibility,
+    skillUsagePaths,
     skillsPromptWorkspaceDir,
     skillsSnapshot,
     skillsWorkspaceDir,
@@ -58,7 +63,8 @@ export function prepareEmbeddedSkills(params: {
     skillsSnapshot: params.attempt.skillsSnapshot,
   });
   const { shouldLoadSkillEntries, skillEntries, loadSkillEntries, preserveEntryOrder } =
-    resolveEmbeddedRunSkillEntries({
+    await resolveEmbeddedRunSkillEntries({
+      assertCurrent: params.assertCurrent,
       workspaceDir: skillsWorkspaceDir,
       config: params.attempt.config,
       agentId: params.sessionAgentId,
@@ -71,27 +77,15 @@ export function prepareEmbeddedSkills(params: {
         : { executionWorkspaceDir: params.effectiveWorkspace }),
       workspaceOnly,
     });
-  const restoreSkillEnv = skillsSnapshot
-    ? applySkillEnvOverridesFromSnapshot({
-        snapshot: skillsSnapshot,
-        config: params.attempt.config,
-      })
-    : applySkillEnvOverrides({
-        skills: skillEntries ?? [],
-        config: params.attempt.config,
-      });
+  let restoreSkillEnv = () => {};
   try {
     const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       skillsWorkspaceDir,
       skillsPromptWorkspaceDir,
     });
-    const skillUsagePaths = mapSandboxSkillUsagePaths({
-      paths: params.sandbox?.skillUsagePaths,
-      skillsWorkspaceDir,
-      skillsPromptWorkspaceDir,
-    });
-    const skillsPrompt = resolveSkillsPrompt({
+    const skillsPrompt = await resolveSkillsPrompt({
+      assertCurrent: params.assertCurrent,
       contextTokenBudget: params.attempt.contextTokenBudget,
       skillsSnapshot,
       entries: promptSkillEntries,
@@ -106,6 +100,21 @@ export function prepareEmbeddedSkills(params: {
       eligibility: skillsEligibility,
       preserveEntryOrder,
     });
+    params.assertCurrent?.();
+    // Preparation may yield to abort/revocation. Apply process-wide overrides only
+    // once all filesystem work has settled and this caller can take custody.
+    restoreSkillEnv =
+      params.applySkillEnvironment === false
+        ? () => {}
+        : skillsSnapshot
+          ? applySkillEnvOverridesFromSnapshot({
+              snapshot: skillsSnapshot,
+              config: params.attempt.config,
+            })
+          : applySkillEnvOverrides({
+              skills: skillEntries,
+              config: params.attempt.config,
+            });
     const sandbox = params.sandbox;
     const sandboxSkillReader: CodeModeSkillReader | undefined = sandbox?.enabled
       ? async ({ location, signal }) => {
@@ -129,8 +138,14 @@ export function prepareEmbeddedSkills(params: {
           reader: sandboxSkillReader,
         })
       : [];
+    // Host read exceptions use exact eligible resources without changing model visibility.
+    // Sandboxes keep their existing materialized paths; never resolve host library pins there.
+    const skillReadResources = params.sandbox?.enabled
+      ? undefined
+      : resolveSkillResourceCandidates(skillsSnapshot);
     return {
       restoreSkillEnv,
+      skillReadResources,
       skillUsagePaths,
       skillsPrompt,
       skillsSnapshotForRun: skillsSnapshot,

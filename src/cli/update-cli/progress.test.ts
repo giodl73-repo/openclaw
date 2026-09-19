@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getUpdateRun } from "../../infra/update-run-ledger.js";
 import type { UpdateRunRecord } from "../../infra/update-run-record.js";
 import { defaultRuntime } from "../../runtime.js";
+import { formatCliJsonFailure } from "../failure-output.js";
 import { createUpdateProgress, printResult } from "./progress.js";
 
 vi.mock("../../infra/update-run-ledger.js", () => ({ getUpdateRun: vi.fn() }));
@@ -79,6 +80,209 @@ describe("update progress", () => {
       "Phase: validating",
     ]);
     expect(lines.join("\n")).toContain("Build type error");
+  });
+
+  it("does not leave a phase observer after initial observation fails", () => {
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+    vi.mocked(getUpdateRun).mockImplementationOnce(() => {
+      throw new Error("initial ledger read failed");
+    });
+    try {
+      expect(() => createUpdateProgress(true, context)).toThrow("initial ledger read failed");
+      run.phase = "verifying";
+      run.steps = [
+        { step: "requested", status: "completed" },
+        { step: "verifying", status: "in_progress" },
+      ];
+      printResult(result, { run: context });
+      const lines = log.mock.calls.flat();
+      expect(lines.join("\n")).toContain("OpenClaw update in progress: verifying.");
+      expect(lines.filter((line) => typeof line === "string" && line.startsWith("Phase:"))).toEqual(
+        [],
+      );
+    } finally {
+      // Replace and dispose a leaked observer when this regression runs on old code.
+      vi.mocked(getUpdateRun).mockImplementation(() => run);
+      presentation = createUpdateProgress(true, context);
+      presentation.dispose();
+      presentation = undefined;
+    }
+  });
+
+  it("releases the terminal spinner when its final ledger read fails", () => {
+    vi.useFakeTimers();
+    vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+    const timerCount = vi.getTimerCount();
+    const signals = ["SIGINT", "SIGTERM"] as const;
+    const listenerCounts = signals.map((signal) => process.listenerCount(signal));
+    presentation = createUpdateProgress(true, context);
+    presentation.progress.onStepStart?.(step);
+    expect(vi.getTimerCount()).toBeGreaterThan(timerCount);
+    const failure = new Error("final ledger read failed");
+    vi.mocked(getUpdateRun).mockImplementationOnce(() => {
+      throw failure;
+    });
+
+    expect(() => presentation?.dispose()).toThrow(failure);
+
+    expect(vi.getTimerCount()).toBe(timerCount);
+    expect(signals.map((signal) => process.listenerCount(signal))).toEqual(listenerCounts);
+  });
+
+  it("keeps unbound step presentation independent of ledger records", () => {
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+    presentation = createUpdateProgress(true);
+    run.phase = "validating";
+    run.steps.push({ step: "validating", status: "in_progress" });
+    vi.mocked(getUpdateRun).mockImplementation(() => {
+      throw new Error("unbound presentation must not read the ledger");
+    });
+    try {
+      presentation.progress.onStepStart?.(step, run);
+      presentation.progress.onStepComplete?.(
+        { ...step, durationMs: 1200, exitCode: 1, stdoutTail: "Build type error" },
+        run,
+      );
+      expect(log).toHaveBeenCalledWith("build...");
+      expect(log.mock.calls.flat().join("\n")).toContain("Build type error");
+      expect(
+        log.mock.calls
+          .flat()
+          .filter((line) => typeof line === "string" && line.startsWith("Phase:")),
+      ).toEqual([]);
+    } finally {
+      vi.mocked(getUpdateRun).mockImplementation(() => run);
+    }
+  });
+
+  it.each([true, false])(
+    "renders the report and phases from one snapshot (present: %s)",
+    (present) => {
+      const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+      presentation = createUpdateProgress(true, context);
+      const captured: UpdateRunRecord = {
+        ...run,
+        phase: "verifying",
+        steps: [
+          { step: "requested", status: "completed" },
+          { step: "verifying", status: "in_progress" },
+        ],
+      };
+      const later: UpdateRunRecord = {
+        ...captured,
+        phase: "repairing",
+        steps: [
+          { step: "requested", status: "completed" },
+          { step: "verifying", status: "completed" },
+          { step: "repairing", status: "in_progress" },
+        ],
+      };
+      vi.mocked(getUpdateRun)
+        .mockReturnValueOnce(present ? captured : undefined)
+        .mockReturnValue(later);
+      try {
+        printResult(result, { run: context });
+        const lines = log.mock.calls.flat();
+        expect(
+          lines.filter((line) => typeof line === "string" && line.startsWith("Phase:")),
+        ).toEqual(present ? ["Phase: requested", "Phase: verifying"] : ["Phase: requested"]);
+        expect(lines.join("\n")).toContain(
+          present ? "OpenClaw update in progress: verifying." : "OpenClaw updated.",
+        );
+        expect(log).not.toHaveBeenCalledWith("Phase: repairing");
+      } finally {
+        vi.mocked(getUpdateRun).mockImplementation(() => run);
+      }
+    },
+  );
+
+  it("prints the exact repair command from a recoverable step", () => {
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+    presentation = createUpdateProgress(true, context);
+    const message =
+      "Skipped temporary cleanup. Run: rm -rf -- '/opt/update fixture/candidate'. Reason: permission denied";
+    presentation.progress.onStepComplete?.({
+      ...step,
+      durationMs: 1,
+      exitCode: 1,
+      stderrTail: "permission denied",
+      advisory: { kind: "recoverable-maintenance", message },
+    });
+    expect(log.mock.calls.flat().join("\n")).toContain(message);
+  });
+
+  it("shows recorded failure facts without replaying the child error envelope", () => {
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+    presentation = createUpdateProgress(true, context);
+    const envelope = formatCliJsonFailure(new Error("Unable to load plugin"), {
+      argv: [],
+      env: {},
+    });
+    const failed = {
+      ...step,
+      durationMs: 1,
+      exitCode: 1,
+      stdoutTail: JSON.stringify(envelope),
+      stderrTail:
+        "[openclaw] The CLI command failed.\n[openclaw] Reason: Unable to load plugin\n[openclaw] Help: openclaw --help",
+      failureFacts: [{ check: "doctor", code: "doctor-failed", message: "Unable to load plugin" }],
+    };
+    presentation.progress.onStepComplete?.(failed);
+    const progress = log.mock.calls.flat().join("\n");
+    expect(progress.match(/Unable to load plugin/gu)).toHaveLength(1);
+    expect(progress).not.toContain("The CLI command failed");
+    log.mockClear();
+    printResult(
+      { ...result, runId: undefined, status: "error", steps: [{ ...failed, cwd: "/fixture" }] },
+      {},
+    );
+    const report = log.mock.calls.flat().join("\n");
+    expect(report.match(/Unable to load plugin/gu)).toHaveLength(1);
+    expect(report).not.toContain("Help: openclaw --help");
+    for (const stdoutTail of [
+      "Additional diagnostic",
+      JSON.stringify({ ...envelope, details: "Additional diagnostic" }),
+    ]) {
+      log.mockClear();
+      const detailed = { ...failed, stdoutTail, cwd: "/fixture" };
+      presentation.progress.onStepComplete?.(detailed);
+      expect(log.mock.calls.flat().join("\n")).toContain("Additional diagnostic");
+      log.mockClear();
+      printResult({ ...result, runId: undefined, status: "error", steps: [detailed] }, {});
+      expect(log.mock.calls.flat().join("\n")).toContain("Additional diagnostic");
+    }
+    log.mockClear();
+    printResult(
+      {
+        ...result,
+        runId: undefined,
+        status: "error",
+        steps: [
+          {
+            ...failed,
+            cwd: "/fixture",
+            stdoutTail: "x".repeat(160),
+            stderrTail: `[openclaw] Reason: Unable to load plugin\nDistinct detail ${"y".repeat(160)}\n[openclaw] Help: openclaw --help\ndoctor: Candidate doctor failed (deadline exceeded) (1000ms)`,
+          },
+        ],
+      },
+      {},
+    );
+    expect(log.mock.calls.flat().join("\n")).toContain("deadline exceeded");
+    log.mockClear();
+    presentation.progress.onStepComplete?.({
+      ...failed,
+      stdoutTail: undefined,
+      stderrTail: undefined,
+    });
+    expect(
+      log.mock.calls
+        .flat()
+        .join("\n")
+        .match(/Unable to load plugin/gu),
+    ).toHaveLength(1);
   });
 
   it("follows restart verification after step progress stops and flushes before the final report", async () => {

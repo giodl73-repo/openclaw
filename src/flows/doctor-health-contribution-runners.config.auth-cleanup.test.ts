@@ -17,7 +17,8 @@ vi.mock("../commands/doctor/shared/config-flow-steps.js", () => ({
   restoreDoctorConfigEnvRefs: (cfg: OpenClawConfig) => cfg,
 }));
 
-vi.mock("../config/config.js", () => ({
+vi.mock("../config/config.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config/config.js")>()),
   transformConfigFile: async ({
     transform,
     ...options
@@ -27,7 +28,8 @@ vi.mock("../config/config.js", () => ({
       { snapshot: createDoctorConfigSnapshot(), previousHash: null, attempt: 0 },
       {},
     );
-    return mocks.replaceConfigFile({ ...options, nextConfig });
+    await mocks.replaceConfigFile({ ...options, nextConfig });
+    return { nextConfig };
   },
 }));
 

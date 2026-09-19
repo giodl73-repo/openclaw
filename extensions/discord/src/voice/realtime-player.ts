@@ -1,17 +1,20 @@
 import type { AudioPlayer, AudioResource } from "@discordjs/voice";
 import { loadDiscordVoiceSdk } from "./sdk-runtime.js";
 
+export const DISCORD_REALTIME_PLAYBACK_IDLE_MS = 2_000;
+
 export type DiscordRealtimePlayerRequest = {
+  isReady: () => boolean;
   createResource: () => AudioResource;
   onStart: () => void;
   onIdle: () => void;
-  onBargeIn: (reason: string) => void;
+  onBargeIn: (reason: string) => boolean;
   onError: (error: unknown) => void;
 };
 
 type DiscordRealtimePlayerLane = {
   hasOutput: () => boolean;
-  onBargeIn: (reason: string) => void;
+  onBargeIn: (reason: string) => boolean;
   cancelForControl: () => void;
 };
 
@@ -40,16 +43,31 @@ export class DiscordRealtimePlayer {
   }
 
   enqueue(request: DiscordRealtimePlayerRequest): void {
-    if (this.closed || this.current === request || this.queue.includes(request)) {
+    if (this.closed || this.current === request) {
       return;
     }
-    this.queue.push(request);
+    if (!this.queue.includes(request)) {
+      this.queue.push(request);
+    }
     this.drain();
+  }
+
+  isRetiring(request: DiscordRealtimePlayerRequest): boolean {
+    if (this.current !== request) {
+      return false;
+    }
+    const state = this.player.state;
+    // Once padding starts, the SDK cannot read new PCM even before it emits Idle.
+    return (
+      state.status !== loadDiscordVoiceSdk().AudioPlayerStatus.Idle &&
+      state.resource.silenceRemaining >= 0
+    );
   }
 
   cancel(request: DiscordRealtimePlayerRequest): void {
     this.queue = this.queue.filter((queued) => queued !== request);
     if (this.current !== request) {
+      this.drain();
       return;
     }
     // stop(true) emits Idle synchronously. Retire ownership before stopping so
@@ -58,16 +76,17 @@ export class DiscordRealtimePlayer {
     this.transition(() => this.player.stop(true));
   }
 
-  handleBargeIn(reason = "barge-in"): void {
-    if (this.current) {
-      this.current.onBargeIn(reason);
-      return;
+  handleBargeIn(reason = "barge-in"): boolean {
+    const current = this.current;
+    if (current) {
+      return current.onBargeIn(reason);
     }
-    for (const lane of this.lanes) {
-      if (lane.hasOutput()) {
-        lane.onBargeIn(reason);
-      }
+    let interrupted = false;
+    const activeLanes = Array.from(this.lanes).filter((lane) => lane.hasOutput());
+    for (const lane of activeLanes) {
+      interrupted = lane.onBargeIn(reason) || interrupted;
     }
+    return interrupted;
   }
 
   isActive(): boolean {
@@ -94,7 +113,8 @@ export class DiscordRealtimePlayer {
     this.player.stop(true);
   }
 
-  private transition(action: () => void): void {
+  /** Prevent retiring one lane from granting playback to a sibling that is also retiring. */
+  transition(action: () => void): void {
     const wasChanging = this.changing;
     this.changing = true;
     try {
@@ -109,10 +129,11 @@ export class DiscordRealtimePlayer {
     if (this.closed || this.changing || this.current) {
       return;
     }
-    const next = this.queue.shift();
-    if (!next) {
+    const next = this.queue[0];
+    if (!next?.isReady()) {
       return;
     }
+    this.queue.shift();
     this.current = next;
     this.transition(() => {
       try {

@@ -130,8 +130,10 @@ Other surfaces:
 - **TUI/Web TUI:** `/status` and `/usage` are supported.
 - **CLI:** `openclaw status --usage` and `openclaw channels list` show
   normalized provider quota windows (`X% left`, not per-response costs).
-  Current usage-window providers: Claude (Anthropic), ClawRouter, Copilot
-  (GitHub), DeepSeek, MiniMax, OpenAI, Xiaomi, Xiaomi Token Plan, and z.ai.
+  Usage-window providers, checked against 2026.9.3: Claude (Anthropic),
+  ClawRouter, Copilot (GitHub), DeepSeek, MiniMax, OpenAI, OpenRouter, Venice,
+  xAI, Xiaomi, Xiaomi Token Plan, and z.ai. Provider plugins supply these
+  snapshots, so an installed plugin can add one.
 
 Usage surfaces normalize common provider-native field aliases before
 display. For OpenAI-family Responses traffic, that includes both
@@ -224,6 +226,10 @@ hosted catalog traffic on offline or restricted networks; bundled pricing still
 works. Agent-local `models.json` prices take precedence over explicit
 `models.providers.*.models[].cost` entries, and both override catalog estimates,
 including explicit flat and zero rates.
+
+When the Gateway writes updated agent-local `models.json` prices, subsequent
+local estimates use those rates without a restart. Recorded per-call costs keep
+their original amounts.
 
 OpenRouter `:nitro` and `:floor` routing shortcuts use the base model's catalog
 estimate when the exact shortcut has no price. Recorded costs and explicit

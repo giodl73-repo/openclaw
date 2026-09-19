@@ -14,7 +14,11 @@ export type SandboxBackendId = string;
 export type SandboxBackendExecSpec = {
   argv: string[];
   env: NodeJS.ProcessEnv;
+  /** Local transport cwd, independent of the remote command's workdir. */
+  cwd?: string;
   stdinMode: "pipe-open" | "pipe-closed";
+  /** Synchronously revalidate runtime authority at deferred process admission. */
+  assertCurrent?: () => void;
   finalizeToken?: unknown;
 };
 
@@ -50,6 +54,7 @@ export type SandboxFsBridgeContext = {
   containerWorkdir: string;
   docker: {
     binds?: string[];
+    tmpfs?: string[];
   };
   backend?: {
     runShellCommand(params: SandboxBackendCommandParams): Promise<SandboxBackendCommandResult>;
@@ -79,6 +84,7 @@ export type SandboxBackendHandle = {
   workdirRoots?: readonly string[];
   capabilities?: {
     browser?: boolean;
+    readOnlyResourceMounts?: boolean;
   };
   buildExecSpec(params: {
     command: string;

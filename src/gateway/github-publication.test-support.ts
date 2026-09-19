@@ -8,7 +8,10 @@ import { insertRegistryWorktree } from "../agents/worktrees/registry.js";
 import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../config/config.js";
 import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
 import { insertGitHubPublicationSessionLifecycle } from "../state/github-publication-session-lifecycles.js";
-import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
+import {
+  closeOpenClawAgentDatabasesAsync,
+  closeOpenClawAgentDatabasesForTest,
+} from "../state/openclaw-agent-db.js";
 import {
   closeOpenClawStateDatabaseForTest,
   type OpenClawStateDatabase,
@@ -42,6 +45,7 @@ vi.mock("../agents/github-tool-identity.js", async (importOriginal) => {
     ...actual,
     matchesPreparedGitHubPublicationIdentity: mocks.matchesIdentity,
     prepareGitHubPublicationIdentity: mocks.prepareIdentity,
+    prepareGitHubPublicationOptionsIdentity: mocks.prepareIdentity,
   };
 });
 
@@ -191,7 +195,8 @@ export let commandCalls: Array<{ argv: string[]; input?: string }>;
 export async function persistPublicationTestSession(sessionKey = SESSION_KEY) {
   setRuntimeConfigSnapshot({
     agents: { list: [{ id: "main", default: true, workspace: path.join(root, "workspace") }] },
-    session: { store: path.join(root, "sessions.json") },
+    // Publication fixtures exercise lifecycle writes without unrelated maintenance workers.
+    session: { store: path.join(root, "sessions.json"), maintenance: { mode: "warn" } },
   });
   const { loadGatewaySessionEntryReadOnly } =
     await vi.importActual<typeof import("./session-utils.js")>("./session-utils.js");
@@ -325,7 +330,7 @@ export function installGitHubPublicationTestHarness(): void {
         worktree: { id: "worktree-1", branch: BRANCH, repoRoot: "/repo" },
       },
     }));
-    let remoteLookup = 0;
+    let remotePublished = false;
     mocks.runCommand
       .mockReset()
       .mockImplementation(async (argv: string[], options?: { input?: string }) => {
@@ -397,9 +402,6 @@ export function installGitHubPublicationTestHarness(): void {
         if (command === "git rev-parse HEAD^") {
           return commandResult(`${OLD_HEAD}\n`);
         }
-        if (command === `git reflog show --format=%H --end-of-options refs/heads/${BRANCH}`) {
-          return commandResult(`${NEW_HEAD}\n${OLD_HEAD}\n`);
-        }
         if (command.startsWith("git commit-tree ")) {
           return commandResult(`${NEW_HEAD}\n`);
         }
@@ -411,8 +413,11 @@ export function installGitHubPublicationTestHarness(): void {
             "git -c credential.helper= -c credential.helper=!gh auth git-credential ls-remote",
           )
         ) {
-          remoteLookup += 1;
-          return commandResult(remoteLookup === 1 ? "" : `${NEW_HEAD}\trefs/heads/${BRANCH}\n`);
+          return commandResult(remotePublished ? `${NEW_HEAD}\trefs/heads/${BRANCH}\n` : "");
+        }
+        if (argv.includes("push")) {
+          remotePublished = true;
+          return commandResult();
         }
         if (command.includes(" repos/openclaw/openclaw/pulls ") && command.includes("state=all")) {
           return commandResult("[]\n");
@@ -428,6 +433,7 @@ export function installGitHubPublicationTestHarness(): void {
   });
 
   afterEach(async () => {
+    await closeOpenClawAgentDatabasesAsync();
     clearRuntimeConfigSnapshot();
     // Agent close releases leases through shared state; closing shared state first can
     // reopen it during teardown and leave a Windows handle under the fixture root.
@@ -440,7 +446,7 @@ export function installGitHubPublicationTestHarness(): void {
 
 /** Real local Git/index with synthetic remote effects; no credential helper reaches a subprocess. */
 export async function createRealPublicationWorkspace(
-  interruptAt: "push" | "observe" | "index" | "create",
+  interruptAt?: "push" | "observe" | "index" | "create",
 ) {
   const { runCommandBuffered } =
     await vi.importActual<typeof import("../process/exec.js")>("../process/exec.js");

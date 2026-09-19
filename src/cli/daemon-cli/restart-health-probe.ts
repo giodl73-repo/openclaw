@@ -1,4 +1,5 @@
 import { redactSensitiveUrlLikeString } from "@openclaw/net-policy/redact-sensitive-url";
+import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import {
@@ -23,7 +24,10 @@ import { inspectPortUsage } from "../../infra/ports-inspect.js";
 import { LOOPBACK_PORT_PROBE_HOSTS } from "../../infra/ports-probe.js";
 import type { PortUsage } from "../../infra/ports-types.js";
 import { sleep } from "../../utils.js";
-import type { GatewayPortHealthSnapshot } from "./restart-health.types.js";
+import type {
+  GatewayPortHealthSnapshot,
+  UnavailablePluginHealthSummary,
+} from "./restart-health.types.js";
 import { allListenersOwnedByRuntimePid } from "./restart-port-ownership.js";
 
 export type GatewayRestartProbeAuth = {
@@ -34,8 +38,10 @@ export type GatewayRestartProbeAuth = {
 export type GatewayReachability = {
   reachable: boolean;
   gatewayVersion: string | null;
+  gatewayBootId?: string;
   gatewayBuildId: string | null | undefined;
   activatedPluginErrors: PluginHealthErrorSummary[];
+  unavailablePlugins: UnavailablePluginHealthSummary[];
   channelProbeErrors: Array<{ id: string; error: string }>;
   probeError?: string;
 };
@@ -51,6 +57,7 @@ export async function waitForGatewayHttpReadiness(params: {
   config?: OpenClawConfig;
   deadlineAt: number;
   delayMs: number;
+  probeTimeoutMs?: number;
   port: number;
   signal?: AbortSignal;
 }): Promise<GatewayHttpReadiness> {
@@ -69,7 +76,7 @@ export async function waitForGatewayHttpReadiness(params: {
           host: "127.0.0.1",
           pathname: "/healthz",
           port: params.port,
-          timeoutMs: Math.min(remainingMs, 3_000),
+          timeoutMs: Math.min(remainingMs, params.probeTimeoutMs ?? 3_000),
           ...(params.signal ? { signal: params.signal } : {}),
         })
         .then((result) => result?.statusCode ?? null),
@@ -78,7 +85,7 @@ export async function waitForGatewayHttpReadiness(params: {
           host: "127.0.0.1",
           pathname: "/readyz",
           port: params.port,
-          timeoutMs: Math.min(remainingMs, 3_000),
+          timeoutMs: Math.min(remainingMs, params.probeTimeoutMs ?? 3_000),
           ...(params.signal ? { signal: params.signal } : {}),
         })
         .then((result) => result?.statusCode ?? null),
@@ -141,77 +148,77 @@ function isGatewayAuthRejection(reason: string): boolean {
 }
 
 function readActivatedPluginErrors(health: unknown): PluginHealthErrorSummary[] {
-  if (!health || typeof health !== "object") {
-    return [];
-  }
-  const plugins = (health as { plugins?: unknown }).plugins;
-  if (!plugins || typeof plugins !== "object") {
-    return [];
-  }
-  const errors = (plugins as { errors?: unknown }).errors;
+  const errors = asOptionalRecord(asOptionalRecord(health)?.plugins)?.errors;
   if (!Array.isArray(errors)) {
     return [];
   }
-  return errors
-    .filter((entry): entry is PluginHealthErrorSummary => {
-      if (!entry || typeof entry !== "object") {
-        return false;
-      }
-      const candidate = entry as Partial<PluginHealthErrorSummary>;
-      return (
-        candidate.activated === true &&
-        typeof candidate.id === "string" &&
-        typeof candidate.error === "string"
-      );
-    })
-    .map((entry) => {
-      const error: PluginHealthErrorSummary = {
-        id: entry.id,
-        origin: typeof entry.origin === "string" ? entry.origin : "unknown",
-        activated: true,
-        error: entry.error,
-      };
-      if (typeof entry.activationSource === "string") {
-        error.activationSource = entry.activationSource;
-      }
-      if (typeof entry.activationReason === "string") {
-        error.activationReason = entry.activationReason;
-      }
-      if (typeof entry.failurePhase === "string") {
-        error.failurePhase = entry.failurePhase;
-      }
-      return error;
-    });
+  return errors.flatMap((value) => {
+    const entry = asOptionalRecord(value);
+    if (
+      entry?.activated !== true ||
+      typeof entry.id !== "string" ||
+      typeof entry.error !== "string"
+    ) {
+      return [];
+    }
+    const error: PluginHealthErrorSummary = {
+      id: entry.id,
+      origin: typeof entry.origin === "string" ? entry.origin : "unknown",
+      activated: true,
+      error: entry.error,
+    };
+    if (typeof entry.activationSource === "string") {
+      error.activationSource = entry.activationSource;
+    }
+    if (typeof entry.activationReason === "string") {
+      error.activationReason = entry.activationReason;
+    }
+    if (typeof entry.failurePhase === "string") {
+      error.failurePhase = entry.failurePhase;
+    }
+    return [error];
+  });
 }
 
 function readChannelProbeErrors(health: unknown): Array<{ id: string; error: string }> {
-  if (!health || typeof health !== "object") {
-    return [];
-  }
-  const channels = (health as { channels?: unknown }).channels;
-  if (!channels || typeof channels !== "object" || Array.isArray(channels)) {
+  const channels = asOptionalRecord(asOptionalRecord(health)?.channels);
+  if (!channels) {
     return [];
   }
   const errors: Array<{ id: string; error: string }> = [];
   for (const [id, summary] of Object.entries(channels)) {
-    if (!summary || typeof summary !== "object") {
+    const probe = asOptionalRecord(asOptionalRecord(summary)?.probe);
+    if (probe?.ok !== false) {
       continue;
     }
-    const probe = (summary as { probe?: unknown }).probe;
-    if (!probe || typeof probe !== "object") {
-      continue;
-    }
-    const ok = (probe as { ok?: unknown }).ok;
-    if (ok !== false) {
-      continue;
-    }
-    const error = (probe as { error?: unknown }).error;
+    const error = probe.error;
     errors.push({
       id,
       error: typeof error === "string" && error.trim() ? error : "probe failed",
     });
   }
   return errors;
+}
+
+function readUnavailablePlugins(health: unknown): UnavailablePluginHealthSummary[] {
+  const unavailable = asOptionalRecord(asOptionalRecord(health)?.plugins)?.unavailable;
+  if (!Array.isArray(unavailable)) {
+    return [];
+  }
+  return unavailable.flatMap((entry) => {
+    const plugin = asOptionalRecord(entry);
+    const diagnostic = asOptionalRecord(plugin?.diagnostic);
+    if (
+      typeof plugin?.id !== "string" ||
+      plugin.state !== "configured-unavailable" ||
+      diagnostic?.kind !== "plugin-verification" ||
+      typeof diagnostic.reason !== "string" ||
+      typeof diagnostic.detail !== "string"
+    ) {
+      return [];
+    }
+    return [{ id: plugin.id, reason: diagnostic.reason, detail: diagnostic.detail }];
+  });
 }
 
 export async function confirmGatewayReachable(params: {
@@ -222,6 +229,7 @@ export async function confirmGatewayReachable(params: {
   env?: NodeJS.ProcessEnv;
   allowDeviceIdentityRequired?: boolean;
   signal?: AbortSignal;
+  timeoutMs?: number;
 }): Promise<GatewayReachability> {
   params.signal?.throwIfAborted();
   const result: GatewayReachability = {
@@ -229,6 +237,7 @@ export async function confirmGatewayReachable(params: {
     gatewayVersion: null,
     gatewayBuildId: undefined,
     activatedPluginErrors: [],
+    unavailablePlugins: [],
     channelProbeErrors: [],
   };
   try {
@@ -238,7 +247,7 @@ export async function confirmGatewayReachable(params: {
     const auth = params.auth ?? context.auth;
     const configuredProbe =
       params.configuredProbe ?? createConfiguredGatewayLocalProbe(context.config);
-    const target = await configuredProbe.resolveWebSocketTarget(params.port);
+    const target = await configuredProbe.resolveWebSocketTarget(params.port, params.signal);
     if (!target) {
       return { ...result, gatewayBuildId: null, probeError: "gateway TLS certificate unavailable" };
     }
@@ -260,15 +269,17 @@ export async function confirmGatewayReachable(params: {
       requireLocalBackendSharedAuth: authNone,
       deviceIdentity: null,
       sharedStateMode: "read-only",
-      timeoutMs: 3_000,
+      timeoutMs: params.timeoutMs ?? 3_000,
       ...(params.signal ? { signal: params.signal } : {}),
       onHelloOk: (hello) => {
         result.gatewayVersion = hello.server.version;
+        result.gatewayBootId = hello.server.bootId;
         result.gatewayBuildId = hello.server.buildId ?? null;
       },
     });
     result.reachable = true;
     result.activatedPluginErrors = readActivatedPluginErrors(health);
+    result.unavailablePlugins = readUnavailablePlugins(health);
     result.channelProbeErrors = readChannelProbeErrors(health);
   } catch (error) {
     params.signal?.throwIfAborted();

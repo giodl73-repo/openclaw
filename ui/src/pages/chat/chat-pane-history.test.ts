@@ -43,6 +43,25 @@ describe("chat pane native history pagination", () => {
     expect(pane.chatProps?.userAvatar).toBe(user.avatarUrl);
   });
 
+  it("reuses the last resolved viewer identity while reconnecting drops selfUser", () => {
+    const { pane, context } = createRefreshChatPane();
+    const user = {
+      id: "profile-viewer",
+      name: "Viewer",
+      identity: { type: "profile" as const, id: "profile-viewer" },
+    };
+    context.gateway.snapshot.selfUser = user;
+    pane.render();
+    expect(pane.chatProps?.userId).toBe("profile-viewer");
+
+    // A reconnect briefly clears selfUser; peer alignment must not flash by
+    // falling back to null. The last resolved identity is presentation-only
+    // (alignment + sender label), never authorization.
+    context.gateway.snapshot.selfUser = null;
+    pane.render();
+    expect(pane.chatProps?.userId).toBe("profile-viewer");
+  });
+
   it.each(["pending", "resolved"] as const)(
     "keeps a %s people query selectable when selected-session metadata hydrates",
     async (replyState) => {
@@ -253,7 +272,7 @@ describe("chat pane native history pagination", () => {
     expect(pane.hasOlderMessages()).toBe(false);
   });
 
-  it("loads at the top through the canonical path and reveals the prepended window", async () => {
+  it("loads at the top through the canonical path without commanding a viewport jump", async () => {
     const request = vi.fn(async () => ({
       messages: [nativeHistoryMessage(1), nativeHistoryMessage(2)],
       hasMore: true,
@@ -262,18 +281,18 @@ describe("chat pane native history pagination", () => {
     }));
     const { pane, scrollToOffset, state } = createNativeShowEarlierPane(request);
 
-    await pane.showEarlierMessages();
+    await pane.loadOlderMessages();
 
     expect(request).toHaveBeenCalledWith("chat.history", {
       sessionKey: state.sessionKey,
       limit: 1000,
+      maxBytes: 512 * 1024,
       offset: 2,
     });
     expect(state.chatMessages.map(nativeHistorySeq)).toEqual([1, 2, 3, 4]);
-    expect(scrollToOffset).toHaveBeenCalledWith(0);
-    expect(pane.transcriptScrollTop).toBe(0);
+    expect(scrollToOffset).not.toHaveBeenCalled();
     expect(pane.historyObserverArmed).toBe(false);
-    expect(pane.historyAutoLoadBlocked).toBe(true);
+    expect(pane.historyAutoLoadBlocked).toBe(false);
   });
 
   it("publishes prepended history to the shared session snapshot", async () => {
@@ -371,7 +390,7 @@ describe("chat pane native history pagination", () => {
     vi.spyOn(pane, "updateComplete", "get").mockReturnValue(Promise.resolve(true));
     const scrollToOffset = vi.spyOn(pane.transcript, "scrollToOffset");
 
-    await pane.showEarlierMessages();
+    await pane.loadOlderMessages();
 
     expect(request).toHaveBeenCalledWith(
       "sessions.catalog.read",
@@ -379,7 +398,7 @@ describe("chat pane native history pagination", () => {
     );
     expect(pane.catalogMessages).toHaveLength(1);
     expect(pane.catalogCursor).toBeUndefined();
-    expect(scrollToOffset).toHaveBeenCalledWith(0);
+    expect(scrollToOffset).not.toHaveBeenCalled();
   });
 
   it("keeps the viewport and pagination retryable when the older load fails", async () => {
@@ -388,7 +407,7 @@ describe("chat pane native history pagination", () => {
     });
     const { pane, scrollToOffset, state, thread } = createNativeShowEarlierPane(request);
 
-    await pane.showEarlierMessages();
+    await pane.loadOlderMessages();
 
     expect(thread.scrollTop).toBe(0);
     expect(state.chatHistoryPagination).toMatchObject({ hasMore: true });
@@ -403,14 +422,14 @@ describe("chat pane native history pagination", () => {
     const { pane, thread } = createNativeShowEarlierPane(request);
     pane.transcriptScrollTop = 500;
 
-    await pane.showEarlierMessages();
+    await pane.loadOlderMessages();
     pane.handleTranscriptScroll({ currentTarget: thread, target: thread } as unknown as Event);
 
     expect(pane.historyAutoLoadBlocked).toBe(true);
     expect(request).toHaveBeenCalledOnce();
   });
 
-  it("joins an in-flight canonical load before revealing its earlier window", async () => {
+  it("joins an in-flight canonical load without commanding a viewport jump", async () => {
     const deferred = createDeferred<{
       messages: unknown[];
       hasMore: boolean;
@@ -420,7 +439,7 @@ describe("chat pane native history pagination", () => {
     const { pane, scrollToOffset } = createNativeShowEarlierPane(request);
 
     const automaticLoad = pane.loadOlderMessages();
-    const manualNavigation = pane.showEarlierMessages();
+    const manualNavigation = pane.loadOlderMessages();
     deferred.resolve({
       messages: [nativeHistoryMessage(1), nativeHistoryMessage(2)],
       hasMore: false,
@@ -429,28 +448,18 @@ describe("chat pane native history pagination", () => {
     await Promise.all([automaticLoad, manualNavigation]);
 
     expect(request).toHaveBeenCalledOnce();
-    expect(scrollToOffset).toHaveBeenCalledOnce();
-    expect(scrollToOffset).toHaveBeenCalledWith(0);
+    expect(scrollToOffset).not.toHaveBeenCalled();
   });
 
-  it("does not navigate a replacement session after an older load settles", async () => {
-    const client = { request: vi.fn() } as unknown as GatewayBrowserClient;
-    const { pane, state } = createTestChatPane({ client });
-    state.chatHistoryPagination = { hasMore: true, nextOffset: 2 };
-    appendChatThread(pane);
-    const loaded = createDeferred<boolean>();
-    const committed = createDeferred<boolean>();
-    vi.spyOn(pane, "loadOlderMessages").mockReturnValue(loaded.promise);
-    vi.spyOn(pane, "updateComplete", "get").mockReturnValue(committed.promise);
-    const scrollToOffset = vi.spyOn(pane.transcript, "scrollToOffset");
-
-    const navigation = pane.showEarlierMessages();
-    loaded.resolve(true);
-    await Promise.resolve();
+  it("does not apply older history to a replacement session", async () => {
+    const older = createDeferred<ChatHistoryResult>();
+    const { pane, state, scrollToOffset } = createNativeShowEarlierPane(vi.fn(() => older.promise));
+    const loading = pane.loadOlderMessages();
     state.sessionKey = "agent:main:replacement";
-    committed.resolve(true);
-    await navigation;
-
+    state.chatMessages = [];
+    older.resolve({ messages: [nativeHistoryMessage(1)], hasMore: false, totalMessages: 1 });
+    await loading;
+    expect(state.chatMessages).toEqual([]);
     expect(scrollToOffset).not.toHaveBeenCalled();
   });
 
@@ -552,6 +561,7 @@ describe("chat pane native history pagination", () => {
       expect(request).toHaveBeenCalledWith("chat.history", {
         sessionKey: state.sessionKey,
         limit: 1000,
+        maxBytes: 512 * 1024,
         offset: 2,
       });
       expect(observedRootMargin).toBe("1200px 0px 0px");
@@ -571,6 +581,7 @@ describe("chat pane native history pagination", () => {
     expect(request).toHaveBeenNthCalledWith(2, "chat.history", {
       sessionKey: state.sessionKey,
       limit: 1000,
+      maxBytes: 512 * 1024,
       offset: 4,
     });
     await vi.waitFor(() => expect(pane.stagedOlderPage).not.toBeNull());
@@ -588,6 +599,7 @@ describe("chat pane native history pagination", () => {
     expect(request).toHaveBeenNthCalledWith(3, "chat.history", {
       sessionKey: state.sessionKey,
       limit: 1000,
+      maxBytes: 512 * 1024,
       offset: 6,
     });
   });
@@ -635,6 +647,7 @@ describe("chat pane native history pagination", () => {
     expect(request).toHaveBeenLastCalledWith("chat.history", {
       sessionKey: state.sessionKey,
       limit: 1000,
+      maxBytes: 512 * 1024,
       offset: 5,
     });
     expect(state.chatMessages.map(nativeHistorySeq)).toEqual([31, 32, 5, 6, 7, 8]);
@@ -883,6 +896,7 @@ describe("chat pane native history pagination", () => {
     expect(request).toHaveBeenCalledWith("chat.history", {
       sessionKey: state.sessionKey,
       limit: 1000,
+      maxBytes: 512 * 1024,
       offset: 2,
     });
     expect(state.chatMessages.map(nativeHistorySeq)).toEqual([1, 2, 3, 4]);
@@ -943,12 +957,14 @@ describe("chat pane native history pagination", () => {
     expect(request).toHaveBeenNthCalledWith(1, "chat.history", {
       sessionKey: state.sessionKey,
       limit: 1000,
+      maxBytes: 512 * 1024,
       offset: 2,
     });
     expect(request).toHaveBeenNthCalledWith(
       2,
       "chat.history",
       expect.objectContaining({ sessionKey: state.sessionKey, limit: 80, maxBytes: 256 * 1024 }),
+      { signal: expect.any(AbortSignal) },
     );
     expect(state.currentSessionId).toBe("session-new");
     expect(state.chatMessages.map(nativeHistorySeq)).toEqual([7, 8]);

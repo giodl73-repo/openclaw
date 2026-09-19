@@ -13,6 +13,10 @@ export type VitestShardTimingSpec = {
   config: string;
   env?: NodeJS.ProcessEnv;
   includePatterns?: readonly string[] | null;
+  /** Exact chunk files for scheduling; does not configure execution filtering. */
+  timingTargets?: readonly string[];
+  /** Inherited filter identity, captured before its producer can remove the file. */
+  timingIncludePatterns?: readonly string[];
   watchMode?: boolean;
 };
 
@@ -95,18 +99,22 @@ export function createCompactSplitTimingGeneration(params: CompactSplitTimingGen
 }
 
 export function resolveShardTimingKey(spec: VitestShardTimingSpec): string {
-  if (!Array.isArray(spec.includePatterns) || spec.includePatterns.length === 0) {
+  const targets = spec.timingTargets ?? spec.includePatterns;
+  if (spec.timingIncludePatterns) {
+    const inherited = spec.timingIncludePatterns;
+    const chunk = targets ? `#targets-${targets.length}-${hashIncludePatterns(targets)}` : "";
+    return `${spec.config}#include-${inherited.length}-${hashIncludePatterns(inherited)}${chunk}`;
+  }
+  if (!Array.isArray(targets) || targets.length === 0) {
     return spec.config;
   }
 
   const shardName = sanitizeTimingLabel(spec.env?.[SHARD_NAME_ENV_KEY] ?? "");
-  if (shardName) {
+  if (shardName && !spec.timingTargets) {
     return `${spec.config}#${shardName}`;
   }
 
-  return `${spec.config}#include-${spec.includePatterns.length}-${hashIncludePatterns(
-    spec.includePatterns,
-  )}`;
+  return `${spec.config}#include-${targets.length}-${hashIncludePatterns(targets)}`;
 }
 
 // Advisory per-file cost hints (seconds) for stripe balancing, from file walls,

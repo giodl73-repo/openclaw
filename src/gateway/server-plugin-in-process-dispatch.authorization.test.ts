@@ -141,7 +141,7 @@ describe("typed in-process agent authorization", () => {
       context.createAgentTurnFacade = createFacade;
       const result = { runId: "host-owned", status: "ok" };
       startTurn.mockImplementation(async ({ io }) => io.emitAcceptance([true, result, undefined]));
-      waitForTurn.mockResolvedValue(result);
+      waitForTurn.mockResolvedValue({ result });
 
       await expect(dispatchScopedMethod({ client, context, method, params })).resolves.toEqual(
         result,
@@ -546,10 +546,7 @@ describe("typed in-process agent authorization", () => {
 
   it("rejects retained tool authority after its owning invocation has completed", async () => {
     const owner = createOperatorClient({ profileId: "expired-owner", scopes: ["operator.read"] });
-    let releaseDispatch!: () => void;
-    const dispatchGate = new Promise<void>((resolve) => {
-      releaseDispatch = resolve;
-    });
+    const { promise: dispatchGate, resolve: releaseDispatch } = createDeferredCore();
     let retained: Promise<unknown> | undefined;
 
     await withOperatorToolGatewayAuthority(

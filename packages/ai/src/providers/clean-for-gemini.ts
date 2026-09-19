@@ -5,6 +5,8 @@ import type { TSchema } from "typebox";
 
 // Keywords that Cloud Code Assist API rejects (not compliant with their JSON Schema subset)
 export const GEMINI_UNSUPPORTED_SCHEMA_KEYWORDS = new Set([
+  // Serialized optional-property metadata is not part of Google's Schema message.
+  "~optional",
   "patternProperties",
   "additionalProperties",
   "$schema",
@@ -489,13 +491,5 @@ function flattenUnionFallback(
 }
 
 export function cleanSchemaForGemini(schema: unknown): TSchema {
-  if (!schema || typeof schema !== "object") {
-    return schema as TSchema;
-  }
-  if (Array.isArray(schema)) {
-    return schema.map(cleanSchemaForGemini) as TSchema;
-  }
-
-  const defs = extendSchemaDefs(undefined, schema as Record<string, unknown>);
-  return cleanSchemaForGeminiWithDefs(schema, defs, undefined) as TSchema;
+  return cleanSchemaForGeminiWithDefs(schema, undefined, undefined) as TSchema;
 }

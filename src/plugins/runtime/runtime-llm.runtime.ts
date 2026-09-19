@@ -28,6 +28,7 @@ import {
   isIsolatedAgentRuntimeRequest,
   runIsolatedAgentRuntimeCompletion,
 } from "./runtime-llm-isolated.js";
+import { writeRuntimeLog } from "./runtime-logging.js";
 import type {
   LlmCompleteCaller,
   LlmCompleteParams,
@@ -72,10 +73,10 @@ const defaultLogger = getChildLogger({ capability: "runtime.llm" });
 
 function toRuntimeLogger(logger: typeof defaultLogger): RuntimeLogger {
   return {
-    debug: (message, meta) => logger.debug?.(meta, message),
-    info: (message, meta) => logger.info(meta, message),
-    warn: (message, meta) => logger.warn(meta, message),
-    error: (message, meta) => logger.error(meta, message),
+    debug: (message, meta) => writeRuntimeLog(logger, "debug", message, meta),
+    info: (message, meta) => writeRuntimeLog(logger, "info", message, meta),
+    warn: (message, meta) => writeRuntimeLog(logger, "warn", message, meta),
+    error: (message, meta) => writeRuntimeLog(logger, "error", message, meta),
   };
 }
 
@@ -585,24 +586,40 @@ export function createRuntimeLlm(
       const trackOwner = captureAsyncWorkTracker();
       // Admit drainage with the parent before acquisition; the caller only waits for its result.
       void trackOwner(async () => {
-        const prepared = await acquireSimpleCompletionModelForAgent({
+        const preparation = await acquireSimpleCompletionModelForAgent({
           cfg,
           agentId,
           modelRef: params.model,
           preferredProfile,
+          ...(requestedModelProfile ? { bindAuthOwner: true } : {}),
           allowBundledStaticCatalogFallback: true,
           allowMissingApiKeyModes: ["aws-sdk"],
           skipAgentDiscovery: true,
+          signal: params.signal,
         });
 
-        if ("error" in prepared) {
-          throw new Error(`Plugin LLM completion failed: ${prepared.error}`);
+        if ("error" in preparation) {
+          throw new Error(`Plugin LLM completion failed: ${preparation.error}`);
         }
+        await using prepared = preparation;
 
         const work = new AsyncWorkScope();
         try {
           callerResult.resolve(
             await work.track(async () => {
+              if (params.requiredAuthMode && prepared.auth.mode !== params.requiredAuthMode) {
+                throw completionError(
+                  "LLM_COMPLETION_NOT_AUTHORIZED",
+                  "Plugin LLM completion selected a credential with the wrong authentication mode.",
+                );
+              }
+              if (requestedModelProfile && prepared.auth.profileId !== requestedModelProfile) {
+                throw completionError(
+                  "LLM_COMPLETION_NOT_AUTHORIZED",
+                  "Plugin LLM completion selected a different authentication profile.",
+                );
+              }
+
               const context = {
                 systemPrompt: buildSystemPrompt(params),
                 messages: buildMessages({
@@ -621,6 +638,9 @@ export function createRuntimeLlm(
                 options: {
                   maxTokens: asFiniteNumber(params.maxTokens),
                   temperature: asFiniteNumber(params.temperature),
+                  ...(params.responseFormat !== undefined
+                    ? { responseFormat: params.responseFormat }
+                    : {}),
                   ...(params.reasoning !== undefined ? { reasoning: params.reasoning } : {}),
                   signal: params.signal,
                 },
@@ -642,6 +662,8 @@ export function createRuntimeLlm(
                   text,
                   provider: prepared.selection.provider,
                   model: prepared.selection.modelId,
+                  responseModel: result.responseModel,
+                  stopReason: result.stopReason,
                   agentId,
                   execution: {
                     mode: "direct-provider",
@@ -656,7 +678,6 @@ export function createRuntimeLlm(
           callerResult.reject(error);
         } finally {
           await work.drain();
-          prepared.release();
         }
       }).catch((error: unknown) => callerResult.reject(error));
       return await callerResult.promise;

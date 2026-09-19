@@ -1,14 +1,19 @@
 import { err, ok, type Result } from "@openclaw/normalization-core/result";
 import { normalizeOptionalString } from "../../packages/normalization-core/src/string-coerce.js";
-import { normalizeTrimmedStringList } from "../../packages/normalization-core/src/string-normalization.js";
+import {
+  normalizeTrimmedStringList,
+  normalizeUniqueTrimmedStringList,
+} from "../../packages/normalization-core/src/string-normalization.js";
 import type { ChannelConfigRuntimeSchema } from "../channels/plugins/types.config.js";
 import {
   normalizeCommandDescriptorName,
   sanitizeCommandDescriptorDescription,
 } from "../cli/program/command-descriptor-utils.js";
 import { isBlockedObjectKey } from "../infra/prototype-keys.js";
+import type { ChannelAccountKeyPolicy } from "../routing/account-lookup.js";
 import type { JsonSchemaObject } from "../shared/json-schema.types.js";
 import { isRecord } from "../utils.js";
+import { normalizeManifestPlatforms } from "./manifest-platforms.js";
 import type {
   PluginManifestActivation,
   PluginManifestActivationCapability,
@@ -19,7 +24,6 @@ import type {
   PluginManifestDashboard,
   PluginManifestDashboardActionVerb,
   PluginManifestDashboardDataBinding,
-  PluginManifestDefaultPlatform,
   PluginManifestOnboardingScope,
   PluginManifestProviderAuthChoice,
   PluginManifestQaRunner,
@@ -64,6 +68,29 @@ export function normalizeManifestActivation(value: unknown): PluginManifestActiv
   return Object.keys(activation).length > 0 ? activation : undefined;
 }
 
+export function normalizeChannelAccountKeyPolicies(
+  value: unknown,
+  channels: readonly string[],
+): Record<string, ChannelAccountKeyPolicy> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const policies: Record<string, ChannelAccountKeyPolicy> = Object.create(null);
+  for (const channel of channels) {
+    if (isBlockedObjectKey(channel) || !Object.hasOwn(value, channel)) {
+      continue;
+    }
+    const entry = value[channel];
+    const field = isRecord(entry)
+      ? normalizeOptionalString(entry.canonicalAliasesRequireOwnField)
+      : undefined;
+    if (field && !isBlockedObjectKey(field)) {
+      policies[channel] = { canonicalAliasesRequireOwnField: field };
+    }
+  }
+  return Object.keys(policies).length ? policies : undefined;
+}
+
 export function normalizeManifestCliCommands(
   value: unknown,
 ): PluginManifestCliCommand[] | undefined {
@@ -89,27 +116,6 @@ export function normalizeManifestCliCommands(
     commands.push({ name, description, hasSubcommands: entry.hasSubcommands });
   }
   return commands;
-}
-
-const MANIFEST_DEFAULT_ENABLEMENT_PLATFORMS = new Set<PluginManifestDefaultPlatform>([
-  "aix",
-  "android",
-  "darwin",
-  "freebsd",
-  "haiku",
-  "linux",
-  "openbsd",
-  "sunos",
-  "win32",
-  "cygwin",
-  "netbsd",
-]);
-
-export function normalizeManifestDefaultPlatforms(value: unknown): PluginManifestDefaultPlatform[] {
-  return normalizeTrimmedStringList(value).filter(
-    (platform): platform is PluginManifestDefaultPlatform =>
-      MANIFEST_DEFAULT_ENABLEMENT_PLATFORMS.has(platform as PluginManifestDefaultPlatform),
-  );
 }
 
 function normalizeManifestSetupProviders(
@@ -355,6 +361,23 @@ export function normalizeManifestControlUi(
   return ok({ entry, ...(styles.length > 0 ? { styles } : {}) });
 }
 
+function normalizeProviderChannelLogin(
+  value: unknown,
+): PluginManifestProviderAuthChoice["channelLogin"] | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== "aliases")) {
+    return undefined;
+  }
+  if (
+    value.aliases !== undefined &&
+    (!Array.isArray(value.aliases) ||
+      value.aliases.some((alias) => typeof alias !== "string" || !alias.trim()))
+  ) {
+    return undefined;
+  }
+  const aliases = normalizeUniqueTrimmedStringList(value.aliases);
+  return aliases.length > 0 ? { aliases } : {};
+}
+
 export function normalizeProviderAuthChoices(
   value: unknown,
 ): PluginManifestProviderAuthChoice[] | undefined {
@@ -381,7 +404,9 @@ export function normalizeProviderAuthChoices(
         ? entry.assistantPriority
         : undefined;
     const assistantVisibility =
-      entry.assistantVisibility === "manual-only" || entry.assistantVisibility === "visible"
+      entry.assistantVisibility === "manual-only" ||
+      entry.assistantVisibility === "visible" ||
+      entry.assistantVisibility === "detected-only"
         ? entry.assistantVisibility
         : undefined;
     const deprecatedChoiceIds = normalizeTrimmedStringList(entry.deprecatedChoiceIds);
@@ -404,10 +429,15 @@ export function normalizeProviderAuthChoices(
         scope === "text-inference" || scope === "image-generation" || scope === "music-generation",
     );
     const appGuidedDiscovery = entry.appGuidedDiscovery === true;
+    const channelLogin = normalizeProviderChannelLogin(entry.channelLogin);
     normalized.push({
       provider,
       method,
       choiceId,
+      ...(entry.modelTarget === "utility" ? { modelTarget: "utility" as const } : {}),
+      ...(entry.platforms !== undefined
+        ? { platforms: normalizeManifestPlatforms(entry.platforms) }
+        : {}),
       ...(choiceLabel ? { choiceLabel } : {}),
       ...(choiceHint ? { choiceHint } : {}),
       ...(icon ? { icon } : {}),
@@ -428,6 +458,8 @@ export function normalizeProviderAuthChoices(
       ...(entry.personalAccount === true ? { personalAccount: true } : {}),
       ...(appGuidedActionLabel ? { appGuidedActionLabel } : {}),
       ...(appGuidedAuth ? { appGuidedAuth } : {}),
+      ...(entry.credentialOnly === true ? { credentialOnly: true } : {}),
+      ...(channelLogin ? { channelLogin } : {}),
       ...(onboardingScopes.length > 0 ? { onboardingScopes } : {}),
     });
   }

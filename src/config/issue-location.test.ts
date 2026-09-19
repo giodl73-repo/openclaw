@@ -320,6 +320,39 @@ describe("renderConfigValidationIssueLines", () => {
     message,
   });
 
+  it.each([
+    {
+      name: "an object",
+      ignoredLines: [
+        "  ignored: {",
+        '    nested: [{ text: "}, ]", values: [1, {}, []] }],',
+        "    // Closing delimiters in this comment: } ]",
+        "  },",
+      ],
+    },
+    {
+      name: "an array",
+      ignoredLines: [
+        "  ignored: [",
+        '    { nested: [[], { text: "}, ]" }] },',
+        "    /* Keep scanning after nested containers. */ {},",
+        "  ],",
+      ],
+    },
+  ])("locates the value after skipping $name with mixed nesting", ({ ignoredLines }) => {
+    const raw = ["{", ...ignoredLines, '  target: "bad",', "}"].join("\n");
+    const config = JSON5.parse(raw);
+
+    expect(
+      renderIssue({
+        issue: issue(["target"], "Invalid input"),
+        raw,
+        parsed: config,
+        effective: config,
+      }),
+    ).toBe('openclaw.json:6 — target: Invalid input, got: "bad"');
+  });
+
   it("combines display paths, source locations, and received values", () => {
     const raw = [
       "{",
@@ -373,7 +406,7 @@ describe("renderConfigValidationIssueLines", () => {
         parsed: config,
         effective: config,
       }),
-    ).toBe('openclaw.json:1 — foo.bar: Invalid input, got: "literal"');
+    ).toBe('openclaw.json:1 — ["foo.bar"]: Invalid input, got: "literal"');
     expect(
       renderIssue({
         issue: issue(["foo", "bar"], "Invalid input"),
@@ -395,7 +428,10 @@ describe("renderConfigValidationIssueLines", () => {
     ).toBe("openclaw.json:1 — gateway.bind: Invalid input");
   });
 
-  it.each(["custom", "vendor.plugin"])("omits plugin-owned values for %s", (pluginId) => {
+  it.each([
+    ["custom", "plugins.entries.custom.config.accessCode"],
+    ["vendor.plugin", 'plugins.entries["vendor.plugin"].config.accessCode'],
+  ])("omits plugin-owned values for %s", (pluginId, displayPath) => {
     const config = {
       plugins: { entries: { [pluginId]: { config: { accessCode: "private" } } } },
     };
@@ -406,6 +442,6 @@ describe("renderConfigValidationIssueLines", () => {
         parsed: config,
         effective: config,
       }),
-    ).toBe(`openclaw.json:1 — plugins.entries.${pluginId}.config.accessCode: Invalid input`);
+    ).toBe(`openclaw.json:1 — ${displayPath}: Invalid input`);
   });
 });

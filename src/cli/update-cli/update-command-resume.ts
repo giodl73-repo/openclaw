@@ -1,16 +1,23 @@
 import { readConfigFileSnapshot } from "../../config/config.js";
+import { formatErrorMessage } from "../../infra/errors.js";
 import { normalizeUpdateChannel } from "../../infra/update-channels.js";
+import { UPDATE_RUN_ID_ENV } from "../../infra/update-control-plane-sentinel.js";
+import { hasDeferredUpdateModelRetirement } from "../../infra/update-deferred-model-retirement.js";
 import {
   POST_CORE_UPDATE_REQUESTED_CHANNEL_ENV,
+  POST_CORE_UPDATE_ENV,
   POST_CORE_UPDATE_INSTALL_RECORDS_PATH_ENV,
   POST_CORE_UPDATE_RESULT_PATH_ENV,
   POST_CORE_UPDATE_STARTED_AT_ENV,
   POST_CORE_UPDATE_SOURCE_CONFIG_PATH_ENV,
 } from "../../infra/update-post-core-context.js";
+import { recordPostCoreUpdateEvidence } from "../../infra/update-run-interruption.js";
 import type { UpdateRunResult } from "../../infra/update-runner.js";
 import { loadInstalledPluginIndexInstallRecords } from "../../plugins/installed-plugin-index-records.js";
 import { readPersistedInstalledPluginIndex } from "../../plugins/installed-plugin-index-store.js";
 import { withPluginLifecycleLease } from "../../plugins/plugin-lifecycle-lease.js";
+import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
+import { withCommandProcessScope } from "../../process/exec-spawn.js";
 import { defaultRuntime } from "../../runtime.js";
 import { VERSION } from "../../version.js";
 import { readPackageVersion, type UpdateCommandOptions } from "./shared.js";
@@ -19,13 +26,24 @@ import {
   persistValidatedDowngradeConfig,
   readPostCorePreUpdateSourceConfig,
 } from "./update-command-config.js";
-import { updatePluginsAfterCoreUpdate } from "./update-command-plugins.js";
 import {
+  completePostCorePluginUpdate,
+  runUpdateFinalizationDoctorInFreshProcess,
+} from "./update-command-fresh-doctor.js";
+import { readPackageUpdateIdentity } from "./update-command-package.js";
+import { collectPostCorePluginAdvisories } from "./update-command-plugins-internals.js";
+import {
+  updatePluginsAfterCoreUpdate,
+  type PostCorePluginUpdateResult,
+} from "./update-command-plugins.js";
+import {
+  postCoreUpdateParentOwnsCompletion,
   readPostCorePluginInstallRecordsFile,
   resolvePostCoreUpdateStartedAtMs,
   writePostCorePluginUpdateResultFile,
   writePostCoreUpdateFailureFile,
 } from "./update-command-post-core.js";
+import { completeSourceUpdateRuntime } from "./update-command-runtime.js";
 
 type ResumePostCoreUpdateParams = {
   root: string;
@@ -76,56 +94,164 @@ async function resumePostCoreUpdateInternal(params: ResumePostCoreUpdateParams):
   process.env.OPENCLAW_COMPATIBILITY_HOST_VERSION =
     (await readPackageVersion(params.root)) ?? VERSION;
 
-  const configSnapshot = await readConfigFileSnapshot({
-    skipPluginValidation: true,
-    suppressFutureVersionWarning: true,
-  });
-  const updateStartedAtMs = await resolvePostCoreUpdateStartedAtMs(process.env);
-  const preUpdateSourceConfig = await readPostCorePreUpdateSourceConfig({
-    sourceConfigPath: process.env[POST_CORE_UPDATE_SOURCE_CONFIG_PATH_ENV],
-    currentSnapshot: configSnapshot,
-    updateStartedAtMs,
-  });
-  const parentPluginInstallRecords = await readPostCorePluginInstallRecordsFile(
-    process.env[POST_CORE_UPDATE_INSTALL_RECORDS_PATH_ENV],
+  const parentOwnsCompletion = await postCoreUpdateParentOwnsCompletion(
+    process.env[POST_CORE_UPDATE_RESULT_PATH_ENV],
   );
-  const pluginUpdate = await withPluginLifecycleLease({}, async () => {
-    // The core migration owner committed before activation. This fresh process
-    // reads that generation and only owns plugin convergence.
-    const preparedConfig = await preparePostCorePluginConfig({
-      requestedChannel,
-      preUpdateConfig: preUpdateSourceConfig,
-      suppressFutureVersionWarning: true,
-    });
-    // The updated doctor may have repaired or removed plugin installs before this process resumed.
-    const currentPluginInstallRecords = await loadInstalledPluginIndexInstallRecords();
-    const persistedPluginIndex = await readPersistedInstalledPluginIndex();
-    const hasForwardedUpdateStart = Boolean(process.env[POST_CORE_UPDATE_STARTED_AT_ENV]?.trim());
-    const currentIndexIsAuthoritative =
-      Object.keys(currentPluginInstallRecords).length > 0 ||
-      Boolean(
-        persistedPluginIndex &&
-        hasForwardedUpdateStart &&
-        updateStartedAtMs !== undefined &&
-        persistedPluginIndex.generatedAtMs >= updateStartedAtMs,
-      );
-    const pluginInstallRecords = currentIndexIsAuthoritative
-      ? currentPluginInstallRecords
-      : parentPluginInstallRecords;
-
-    return await updatePluginsAfterCoreUpdate({
-      root: params.root,
-      channel,
-      ...preparedConfig,
-      json: params.opts.json,
-      acceptCapabilities: params.opts.acceptCapabilities,
-      timeoutMs: params.timeoutMs,
-      pluginInstallRecords,
-    });
+  await withPluginLifecycleLease({}, async (lease) => {
+    await completeSourceUpdateRuntime({ root: params.root, timeoutMs: params.timeoutMs, lease });
   });
-  // Only the target process may restamp an unchanged downgrade config. Plugin
-  // migrations that still invalidate it will write through the target Doctor later.
-  await persistValidatedDowngradeConfig(await readConfigFileSnapshot());
+  let maintenance: Awaited<
+    ReturnType<typeof import("../../commands/doctor-maintenance.js").beginDoctorMaintenance>
+  >;
+  let outcome: { pluginUpdate: PostCorePluginUpdateResult } | { error: unknown };
+  try {
+    outcome = {
+      pluginUpdate: await withCommandProcessScope(async () => {
+        if (!parentOwnsCompletion) {
+          const { beginDoctorMaintenance } = await import("../../commands/doctor-maintenance.js");
+          maintenance = await beginDoctorMaintenance({
+            root: params.root,
+            options: { repair: true, nonInteractive: true, json: params.opts.json },
+            runtime: { ...defaultRuntime, log: defaultRuntime.error },
+          });
+          // The parent parks the service; each fresh Doctor holds its own database fences.
+          await maintenance?.releaseState();
+          // Shipped parents expect the child to prepare migration plugins and settle
+          // Doctor before plugin config writes; Doctor owns that preparation and its guards.
+          await runUpdateFinalizationDoctorInFreshProcess({
+            phase: "post-plugin",
+            root: params.root,
+            yes: params.opts.yes === true,
+            json: params.opts.json === true,
+            timeoutMs: params.timeoutMs,
+          });
+        }
+
+        const configSnapshot = await readConfigFileSnapshot({
+          skipPluginValidation: true,
+          suppressFutureVersionWarning: true,
+        });
+        const updateStartedAtMs = await resolvePostCoreUpdateStartedAtMs(process.env);
+        const preUpdateSourceConfig = await readPostCorePreUpdateSourceConfig({
+          sourceConfigPath: process.env[POST_CORE_UPDATE_SOURCE_CONFIG_PATH_ENV],
+          currentSnapshot: configSnapshot,
+          updateStartedAtMs,
+        });
+        const parentPluginInstallRecords = await readPostCorePluginInstallRecordsFile(
+          process.env[POST_CORE_UPDATE_INSTALL_RECORDS_PATH_ENV],
+        );
+        const producedPluginUpdate = await withPluginLifecycleLease({}, async () => {
+          const preparedConfig = await preparePostCorePluginConfig({
+            requestedChannel,
+            preUpdateConfig: preUpdateSourceConfig,
+            suppressFutureVersionWarning: true,
+          });
+          // The updated doctor may have repaired or removed plugin installs before this process resumed.
+          const currentPluginInstallRecords = await loadInstalledPluginIndexInstallRecords();
+          const persistedPluginIndex = await readPersistedInstalledPluginIndex();
+          const hasForwardedUpdateStart = Boolean(
+            process.env[POST_CORE_UPDATE_STARTED_AT_ENV]?.trim(),
+          );
+          const currentIndexIsAuthoritative =
+            Object.keys(currentPluginInstallRecords).length > 0 ||
+            Boolean(
+              persistedPluginIndex &&
+              hasForwardedUpdateStart &&
+              updateStartedAtMs !== undefined &&
+              persistedPluginIndex.generatedAtMs >= updateStartedAtMs,
+            );
+          const pluginInstallRecords = currentIndexIsAuthoritative
+            ? currentPluginInstallRecords
+            : parentPluginInstallRecords;
+
+          return await updatePluginsAfterCoreUpdate({
+            root: params.root,
+            channel,
+            ...preparedConfig,
+            json: params.opts.json,
+            acceptCapabilities: params.opts.acceptCapabilities,
+            timeoutMs: params.timeoutMs,
+            pluginInstallRecords,
+          });
+        });
+        // Release plugin ownership before Doctor reacquires it. Publishing the result
+        // permits the parent to stop this child, so all child-owned work must settle first.
+        const pluginUpdate =
+          !parentOwnsCompletion ||
+          (!producedPluginUpdate.changed && hasDeferredUpdateModelRetirement())
+            ? (
+                await completePostCorePluginUpdate({
+                  root: params.root,
+                  pluginUpdate: producedPluginUpdate,
+                  freshDoctorRequired: producedPluginUpdate.changed,
+                  yes: params.opts.yes === true,
+                  json: params.opts.json === true,
+                  timeoutMs: params.timeoutMs,
+                })
+              ).pluginUpdate
+            : producedPluginUpdate;
+        // Only the target process may restamp an unchanged downgrade config. Plugin
+        // migrations that still invalidate it will write through the target Doctor later.
+        const finalConfig = await readConfigFileSnapshot();
+        await persistValidatedDowngradeConfig(finalConfig);
+        return pluginUpdate;
+      }),
+    };
+  } catch (error) {
+    outcome = { error };
+  }
+  // A legacy parent can terminate this child as soon as its result appears.
+  // Settle child work and restore service custody before publishing either outcome.
+  if (maintenance && !("error" in outcome && hasCommandProcessCleanupError(outcome.error))) {
+    const owned = maintenance;
+    const failures = "error" in outcome ? [outcome.error] : [];
+    for (const restore of [
+      async () =>
+        owned.finish((await readConfigFileSnapshot({ skipPluginValidation: true })).config),
+      () => owned.release(),
+    ]) {
+      if (failures.some(hasCommandProcessCleanupError)) {
+        break;
+      }
+      try {
+        await withCommandProcessScope(restore);
+      } catch (error) {
+        if (!failures.includes(error)) {
+          failures.push(error);
+        }
+      }
+    }
+    if (failures.length) {
+      outcome = {
+        error:
+          failures.length === 1
+            ? failures[0]
+            : new AggregateError(failures, "Post-core update and service restoration failed", {
+                cause: failures[0],
+              }),
+      };
+    }
+  }
+  if ("error" in outcome) {
+    throw outcome.error;
+  }
+  const { pluginUpdate } = outcome;
+  const runId = process.env[UPDATE_RUN_ID_ENV]?.trim();
+  if (process.env[POST_CORE_UPDATE_ENV] === "1" && runId) {
+    try {
+      recordPostCoreUpdateEvidence(runId, {
+        candidate:
+          pluginUpdate.status !== "error"
+            ? await readPackageUpdateIdentity(params.root)
+            : undefined,
+        warnings: collectPostCorePluginAdvisories(pluginUpdate),
+      });
+    } catch (error) {
+      defaultRuntime.error(
+        `Post-core update evidence could not be saved to update history: ${formatErrorMessage(error)} Update completion may require Doctor verification.`,
+      );
+    }
+  }
   if (process.env[POST_CORE_UPDATE_RESULT_PATH_ENV]) {
     await writePostCorePluginUpdateResultFile(
       process.env[POST_CORE_UPDATE_RESULT_PATH_ENV],

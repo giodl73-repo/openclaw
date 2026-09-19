@@ -29,7 +29,6 @@ import {
   type ExecCommandSegment,
   type ExecSegmentSatisfiedBy,
   type ExecSecurity,
-  type SkillBinTrustEntry,
 } from "../infra/exec-approvals.js";
 import {
   planExecAuthorization,
@@ -156,11 +155,6 @@ type SystemRunPolicyPhase = SystemRunParsePhase & {
   analysisOk: boolean;
   allowlistSatisfied: boolean;
   allowlistAuthorizationSatisfied: boolean;
-  safeBins: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBins"];
-  safeBinProfiles: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["safeBinProfiles"];
-  trustedSafeBinDirs: ReturnType<typeof resolveExecSafeBinRuntimePolicy>["trustedSafeBinDirs"];
-  skillBins: SkillBinTrustEntry[];
-  autoAllowSkills: boolean;
   segments: ExecCommandSegment[];
   segmentSatisfiedBy: ExecSegmentSatisfiedBy[];
   authorizationPlan: ExecAuthorizationPlan | undefined;
@@ -271,6 +265,7 @@ type HandleSystemRunInvokeOptions = {
     env: Record<string, string> | undefined,
     timeoutMs: number | undefined,
     signal?: AbortSignal,
+    assertCurrent?: () => void,
   ) => Promise<RunResult>;
   runViaMacAppExecHost: (params: {
     approvals: ExecApprovalsResolved;
@@ -924,11 +919,6 @@ async function evaluateSystemRunPolicyPhase(
     analysisOk,
     allowlistSatisfied,
     allowlistAuthorizationSatisfied,
-    safeBins,
-    safeBinProfiles,
-    trustedSafeBinDirs,
-    skillBins: bins,
-    autoAllowSkills,
     segments,
     segmentSatisfiedBy,
     authorizationPlan: allowlistEvaluation.authorizationPlan,
@@ -1021,20 +1011,12 @@ async function executeSystemRunPhase(
     plannedAllowlistArgv: phase.plannedAllowlistArgv,
     argv: phase.argv,
     security: phase.security,
-    approvals: phase.approvals,
-    safeBins: phase.safeBins,
-    safeBinProfiles: phase.safeBinProfiles,
-    trustedSafeBinDirs: phase.trustedSafeBinDirs,
-    skillBins: phase.skillBins,
-    autoAllowSkills: phase.autoAllowSkills,
     isWindows: phase.isWindows,
     policy: phase.policy,
     shellCommand: phase.shellPayload,
     segments: phase.segments,
     segmentSatisfiedBy: phase.segmentSatisfiedBy,
     authorizationPlan: phase.authorizationPlan,
-    cwd: phase.cwd,
-    env: phase.env,
   });
   if (!execArgv) {
     await sendSystemRunDenied(opts, phase.execution, {
@@ -1137,8 +1119,11 @@ async function executeSystemRunPhase(
     requireDurableAllowlistApproval: phase.durableApprovalRequirement === "segment-allowlist",
   };
 
+  let assertCommittedAuthorization: () => void;
   try {
-    await (opts.commitExecAuthorization ?? commitExecAuthorizationLocked)({
+    assertCommittedAuthorization = await (
+      opts.commitExecAuthorization ?? commitExecAuthorizationLocked
+    )({
       agentId: phase.agentId,
       matches: phase.allowlistMatches,
       command: phase.commandText,
@@ -1167,9 +1152,41 @@ async function executeSystemRunPhase(
   if (opts.signal?.aborted) {
     return;
   }
-  const result = await (opts.signal
-    ? opts.runCommand(execArgv, phase.cwd, phase.env, phase.timeoutMs, opts.signal)
-    : opts.runCommand(execArgv, phase.cwd, phase.env, phase.timeoutMs));
+  let authorizationDenied = false;
+  const assertCurrent = () => {
+    try {
+      assertCommittedAuthorization();
+    } catch (error) {
+      authorizationDenied = true;
+      throw error;
+    }
+  };
+  let result: RunResult;
+  try {
+    assertCurrent();
+    result = await opts.runCommand(
+      execArgv,
+      phase.cwd,
+      phase.env,
+      phase.timeoutMs,
+      opts.signal,
+      assertCurrent,
+    );
+    // Some launch adapters translate spawn errors into a RunResult. A revoked
+    // authorization still belongs on the denial route, never exec.finished.
+    if (authorizationDenied) {
+      throw new Error("Exec approval changed before execution");
+    }
+  } catch (error) {
+    if (!authorizationDenied) {
+      throw error;
+    }
+    await sendSystemRunDenied(opts, phase.execution, {
+      reason: "approval-required",
+      message: "SYSTEM_RUN_DENIED: exec approval changed before execution",
+    });
+    return;
+  }
   if (opts.signal?.aborted) {
     return;
   }

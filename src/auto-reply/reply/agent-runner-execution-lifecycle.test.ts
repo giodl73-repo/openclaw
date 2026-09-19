@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createChannelParticipantAdmissionEvidence } from "../../../test/helpers/channel-admission-evidence.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
-import type { CompactionAccountingFact } from "../../agents/embedded-agent-runner/run/internal-params.js";
+import type {
+  CompactionAccountingFact,
+  RunEmbeddedAgentInternalParams,
+} from "../../agents/embedded-agent-runner/run/internal-params.js";
 import {
   clearActiveEmbeddedRun,
   isEmbeddedAgentRunActive,
@@ -37,6 +40,7 @@ import type {
   FallbackRunnerParams,
   EmbeddedAgentParams,
 } from "./agent-runner-execution.test-support.js";
+import type { InternalGetReplyOptions } from "./get-reply.types.js";
 import {
   createReplyOperation,
   hasReplyOperationExecutionStarted,
@@ -57,6 +61,20 @@ const compactionTarget = {
 };
 
 describe("executeAgentTurn: run lifecycle and ownership", () => {
+  it("classifies cancellation raised by the real deferred lifecycle owner", async () => {
+    state.runEmbeddedAgentMock.mockImplementationOnce(
+      async (params: RunEmbeddedAgentInternalParams) => {
+        params.onDeferredLifecycleAbort?.();
+        params.abortSignal?.throwIfAborted();
+        throw new Error("The deferred abort must stop the current attempt");
+      },
+    );
+
+    const result = await execution.executeAgentTurn(createMinimalRunAgentTurnParams());
+
+    expect(result.outcome).toMatchObject({ kind: "aborted", reason: "user" });
+  });
+
   it.each([
     {
       kind: "restart",
@@ -94,6 +112,7 @@ describe("executeAgentTurn: run lifecycle and ownership", () => {
       setActiveEmbeddedRun(sessionId, handle, sessionKey);
       state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
         params.onDeferredLifecycleOwner?.({
+          beginRetryWait: () => undefined,
           complete: async () => clearActiveEmbeddedRun(sessionId, handle, sessionKey),
           discard: () => clearActiveEmbeddedRun(sessionId, handle, sessionKey),
         });
@@ -836,6 +855,64 @@ describe("executeAgentTurn: run lifecycle and ownership", () => {
     expectMockCallArgFields(state.runEmbeddedAgentMock, 0, "heartbeat embedded run params", {
       trigger: "heartbeat",
       requireExplicitMessageTarget: true,
+    });
+  });
+
+  it("forwards bundle MCP retirement to isolated heartbeat embedded runs", async () => {
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("anthropic", "claude", initialFallbackAttemptOptions(params)),
+      provider: "anthropic",
+      model: "claude",
+      attempts: [],
+    }));
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "HEARTBEAT_OK" }],
+      meta: {},
+    });
+
+    const executeAgentTurn = await getExecuteAgentTurnForTest();
+    const opts: InternalGetReplyOptions = { isHeartbeat: true, cleanupBundleMcpOnRunEnd: true };
+    const params = createMinimalRunAgentTurnParams({ opts });
+    params.isHeartbeat = true;
+
+    await executeAgentTurn(params);
+
+    expectMockCallArgFields(
+      state.runEmbeddedAgentMock,
+      0,
+      "isolated heartbeat embedded run params",
+      {
+        trigger: "heartbeat",
+        cleanupBundleMcpOnRunEnd: true,
+      },
+    );
+  });
+
+  it("forwards bundle MCP retirement to isolated heartbeat CLI runs", async () => {
+    state.isCliProviderMock.mockReturnValue(true);
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("claude-cli", "sonnet-4.6", initialFallbackAttemptOptions(params)),
+      provider: "claude-cli",
+      model: "sonnet-4.6",
+      attempts: [],
+    }));
+    state.runCliAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "final" }],
+      meta: {},
+    });
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "claude-cli";
+    followupRun.run.model = "sonnet-4.6";
+    const opts: InternalGetReplyOptions = { isHeartbeat: true, cleanupBundleMcpOnRunEnd: true };
+    const params = createMinimalRunAgentTurnParams({ followupRun, opts });
+    params.isHeartbeat = true;
+
+    const executeAgentTurn = await getExecuteAgentTurnForTest();
+    await executeAgentTurn(params);
+
+    expectMockCallArgFields(state.runCliAgentMock, 0, "isolated heartbeat CLI run params", {
+      trigger: "heartbeat",
+      cleanupBundleMcpOnRunEnd: true,
     });
   });
 

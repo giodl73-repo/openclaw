@@ -3,25 +3,35 @@ import { html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { selectApplicationSession } from "../../app/agent-selection.ts";
 import { applicationContext, type ApplicationContext } from "../../app/context.ts";
+import { LazyCustomElementRequestController } from "../../app/lazy-custom-element.ts";
 import { readPresenceEntries } from "../../app/user-profile.ts";
-import type { ImageLightboxItem } from "../../components/image-lightbox.ts";
+import type { ImageLightboxItem } from "../../components/image-lightbox.types.ts";
+import "../../styles/new-session-attachment-panel.css";
+import { renderLazyViewError } from "../../components/lazy-view-error.ts";
 import { t } from "../../i18n/index.ts";
-import { normalizeAgentTargetLabel } from "../../lib/agents/display.ts";
-import "../../components/web-awesome-popover.ts";
+import { registerNewSessionSetupEnglish } from "../../i18n/locales/en-new-session-setup.ts";
+import { normalizeAgentTargetLabel, resolveAgentTextAvatar } from "../../lib/agents/display.ts";
+import { resolveAgentAvatarUrl } from "../../lib/avatar.ts";
 import type { HumanMention } from "../../lib/chat/chat-types.ts";
+import { createIdleImport } from "../../lib/idle-import.ts";
+import "../../components/web-awesome-popover.ts";
 import { sessionNavigationTarget } from "../../lib/sessions/route-navigation.ts";
 import { buildAgentMainSessionKey } from "../../lib/sessions/session-key.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
 import { focusChatComposerFromPrintableKeydown } from "../chat/chat-pane-shared.ts";
-import "../../styles/chat/composer.css";
-import "../../styles/new-session.css";
+import { chatStartupStatusLabel } from "../chat/chat-run-startup.ts";
 import { renderChatImageLightbox } from "../chat/components/chat-image-lightbox.ts";
+import "../../styles/chat/composer.css";
+import "../../styles/chat/composer-surface.css";
+import "../../styles/new-session.css";
+import { installChatComposerPickerDismissal } from "../chat/components/chat-picker-overlay.ts";
+import type { SidebarContent } from "../chat/components/chat-sidebar-content-types.ts";
 import { renderWelcomeState } from "../chat/components/chat-welcome.ts";
 import * as catalog from "./catalog-target.ts";
 import { NewSessionDictationControl } from "./composer-dictation-control.ts";
 import { ConnectMachineSetupState, renderConnectMachineDialog } from "./connect-machine-dialog.ts";
-import { renderNewSessionBody } from "./draft-composer.ts";
+import { renderNewSessionBody } from "./draft-body.ts";
 import { DraftGatewayState } from "./draft-gateway-state.ts";
 import * as drafts from "./draft-navigation-handoff.ts";
 import { DraftPlaceBrowser } from "./draft-place-browser.ts";
@@ -30,18 +40,32 @@ import { DraftSubmissionFlow } from "./draft-submission-flow.ts";
 import { NewSessionTitleController } from "./draft-title.ts";
 import { renderNewSessionDraftView } from "./draft-view.ts";
 import { renderNewSessionIncognitoControl } from "./incognito-control.ts";
+import { forgetInstantThreadPage } from "./instant-thread-restore.ts";
 import type { NewSessionRouteData } from "./location.ts";
 import {
   closeAgentPicker,
   closeSessionMenus,
   createControllerHost,
   isPlaceTopologyEvent,
-  presenceStateSignature,
+  nodePresenceStateSignature,
 } from "./new-session-runtime.ts";
 import type { SubmissionOutcomeReason } from "./session-placement-recovery-state.ts";
 import { renderAgentSelect, renderNewSessionPlaceControls } from "./target-controls.ts";
 
+registerNewSessionSetupEnglish();
+
 const { activateDraft, restoreDraft, restoreDraftOwner, retainDraft } = drafts;
+
+const attachmentPanelElement = {
+  tagName: "openclaw-chat-detail-panel",
+  get label() {
+    return t("chat.attachments.pastedText");
+  },
+  loadModule: async () => {
+    await import("../../styles/chat/sidebar.css");
+    await import("../chat/components/chat-detail-panel.ts");
+  },
+};
 
 export class NewSessionPage extends OpenClawLightDomElement {
   @property({ attribute: false }) data: NewSessionRouteData | undefined;
@@ -49,12 +73,34 @@ export class NewSessionPage extends OpenClawLightDomElement {
   @consume({ context: applicationContext, subscribe: true })
   private context?: ApplicationContext;
 
+  private retainedForHandoff: object | null = null;
   private openedFor: string | null = null;
+  private readonly critterImport = createIdleImport(
+    () => import("../../components/lobster-pet.runtime.ts"),
+  );
   private openedGroupDefaults = "";
   private openedAgentId = "";
   private messageOwnerKey = "";
   private presenceSignature = "";
   private readonly connectMachine: ConnectMachineSetupState;
+  @state() private attachmentPanel: {
+    content: Extract<SidebarContent, { kind: "attachment" }>;
+    ownerKey: string;
+    agentId: string;
+  } | null = null;
+  private readonly attachmentPanelLoader = new LazyCustomElementRequestController(this);
+  private readonly closeAttachmentPanel = () => {
+    this.attachmentPanel = null;
+  };
+  private readonly openAttachmentPanel = (content: SidebarContent) => {
+    if (content.kind === "attachment") {
+      this.attachmentPanel = {
+        content,
+        ownerKey: this.routeOwnerKey(),
+        agentId: this.place.agentId,
+      };
+    }
+  };
   @state() private imageLightbox: ImageLightboxItem | null = null;
   @state() private agentPickerOpen = false;
   private readonly groupRouteRevalidation = new catalog.GroupRouteRevalidation(
@@ -148,7 +194,7 @@ export class NewSessionPage extends OpenClawLightDomElement {
         requestUpdate: () => this.requestUpdate(),
         onError: (error) =>
           error === null ? this.submission.clearError() : this.submission.setError(error),
-        onClearError: (error) => this.submission.clearErrorIf(error),
+        onClearError: (error) => this.submission.clearError(error),
       },
     );
     this.submission = new DraftSubmissionFlow(
@@ -157,8 +203,36 @@ export class NewSessionPage extends OpenClawLightDomElement {
       () => ({ context: this.context, data: this.data, isConnected: this.isConnected }),
       {
         requestUpdate: () => this.requestUpdate(),
-        closeTransientUi: () => closeSessionMenus(this),
+        closeTransientUi: () => {
+          this.closeAttachmentPanel();
+          closeSessionMenus(this);
+        },
         takePreparedTitle: () => this.titlePreparation.takePreparedTitle(),
+        retainForHandoff: () => {
+          if (!this.data || !this.isConnected) {
+            return undefined;
+          }
+          const retention = {};
+          this.retainedForHandoff = retention;
+          return {
+            page: this,
+            data: this.data,
+            synchronizeGateway: () => {
+              if (this.context) {
+                this.gateway.synchronize(this.context.gateway);
+              }
+            },
+            release: () => {
+              if (this.retainedForHandoff !== retention) {
+                return;
+              }
+              this.retainedForHandoff = null;
+              if (!this.isConnected) {
+                this.disposeDraft();
+              }
+            },
+          };
+        },
       },
     );
     this.connectMachine = new ConnectMachineSetupState(
@@ -176,6 +250,7 @@ export class NewSessionPage extends OpenClawLightDomElement {
       requestUpdate: () => this.requestUpdate(),
     });
     this.subscriptions = new SubscriptionsController(this)
+      .effect(() => this.ownerDocument, installChatComposerPickerDismissal)
       .watch(
         () => this.context?.theme,
         (theme, notify) => theme.subscribe(notify),
@@ -188,7 +263,7 @@ export class NewSessionPage extends OpenClawLightDomElement {
       .effect(
         () => this.context?.gateway,
         (gateway) => {
-          this.presenceSignature = presenceStateSignature(
+          this.presenceSignature = nodePresenceStateSignature(
             readPresenceEntries(gateway.snapshot.hello?.snapshot) ?? [],
           );
           return gateway.subscribeEvents((event) => {
@@ -204,7 +279,7 @@ export class NewSessionPage extends OpenClawLightDomElement {
             if (!presence) {
               return;
             }
-            const signature = presenceStateSignature(presence);
+            const signature = nodePresenceStateSignature(presence);
             if (signature !== this.presenceSignature) {
               this.presenceSignature = signature;
               void this.gateway.refreshCloudProfiles();
@@ -227,6 +302,14 @@ export class NewSessionPage extends OpenClawLightDomElement {
         (sessions) => this.groupRouteRevalidation.synchronize(sessions),
       )
       .watch(
+        () => this.context?.placementStartup,
+        (startup, notify) => startup.subscribe(notify),
+      )
+      .watch(
+        () => this.context?.runtimeConfig,
+        (runtimeConfig, notify) => runtimeConfig.subscribe(notify),
+      )
+      .watch(
         () => this.context?.config,
         (config, notify) => config.subscribe(() => notify()),
       );
@@ -240,15 +323,30 @@ export class NewSessionPage extends OpenClawLightDomElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    this.submission.draftPersistence.connect();
+    this.critterImport.schedule();
     document.addEventListener("keydown", this, true);
     window.addEventListener("beforeunload", this.flushDraft);
   }
 
   override disconnectedCallback() {
+    this.closeAttachmentPanel();
+    this.attachmentPanelLoader.requestWhileActive(attachmentPanelElement, false);
+    this.critterImport.dispose();
     document.removeEventListener("keydown", this, true);
     window.removeEventListener("beforeunload", this.flushDraft);
-    retainDraft(this.context, this.submission, this.openedFor, this.messageOwnerKey);
     this.subscriptions.clear();
+    this.dictation.dispose();
+    this.connectMachine.close();
+    if (!this.retainedForHandoff) {
+      this.disposeDraft();
+    }
+    super.disconnectedCallback();
+  }
+
+  private disposeDraft() {
+    forgetInstantThreadPage(this.data, this);
+    retainDraft(this.context, this.submission, this.openedFor, this.messageOwnerKey);
     this.gateway.invalidateDiscovery(
       true,
       this.submission.pendingPlacement.sessionKey ? "placement-interrupted" : "gateway-changed",
@@ -256,9 +354,26 @@ export class NewSessionPage extends OpenClawLightDomElement {
     this.gateway.disconnect();
     this.browser.disconnect();
     this.submission.disconnect();
-    this.dictation.dispose();
-    this.connectMachine.close();
-    super.disconnectedCallback();
+  }
+
+  override willUpdate() {
+    const panel = this.attachmentPanel;
+    if (
+      panel &&
+      (panel.ownerKey !== this.routeOwnerKey() ||
+        panel.agentId !== this.place.agentId ||
+        this.submission.submitting ||
+        Boolean(this.submission.pendingPlacement.sessionKey) ||
+        !this.submission.attachmentDraft.attachments.some(
+          (attachment) => attachment.id === panel.content.sourceIdentity,
+        ))
+    ) {
+      this.attachmentPanel = null;
+    }
+    this.attachmentPanelLoader.requestWhileActive(
+      attachmentPanelElement,
+      this.attachmentPanel !== null,
+    );
   }
 
   override updated() {
@@ -286,6 +401,10 @@ export class NewSessionPage extends OpenClawLightDomElement {
     const resolvedAgentId = this.data?.agentId ?? "";
     const groupDefaults = catalog.groupDefaultsKey(this.data);
     if (this.openedFor !== openKey) {
+      // Ordinary drafts release previews on reset and restore through durable storage.
+      if (this.openedFor !== null && this.submission.visibility === "incognito") {
+        retainDraft(this.context, this.submission, this.openedFor, this.messageOwnerKey);
+      }
       const ownedMessage = this.messageOwnerKey === openKey ? this.submission.message : "";
       const ownedMentions = this.messageOwnerKey === openKey ? this.submission.mentions : undefined;
       this.openedFor = openKey;
@@ -327,6 +446,7 @@ export class NewSessionPage extends OpenClawLightDomElement {
     resetHostSelection: boolean,
     submissionOutcome: SubmissionOutcomeReason,
   ) {
+    this.closeAttachmentPanel();
     this.place.invalidateGatewayDiscovery(resetHostSelection);
     this.submission.attachmentDraft.abortReads();
     this.submission.invalidate(submissionOutcome);
@@ -391,6 +511,8 @@ export class NewSessionPage extends OpenClawLightDomElement {
         submitting: this.submission.submitting,
         pendingPlacement: Boolean(this.submission.pendingPlacement.sessionKey),
         onConnectMachine: () => this.openConnectMachine(),
+        onFocusComposer: () =>
+          this.submission.composerTextarea.getTextarea()?.focus({ preventScroll: true }),
         requestUpdate: () => this.requestUpdate(),
       }),
       retrying:
@@ -422,6 +544,7 @@ export class NewSessionPage extends OpenClawLightDomElement {
       requestUpdate: () => this.requestUpdate(),
       onMessage: (message, mentions) => this.setMessageFromUser(message, mentions),
       onOpenImage: this.setImageLightbox,
+      onOpenSidebar: this.openAttachmentPanel,
     });
   }
 
@@ -430,9 +553,10 @@ export class NewSessionPage extends OpenClawLightDomElement {
     const identity = this.context?.agentIdentity.get(this.place.agentId);
     const gateway = this.context?.gateway.snapshot;
     return renderWelcomeState({
+      currentAgentId: this.place.agentId,
       assistantName: agent ? normalizeAgentTargetLabel(agent, identity) : "",
-      assistantAvatar: agent?.identity?.avatar ?? agent?.identity?.emoji ?? null,
-      assistantAvatarUrl: agent?.identity?.avatarUrl ?? null,
+      assistantAvatar: resolveAgentTextAvatar(agent ?? {}, identity),
+      assistantAvatarUrl: resolveAgentAvatarUrl(agent ?? {}, identity),
       hint: t(catalog.isTarget(this.data) ? "newSession.nativeTerminalHint" : "newSession.hint"),
       composer: this.renderDraftBlock(),
       hideSecondaryContent: this.submission.visibility === "incognito",
@@ -472,8 +596,11 @@ export class NewSessionPage extends OpenClawLightDomElement {
 
   override render() {
     const pendingMessage = this.submission.pendingMessage;
+    const completed = this.submission.completedSubmission;
+    const startup = completed ? this.context?.placementStartup.get(completed.key) : null;
     const identity = this.context?.gateway.snapshot.selfUser?.identity;
     const incognito = this.submission.visibility === "incognito";
+    const panelLoad = this.attachmentPanelLoader.visibleState;
     return html`
       <div
         class="new-session-page ${pendingMessage ? "chat" : ""} ${
@@ -493,7 +620,23 @@ export class NewSessionPage extends OpenClawLightDomElement {
           pendingMessage,
           userId: identity?.type === "profile" ? identity.id : null,
           submitting: this.submission.submitting,
-          renderDraft: () => this.renderWelcome(),
+          statusLabel:
+            this.context?.gateway.snapshot.phase === "connected"
+              ? undefined
+              : t("connection.reconnecting"),
+          completion: completed
+            ? {
+                label:
+                  completed.error ??
+                  startup?.error ??
+                  chatStartupStatusLabel(null, startup) ??
+                  t("newSession.created"),
+                onOpen: () => void this.submission.openSubmittedSession(),
+                disabled: this.context?.gateway.snapshot.phase !== "connected",
+              }
+            : undefined,
+          showDraft: Boolean(completed),
+          renderDraft: () => (completed ? this.renderDraftBlock() : this.renderWelcome()),
           onOpenImage: this.setImageLightbox,
         })}
         ${renderConnectMachineDialog({
@@ -513,6 +656,28 @@ export class NewSessionPage extends OpenClawLightDomElement {
         })}
         ${renderChatImageLightbox(this.imageLightbox, () => this.setImageLightbox(null))}
       </div>
+      ${
+        this.attachmentPanel
+          ? html`<aside class="new-session-attachment-panel">
+              ${
+                panelLoad?.status === "error"
+                  ? renderLazyViewError({
+                      error: panelLoad.error,
+                      stale: panelLoad.stale,
+                      onRetry: () => this.attachmentPanelLoader.retry(),
+                      onClose: this.closeAttachmentPanel,
+                    })
+                  : panelLoad
+                    ? html`<div role="status">${t("common.loading")}</div>`
+                    : nothing
+              }
+              <openclaw-chat-detail-panel
+                .content=${{ ...this.attachmentPanel.content }}
+                @chat-detail-panel-close=${this.closeAttachmentPanel}
+              ></openclaw-chat-detail-panel>
+            </aside>`
+          : nothing
+      }
     `;
   }
 }

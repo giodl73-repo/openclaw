@@ -1,33 +1,27 @@
 import { initialState, Task, TaskStatus } from "@lit/task";
 import type { ReactiveControllerHost } from "lit";
-import type {
-  UsersPrefsGetResult,
-  UsersPrefsSetResult,
-} from "../../../../packages/gateway-protocol/src/index.js";
 import type { ApplicationContext } from "../../app/context.ts";
 import { hasOperatorWriteAccess } from "../../app/operator-access.ts";
 import { t } from "../../i18n/index.ts";
+import { registerNewSessionSetupEnglish } from "../../i18n/locales/en-new-session-setup.ts";
 import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
-import { normalizeAgentId } from "../../lib/sessions/session-key.ts";
 import * as catalog from "./catalog-target.ts";
-import { CLOUD_PROFILE_RETRY_DELAYS_MS, discoverPlaceCatalog } from "./cloud-profile-discovery.ts";
+import { CLOUD_PROFILE_RETRY_DELAYS_MS } from "./cloud-profile-discovery.ts";
+import { requestPlaceCatalog } from "./cloud-target.ts";
 import type { DraftCloudProfile, DraftEnvironment } from "./discovery.ts";
+import {
+  DraftPreferenceState,
+  type SubmittedWorktreePreference,
+} from "./draft-preference-state.ts";
 import { discoverGatewayName } from "./gateway-name-discovery.ts";
 import type { NewSessionRouteData } from "./location.ts";
-import {
-  decodeIdentityPreferences,
-  encodeIdentityPreferences,
-  loadBrowserPreferences,
-  loadNewSessionPreference,
-  patchNewSessionPreference,
-  PREFS_MIGRATION_KEY,
-  replaceBrowserPreference,
-  type NewSessionPreference,
-} from "./preferences.ts";
+import type { NewSessionPreference } from "./preferences.ts";
 import {
   resolveSubmissionOutcomeReason,
   type SubmissionOutcomeReason,
 } from "./session-placement-recovery-state.ts";
+
+registerNewSessionSetupEnglish();
 
 const CATALOG_RETRY_DELAYS_MS = [0, 1_000, 3_000] as const;
 
@@ -78,12 +72,9 @@ export class DraftGatewayState {
   private catalogRetryAttempt = 0;
   private catalogRetryTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private cloudProfileRetryAttempt = 0;
+  private cloudProfileRefresh: Promise<void> | null = null;
   private cloudProfileRetryTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
-  private preferenceScope = "";
-  private preferenceModeValue: "local" | "loading" | "remote" = "local";
-  private identityPreferences: Record<string, NewSessionPreference> = {};
-  private preferenceLoad: Promise<void> = Promise.resolve();
-  private preferenceWrite: Promise<void> = Promise.resolve();
+  private readonly preferences: DraftPreferenceState;
 
   private readonly gatewayNameTask: Task<readonly unknown[], string>;
   private readonly cloudProfileTask: Task<
@@ -96,6 +87,21 @@ export class DraftGatewayState {
     private readonly read: () => DraftGatewaySnapshot,
     private readonly callbacks: DraftGatewayCallbacks,
   ) {
+    this.preferences = new DraftPreferenceState(
+      () => ({
+        source: this.gatewaySource,
+        client: this.gatewayClientValue,
+        gatewayUrl: this.gatewayUrlValue,
+        recoveryScope: this.gatewayRecoveryScopeValue,
+        bootId: this.gatewayBootIdValue,
+        connected: this.gatewayConnectedValue,
+        connectionEpoch: this.gatewayConnectionEpochValue,
+        data: this.read().data,
+        pendingPlacementSessionKey: this.read().pendingPlacement.sessionKey,
+        agentsHydrated: this.read().agentsHydrated,
+      }),
+      callbacks,
+    );
     this.gatewayNameTask = new Task(host, {
       args: () =>
         [
@@ -117,19 +123,25 @@ export class DraftGatewayState {
           this.gatewayRecoveryScopeValue,
           this.read().runtimeId,
         ] as const,
-      task: ([client, _connectionEpoch, canWrite, isAdmin, _recoveryScope, runtimeId]) =>
-        client ? discoverPlaceCatalog(client, canWrite, isAdmin, runtimeId) : initialState,
+      task: async ([client, _connectionEpoch, canWrite, isAdmin, _recoveryScope, runtimeId]) => {
+        if (!client) {
+          return initialState;
+        }
+        if (!canWrite) {
+          return { profiles: [], environments: [] };
+        }
+        const result = await requestPlaceCatalog(client, runtimeId);
+        return { ...result, profiles: isAdmin ? result.profiles : [] };
+      },
       onComplete: (placeCatalog) => {
         this.resetCloudProfileRetry();
         this.environmentsValue = placeCatalog.environments;
         this.applyCloudProfiles(placeCatalog.profiles);
         this.cloudProfilesReadyValue = true;
-        this.callbacks.requestUpdate();
       },
       onError: () => {
         // A failed refresh cannot invalidate this Gateway's last successful place catalog.
         this.scheduleCloudProfileRetry();
-        this.callbacks.requestUpdate();
       },
     });
   }
@@ -194,7 +206,7 @@ export class DraftGatewayState {
   }
 
   get preferenceLoading(): boolean {
-    return this.preferenceModeValue === "loading";
+    return this.preferences.loading;
   }
 
   resolvedGroupCategory(): string | undefined {
@@ -207,7 +219,24 @@ export class DraftGatewayState {
       : undefined;
   }
 
-  refreshCloudProfiles() {
+  refreshCloudProfiles(): Promise<void> {
+    if (this.cloudProfileTask.status === TaskStatus.PENDING) {
+      const queued =
+        this.cloudProfileRefresh ??
+        this.cloudProfileTask.taskComplete
+          .catch(() => undefined)
+          .then(() => {
+            if (this.cloudProfileRefresh === queued) {
+              this.cloudProfileRefresh = null;
+              return this.refreshCloudProfiles();
+            }
+            return undefined;
+          });
+      this.cloudProfileRefresh = queued;
+      return queued;
+    }
+    globalThis.clearTimeout(this.cloudProfileRetryTimer);
+    this.cloudProfileRetryTimer = undefined;
     return this.cloudProfileTask.run();
   }
 
@@ -292,11 +321,12 @@ export class DraftGatewayState {
         this.retryPendingCatalogTarget();
       }
     }
-    this.synchronizeIdentityPreferences(snapshot.selfUser?.id);
+    this.preferences.synchronize();
     this.callbacks.requestUpdate();
   }
 
   invalidateDiscovery(resetHostSelection: boolean, submissionOutcome: SubmissionOutcomeReason) {
+    this.cloudProfileRefresh = null;
     // Retire pending results synchronously; Lit may not run hostUpdate before they settle.
     void this.cloudProfileTask.run([null, -1, false, false, ""]);
     this.cloudProfilesValue = [];
@@ -402,66 +432,25 @@ export class DraftGatewayState {
       });
   };
 
-  readPreference(agentId: string): NewSessionPreference | null {
-    const snapshot = this.read();
-    if (
-      catalog.isTarget(snapshot.data) ||
-      snapshot.data?.group ||
-      snapshot.pendingPlacement.sessionKey
-    ) {
-      return null;
-    }
-    return this.preferenceModeValue === "remote"
-      ? (this.identityPreferences[normalizeAgentId(agentId)] ?? null)
-      : loadNewSessionPreference(this.gatewayUrlValue, agentId);
+  readPreference(agentId: string) {
+    return this.preferences.readPreference(agentId);
   }
 
-  persistPreference(agentIdValue: string, workspace: string, patch: NewSessionPreference) {
-    const snapshot = this.read();
-    if (
-      catalog.isTarget(snapshot.data) ||
-      snapshot.data?.group ||
-      snapshot.pendingPlacement.sessionKey
-    ) {
-      return;
-    }
-    const agentId = normalizeAgentId(agentIdValue);
-    const nextPatch = { workspace, ...patch };
-    if (this.preferenceModeValue === "local") {
-      patchNewSessionPreference(this.gatewayUrlValue, agentId, nextPatch);
-      return;
-    }
-    const scope = this.preferenceScope;
-    const client = this.gatewayClientValue;
-    const gatewayUrl = this.gatewayUrlValue;
-    const write = async () => {
-      await this.preferenceLoad;
-      if (!client || this.preferenceScope !== scope) {
-        return;
-      }
-      if (this.preferenceModeValue === "local") {
-        patchNewSessionPreference(gatewayUrl, agentId, nextPatch);
-        return;
-      }
-      const next = { ...this.identityPreferences[agentId], ...nextPatch };
-      try {
-        const result = await client.request<UsersPrefsSetResult>("users.prefs.set", {
-          entries: encodeIdentityPreferences({ [agentId]: next }),
-        });
-        if (result.status !== "ok" || this.preferenceScope !== scope) {
-          return;
-        }
-        this.identityPreferences = { ...this.identityPreferences, [agentId]: next };
-        replaceBrowserPreference(gatewayUrl, agentId, next);
-        this.callbacks.requestUpdate();
-      } catch {
-        // Gateway state is authoritative for identified users; retain the last mirrored value.
-      }
-    };
-    this.preferenceWrite = this.preferenceWrite.then(write, write);
+  capturePreferenceConsumption(
+    agentId: string,
+    workspace: string,
+    expected: SubmittedWorktreePreference,
+  ) {
+    return this.preferences.capturePreferenceConsumption(agentId, workspace, expected);
+  }
+
+  persistPreference(agentId: string, workspace: string, patch: NewSessionPreference) {
+    return this.preferences.persistPreference(agentId, workspace, patch);
   }
 
   disconnect() {
+    this.preferences.disconnect();
+    this.cloudProfileRefresh = null;
     this.gatewaySource = null;
     this.gatewayClientValue = null;
     this.gatewayConnectedValue = false;
@@ -522,102 +511,5 @@ export class DraftGatewayState {
         void this.cloudProfileTask.run();
       }
     }, delayMs);
-  }
-
-  private synchronizeIdentityPreferences(profileId: string | undefined) {
-    const client = this.gatewayConnectedValue ? this.gatewayClientValue : null;
-    const context = this.read().context;
-    const advertised =
-      context &&
-      isGatewayMethodAdvertised(context.gateway.snapshot, "users.prefs.get") === true &&
-      isGatewayMethodAdvertised(context.gateway.snapshot, "users.prefs.set") === true;
-    const scope =
-      client && profileId && advertised
-        ? `${this.gatewayConnectionEpochValue}\0${profileId}`
-        : "local";
-    if (scope === this.preferenceScope) {
-      return;
-    }
-    this.preferenceScope = scope;
-    this.identityPreferences = {};
-    if (!client || !profileId || !advertised) {
-      this.preferenceModeValue = "local";
-      this.preferenceLoad = Promise.resolve();
-      return;
-    }
-    this.preferenceModeValue = "loading";
-    this.preferenceLoad = this.loadIdentityPreferences({
-      client,
-      gatewayUrl: this.gatewayUrlValue,
-      scope,
-    });
-  }
-
-  private async loadIdentityPreferences(params: {
-    client: NonNullable<ApplicationContext["gateway"]["snapshot"]["client"]>;
-    gatewayUrl: string;
-    scope: string;
-  }): Promise<void> {
-    try {
-      const result = await params.client.request<UsersPrefsGetResult>("users.prefs.get", {});
-      if (this.preferenceScope !== params.scope) {
-        return;
-      }
-      if (result.status !== "ok") {
-        this.preferenceModeValue = "local";
-        return;
-      }
-      let preferences = decodeIdentityPreferences(result.entries);
-      const browserPreferences = loadBrowserPreferences(params.gatewayUrl);
-      if (result.entries[PREFS_MIGRATION_KEY] !== true) {
-        const missingBrowserPreferences = Object.fromEntries(
-          Object.entries(browserPreferences).filter(
-            ([agentId]) => !Object.hasOwn(preferences, agentId),
-          ),
-        );
-        const migrationEntries = [
-          ...Object.entries(encodeIdentityPreferences(missingBrowserPreferences)),
-          [PREFS_MIGRATION_KEY, true] as const,
-        ];
-        let migrationFailed = false;
-        for (let offset = 0; offset < migrationEntries.length; offset += 32) {
-          const batch = Object.fromEntries(migrationEntries.slice(offset, offset + 32));
-          let response: UsersPrefsSetResult;
-          try {
-            response = await params.client.request<UsersPrefsSetResult>("users.prefs.set", {
-              entries: batch,
-            });
-          } catch {
-            migrationFailed = true;
-            break;
-          }
-          if (this.preferenceScope !== params.scope) {
-            return;
-          }
-          if (response.status !== "ok") {
-            migrationFailed = true;
-            break;
-          }
-          Object.assign(preferences, decodeIdentityPreferences(batch));
-        }
-        if (migrationFailed) {
-          preferences = { ...browserPreferences, ...preferences };
-        }
-      }
-      this.identityPreferences = preferences;
-      this.preferenceModeValue = "remote";
-      for (const [agentId, preference] of Object.entries(preferences)) {
-        replaceBrowserPreference(params.gatewayUrl, agentId, preference);
-      }
-      if (this.read().agentsHydrated) {
-        this.callbacks.onAdoptAgentDefaults();
-      }
-      this.callbacks.requestUpdate();
-    } catch {
-      if (this.preferenceScope === params.scope) {
-        this.preferenceModeValue = "local";
-        this.callbacks.requestUpdate();
-      }
-    }
   }
 }

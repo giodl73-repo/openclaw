@@ -7,6 +7,7 @@ import type {
   ApplicationGateway,
   ApplicationGatewaySnapshot,
 } from "../app/context.ts";
+import { invalidateChatMetadataStore } from "../lib/chat/chat-metadata-cache.ts";
 import { createApplicationContextProvider } from "../test-helpers/application-context.ts";
 import {
   createTestGatewayClient,
@@ -24,7 +25,10 @@ export function createGateway(
   connected: boolean,
   options: { methods?: string[]; request?: GatewayRequestHandler } = {},
 ): GatewayHarness {
-  const client = createTestGatewayClient(options.request ?? (() => ({ models: [] })));
+  const client = createTestGatewayClient(
+    options.request ??
+      ((method) => (method === "sessions.search" ? { results: [], sessions: [] } : { models: [] })),
+  );
   let snapshot: ApplicationGatewaySnapshot = {
     client,
     phase: connected ? "connected" : "reconnecting",
@@ -63,11 +67,17 @@ export function createGateway(
   return {
     gateway,
     emit(event) {
+      if (event === "config.changed" || event === "chat.metadata.changed") {
+        invalidateChatMetadataStore(client);
+      }
       for (const listener of events) {
         listener({ type: "event", event, payload: {} });
       }
     },
     setConnected(nextConnected) {
+      if (!nextConnected) {
+        invalidateChatMetadataStore(client);
+      }
       snapshot = {
         ...snapshot,
         phase: nextConnected ? "connected" : "reconnecting",
@@ -90,6 +100,8 @@ export function createContext(
       subscribe: () => () => undefined,
     }),
     agents: {
+      state: { agentsList: null },
+      subscribe: () => () => undefined,
       ensureList: async () => null,
     },
     sessions: {

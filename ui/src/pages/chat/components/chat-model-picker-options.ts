@@ -1,28 +1,50 @@
 import { html, nothing } from "lit";
-import type { ModelCatalogEntry } from "../../../api/types.ts";
 import { icons } from "../../../components/icons.ts";
-import "../../../components/tooltip.ts";
 import {
   formatRawProviderLabel,
   providerDisplayLabel,
   renderProviderBrandIcon,
 } from "../../../components/provider-icon.ts";
+import "../../../components/tooltip.ts";
 import { t } from "../../../i18n/index.ts";
+import { registerModelControlsEnglish } from "../../../i18n/locales/en-model-controls.ts";
 import { formatContextTokenCapacity } from "../../../lib/format.ts";
+import type { ModelRuntimeEntry } from "../../../lib/model-runtime-choice.ts";
+
+registerModelControlsEnglish();
 
 export type ChatModelPickerOption = {
   agentRuntimeId?: string;
+  /** Null is an unknown configured base; undefined is an ordinary model-only row. Both clear a prior pin. */
+  agentRuntime?: string | null;
+  /** Only explicit alternatives pin a runtime; configured base rows follow current routing. */
+  runtimeOverride?: string;
   commitValue: string;
   contextTokens?: number;
   contextWindow?: number;
   disabled?: boolean;
-  unavailableReason?: ModelCatalogEntry["unavailableReason"];
+  unavailableReason?: ModelRuntimeEntry["unavailableReason"];
   isDefault: boolean;
   label: string;
   provider: string;
   supportsTools?: boolean;
   value: string;
 };
+
+export function modelPickerOptionKey(option: ChatModelPickerOption): string {
+  return JSON.stringify([option.value, option.agentRuntime ?? null]);
+}
+
+export function isModelPickerOptionSelected(
+  option: ChatModelPickerOption,
+  value: string,
+  agentRuntime?: string,
+): boolean {
+  return (
+    (option.value === value || (option.isDefault && value === "")) &&
+    (option.agentRuntime === undefined || (option.agentRuntime ?? undefined) === agentRuntime)
+  );
+}
 
 function formatModelContextMeta(option: ChatModelPickerOption): string {
   const active = option.contextTokens;
@@ -90,14 +112,23 @@ export function renderChatModelPickerOption(params: {
   entry: ChatModelPickerOption;
   index: number;
   selectedModelValue: string;
+  selectedAgentRuntime?: string;
+  sessionModelPinned: boolean;
   onHighlight: (row: HTMLButtonElement) => void;
   onSelect: (entry: ChatModelPickerOption, event: MouseEvent) => void;
   onModelSetup?: () => void;
 }) {
-  const selected =
-    params.entry.value === params.selectedModelValue ||
-    (params.entry.isDefault && params.selectedModelValue === "");
+  const selected = isModelPickerOptionSelected(
+    params.entry,
+    params.selectedModelValue,
+    params.selectedAgentRuntime,
+  );
   const modelLabel = formatModelLabel(params.entry);
+  // A session with a recorded pin (even one pinned to the default's own value)
+  // can always return to Default when the default model is unavailable: the row
+  // commits the reset, not that model. Otherwise an unavailable default routes
+  // to sign-in like any other unavailable row.
+  const resetsPin = params.entry.isDefault && params.sessionModelPinned;
   const needsAuth =
     params.entry.disabled &&
     (params.entry.unavailableReason === "missing-auth" ||
@@ -111,12 +142,17 @@ export function renderChatModelPickerOption(params: {
       ]
         .filter(Boolean)
         .join(" · ");
-  const accessibleStatus = needsAuth ? t("modelSetup.candidates.signInNeeded") : "";
+  const accessibleStatus = needsAuth
+    ? t("modelSetup.candidates.signInNeeded")
+    : params.entry.unavailableReason === "unsupported-runtime"
+      ? t("chat.modelControls.runtimeUnavailable")
+      : "";
   const option = html`<button
     class="chat-controls__inline-select-option chat-controls__model-option ${
       selected ? "chat-controls__inline-select-option--selected" : ""
     }"
     data-chat-model-option=${params.entry.value}
+    data-chat-model-runtime=${params.entry.agentRuntime ?? nothing}
     data-chat-model-default=${params.entry.isDefault ? "true" : nothing}
     data-chat-model-index=${params.index}
     data-chat-model-keywords=${
@@ -128,22 +164,24 @@ export function renderChatModelPickerOption(params: {
     ).toLocaleLowerCase()}
     role="option"
     aria-selected=${selected ? "true" : "false"}
+    title=${accessibleStatus || nothing}
     aria-label=${[
       modelLabel,
+      params.entry.agentRuntimeId ? formatAgentRuntimeLabel(params.entry.agentRuntimeId) : "",
       accessibleStatus,
       params.entry.supportsTools === false ? t("chat.modelControls.chatOnlyHelp") : "",
     ]
       .filter(Boolean)
       .join(". ")}
     type="button"
-    ?disabled=${params.disabled || (params.entry.disabled && !onModelSetup)}
+    ?disabled=${params.disabled || (params.entry.disabled && !onModelSetup && !resetsPin)}
     data-chat-model-setup=${onModelSetup ? "true" : nothing}
     @mouseenter=${(event: MouseEvent) =>
       params.onHighlight(event.currentTarget as HTMLButtonElement)}
     @click=${(event: MouseEvent) => {
       // A sign-in-gated model must not dead-end: the row routes to Model
       // Setup instead of silently ignoring the click on a disabled button.
-      if (params.entry.disabled) {
+      if (params.entry.disabled && !resetsPin) {
         event.stopPropagation();
         onModelSetup?.();
         return;

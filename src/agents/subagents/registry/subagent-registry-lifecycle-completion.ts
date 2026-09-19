@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
 import { isAgentEventLifecycleGenerationCurrent } from "../../../infra/agent-events.js";
 import { createLazyImportLoader } from "../../../shared/lazy-promise.js";
@@ -5,10 +6,8 @@ import type { DetachedTaskFindResult } from "../../../tasks/detached-task-runtim
 import { isProvisionalSubagentKillTask } from "../../../tasks/task-cancellation-state.js";
 import { mergeAgentRunTerminalReplySnapshot } from "../../agent-run-terminal-reply.js";
 import { peekSwarmStructuredOutput } from "../../tools/structured-output-tool.js";
-import {
-  type SubagentRunOutcome,
-  withSubagentOutcomeTiming,
-} from "../announce/subagent-announce-output.js";
+import { withSubagentOutcomeTiming } from "../announce/subagent-announce-output.js";
+import type { SubagentRunOutcome } from "../subagent-run-outcome.types.js";
 import { updateSwarmCollectorCompletion } from "../swarm/swarm-collector.js";
 import { clearDeliveryState, ensureCompletionState } from "./subagent-delivery-state.js";
 import {
@@ -25,7 +24,7 @@ import type { SubagentLifecycleCompletionContext } from "./subagent-registry-lif
 import {
   freezeRunResultAtCompletion,
   refreshPendingFinalDeliveryPayload,
-  safeFinalizeSubagentTaskRun,
+  finalizeSubagentTaskRun,
 } from "./subagent-registry-lifecycle-delivery.js";
 import type { SubagentCompletionRequest, SubagentRunRecord } from "./subagent-registry.types.js";
 import {
@@ -232,11 +231,18 @@ export async function completeSubagentRunAttempt(
       completeParams.reason === SUBAGENT_ENDED_REASON_KILLED &&
       entry.killIntent === undefined &&
       entry.endedReason !== undefined &&
-      entry.endedReason !== SUBAGENT_ENDED_REASON_KILLED &&
-      entry.execution.outcome !== undefined
+      entry.execution.outcome !== undefined &&
+      (entry.endedReason !== SUBAGENT_ENDED_REASON_KILLED ||
+        (entry.execution.status === "terminal" &&
+          entry.killReconciliation === undefined &&
+          entry.pauseReason === undefined &&
+          typeof entry.execution.endedAt === "number" &&
+          Number.isFinite(entry.execution.endedAt) &&
+          typeof entry.cleanupCompletedAt === "number" &&
+          Number.isFinite(entry.cleanupCompletedAt) &&
+          entry.cleanupCompletedAt >= entry.execution.endedAt))
     ) {
-      // Any finalized provider outcome is canonical. A delayed abort listener
-      // must not replace success, failure, or timeout with a killed marker.
+      // A delayed abort must not replace a finalized result or reopen a cleaned cancellation.
       return;
     }
     let requestedEndedAt =
@@ -315,7 +321,7 @@ export async function completeSubagentRunAttempt(
         completionReason = SUBAGENT_ENDED_REASON_KILLED;
         completionOutcome = { status: "error", error: killIntent.reason };
         entry.killIntent = undefined;
-        if (killOwnsCurrentLifecycle) {
+        if (killOwnsCurrentLifecycle && entry.execution.suppressSessionEffects !== true) {
           suppressSessionEffects = false;
           entry.execution = {
             ...entry.execution,
@@ -326,6 +332,7 @@ export async function completeSubagentRunAttempt(
         }
         entry.killReconciliation = {
           killedAt: killIntent.requestedAt,
+          taskCancellationAccepted: killOwnsCurrentLifecycle ? true : undefined,
           suppressTaskDelivery: killIntent.suppressTaskDelivery === true ? true : undefined,
         };
       }
@@ -436,7 +443,13 @@ export async function completeSubagentRunAttempt(
             startedAt: entry.execution.startedAt,
             endedAt,
           });
-    const executionOutcome = recoveryRequested ? (entry.execution.outcome ?? outcome) : outcome;
+    // Lifecycle events and agent.wait may report the same terminal facts. Keep
+    // their authority stable while a prepared announcement waits for admission.
+    const executionOutcome =
+      (recoveryRequested || isDeepStrictEqual(entry.execution.outcome, outcome)) &&
+      entry.execution.outcome
+        ? entry.execution.outcome
+        : outcome;
     const retainedRestartRecovery = suppressSessionEffects
       ? entry.execution.restartRecovery
       : undefined;
@@ -574,7 +587,7 @@ export async function completeSubagentRunAttempt(
     // A steer abort ends one agent run but continues the same detached task.
     // The successor must remain able to publish its eventual terminal state.
     if (provisionalKillSnapshot) {
-      const finalizedTasks = safeFinalizeSubagentTaskRun(params, {
+      const finalizedTasks = finalizeSubagentTaskRun(params, {
         entry,
         outcome: executionOutcome,
         taskResolution: postCaptureTaskResolution,
@@ -630,7 +643,7 @@ export async function completeSubagentRunAttempt(
         throw error;
       }
       if (!suppressTaskFinalization) {
-        safeFinalizeSubagentTaskRun(params, {
+        finalizeSubagentTaskRun(params, {
           entry,
           outcome: executionOutcome,
         });

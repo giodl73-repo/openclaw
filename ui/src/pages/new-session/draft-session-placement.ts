@@ -1,6 +1,6 @@
 import type { SessionCreateParams } from "../../lib/sessions/create.ts";
 import type { SessionPlacementRecovery } from "../../lib/sessions/session-placement-recovery.ts";
-import { restoreChatApiAttachments } from "../chat/attachment-api.ts";
+import { restoreChatApiAttachments } from "../chat/attachment-restoration.ts";
 import type { NewSessionVisibility } from "./create-params.ts";
 import type { PendingSessionPlacementRecoveryState } from "./session-placement-recovery-state.ts";
 
@@ -13,6 +13,7 @@ export type PendingPlacementPlace = {
   machineClass?: string;
   cwd?: string;
   repository?: SessionCreateParams["repository"];
+  worktreeSource?: SessionCreateParams["worktreeSource"];
 };
 
 export function resolveDraftSessionPlacement(
@@ -57,6 +58,9 @@ export function projectDraftSessionPlacementRecovery(recovery: SessionPlacementR
         ? { deviceId: recovery.target.deviceId }
         : { autoDevice: true }),
     cwd: recovery.createParams?.cwd,
+    ...(recovery.createParams?.worktreeSource
+      ? { worktreeSource: recovery.createParams.worktreeSource }
+      : {}),
     ...(recovery.createParams?.repository
       ? { repository: { ...recovery.createParams.repository } }
       : {}),

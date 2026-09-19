@@ -22,13 +22,15 @@ import type { SessionToolOverrides } from "../../../lib/sessions/patch.ts";
 import type { ComposerDictationController } from "../composer-dictation.ts";
 import type { ComposerMicrophonePicker } from "../composer-microphone-picker.ts";
 import type { ChatInputHistoryKeyInput, ChatInputHistoryKeyResult } from "../input-history.ts";
-import type { RealtimeTalkConversationEntry } from "../realtime-talk-conversation.ts";
-import type { RealtimeTalkCameraDevice } from "../realtime-talk-input.ts";
-import type { RealtimeTalkLevelSignal } from "../realtime-talk-level.ts";
-import type { RealtimeTalkStatus } from "../realtime-talk.ts";
 import type { ChatRunUiStatus } from "../run-lifecycle.ts";
+import type { RealtimeTalkConversationEntry } from "../talk/conversation.ts";
+import type { RealtimeTalkCameraDevice } from "../talk/input.ts";
+import type { RealtimeTalkLevelSignal } from "../talk/level.ts";
+import type { RealtimeTalkStatus } from "../talk/session.ts";
+import type { RealtimeVoiceSelectionState } from "../talk/voice-selection.ts";
 import type { FallbackStatus } from "../tool-stream-contract.ts";
-import type { ChatAttachmentControlsProps } from "./chat-attachments.ts";
+import type { ChatAttachmentControlsProps } from "./chat-attachment-controls.types.ts";
+import type { ComposerEmojiMenu } from "./chat-composer-emoji.ts";
 import type { HumanMentionDirectory, HumanMentionMenu } from "./chat-composer-mention-menu.ts";
 import type {
   ChatComposerCapabilityMenuProps,
@@ -77,6 +79,9 @@ export type ChatComposerProps = ChatAttachmentControlsProps & {
   offline?: boolean;
   queuedOutboxCount?: number;
   canSend: boolean;
+  modelRequiredReason?: string | null;
+  submitDisabledReason?: string | null;
+  submitPending?: boolean;
   disabledReason: string | null;
   disabledReasonTone?: "info" | "danger";
   disabledReasonBusy?: boolean;
@@ -88,8 +93,12 @@ export type ChatComposerProps = ChatAttachmentControlsProps & {
   waitingApproval?: boolean;
   fallbackStatus?: FallbackStatus | null;
   progressCard?: ProgressCard | null;
+  progressCardIdentity?: string;
+  progressCardInitialLoading?: boolean;
   runActive?: boolean;
   collapseTaskProgress?: boolean;
+  readingHistory?: boolean;
+  onProgressManipulate?: () => void;
   runId?: string | null;
   onDismissProgressCard?: (card: ProgressCard) => void;
   gatewayQuestionPrompts?: readonly QuestionPrompt[];
@@ -130,6 +139,7 @@ export type ChatComposerProps = ChatAttachmentControlsProps & {
   realtimeTalkVideoCapable?: boolean;
   realtimeTalkVideoPending?: boolean;
   realtimeTalkCameraError?: boolean;
+  realtimeTalkVoice?: RealtimeVoiceSelectionState;
   gatewayClient?: GatewayBrowserClient | null;
   composerHoldToRecord?: boolean;
   realtimeTalkInputDeviceId?: string;
@@ -140,7 +150,8 @@ export type ChatComposerProps = ChatAttachmentControlsProps & {
   typingActors?: readonly { id: string; label: string; preview?: string }[];
   onTypingChange?: (typing: boolean, preview?: string) => void;
   composerControls?: TemplateResult | typeof nothing;
-  anchoredNotices?: TemplateResult | typeof nothing;
+  footerContent?: TemplateResult | typeof nothing;
+  notices?: TemplateResult | typeof nothing;
   permissionPicker?: ChatPermissionPickerProps;
   onDraftChange: (next: string, mentions?: readonly HumanMention[]) => void;
   onHistoryKeydown?: (input: ChatInputHistoryKeyInput) => ChatInputHistoryKeyResult;
@@ -151,6 +162,7 @@ export type ChatComposerProps = ChatAttachmentControlsProps & {
     submissionAction?: Event,
   ) => void | Promise<boolean | void>;
   onToggleRealtimeTalk?: () => void;
+  onSelectRealtimeVoice?: (voice: string) => void;
   onToggleRealtimeCamera?: () => void;
   onSwitchRealtimeCamera?: () => void;
   onDismissRealtimeTalkError?: () => void;
@@ -159,7 +171,8 @@ export type ChatComposerProps = ChatAttachmentControlsProps & {
   onQueueRemove: (id: string) => void;
   onQueueRetry?: (id: string) => void;
   onQueueSteer?: (id: string) => void;
-  onQueueMove?: (id: string, toIndex: number) => void;
+  onQueueMove?: (id: string, targetId: string) => void;
+  displayQueue?: ChatQueueItem[];
   queuedEdit?: ChatQueuedEditProps;
   onClearReply?: () => void;
   onGoalAction?: (goalId: string, action: ChatGoalAction) => void;
@@ -185,7 +198,9 @@ type ComposingDraft = {
 export type ChatComposerState = SkillMenuState &
   SlashMenuState & {
     composerComposing: boolean;
+    editRevision: number;
     mentionMenu: HumanMentionMenu;
+    emojiMenu: ComposerEmojiMenu;
     mentionInput?: HumanMentionInput;
     composingDraft: ComposingDraft | null;
     composerInputIntentKey: string | null;

@@ -1,13 +1,13 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import {
   cleanupOwnedKeychain,
   createOwnedKeychain,
   probeOwnedKeychain,
-  runBounded,
 } from "../../.github/actions/ios-signing-keychain/keychain.mjs";
 import { verifyAndroidReleaseSource } from "../../apps/android/scripts/build-release-artifacts.ts";
 import {
@@ -15,6 +15,7 @@ import {
   writeMobileReleaseIntent,
 } from "../../scripts/mobile-release-intent.mjs";
 import { applyMobileReleasePlan, planMobileRelease } from "../../scripts/mobile-release-version.ts";
+import { resolveTestNodeExecPath } from "../../src/test-utils/node-process.js";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const REPOSITORY = "openclaw/openclaw";
@@ -23,6 +24,7 @@ const OTHER_SHA = "c".repeat(40);
 const RECEIPT_ARTIFACT_DIGEST = `sha256:${"d".repeat(64)}`;
 const INTENT_ARTIFACT_DIGEST = `sha256:${"e".repeat(64)}`;
 const BUILD_TIMESTAMP = "2026-09-02T06:00:00.000Z";
+const testNodeExecPath = resolveTestNodeExecPath();
 const RELEASE_PATHS = [
   "apps/mobile/version.json",
   "apps/android/version.json",
@@ -37,6 +39,7 @@ const TOOLING_FILES = [
   "scripts/lib/direct-run.mjs",
   "scripts/lib/ios-release-plan.ts",
   "scripts/lib/ios-version.ts",
+  "scripts/lib/mobile-changelog.ts",
   "scripts/lib/mobile-version.ts",
   "scripts/lib/release-version.mjs",
 ] as const;
@@ -216,7 +219,7 @@ if (gitArgs[0] === "remote" && gitArgs[1] === "get-url") {
 if (gitArgs[0] === "fetch" && !${JSON.stringify(realFetch)}) {
   process.exit(0);
 }
-if (gitArgs[0] === "archive" && process.env.GIT_ARCHIVE_MODE) {
+if (gitArgs.includes("archive") && process.env.GIT_ARCHIVE_MODE) {
   const outputArgument = gitArgs.find((value) => value.startsWith("--output="));
   if (!outputArgument) {
     console.error("archive test mode requires disk-backed output");
@@ -237,6 +240,10 @@ if (gitArgs[0] === "archive" && process.env.GIT_ARCHIVE_MODE) {
   process.exit(76);
 }
 const result = spawnSync("/usr/bin/git", args, { stdio: "inherit" });
+if (result.status === 0 && gitArgs.includes("archive") && process.env.GIT_ARCHIVE_CAPTURE) {
+  const outputArgument = gitArgs.find((value) => value.startsWith("--output="));
+  fs.copyFileSync(outputArgument.slice("--output=".length), process.env.GIT_ARCHIVE_CAPTURE);
+}
 process.exit(result.status ?? 1);
 `,
     { mode: 0o755 },
@@ -646,6 +653,12 @@ function advanceObservedMain(fixture: Fixture, fromSha: string, branch: string):
 
 function runAuthority(fixture: Fixture, phase: string, overrides: NodeJS.ProcessEnv = {}) {
   fs.writeFileSync(fixture.outputPath, "");
+  if (overrides.MOBILE_OPERATION === "inspect" && phase === "inspect") {
+    const candidatePath = path.join(fixture.trusted, ".ios-inspection-candidate");
+    if (!fs.existsSync(candidatePath)) {
+      fs.cpSync(fixture.workspace, candidatePath, { recursive: true });
+    }
+  }
   return spawnSync(process.execPath, ["--experimental-strip-types", fixture.scriptPath, phase], {
     encoding: "utf8",
     env: { ...fixture.env, ...overrides },
@@ -691,6 +704,94 @@ function archiveSpoolPath(fixture: Fixture): string {
     throw new Error("git archive did not use disk-backed output");
   }
   return output.slice("--output=".length);
+}
+
+function writeArchiveFixture(repository: string): void {
+  writeFile(repository, "unneeded/promised.txt", "unrelated promised blob\n");
+  for (const [file, prefix, pattern] of [
+    [".gitattributes", "root", "scripts/fixtures"],
+    ["scripts/.gitattributes", "nested", "fixtures"],
+  ] as const) {
+    writeFile(
+      repository,
+      file,
+      `${pattern}/${prefix}-ignored.txt export-ignore\n` +
+        `${pattern}/${prefix}-subst.txt export-subst\n` +
+        `${pattern}/${prefix}-crlf.txt text eol=crlf\n`,
+    );
+    writeFile(repository, `scripts/fixtures/${prefix}-ignored.txt`, `${prefix} ignored\n`);
+    writeFile(repository, `scripts/fixtures/${prefix}-subst.txt`, "$Format:%H %ct$\n");
+    writeFile(repository, `scripts/fixtures/${prefix}-crlf.txt`, "first\nsecond\n");
+  }
+  writeFile(repository, "scripts/fixtures/keep.txt", "required archive resource\n");
+  writeFile(repository, "scripts/fixtures/executable.sh", "#!/bin/sh\nexit 0\n");
+  fs.chmodSync(path.join(repository, "scripts/fixtures/executable.sh"), 0o755);
+  fs.symlinkSync("keep.txt", path.join(repository, "scripts/fixtures/keep-link"));
+}
+
+function useColdPartialClone(fixture: Fixture, missingPath?: string): void {
+  const previousTrusted = fixture.trusted;
+  const workflowSha = git(previousTrusted, "rev-parse", "HEAD");
+  const trusted = path.join(path.dirname(previousTrusted), "trusted-partial");
+  git(fixture.source, "config", "uploadpack.allowFilter", "true");
+  git(
+    path.dirname(trusted),
+    "clone",
+    "--filter=blob:none",
+    "--no-checkout",
+    pathToFileURL(fixture.source).href,
+    trusted,
+  );
+  git(trusted, "update-ref", "--no-deref", "HEAD", workflowSha);
+  git(trusted, "update-ref", "refs/remotes/origin/mobile-authority-target", fixture.targetSha);
+
+  // Populate only the authority inputs, never warming the unrelated promised blob
+  // through a full checkout or a preceding archive in this clone.
+  const blobs = new Set<string>();
+  for (const ref of new Set([fixture.baseSha, fixture.targetSha, workflowSha])) {
+    for (const entry of git(trusted, "ls-tree", "-r", ref).split("\n")) {
+      const [metadata, file] = entry.split("\t");
+      const blob = metadata?.split(" ")[2];
+      if (!blob || !file) {
+        throw new Error(`Malformed fixture tree entry: ${entry}`);
+      }
+      if (file !== "unneeded/promised.txt" && file !== missingPath) {
+        blobs.add(blob);
+      }
+    }
+  }
+  for (const blob of blobs) {
+    git(trusted, "cat-file", "blob", blob);
+  }
+  // The CLI needs these checked-out modules; archive contents still come only
+  // from Git objects. Keep HEAD independent of the receipt's Tooling SHA.
+  for (const file of [
+    ".github/actions/mobile-release-authority/authority.mjs",
+    "scripts/mobile-release-intent.mjs",
+  ]) {
+    writeFile(trusted, file, fs.readFileSync(path.join(previousTrusted, file), "utf8"));
+  }
+  fixture.trusted = trusted;
+  fixture.actionPath = path.join(trusted, ".github/actions/mobile-release-authority");
+  fixture.scriptPath = path.join(fixture.actionPath, "authority.mjs");
+  fixture.env.MOBILE_ACTION_PATH = fixture.actionPath;
+  fs.writeFileSync(fixture.gitLog, "");
+  expect(git(trusted, "config", "--get", "remote.origin.promisor")).toBe("true");
+  expect(git(trusted, "config", "--get", "remote.origin.partialclonefilter")).toBe("blob:none");
+}
+
+function hasLocalBlob(fixture: Fixture, file: string): boolean {
+  const oid = git(fixture.source, "rev-parse", `${fixture.baseSha}:${file}`);
+  const result = spawnSync(
+    "/usr/bin/git",
+    ["-C", fixture.trusted, "--no-lazy-fetch", "cat-file", "-e", oid],
+    {
+      encoding: "utf8",
+      env: { ...process.env, GIT_NO_LAZY_FETCH: "1" },
+    },
+  );
+  expect([0, 1], result.stderr).toContain(result.status);
+  return result.status === 0;
 }
 
 function resetState(fixture: Fixture): void {
@@ -767,8 +868,11 @@ function recordOverrides(fixture: Fixture, outputs: Record<string, string>): Nod
 function prepareRecoveryOverrides(
   fixture: Fixture,
   outputs: Record<string, string>,
+  mutate?: (repository: string) => void,
 ): NodeJS.ProcessEnv {
   git(fixture.source, "checkout", "-b", "trusted-main-after-upload", fixture.baseSha);
+  mutate?.(fixture.source);
+  git(fixture.source, "add", "-A");
   git(fixture.source, "commit", "--allow-empty", "-m", "advance trusted main after upload");
   const recoveryWorkflowSha = git(fixture.source, "rev-parse", "HEAD");
   git(fixture.trusted, "fetch", "origin", recoveryWorkflowSha);
@@ -795,6 +899,78 @@ function expectOnlyAttemptOneLifecycleReads(
 }
 
 describe("mobile release authority", () => {
+  it("validates inspection without publication receipts, intents, attestations, or ref writes", () => {
+    const fixture = createFixture();
+    const result = runAuthority(fixture, "inspect", { MOBILE_OPERATION: "inspect" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readOutputs(fixture.outputPath)).toEqual({
+      inspection_validated: "true",
+      ios_app_store_version: "2026.9.20",
+    });
+    expect(fs.existsSync(path.join(fixture.runnerTemp, "mobile-release-ref-ios"))).toBe(false);
+    expect(fs.existsSync(path.join(fixture.runnerTemp, "mobile-release-intent-ios"))).toBe(false);
+    expect(
+      readGhTrace(fixture.ghLog).every(
+        ({ args }) =>
+          args[0] === "api" && !args.includes("POST") && !args[1]?.includes("/artifacts"),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "cancelled",
+      { GH_CURRENT_STATUSES: "in_progress,completed", GH_CURRENT_CONCLUSIONS: 'null,"cancelled"' },
+    ],
+    ["rerun", { GH_CURRENT_ATTEMPTS: "1,2" }],
+    ["revoked actor", { GH_PERMISSIONS: "write,read" }],
+    ["moved candidate", { GH_TARGET_REFS: OTHER_SHA }],
+    ["wrong tooling", { MOBILE_WORKFLOW_SHA: OTHER_SHA }],
+    ["recovery", { MOBILE_RECOVERY: "true" }],
+    ["foreign run", { MOBILE_AUTHORITY_RUN_ID: "999" }],
+  ])("rejects inspection with %s before returning credential admission", (_label, overrides) => {
+    const fixture = createFixture();
+    const result = runAuthority(fixture, "inspect", { MOBILE_OPERATION: "inspect", ...overrides });
+    expect(result.status).toBe(1);
+    expect(readOutputs(fixture.outputPath)).toEqual({});
+    expect(readGhTrace(fixture.ghLog).some(({ args }) => args.includes("POST"))).toBe(false);
+  });
+
+  it("rejects dirty trusted tooling during inspection before admission", () => {
+    const fixture = createFixture();
+    fs.appendFileSync(
+      path.join(fixture.trusted, "scripts/lib/ios-release-plan.ts"),
+      "\n// unexpected tooling mutation\n",
+    );
+    const result = runAuthority(fixture, "inspect", { MOBILE_OPERATION: "inspect" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Trusted inspection tooling has tracked changes");
+    expect(readOutputs(fixture.outputPath)).toEqual({});
+    expect(readGhTrace(fixture.ghLog)).toEqual([]);
+  });
+
+  it("rejects dirty candidate data during inspection", () => {
+    const fixture = createFixture();
+    const candidatePath = path.join(fixture.trusted, ".ios-inspection-candidate");
+    fs.cpSync(fixture.workspace, candidatePath, { recursive: true });
+    fs.writeFileSync(path.join(candidatePath, "apps/ios/CHANGELOG.md"), "dirty\n");
+    const result = runAuthority(fixture, "inspect", { MOBILE_OPERATION: "inspect" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("tracked changes");
+    expect(readOutputs(fixture.outputPath)).toEqual({});
+  });
+
+  it.each(["authorize", "revalidate", "validate-record", "record"])(
+    "inspection cannot enter %s",
+    (phase) => {
+      const fixture = createFixture();
+      const result = runAuthority(fixture, phase, { MOBILE_OPERATION: "inspect" });
+      expect(result.status).toBe(1);
+      expect(readOutputs(fixture.outputPath)).toEqual({});
+      expect(readGhTrace(fixture.ghLog)).toEqual([]);
+    },
+  );
+
   it("authorizes an exact five-file release candidate and emits an attested v2 receipt", () => {
     const fixture = createFixture();
     const outputs = authorize(fixture);
@@ -1034,6 +1210,142 @@ describe("mobile release authority", () => {
     expect(fs.existsSync(path.dirname(spool))).toBe(true);
     expect(fs.existsSync(spool)).toBe(false);
   });
+
+  it.each([
+    ["authorization", false, undefined],
+    ["recovery with different HEAD attributes", true, undefined],
+    ["authorization with a lazy required resource", false, "scripts/fixtures/keep.txt"],
+  ] as const)(
+    "preserves the complete cold partial-clone archive during %s without unrelated fetches",
+    (_label, recovery, missingPath) => {
+      const fixture = createFixture({ mutateBase: writeArchiveFixture });
+      let overrides: NodeJS.ProcessEnv = {};
+      if (recovery) {
+        const outputs = authorize(fixture);
+        signIntentFile(fixture, outputs);
+        overrides = prepareRecoveryOverrides(fixture, outputs, (repository) => {
+          writeFile(
+            repository,
+            ".gitattributes",
+            "scripts/fixtures/root-subst.txt export-ignore\n",
+          );
+          writeFile(
+            repository,
+            "scripts/.gitattributes",
+            "fixtures/nested-subst.txt export-ignore\n",
+          );
+        });
+        resetState(fixture);
+      }
+      const expected = path.join(fixture.runnerTemp, "expected.tar");
+      git(
+        fixture.source,
+        "archive",
+        "--format=tar",
+        `--output=${expected}`,
+        fixture.baseSha,
+        "--",
+        "scripts",
+      );
+      useColdPartialClone(fixture, missingPath);
+      // Neither unstaged attributes nor an inherited attribute source may replace
+      // the selected immutable Tooling SHA, including record-only recovery.
+      writeFile(fixture.trusted, ".gitattributes", "scripts export-ignore\n");
+      writeFile(fixture.trusted, "scripts/.gitattributes", "* export-ignore\n");
+      const head = git(fixture.trusted, "rev-parse", "HEAD");
+      expect(head === fixture.baseSha).toBe(!recovery);
+      expect(hasLocalBlob(fixture, "unneeded/promised.txt")).toBe(false);
+      if (missingPath) {
+        expect(hasLocalBlob(fixture, missingPath)).toBe(false);
+      }
+      const captured = path.join(fixture.runnerTemp, "actual.tar");
+      const trace = path.join(fixture.runnerTemp, "archive-events.jsonl");
+      const result = runAuthority(fixture, recovery ? "validate-record" : "authorize", {
+        ...overrides,
+        GIT_ARCHIVE_CAPTURE: captured,
+        GIT_ATTR_SOURCE: head,
+        GIT_NO_LAZY_FETCH: undefined,
+        GIT_TRACE2_EVENT: trace,
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(fs.readFileSync(captured).equals(fs.readFileSync(expected))).toBe(true);
+      expect(hasLocalBlob(fixture, "unneeded/promised.txt")).toBe(false);
+      const fetches = fs
+        .readFileSync(trace, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { event: string; argv?: string[] })
+        .filter((event) => event.event === "child_start" && event.argv?.includes("fetch"));
+      expect(fetches).toHaveLength(missingPath ? 1 : 0);
+      if (missingPath) {
+        expect(hasLocalBlob(fixture, missingPath)).toBe(true);
+      }
+      const spool = archiveSpoolPath(fixture);
+      expect(fs.existsSync(spool)).toBe(false);
+      const extracted = path.dirname(spool);
+      for (const prefix of ["root", "nested"]) {
+        expect(fs.existsSync(path.join(extracted, `scripts/fixtures/${prefix}-ignored.txt`))).toBe(
+          false,
+        );
+        expect(
+          fs.readFileSync(path.join(extracted, `scripts/fixtures/${prefix}-subst.txt`), "utf8"),
+        ).toBe(
+          `${fixture.baseSha} ${git(fixture.source, "show", "-s", "--format=%ct", fixture.baseSha)}\n`,
+        );
+        expect(
+          fs.readFileSync(path.join(extracted, `scripts/fixtures/${prefix}-crlf.txt`), "utf8"),
+        ).toBe("first\r\nsecond\r\n");
+      }
+      expect(fs.readFileSync(path.join(extracted, "scripts/fixtures/keep.txt"), "utf8")).toBe(
+        "required archive resource\n",
+      );
+      expect(fs.statSync(path.join(extracted, "scripts/fixtures/executable.sh")).mode & 0o111).toBe(
+        0o111,
+      );
+      expect(fs.readlinkSync(path.join(extracted, "scripts/fixtures/keep-link"))).toBe("keep.txt");
+      const commitId = spawnSync("/usr/bin/git", ["get-tar-commit-id"], {
+        encoding: "utf8",
+        input: fs.readFileSync(captured),
+      });
+      expect(commitId.status, commitId.stderr).toBe(0);
+      expect(commitId.stdout.trim()).toBe(fixture.baseSha);
+    },
+  );
+
+  it.each([".gitattributes", "scripts/.gitattributes", "scripts/fixtures/keep.txt"])(
+    "refuses an incomplete scripts export when promised %s is unavailable",
+    (missingPath) => {
+      const fixture = createFixture({ mutateBase: writeArchiveFixture });
+      useColdPartialClone(fixture, missingPath);
+      expect(hasLocalBlob(fixture, missingPath)).toBe(false);
+      expect(hasLocalBlob(fixture, "unneeded/promised.txt")).toBe(false);
+      git(
+        fixture.trusted,
+        "remote",
+        "set-url",
+        "origin",
+        path.join(fixture.runnerTemp, "absent-origin"),
+      );
+      const captured = path.join(fixture.runnerTemp, "incomplete.tar");
+
+      const result = runAuthority(fixture, "authorize", {
+        GIT_ARCHIVE_CAPTURE: captured,
+        GIT_NO_LAZY_FETCH: undefined,
+      });
+
+      expect(result.status).toBe(1);
+      const oid = git(fixture.source, "rev-parse", `${fixture.baseSha}:${missingPath}`);
+      expect(result.stderr).toContain(`could not fetch ${oid} from promisor remote`);
+      expect(fs.readFileSync(fixture.outputPath, "utf8")).toBe("");
+      expect(fs.existsSync(path.join(fixture.runnerTemp, "mobile-release-ref-ios"))).toBe(false);
+      expect(fs.existsSync(captured)).toBe(false);
+      const spool = archiveSpoolPath(fixture);
+      expect(fs.existsSync(spool)).toBe(false);
+      expect(fs.existsSync(path.join(path.dirname(spool), "scripts"))).toBe(false);
+      expect(hasLocalBlob(fixture, "unneeded/promised.txt")).toBe(false);
+    },
+  );
 
   it.each([
     ["partial Git archive", "partial-failure"],
@@ -1604,6 +1916,26 @@ describe("mobile release authority", () => {
     expect(fs.existsSync(path.join(fixture.stateDir, "release-ref"))).toBe(false);
   });
 
+  it("record-only rejects a missing original intent before token or ref writing", () => {
+    const fixture = createFixture();
+    const outputs = authorize(fixture);
+    const recovery = prepareRecoveryOverrides(fixture, outputs);
+    resetState(fixture);
+    const result = runAuthority(fixture, "resolve-artifacts", {
+      ...recovery,
+      MOBILE_INTENT_ARTIFACT_DIGEST: "",
+      MOBILE_INTENT_ARTIFACT_ID: "",
+      MOBILE_INTENT_ARTIFACT_NAME: "",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Expected exactly one unexpired mobile-release-intent-ios-123-1 artifact",
+    );
+    expect(readOutputs(fixture.outputPath)).toEqual({});
+    expect(fs.existsSync(path.join(fixture.runnerTemp, "mobile-release-intent-ios"))).toBe(false);
+    expect(readGhTrace(fixture.ghLog).some(({ args }) => args.includes("POST"))).toBe(false);
+  });
+
   it("records exact iOS and Android intents and handles an identical create race idempotently", () => {
     for (const platform of ["ios", "android"] as const) {
       const fixture = createFixture({ platform });
@@ -1957,8 +2289,15 @@ describe("mobile release authority", () => {
     expect(JSON.stringify(steps)).not.toContain("candidate/");
 
     const tooling = steps[toolingIndex]?.run ?? "";
+    expect(tooling).toContain('apt_source="/etc/apt/sources.list.d/ubuntu.sources"');
     expect(tooling).toContain(
-      "/usr/bin/apt-get install -y --no-install-recommends acl imagemagick",
+      'apt_source_parts="$RUNNER_TEMP/openclaw-android-apt-sourceparts-disabled"',
+    );
+    expect(tooling).toContain('test -s "$apt_source"');
+    expect(tooling).toContain('[[ -e "$apt_source_parts" || -L "$apt_source_parts" ]]');
+    expect(tooling).toContain('/usr/bin/apt-get "${apt_options[@]}" update');
+    expect(tooling).toMatch(
+      /\/usr\/bin\/apt-get "\$\{apt_options\[@\]\}" install \\\n\s+-y --no-install-recommends acl imagemagick/u,
     );
     expect(tooling).toContain(
       'test "$(git -C "$trusted_root" rev-parse HEAD)" = "$GITHUB_WORKFLOW_SHA"',
@@ -2598,6 +2937,322 @@ fi
     expect(source).not.toMatch(/apps-signing|MATCH_PASSWORD|GOOGLE_PLAY|upload-and-record/iu);
   });
 
+  it("generates two-axis varied-color Android conversion smoke inputs", () => {
+    const workflow = parse(
+      fs.readFileSync(".github/workflows/android-emulator-diagnostic.yml", "utf8"),
+    ) as {
+      jobs: Record<string, { steps?: Array<{ name: string; run?: string }> }>;
+    };
+    const tooling = Object.values(workflow.jobs)
+      .flatMap((job) => job.steps ?? [])
+      .find((step) => step.name === "Prepare trusted Linux Android tooling")?.run;
+
+    expect(tooling).toMatch(
+      /width="\$\{dimensions%x\*\}"\n\s+height="\$\{dimensions#\*x\}"\n\s+\/usr\/bin\/convert \\\n\s+\\\( -size "\$dimensions" 'gradient:#000000-#ff0000' \\\) \\\n\s+\\\( -size "\$\{height\}x\$\{width\}" 'gradient:#000000-#00ff00' -transpose \\\) \\\n\s+-compose plus -composite \\\n\s+-alpha set -channel A -evaluate set 60% \+channel/u,
+    );
+    expect(tooling).not.toContain("'xc:");
+    expect(tooling).toMatch(
+      /\/usr\/bin\/identify \+ping \\\n\s+-format 'format=%m width=%w height=%h colorspace=%\[colorspace\] type=%\[type\] channels=%\[channels\] quality=%Q\\n'/u,
+    );
+    expect(tooling).not.toContain("/usr/bin/identify -ping");
+  });
+
+  it("fully decodes Android JPEGs before enforcing true-color metadata", () => {
+    const adapter = fs.readFileSync("scripts/android-sips-linux.sh", "utf8");
+
+    expect(adapter).toContain(
+      "\"$identify_bin\" +ping -format '%m|%w|%h|%[colorspace]|%[type]|%[channels]|%Q'",
+    );
+    expect(adapter).not.toContain(
+      "\"$identify_bin\" -ping -format '%m|%w|%h|%[colorspace]|%[type]|%[channels]|%Q'",
+    );
+    expect(adapter).toContain('[[ "$output_type" == "TrueColor" ]]');
+  });
+
+  it("isolates Ubuntu APT sources before Android tooling setup", () => {
+    const workflowFiles = [
+      ".github/workflows/android-emulator-diagnostic.yml",
+      ".github/workflows/android-beta-release.yml",
+    ] as const;
+
+    const readToolingBody = (file: string): string => {
+      const workflow = parse(fs.readFileSync(file, "utf8")) as {
+        jobs: Record<string, { steps?: Array<{ name: string; run?: string }> }>;
+      };
+      const matches = Object.values(workflow.jobs)
+        .flatMap((job) => job.steps ?? [])
+        .filter((step) => step.name === "Prepare trusted Linux Android tooling");
+      if (matches.length !== 1 || !matches[0]?.run) {
+        throw new Error(`${file}: missing unique Linux Android tooling step`);
+      }
+      return matches[0].run;
+    };
+
+    const diagnosticTooling = readToolingBody(".github/workflows/android-emulator-diagnostic.yml");
+    expect(diagnosticTooling).toMatch(
+      /width="\$\{dimensions%x\*\}"\n\s+height="\$\{dimensions#\*x\}"\n\s+\/usr\/bin\/convert \\\n\s+\\\( -size "\$dimensions" 'gradient:#000000-#ff0000' \\\) \\\n\s+\\\( -size "\$\{height\}x\$\{width\}" 'gradient:#000000-#00ff00' -transpose \\\) \\\n\s+-compose plus -composite \\\n\s+-alpha set -channel A -evaluate set 60% \+channel \\\n\s+"\$smoke_dir\/input-\$\{dimensions\}\.png"/u,
+    );
+    expect(diagnosticTooling).not.toContain("gradient:rgba(");
+
+    const pathExists = (target: string): boolean => {
+      try {
+        fs.lstatSync(target);
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return false;
+        }
+        throw error;
+      }
+    };
+
+    const runToolingFixture = (
+      file: string,
+      options: {
+        broadSource?: boolean;
+        sourceState?: "empty" | "missing" | "nonempty";
+        sourcePartsState?: "absent" | "directory" | "symlink";
+        updateExit?: number;
+      } = {},
+    ) => {
+      const root = tempRoots.make("openclaw-android-apt-source-");
+      const bin = path.join(root, "bin");
+      const runnerTemp = path.join(root, "runner-temp");
+      const diagnosticDir = path.join(root, "diagnostic");
+      const aptSource = path.join(root, "ubuntu.sources");
+      const aptSourceParts = path.join(runnerTemp, "openclaw-android-apt-sourceparts-disabled");
+      const aptLog = path.join(root, "apt.log");
+      const installSentinel = path.join(root, "install-ran");
+      const adapterSentinel = path.join(root, "adapter-ran");
+      const kvmSentinel = path.join(root, "kvm-ran");
+      const adapterSource = [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        'output=""',
+        "while (( $# > 0 )); do",
+        '  if [[ "$1" == "--out" ]]; then output="$2"; shift 2; else shift; fi',
+        "done",
+        'test -n "$output"',
+        'printf "jpeg\\n" >"$output"',
+        'printf "adapter\\n" >"$ADAPTER_SENTINEL"',
+        "",
+      ].join("\n");
+      fs.mkdirSync(bin);
+      fs.mkdirSync(runnerTemp);
+      fs.mkdirSync(diagnosticDir);
+      if ((options.sourceState ?? "nonempty") !== "missing") {
+        fs.writeFileSync(
+          aptSource,
+          options.sourceState === "empty" ? "" : "Types: deb\nURIs: fixture.invalid\n",
+        );
+      }
+      if (options.sourcePartsState === "directory") {
+        fs.mkdirSync(aptSourceParts);
+      } else if (options.sourcePartsState === "symlink") {
+        fs.symlinkSync(path.join(root, "missing-sourceparts"), aptSourceParts);
+      }
+
+      const writeExecutable = (name: string, source: string): string => {
+        const executable = path.join(bin, name);
+        fs.writeFileSync(executable, source, { mode: 0o755 });
+        return executable;
+      };
+      const timeout = writeExecutable(
+        "timeout",
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          "while (( $# > 0 )); do",
+          '  case "$1" in',
+          "    --signal=*|--kill-after=*) shift ;;",
+          "    300s) shift; break ;;",
+          "    *) exit 91 ;;",
+          "  esac",
+          "done",
+          'exec "$@"',
+          "",
+        ].join("\n"),
+      );
+      const sudo = writeExecutable(
+        "sudo",
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          'test "$1" = "env"',
+          "shift",
+          'while (( $# > 0 )) && [[ "$1" == *=* ]]; do export "$1"; shift; done',
+          'exec "$@"',
+          "",
+        ].join("\n"),
+      );
+      const aptGet = writeExecutable(
+        "apt-get",
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          'printf "%s\\n" "$*" >>"$APT_LOG"',
+          'if (( $# < 5 )) || [[ "$1" != "-o" || "$2" != "Dir::Etc::sourcelist=$APT_SOURCE" ||',
+          '  "$3" != "-o" || "$4" != "Dir::Etc::sourceparts=$APT_SOURCE_PARTS" ]]; then',
+          "  exit 100",
+          "fi",
+          'if [[ "$5" == "update" ]]; then exit "${APT_UPDATE_EXIT:-0}"; fi',
+          'test "$5" = "install"',
+          'test "$6" = "-y"',
+          'test "$7" = "--no-install-recommends"',
+          'test "$8" = "acl"',
+          'test "$9" = "imagemagick"',
+          'printf "install\\n" >"$INSTALL_SENTINEL"',
+          "",
+        ].join("\n"),
+      );
+      const convert = writeExecutable(
+        "convert",
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          'output="${!#}"',
+          'printf "png\\n" >"$output"',
+          "",
+        ].join("\n"),
+      );
+      const identify = writeExecutable(
+        "identify",
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          "printf 'format=JPEG width=1 height=1 colorspace=sRGB type=TrueColor channels=3.0 quality=95\\n'",
+          "",
+        ].join("\n"),
+      );
+      writeExecutable(
+        "git",
+        [
+          "#!/bin/bash",
+          "set -euo pipefail",
+          'test "$1" = "-C"',
+          "shift 2",
+          'case "$1 $2" in',
+          '  "rev-parse HEAD") printf "%s\\n" "$GITHUB_WORKFLOW_SHA" ;;',
+          '  "ls-tree HEAD") printf "100755 blob fixtureoid scripts/android-sips-linux.sh\\n" ;;',
+          '  "cat-file blob")',
+          '    printf "adapter\\n" >"$ADAPTER_SENTINEL"',
+          '    cat "$ADAPTER_SOURCE"',
+          "    ;;",
+          "  *) exit 92 ;;",
+          "esac",
+          "",
+        ].join("\n"),
+      );
+
+      for (const trustedRoot of [
+        path.join(root, ".mobile-release-tooling"),
+        path.join(root, "apps/android/build/mobile-release-ci/authority"),
+      ]) {
+        writeFile(trustedRoot, "scripts/android-sips-linux.sh", adapterSource);
+        fs.chmodSync(path.join(trustedRoot, "scripts/android-sips-linux.sh"), 0o755);
+      }
+      fs.writeFileSync(path.join(root, "adapter-source.sh"), adapterSource, { mode: 0o755 });
+
+      let body = readToolingBody(file);
+      if (options.broadSource) {
+        body = body
+          .replace('/usr/bin/apt-get "${apt_options[@]}" update', "/usr/bin/apt-get update")
+          .replace('/usr/bin/apt-get "${apt_options[@]}" install', "/usr/bin/apt-get install");
+      }
+      body = body
+        .replaceAll("/usr/bin/timeout", timeout)
+        .replaceAll("/usr/bin/sudo", sudo)
+        .replaceAll("/usr/bin/apt-get", aptGet)
+        .replaceAll("/usr/bin/convert", convert)
+        .replaceAll("/usr/bin/identify", identify)
+        .replaceAll("/etc/apt/sources.list.d/ubuntu.sources", aptSource);
+
+      const result = spawnSync(
+        "/bin/bash",
+        ["-c", [body, 'printf "kvm\\n" >"$KVM_SENTINEL"'].join("\n")],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ADAPTER_SENTINEL: adapterSentinel,
+            ADAPTER_SOURCE: path.join(root, "adapter-source.sh"),
+            APT_LOG: aptLog,
+            APT_SOURCE: aptSource,
+            APT_SOURCE_PARTS: aptSourceParts,
+            APT_UPDATE_EXIT: String(options.updateExit ?? 0),
+            DIAGNOSTIC_DIR: diagnosticDir,
+            GITHUB_WORKFLOW_SHA: "a".repeat(40),
+            INSTALL_SENTINEL: installSentinel,
+            KVM_SENTINEL: kvmSentinel,
+            PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+            RUNNER_ARCH: "X64",
+            RUNNER_OS: "Linux",
+            RUNNER_TEMP: runnerTemp,
+          },
+          timeout: 5_000,
+        },
+      );
+      return {
+        adapterSentinel,
+        aptSource,
+        aptSourceParts,
+        calls: fs.existsSync(aptLog)
+          ? fs.readFileSync(aptLog, "utf8").trim().split("\n").filter(Boolean)
+          : [],
+        installSentinel,
+        kvmSentinel,
+        result,
+      };
+    };
+
+    for (const file of workflowFiles) {
+      const broad = runToolingFixture(file, { broadSource: true });
+      expect(broad.result.status, `${file}: broad source should fail`).toBe(100);
+      expect(fs.existsSync(broad.installSentinel)).toBe(false);
+      expect(fs.existsSync(broad.adapterSentinel)).toBe(false);
+      expect(fs.existsSync(broad.kvmSentinel)).toBe(false);
+
+      const restricted = runToolingFixture(file);
+      expect(
+        restricted.result.status,
+        `${file}: signal=${restricted.result.signal ?? "none"}\n${restricted.result.stderr}`,
+      ).toBe(0);
+      expect(restricted.calls).toEqual([
+        `-o Dir::Etc::sourcelist=${restricted.aptSource} -o Dir::Etc::sourceparts=${restricted.aptSourceParts} update`,
+        `-o Dir::Etc::sourcelist=${restricted.aptSource} -o Dir::Etc::sourceparts=${restricted.aptSourceParts} install -y --no-install-recommends acl imagemagick`,
+      ]);
+      expect(pathExists(restricted.aptSourceParts)).toBe(false);
+      expect(fs.existsSync(restricted.installSentinel)).toBe(true);
+      expect(fs.existsSync(restricted.adapterSentinel)).toBe(true);
+      expect(fs.existsSync(restricted.kvmSentinel)).toBe(true);
+
+      const failedUpdate = runToolingFixture(file, { updateExit: 100 });
+      expect(failedUpdate.result.status).toBe(100);
+      expect(failedUpdate.calls).toHaveLength(1);
+      expect(fs.existsSync(failedUpdate.installSentinel)).toBe(false);
+      expect(fs.existsSync(failedUpdate.adapterSentinel)).toBe(false);
+      expect(fs.existsSync(failedUpdate.kvmSentinel)).toBe(false);
+
+      for (const sourceState of ["missing", "empty"] as const) {
+        const guarded = runToolingFixture(file, { sourceState });
+        expect(guarded.result.status, `${file}: ${sourceState} source`).not.toBe(0);
+        expect(guarded.calls).toEqual([]);
+        expect(fs.existsSync(guarded.adapterSentinel)).toBe(false);
+        expect(fs.existsSync(guarded.kvmSentinel)).toBe(false);
+      }
+
+      for (const sourcePartsState of ["directory", "symlink"] as const) {
+        const guarded = runToolingFixture(file, { sourcePartsState });
+        expect(guarded.result.status, `${file}: ${sourcePartsState} source parts`).not.toBe(0);
+        expect(guarded.calls).toEqual([]);
+        expect(pathExists(guarded.aptSourceParts)).toBe(true);
+        expect(fs.existsSync(guarded.adapterSentinel)).toBe(false);
+        expect(fs.existsSync(guarded.kvmSentinel)).toBe(false);
+      }
+    }
+  });
+
   it("keeps upload and recovery credentials inside one protected platform boundary", () => {
     const workflows = [
       {
@@ -2676,7 +3331,11 @@ fi
       };
       expect(workflow.name).toBe(name);
       expect(Object.keys(workflow.on)).toEqual(["workflow_dispatch"]);
-      expect(Object.keys(workflow.jobs)).toEqual(["authorize", "release", "recover-record"]);
+      expect(Object.keys(workflow.jobs)).toEqual(
+        platform === "ios"
+          ? ["authorize", "release", "recover-record", "inspect"]
+          : ["authorize", "release", "recover-record"],
+      );
       expect(workflow.jobs.authorize?.environment).toBeUndefined();
       expect(workflow.jobs.release?.environment).toBe(environment);
       expect(workflow.jobs["recover-record"]?.environment).toBe(environment);
@@ -2846,8 +3505,17 @@ fi
         expect(androidSetupIndex).toBeGreaterThanOrEqual(0);
         expect(accelerationCheckIndex).toBe(androidSetupIndex + 1);
         expect(accelerationCheckIndex).toBeLessThan(signingRevalidateIndex);
+        expect(toolingStep?.run).toContain('apt_source="/etc/apt/sources.list.d/ubuntu.sources"');
         expect(toolingStep?.run).toContain(
-          "/usr/bin/apt-get install -y --no-install-recommends acl imagemagick",
+          'apt_source_parts="$RUNNER_TEMP/openclaw-android-apt-sourceparts-disabled"',
+        );
+        expect(toolingStep?.run).toContain('test -s "$apt_source"');
+        expect(toolingStep?.run).toContain(
+          '[[ -e "$apt_source_parts" || -L "$apt_source_parts" ]]',
+        );
+        expect(toolingStep?.run).toContain('/usr/bin/apt-get "${apt_options[@]}" update');
+        expect(toolingStep?.run).toMatch(
+          /\/usr\/bin\/apt-get "\$\{apt_options\[@\]\}" install \\\n\s+-y --no-install-recommends acl imagemagick/u,
         );
         expect(toolingStep?.run).toContain(
           'trusted_root="apps/android/build/mobile-release-ci/authority"',
@@ -3067,7 +3735,7 @@ fi
     }
   });
 
-  it("passes protected iOS release inputs only to the iOS upload step", () => {
+  it("passes protected iOS group policy only to upload and inspection, and screenshot inputs only to upload", () => {
     const source = fs.readFileSync(".github/workflows/ios-beta-release.yml", "utf8");
     const project = parse(fs.readFileSync("apps/ios/project.yml", "utf8")) as {
       name?: string;
@@ -3100,13 +3768,19 @@ fi
     );
 
     expect(source).not.toContain("secrets.TESTFLIGHT_INTERNAL_GROUP");
-    expect(source.match(/\$\{\{ vars\.TESTFLIGHT_INTERNAL_GROUP \}\}/gu)).toHaveLength(1);
+    expect(source.match(/\$\{\{ vars\.TESTFLIGHT_INTERNAL_GROUP \}\}/gu)).toHaveLength(2);
     expect(workflow.jobs.release?.environment).toBe("ios-beta-release");
     expect(placements).toEqual([
       {
         envName: "TESTFLIGHT_INTERNAL_GROUP",
         jobName: "release",
         runsUpload: true,
+        value: "${{ vars.TESTFLIGHT_INTERNAL_GROUP }}",
+      },
+      {
+        envName: "TESTFLIGHT_INTERNAL_GROUP",
+        jobName: "inspect",
+        runsUpload: false,
         value: "${{ vars.TESTFLIGHT_INTERNAL_GROUP }}",
       },
     ]);
@@ -3141,7 +3815,7 @@ fi
     ]);
   });
 
-  it("owns the iOS signing keychain through trusted authority code", () => {
+  it("runs the iOS signing proof through the prepared Fastlane environment", () => {
     const source = fs.readFileSync(".github/workflows/ios-beta-release.yml", "utf8");
     const workflow = parse(source) as {
       jobs: {
@@ -3188,10 +3862,115 @@ fi
     expect(releaseSteps[signingProofIndex]?.env).toEqual({
       MATCH_PASSWORD: "${{ secrets.MATCH_PASSWORD }}",
     });
-    expect(releaseSteps[signingProofIndex]?.run).toContain("pnpm ios:release:signing:check");
-    expect(releaseSteps[signingProofIndex]?.run).toContain(
-      "authority/.github/actions/ios-signing-keychain/keychain.mjs probe",
+    const signingProof = releaseSteps[signingProofIndex]?.run;
+    expect(signingProof).toBeTruthy();
+    const fixtureRoot = tempRoots.make("openclaw-ios-signing-proof-");
+    const workspace = path.join(fixtureRoot, "workspace");
+    const home = path.join(fixtureRoot, "home");
+    const preparedBin = path.join(fixtureRoot, "prepared-bin");
+    const loginBin = path.join(fixtureRoot, "login-bin");
+    const eventsPath = path.join(fixtureRoot, "events");
+    for (const directory of [
+      home,
+      preparedBin,
+      loginBin,
+      path.join(workspace, "scripts/lib"),
+      path.join(workspace, "apps/ios"),
+    ]) {
+      fs.mkdirSync(directory, { recursive: true });
+    }
+    fs.copyFileSync(
+      "scripts/lib/ios-fastlane.sh",
+      path.join(workspace, "scripts/lib/ios-fastlane.sh"),
     );
+    fs.copyFileSync("apps/ios/Gemfile", path.join(workspace, "apps/ios/Gemfile"));
+    fs.writeFileSync(
+      path.join(home, ".bash_profile"),
+      'export PATH="$FIXTURE_LOGIN_BIN:/usr/bin:/bin"\n',
+    );
+    fs.writeFileSync(
+      path.join(preparedBin, "pnpm"),
+      [
+        "#!/bin/bash",
+        'printf "pnpm:%s\\n" "$*" >>"$FIXTURE_EVENTS"',
+        "exec /bin/bash -lc 'source ./scripts/lib/ios-fastlane.sh && cd apps/ios && run_ios_fastlane ios signing_check'",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(loginBin, "bundle"),
+      ["#!/bin/bash", 'printf "login-bundle:%s\\n" "$*" >>"$FIXTURE_EVENTS"', "exit 42", ""].join(
+        "\n",
+      ),
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(preparedBin, "bundle"),
+      [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        '[[ "$BUNDLE_GEMFILE" == "$FIXTURE_WORKSPACE/apps/ios/Gemfile" ]]',
+        '[[ "$PWD" == "$FIXTURE_WORKSPACE/apps/ios" ]]',
+        'printf "bundle:%s\\n" "$*" >>"$FIXTURE_EVENTS"',
+        'if [[ "$2" == "check" ]]; then',
+        '  [[ "${FIXTURE_FAIL_CHECK:-0}" != "1" ]] || exit 42',
+        'elif [[ "$2" != "exec" || "$3" != "fastlane" || "$4" != "ios" || "$5" != "signing_check" ]]; then',
+        "  exit 43",
+        "fi",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(preparedBin, "node"),
+      [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        '[[ "$PWD" == "$FIXTURE_WORKSPACE" ]]',
+        '[[ "$*" == "apps/ios/build/mobile-release-ci/authority/.github/actions/ios-signing-keychain/keychain.mjs probe" ]]',
+        'printf "probe:root-cwd\\n" >>"$FIXTURE_EVENTS"',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const runSigningProof = (extraEnv: NodeJS.ProcessEnv = {}) => {
+      fs.writeFileSync(eventsPath, "");
+      const result = spawnSync("/bin/bash", ["--noprofile", "--norc", "-c", signingProof ?? ""], {
+        cwd: workspace,
+        encoding: "utf8",
+        env: {
+          FIXTURE_EVENTS: eventsPath,
+          FIXTURE_LOGIN_BIN: loginBin,
+          FIXTURE_WORKSPACE: workspace,
+          HOME: home,
+          MATCH_PASSWORD: "fixture-password",
+          PATH: `${preparedBin}:/usr/bin:/bin`,
+          ...extraEnv,
+        },
+        timeout: 5_000,
+      });
+      return {
+        events: fs.readFileSync(eventsPath, "utf8").trim().split("\n").filter(Boolean),
+        result,
+      };
+    };
+
+    const prepared = runSigningProof();
+    expect(prepared.result.status, prepared.result.stderr).toBe(0);
+    expect(prepared.events).toEqual([
+      "bundle:_2.6.9_ check",
+      "bundle:_2.6.9_ exec fastlane ios signing_check",
+      "probe:root-cwd",
+    ]);
+    expect(signingProof).toContain("source ./scripts/lib/ios-fastlane.sh");
+    expect(signingProof).toContain("(cd apps/ios && run_ios_fastlane ios signing_check)");
+
+    const failedCheck = runSigningProof({ FIXTURE_FAIL_CHECK: "1" });
+    expect(failedCheck.result.status).not.toBe(0);
+    expect(failedCheck.events).toEqual(["bundle:_2.6.9_ check"]);
+
     const authorityCheckout = releaseSteps.find(
       (step) => step.name === "Checkout trusted mobile release authority",
     );
@@ -3613,21 +4392,41 @@ fi
           'process.on("SIGTERM", () => {});',
           "setInterval(() => {}, 1000);",
         ].join("\n");
-        const startedAt = Date.now();
-        await expect(
-          runBounded(process.execPath, ["-e", parentSource], {
-            env: { ...process.env, PID_FILE: pidFile },
-            maxOutputBytes,
-            terminateGraceMs: 200,
-            timeoutMs,
-          }),
-        ).rejects.toThrow(expectedError);
-        expect(Date.now() - startedAt).toBeLessThan(3_000);
-        const processIds = fs
-          .readFileSync(pidFile, "utf8")
-          .trim()
-          .split("\n")
-          .map((value) => Number.parseInt(value, 10));
+        const runnerSource = `
+import fs from "node:fs";
+import { runBounded } from ${JSON.stringify(pathToFileURL(path.resolve(".github/actions/ios-signing-keychain/keychain.mjs")).href)};
+const startedAt = Date.now();
+let message = "";
+try {
+  await runBounded(process.execPath, ["-e", ${JSON.stringify(parentSource)}], {
+    env: { ...process.env, PID_FILE: ${JSON.stringify(pidFile)} },
+    maxOutputBytes: ${JSON.stringify(maxOutputBytes)},
+    terminateGraceMs: 200,
+    timeoutMs: ${timeoutMs},
+  });
+} catch (error) {
+  message = error instanceof Error ? error.message : String(error);
+}
+const processIds = fs.readFileSync(${JSON.stringify(pidFile)}, "utf8").trim().split("\\n").map(Number);
+let processGroupAlive = true;
+try { process.kill(-processIds[0], 0); } catch { processGroupAlive = false; }
+process.stdout.write(JSON.stringify({ elapsedMs: Date.now() - startedAt, message, processGroupAlive, processIds }));
+`;
+        const result = spawnSync(
+          testNodeExecPath,
+          ["--input-type=module", "--eval", runnerSource],
+          { cwd: process.cwd(), encoding: "utf8", env: process.env },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        const outcome = JSON.parse(result.stdout) as {
+          elapsedMs: number;
+          message: string;
+          processGroupAlive: boolean;
+          processIds: number[];
+        };
+        expect(outcome.message).toContain(expectedError);
+        expect(outcome.elapsedMs).toBeLessThan(3_000);
+        const processIds = outcome.processIds;
         expect(processIds).toHaveLength(2);
         const processGroupId = processIds[0];
         if (
@@ -3637,7 +4436,7 @@ fi
         ) {
           throw new Error(`Invalid owned process-group ID: ${processGroupId}`);
         }
-        expect(() => process.kill(-processGroupId, 0)).toThrow();
+        expect(outcome.processGroupAlive).toBe(false);
       };
 
       await exerciseOwnedProcessTree({

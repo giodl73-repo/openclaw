@@ -1,7 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { projectProviderError } from "../../../../packages/ai/src/utils/provider-error.js";
+import {
+  createReplyOperation,
+  isReplyRunEvidenceStale,
+} from "../../../auto-reply/reply/reply-run-registry.js";
+import {
+  closeDiagnosticEmbeddedRunOwner,
+  createDiagnosticEmbeddedRunOwner,
+  getDiagnosticSessionActivitySnapshot,
+  markDiagnosticEmbeddedRunStarted,
+  resolveRunStaleThresholdMs,
+} from "../../../logging/diagnostic-run-activity.js";
 import { FailoverError } from "../../failover-error.js";
 import { resolveRetryAfterMs } from "../../failover/retry-evidence.js";
+import {
+  createDeferredEmbeddedRunLifecycleManager,
+  createEmbeddedAttemptDeferredLifecycleOwner,
+} from "./deferred-lifecycle-owner.js";
 
 const mocks = vi.hoisted(() => ({
   sleepWithAbort: vi.fn(async (_ms: number, _abortSignal?: AbortSignal): Promise<void> => {}),
@@ -28,11 +43,13 @@ function createController(
   advanceAuthProfile: ControllerInput["advanceAuthProfile"],
   fallbackConfigured = false,
   abortSignal?: AbortSignal,
+  onRetryWait?: ControllerInput["runParams"]["onRetryWait"],
 ) {
   return createEmbeddedRunFailoverRetryController({
     runParams: {
       runId: "run:failover-retry-controller-test",
       abortSignal,
+      onRetryWait,
     } as ControllerInput["runParams"],
     provider: "openai",
     modelId: "gpt-5.6-luna",
@@ -62,34 +79,38 @@ describe("createEmbeddedRunFailoverRetryController", () => {
     rateLimitContext.logFallbackDecision.mockClear();
   });
 
-  it("retries rate limits for ten attempts with capped backoff and transient status", async () => {
-    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
-    const events: Array<Record<string, unknown>> = [];
-    const onRetry = (status: Record<string, unknown>) => {
-      events.push(status);
-    };
-    try {
-      const controller = createController(vi.fn(async () => false));
-      for (let attempt = 2; attempt <= 10; attempt++) {
-        await expect(
-          controller.maybeRetryTransient({ reason: "rate_limit", onRetry }),
-        ).resolves.toBe(true);
-        expect(events.at(-1)).toEqual({
-          reason: "rate_limit",
-          attempt: attempt - 1,
-          maxRetries: 9,
-          delayMs: expect.any(Number),
-        });
+  it.each([
+    { jitter: 0, delays: [500, 1000, 2000, 4000, 8000, 15000, 15000, 15000, 15000] },
+    { jitter: 0.999, delays: [1499, 2998, 5996, 11992, 23984, 30000, 30000, 30000, 30000] },
+  ])(
+    "retries rate limits for ten attempts with capped backoff (jitter=$jitter)",
+    async ({ jitter, delays }) => {
+      const random = vi.spyOn(Math, "random").mockReturnValue(jitter);
+      const events: Array<Record<string, unknown>> = [];
+      const onRetry = (status: Record<string, unknown>) => {
+        events.push(status);
+      };
+      try {
+        const controller = createController(vi.fn(async () => false));
+        for (let attempt = 2; attempt <= 10; attempt++) {
+          await expect(
+            controller.maybeRetryTransient({ reason: "rate_limit", onRetry }),
+          ).resolves.toBe(true);
+          expect(events.at(-1)).toEqual({
+            reason: "rate_limit",
+            attempt: attempt - 1,
+            maxRetries: 9,
+            delayMs: expect.any(Number),
+          });
+        }
+        await expect(controller.maybeRetryTransient({ reason: "rate_limit" })).resolves.toBe(false);
+        expect(mocks.sleepWithAbort.mock.calls.map(([delay]) => delay)).toEqual(delays);
+        expect(events).toHaveLength(9);
+      } finally {
+        random.mockRestore();
       }
-      await expect(controller.maybeRetryTransient({ reason: "rate_limit" })).resolves.toBe(false);
-      expect(mocks.sleepWithAbort.mock.calls.map(([delay]) => delay)).toEqual([
-        1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000,
-      ]);
-      expect(events).toHaveLength(9);
-    } finally {
-      random.mockRestore();
-    }
-  });
+    },
+  );
 
   it("counts earlier transient failures toward the ten-attempt rate-limit ceiling", async () => {
     const controller = createController(vi.fn(async () => false));
@@ -109,7 +130,7 @@ describe("createEmbeddedRunFailoverRetryController", () => {
     "does not add a %i non-rate budget after exhausting rate-limit attempts",
     async (budget) => {
       const controller = createController(vi.fn(async () => false));
-      controller.setTransientRetryBudget(budget);
+      controller.observeAttempt({ providerRetryMaxRetries: budget });
       const expectedRetries = Math.min(budget, 9);
       for (let retry = 0; retry < expectedRetries; retry++) {
         await expect(controller.maybeRetryTransient({ reason: "rate_limit" })).resolves.toBe(true);
@@ -190,11 +211,36 @@ describe("createEmbeddedRunFailoverRetryController", () => {
       const cancellation = new AbortController();
       const dayMs = 24 * 60 * 60 * 1000;
       const retryAfterMs = 30 * dayMs;
+      const ref = {
+        sessionId: "retry-wait-session",
+        runId: "retry-wait-run",
+        sessionKey: "agent:main:retry-wait",
+      };
+      const operation = createReplyOperation({
+        ...ref,
+        turnKind: "visible",
+        resetTriggered: false,
+      });
+      const diagnosticOwner = createDiagnosticEmbeddedRunOwner(ref);
+      markDiagnosticEmbeddedRunStarted({ ...ref, owner: diagnosticOwner });
+      const lifecycle = createDeferredEmbeddedRunLifecycleManager(ref);
+      lifecycle.adopt(
+        createEmbeddedAttemptDeferredLifecycleOwner({
+          ...ref,
+          diagnosticOwner,
+          isCurrent: () => true,
+          onRetryWaitCompleted: () => operation.recordActivity(),
+          trajectoryRecorder: null,
+          clearActiveRun: () => closeDiagnosticEmbeddedRunOwner(diagnosticOwner),
+        }),
+      );
+      const deadlineAtMs = Date.now() + retryAfterMs;
       try {
         const controller = createController(
           vi.fn(async () => false),
           false,
           cancellation.signal,
+          lifecycle.beginRetryWait,
         );
         let retried = false;
         const retry = controller
@@ -203,21 +249,40 @@ describe("createEmbeddedRunFailoverRetryController", () => {
             retried = result;
             return result;
           });
+        await vi.advanceTimersByTimeAsync(dayMs + 1);
+        const activity = getDiagnosticSessionActivitySnapshot(ref);
+        expect(activity.activeWorkKind).toBe("embedded_run");
+        expect(activity.activeRetryWaitDeadlineAtMs).toBe(deadlineAtMs);
+        expect(activity.lastProgressAgeMs).toBe(dayMs + 1);
+        expect(resolveRunStaleThresholdMs(activity)).toBe(retryAfterMs);
+        expect(isReplyRunEvidenceStale(operation)).toBe(false);
         if (abort) {
           const rejected = expect(retry).rejects.toMatchObject({ name: "AbortError" });
-          await vi.advanceTimersByTimeAsync(dayMs + 1);
           cancellation.abort();
+          expect(
+            getDiagnosticSessionActivitySnapshot(ref).activeRetryWaitDeadlineAtMs,
+          ).toBeUndefined();
           await rejected;
           expect(controller.transientRetryCount).toBe(0);
           expect(vi.getTimerCount()).toBe(0);
         } else {
-          await vi.advanceTimersByTimeAsync(retryAfterMs - 1);
+          await vi.advanceTimersByTimeAsync(retryAfterMs - dayMs - 2);
           expect(retried).toBe(false);
           await vi.advanceTimersByTimeAsync(1);
           await expect(retry).resolves.toBe(true);
           expect(controller.transientRetryCount).toBe(1);
+          expect(
+            getDiagnosticSessionActivitySnapshot(ref).activeRetryWaitDeadlineAtMs,
+          ).toBeUndefined();
+          expect(getDiagnosticSessionActivitySnapshot(ref).lastProgressAgeMs).toBe(0);
+          expect(getDiagnosticSessionActivitySnapshot(ref).lastProgressReason).toBe(
+            "retry_wait:ended",
+          );
+          expect(isReplyRunEvidenceStale(operation)).toBe(false);
         }
       } finally {
+        await lifecycle.complete();
+        operation.complete();
         vi.useRealTimers();
         mocks.sleepWithAbort.mockImplementation(async () => {});
       }
@@ -231,7 +296,7 @@ describe("createEmbeddedRunFailoverRetryController", () => {
       const controller = createController(vi.fn(async () => false));
       // A raised budget only delivers the attempts the 90s window fits; without this
       // record an operator cannot tell why the configured retries never ran.
-      controller.setTransientRetryBudget(8);
+      controller.observeAttempt({ providerRetryMaxRetries: 8 });
       await expect(controller.maybeRetryTransient({ reason: "server_error" })).resolves.toBe(true);
       nowMs += 90_000;
       await expect(controller.maybeRetryTransient({ reason: "server_error" })).resolves.toBe(false);
@@ -242,6 +307,27 @@ describe("createEmbeddedRunFailoverRetryController", () => {
       expect(truncationLog).toContain("after 1/8 retries");
     } finally {
       dateNow.mockRestore();
+    }
+  });
+
+  it("does not truncate a provider wait to fit the remaining outage window", async () => {
+    let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    try {
+      const controller = createController(vi.fn(async () => false));
+      await expect(controller.maybeRetryTransient({ reason: "timeout" })).resolves.toBe(true);
+      nowMs += 89_000;
+      const retryAfterMs = resolveRetryAfterMs(
+        "HTTP 503: temporary failure; Retry-After: Thu, 01 Jan 2026 00:01:31 GMT",
+        nowMs,
+      );
+      expect(retryAfterMs).toBe(2000);
+      await expect(
+        controller.maybeRetryTransient({ reason: "timeout", retryAfterMs }),
+      ).resolves.toBe(false);
+      expect(mocks.sleepWithAbort).toHaveBeenCalledOnce();
+    } finally {
+      now.mockRestore();
     }
   });
 
@@ -319,7 +405,7 @@ describe("createEmbeddedRunFailoverRetryController", () => {
     ["rate_limit", 1],
   ] as const)("honors the saved %s retry budget of %i", async (reason, budget) => {
     const controller = createController(vi.fn(async () => false));
-    controller.setTransientRetryBudget(budget);
+    controller.observeAttempt({ providerRetryMaxRetries: budget });
     const onRetry = vi.fn();
     for (let retry = 0; retry < budget; retry++) {
       await expect(controller.maybeRetryTransient({ reason, onRetry })).resolves.toBe(true);

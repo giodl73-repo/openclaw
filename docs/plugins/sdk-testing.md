@@ -86,7 +86,6 @@ the focused test subpaths above.
 | `createTestWizardPrompter`                                                | Build a mocked setup wizard prompter. Import from `plugin-sdk/plugin-test-runtime`                                                          |
 | `createRuntimeTaskFlow`                                                   | Create isolated runtime task-flow state. Import from `plugin-sdk/plugin-test-runtime`                                                       |
 | `runProviderCatalog`                                                      | Execute a provider catalog hook with test dependencies. Import from `plugin-sdk/plugin-test-runtime`                                        |
-| `resolveProviderWizardOptions`                                            | Resolve provider setup wizard choices in contract tests. Import from `plugin-sdk/plugin-test-runtime`                                       |
 | `resolveProviderModelPickerEntries`                                       | Resolve provider model-picker entries in contract tests. Import from `plugin-sdk/plugin-test-runtime`                                       |
 | `buildProviderPluginMethodChoice`                                         | Build provider wizard choice ids for assertions. Import from `plugin-sdk/plugin-test-runtime`                                               |
 | `setProviderWizardProvidersResolverForTest`                               | Inject provider wizard providers for isolated tests. Import from `plugin-sdk/plugin-test-runtime`                                           |
@@ -246,6 +245,13 @@ describe("my-channel plugin", () => {
 ```
 
 ### Unit testing a provider plugin
+
+For bundled catalog tests that resolve provider endpoint capabilities, call
+`useProviderCatalogMetadata(new URL(".", import.meta.url))` from
+`openclaw/plugin-sdk/plugin-test-runtime` at file or suite scope. It prepares
+the plugin's manifest metadata once, installs and clears that snapshot around
+each test, and rejects Jiti loading during assertions. This keeps cold runtime
+discovery out of catalog test deadlines without changing provider behavior.
 
 ```typescript
 import { describe, it, expect } from "vitest";

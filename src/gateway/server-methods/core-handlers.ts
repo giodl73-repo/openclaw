@@ -3,7 +3,7 @@ import { createLazyPromise } from "../../shared/lazy-promise.js";
 import {
   listCoreGatewayHandlerMethodNames,
   type CoreGatewayHandlerFamily,
-} from "../methods/core-descriptors.js";
+} from "../methods/core-method-policy.js";
 import { createLazyCoreHandlers } from "./lazy-core-handlers.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
@@ -16,6 +16,8 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   agents: () => import("./agents.js").then((module) => module.agentsHandlers),
   "claws-monitors": () =>
     import("./claws-monitors.js").then((module) => module.clawsMonitorHandlers),
+  "claws-packages": () =>
+    import("./claws-packages.js").then((module) => module.clawsPackageHandlers),
   "agents-workspace": () =>
     import("./agents-workspace.js").then((module) => module.agentsWorkspaceHandlers),
   artifacts: () => import("./artifacts.js").then((module) => module.artifactsHandlers),
@@ -35,6 +37,7 @@ const CORE_GATEWAY_HANDLER_MODULES = {
       "chat.abort": module.handleChatAbortRequest,
     })),
   commands: () => import("./commands.js").then((module) => module.commandsHandlers),
+  computer: () => import("./computer.js").then((module) => module.computerHandlers),
   config: () => import("./config.js").then((module) => module.configHandlers),
   conversations: () => import("./conversations.js").then((module) => module.conversationHandlers),
   connect: () => import("./connect.js").then((module) => module.connectHandlers),
@@ -61,6 +64,10 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   "ui-command": () => import("./ui-command.js").then((module) => module.uiCommandHandlers),
   "models-auth-status": () =>
     import("./models-auth-status.js").then((module) => module.modelsAuthStatusHandlers),
+  "models-auth-login": () =>
+    import("./models-auth-login.js").then((module) => module.modelsAuthLoginHandlers),
+  "mcp-auth-login": () =>
+    import("./mcp-auth-login.js").then((module) => module.mcpAuthLoginHandlers),
   "models-auth-order": () =>
     import("./models-auth-order.js").then((module) => module.modelsAuthOrderHandlers),
   models: () => import("./models.js").then((module) => module.modelsHandlers),
@@ -130,6 +137,8 @@ const CORE_GATEWAY_HANDLER_MODULES = {
     import("./session-catalog.js").then((module) => module.sessionCatalogHandlers),
   "session-discussion": () =>
     import("./session-discussion.js").then((module) => module.sessionDiscussionHandlers),
+  "session-activity-summary": () =>
+    import("./session-activity-summary.js").then((module) => module.sessionActivitySummaryHandlers),
   "session-observer-rpc": () =>
     import("../session-observer-rpc.js").then((module) => module.sessionObserverHandlers),
   "session-companion-rpc": () =>
@@ -137,9 +146,9 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   "hooks-status": () => import("./hooks-status.js").then((module) => module.hooksStatusHandlers),
   skills: () => import("./skills.js").then((module) => module.skillsHandlers),
   system: () => import("./system.js").then((module) => module.systemHandlers),
-  talk: () => import("./talk.js").then((module) => module.talkHandlers),
+  talk: () => import("../talk/handlers/index.js").then((module) => module.talkHandlers),
   // Mode synchronization does not depend on loading speech or realtime providers.
-  "talk-mode": () => import("./talk-mode.js").then((module) => module.talkModeHandlers),
+  "talk-mode": () => import("../talk/handlers/mode.js").then((module) => module.talkModeHandlers),
   tasks: () => import("./tasks.js").then((module) => module.tasksHandlers),
   "task-suggestions": () =>
     import("./task-suggestions.js").then((module) => module.taskSuggestionsHandlers),
