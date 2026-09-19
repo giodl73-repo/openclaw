@@ -1,39 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import {
   appendTranscriptEvent,
   persistSessionTranscriptTurn,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
 import * as activeTranscriptEvents from "../config/sessions/session-accessor.sqlite-active-events.js";
-import { waitForSessionTranscriptIndexReconcilesInStateDir } from "../config/sessions/session-transcript-reconcile.js";
 import * as redact from "../logging/redact.js";
-import {
-  closeOpenClawAgentDatabasesAsync,
-  closeOpenClawAgentDatabasesForTest,
-  openOpenClawAgentDatabase,
-} from "../state/openclaw-agent-db.js";
-import {
-  closeOpenClawStateDatabaseAsync,
-  closeOpenClawStateDatabaseForTest,
-} from "../state/openclaw-state-db.js";
+import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
+import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
 import { defaultSessionCompanionContextReader } from "./session-companion-context.js";
 import { createSessionCompanion } from "./session-companion.js";
 import { notifyGatewaySessionReset } from "./session-reset-notifications.js";
 
-const tempDirs = createTempDirTracker();
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 afterEach(async () => {
-  // Deferred reconciliation must settle before its databases and fixture directories close.
+  // Worker leases still need these databases until asynchronous cleanup settles.
   for (const stateDir of tempDirs.dirs) {
-    await waitForSessionTranscriptIndexReconcilesInStateDir(stateDir);
+    await cleanupSessionStateForTest({ stateDir });
   }
-  await closeOpenClawAgentDatabasesAsync();
-  await closeOpenClawStateDatabaseAsync();
-  closeOpenClawAgentDatabasesForTest();
-  closeOpenClawStateDatabaseForTest();
   vi.unstubAllEnvs();
-  tempDirs.cleanup();
 });
 
 function createScope(prefix: string) {
