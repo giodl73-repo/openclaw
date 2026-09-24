@@ -54,7 +54,7 @@ type ClawExportResult = {
   filesWritten: string[];
 };
 
-const DRIFTED_BOOTSTRAP_STATES = new Set<string>(["modified", "unsafe", "unknown"]);
+const DRIFTED_BOOTSTRAP_STATES = new Set<string>(["modified", "unsafe", "unknown", "unowned"]);
 
 export class ClawExportError extends Error {
   constructor(

@@ -13,7 +13,9 @@ import {
   listOpenClawRegisteredAgentDatabases,
   registerOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db-registry.js";
+import { closeOpenClawAgentDatabasesAsync } from "../state/openclaw-agent-db.js";
 import {
+  closeOpenClawStateDatabaseAsync,
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
@@ -34,10 +36,15 @@ import {
 
 let state: OpenClawTestState;
 beforeEach(async () => {
-  state = await createOpenClawTestState({ prefix: "claw-remove-config-" });
+  state = await createOpenClawTestState({
+    prefix: "claw-remove-config-",
+    layout: "state-only",
+  });
   await state.writeConfig({});
 });
 afterEach(async () => {
+  await closeOpenClawAgentDatabasesAsync();
+  await closeOpenClawStateDatabaseAsync();
   closeOpenClawStateDatabaseForTest();
   await state.cleanup();
 });
@@ -336,7 +343,7 @@ describe("Claw status and remove", () => {
     const config: OpenClawConfig = {
       ...current.getConfig(),
       bindings: [{ match: { channel: "telegram", accountId: "*" }, agentId: "worker" }],
-      tools: { agentToAgent: { allow: ["worker"] } },
+      tools: { agentToAgent: { allow: ["WORKER"] } },
     } as OpenClawConfig;
 
     const plan = await buildClawRemovePlan("worker", { env: current.env, config });
@@ -344,8 +351,18 @@ describe("Claw status and remove", () => {
     expect(plan.actions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "agent", target: 'agents.entries["worker"]' }),
-        expect.objectContaining({ kind: "configBinding", target: "bindings[agentId=worker]" }),
-        expect.objectContaining({ kind: "agentAllow", target: "tools.agentToAgent.allow[worker]" }),
+        expect.objectContaining({
+          kind: "configBinding",
+          action: "remove",
+          blocked: false,
+          target: "bindings[agentId=worker]",
+        }),
+        expect.objectContaining({
+          kind: "agentAllow",
+          action: "remove",
+          blocked: false,
+          target: "tools.agentToAgent.allow[worker]",
+        }),
         expect.objectContaining({ kind: "workspace", action: "trash" }),
         expect.objectContaining({ kind: "agentState", action: "trash" }),
         expect.objectContaining({ kind: "sessionIndex", action: "delete" }),

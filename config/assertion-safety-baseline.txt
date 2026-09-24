@@ -1749,7 +1749,7 @@ src/agents/transport-message-transform.ts	2
 src/agents/utils/frontmatter.ts	2
 src/agents/workspace-legacy-state.ts	2
 src/agents/workspace-state-store.ts	1
-src/agents/workspace.ts	5
+src/agents/workspace.ts	3
 src/agents/worktrees/git.ts	2
 src/agents/worktrees/run-lease.ts	1
 src/audit/execution-identity-admission.ts	3
@@ -1927,7 +1927,7 @@ src/cli/channel-auth.ts	4
 src/cli/channel-options.ts	1
 src/cli/channels-cli.ts	5
 src/cli/claws-cli.gateway-readiness.ts	1
-src/cli/claws-cli.runtime.ts	2
+src/cli/claws-cli.runtime.ts	1
 src/cli/command-config-resolution.ts	2
 src/cli/command-format.ts	1
 src/cli/command-options.ts	1

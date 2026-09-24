@@ -6,7 +6,10 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { McpServerConfig } from "../config/types.mcp.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { PLUGIN_ARTIFACT_ADAPTER_IDENTITY } from "../plugins/install-artifact-inspection.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+import {
+  closeOpenClawStateDatabaseAsync,
+  closeOpenClawStateDatabaseForTest,
+} from "../state/openclaw-state-db.js";
 import { applyClawAddPlan } from "./add.js";
 import { exportClawAgent } from "./export.js";
 import { buildClawAddPlan } from "./lifecycle.js";
@@ -48,12 +51,14 @@ vi.mock("./source-limits.js", async (importOriginal) => {
   };
 });
 
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-
-afterEach(() => {
-  closeOpenClawStateDatabaseForTest();
-  lifecycleStateTestControl.afterRead = undefined;
-  vi.unstubAllEnvs();
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterEach(async () => {
+    await closeOpenClawStateDatabaseAsync();
+    closeOpenClawStateDatabaseForTest();
+    lifecycleStateTestControl.afterRead = undefined;
+    vi.unstubAllEnvs();
+    cleanup();
+  });
 });
 
 async function installedFixture(
