@@ -9,7 +9,8 @@ import {
   resolveSurvivingDatabaseFilePaths,
 } from "../agents/agent-delete-databases.js";
 import { findOverlappingWorkspaceAgentIds } from "../agents/agent-delete-safety.js";
-import { listAgentEntries, resolveAgentDir } from "../agents/agent-scope.js";
+import { resolveAgentEntry } from "../agents/agent-scope-config.js";
+import { resolveAgentDir } from "../agents/agent-scope.js";
 import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../agents/workspace-bootstrap-read.js";
 import {
   prepareLegacyWorkspaceStateReset,
@@ -48,9 +49,16 @@ import {
   runOpenClawStateWriteTransaction,
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
+import type { ClawRemovePlanAction } from "./lifecycle-remove-contract.js";
 import type { ClawMonitorCleanupGateway, ClawMonitorSnapshot } from "./monitor-cleanup-contract.js";
 import { deleteCachedClawInstallSchemaVersion } from "./provenance-runtime-read.js";
 import type { PersistedClawInstall } from "./provenance.js";
+import { moveClawWorkspaceFileNoReplace } from "./workspace-file-move.js";
+import {
+  clawBootstrapSeedOwned,
+  deleteAdoptedWorkspaceRow,
+  type ClawWorkspaceAdoption,
+} from "./workspace-origin.js";
 import type { PersistedClawWorkspaceFile } from "./workspace.js";
 
 type ClawRemovalDatabase = Pick<
@@ -92,6 +100,7 @@ export function synthesizeOrphanInstall(params: {
     agentId: params.agentId,
     workspace: params.workspace ?? "",
     agentConfigDigest: "sha256:missing",
+    agentOrigin: "created",
     agentOwnedPaths: [],
     status: "partial",
     addedAtMs: updatedAtMs,
@@ -104,10 +113,13 @@ export function deletionEffects(
   agentId: string,
   fallbackWorkspace = "",
   env?: NodeJS.ProcessEnv,
+  preferFallbackWorkspace = false,
 ) {
-  const agent = listAgentEntries(config).find((candidate) => candidate.id === agentId);
+  const agent = resolveAgentEntry(config, agentId);
   const pruned = pruneAgentConfig(config, agentId);
-  const workspace = agent?.workspace ?? fallbackWorkspace;
+  const workspace = preferFallbackWorkspace
+    ? fallbackWorkspace
+    : (agent?.workspace ?? fallbackWorkspace);
   const agentDir = resolveAgentDir(config, agentId, env);
   const sessionsDir = resolveSessionTranscriptsDirForAgent(agentId, env);
   const workspaceSharedWith = workspace
@@ -119,6 +131,90 @@ export function deletionEffects(
     agentDir,
     sessionsDir,
     workspaceSharedWith,
+  };
+}
+
+export function planClawHistoricalAgentState(params: {
+  agentId: string;
+  agentDir?: string;
+  sessionsDir: string;
+  retain: boolean;
+  modified: boolean;
+  sharedAgentDir?: boolean;
+  sharedSessionsDir?: boolean;
+}): ClawRemovePlanAction[] {
+  const blocked = params.retain ? false : params.modified;
+  const retainAgentDir = params.retain || params.sharedAgentDir === true;
+  const retainSessionsDir = params.retain || params.sharedSessionsDir === true;
+  const actions: ClawRemovePlanAction[] = params.agentDir
+    ? [
+        {
+          kind: "agentState",
+          id: params.agentId,
+          action: retainAgentDir ? "retain" : "trash",
+          target: params.agentDir,
+          blocked,
+          ...(params.retain
+            ? { reason: "Agent state existed before this Claw adopted the agent." }
+            : params.sharedAgentDir
+              ? { reason: "Agent directory contains state owned by another agent." }
+              : {}),
+        },
+      ]
+    : [];
+  actions.push(
+    {
+      kind: "sessionIndex",
+      id: params.agentId,
+      action: params.retain ? "retain" : "delete",
+      target: `session store entries for agent:${params.agentId}`,
+      blocked,
+      ...(params.retain
+        ? { reason: "Session history existed before this Claw adopted the agent." }
+        : {}),
+    },
+    {
+      kind: "sessionTranscripts",
+      id: params.agentId,
+      action: retainSessionsDir ? "retain" : "trash",
+      target: params.sessionsDir,
+      blocked,
+      ...(params.retain
+        ? { reason: "Session transcripts existed before this Claw adopted the agent." }
+        : params.sharedSessionsDir
+          ? { reason: "Session directory contains state owned by another agent." }
+          : {}),
+    },
+  );
+  return actions;
+}
+
+/** Resolves the retain/trash plan for a workspace using the canonical reason priority. */
+export function planClawWorkspaceRemoval(params: {
+  sharedWorkspace: boolean;
+  sharedWith: string[];
+  adopted: boolean;
+  modified: boolean;
+  untracked: boolean;
+}): {
+  action: "retain" | "trash";
+  details: { retained: boolean; sharedWith: string[] };
+  reason?: string;
+} {
+  const retained = params.sharedWorkspace || params.adopted || params.modified || params.untracked;
+  const reason = params.sharedWorkspace
+    ? "Workspace contains state owned by another agent."
+    : params.adopted
+      ? "Workspace existed before this Claw adopted it."
+      : params.modified
+        ? "Workspace contains locally modified Claw-managed files."
+        : params.untracked
+          ? "Workspace contains files or directories not managed by this Claw."
+          : undefined;
+  return {
+    action: retained ? "retain" : "trash",
+    details: { retained, sharedWith: params.sharedWith },
+    ...(reason ? { reason } : {}),
   };
 }
 
@@ -258,6 +354,7 @@ export async function cleanupClawAgentFilesystem(params: {
   retainWorkspace?: boolean;
   stateDatabase?: OpenClawStateDatabaseOptions;
   assertCurrent: () => void;
+  retainHistoricalAgentState?: boolean;
 }): Promise<string[]> {
   const errors: string[] = [];
   const trashPath: ClawTrashPath = (pathname, runtime) => {
@@ -304,17 +401,19 @@ export async function cleanupClawAgentFilesystem(params: {
       errors.push(`Could not trash workspace ${params.targets.workspaceDir}.`);
     }
   }
-  if (
-    !sharedWithSurvivor(params.targets.agentDir) &&
-    !(await trashPath(params.targets.agentDir, params.runtime))
-  ) {
-    errors.push(`Could not trash agent state ${params.targets.agentDir}.`);
-  }
-  if (
-    !sharedWithSurvivor(params.targets.sessionsDir) &&
-    !(await trashPath(params.targets.sessionsDir, params.runtime))
-  ) {
-    errors.push(`Could not trash session transcripts ${params.targets.sessionsDir}.`);
+  if (!params.retainHistoricalAgentState) {
+    if (
+      !sharedWithSurvivor(params.targets.agentDir) &&
+      !(await trashPath(params.targets.agentDir, params.runtime))
+    ) {
+      errors.push(`Could not trash agent state ${params.targets.agentDir}.`);
+    }
+    if (
+      !sharedWithSurvivor(params.targets.sessionsDir) &&
+      !(await trashPath(params.targets.sessionsDir, params.runtime))
+    ) {
+      errors.push(`Could not trash session transcripts ${params.targets.sessionsDir}.`);
+    }
   }
   return errors;
 }
@@ -341,7 +440,7 @@ type ClawRemovableWorkspaceFile = DigestOwnedWorkspaceFile & DigestOwnedWorkspac
 
 export type RemovedWorkspaceFile = {
   path: string;
-  action: "deleted" | "missing" | "retainedModified" | "error";
+  action: "deleted" | "missing" | "retainedModified" | "retainedUnowned" | "error";
   message?: string;
 };
 
@@ -351,7 +450,7 @@ export type ClawManagedFileStatus = PersistedClawWorkspaceFile & {
 };
 
 export type ClawBootstrapStatus = {
-  state: "pending" | "complete" | "modified" | "missing" | "unsafe" | "unknown";
+  state: "pending" | "complete" | "modified" | "missing" | "unsafe" | "unknown" | "unowned";
   workspace: string;
   path: string;
   sourcePath?: string;
@@ -396,6 +495,7 @@ export async function inspectClawWorkspaceFile(
 
 export async function inspectClawBootstrap(
   install: PersistedClawInstall,
+  workspaceOrigin: ClawWorkspaceAdoption,
   options: OpenClawStateDatabaseOptions,
 ): Promise<ClawBootstrapStatus> {
   const nativeState = await resolveWorkspaceBootstrapStatus(install.workspace, options);
@@ -435,6 +535,18 @@ export async function inspectClawBootstrap(
     },
     MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES,
   );
+  // The recorded seed receipt, not the digest, decides whether an adopted workspace's
+  // BOOTSTRAP.md is this install's: a file it never seeded is never a deletion candidate.
+  if (
+    inspected.state !== "missing" &&
+    !clawBootstrapSeedOwned(workspaceOrigin, install.workspace)
+  ) {
+    return {
+      ...base,
+      state: "unowned",
+      message: "BOOTSTRAP.md exists but this install never seeded it.",
+    };
+  }
   if (inspected.state === "unchanged") {
     return { ...base, state: "pending" };
   }
@@ -455,6 +567,7 @@ export async function removeClawWorkspaceFile(
   record: ClawRemovableWorkspaceFile,
   assertCurrent: () => void,
   maxBytes = 1024 * 1024,
+  ownsFile?: (relativePath: string) => boolean,
 ): Promise<RemovedWorkspaceFile> {
   if (record.state === "missing") {
     return { path: record.path, action: "missing" };
@@ -472,15 +585,21 @@ export async function removeClawWorkspaceFile(
       return { path: record.path, action: "missing" };
     }
     const stagedPath = `${record.path}.openclaw-claw-remove-${randomUUID()}`;
-    assertCurrent();
-    await workspace.move(record.path, stagedPath, { overwrite: false });
+    await moveClawWorkspaceFileNoReplace(workspace, record.path, stagedPath, assertCurrent);
     let outcome: Result<void, unknown>;
     try {
       const content = await workspace.readBytes(stagedPath, { maxBytes });
       assertCurrent();
       const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
-      if (digest === record.contentDigest) {
-        await workspace.remove(stagedPath);
+      if (digest === record.contentDigest && (!ownsFile || ownsFile(stagedPath))) {
+        await workspace.remove(stagedPath, {
+          assertBeforeMutation: () => {
+            assertCurrent();
+            if (ownsFile && !ownsFile(stagedPath)) {
+              throw new Error("Claw bootstrap identity changed before removal.");
+            }
+          },
+        });
         return { path: record.path, action: "deleted" };
       }
       outcome = ok(undefined);
@@ -489,7 +608,7 @@ export async function removeClawWorkspaceFile(
     }
     // Undo this attempt's staging even after ownership loss; never replace new content.
     try {
-      await workspace.move(stagedPath, record.path, { overwrite: false });
+      await moveClawWorkspaceFileNoReplace(workspace, stagedPath, record.path, () => undefined);
     } catch (error) {
       throw new AggregateError(
         [...(outcome.ok ? [] : [outcome.error]), error],
@@ -500,7 +619,10 @@ export async function removeClawWorkspaceFile(
     if (!outcome.ok) {
       throw outcome.error;
     }
-    return { path: record.path, action: "retainedModified" };
+    return {
+      path: record.path,
+      action: ownsFile && !ownsFile(record.path) ? "retainedUnowned" : "retainedModified",
+    };
   } catch (error) {
     return {
       path: record.path,
@@ -517,12 +639,13 @@ export function releaseClawRemoveRows(
   assertCurrent: (database: OpenClawStateDatabase) => void,
   completeDeletion: (database: OpenClawStateDatabase) => void,
   options: OpenClawStateDatabaseOptions,
+  retainHistoricalAgentState = false,
 ): boolean {
   const complete = cleanupErrors.length === 0;
   try {
     runOpenClawStateWriteTransaction((database) => {
       assertCurrent(database);
-      if (complete) {
+      if (complete && !retainHistoricalAgentState) {
         // Discovery and owned rows must retire under the same current-operation transaction.
         unregisterOpenClawAgentDatabases({ agentId, env: options.env, database });
       }
@@ -555,6 +678,9 @@ export function releaseClawRemoveRows(
           query.deleteFrom("claw_installs").where("agent_id", "=", agentId),
         );
       }
+      // Drop the origin with the install it describes; a later agent reusing this id must not
+      // inherit an adopted-workspace claim from a Claw that no longer exists.
+      deleteAdoptedWorkspaceRow(db, agentId);
       // Complete removals release the fence and retry owner in the same transaction.
       completeDeletion(database);
     }, options);
