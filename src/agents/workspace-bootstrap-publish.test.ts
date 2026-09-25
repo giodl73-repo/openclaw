@@ -3,7 +3,6 @@
 import syncFs from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { configureFsSafeNative, getFsSafeNativeConfig } from "@openclaw/fs-safe/config";
 import { describe, expect, it, vi } from "vitest";
 import * as fsSafe from "../infra/fs-safe.js";
 import { makeTempWorkspace } from "../test-helpers/workspace.js";
@@ -168,20 +167,22 @@ describe("bootstrap publication atomicity", () => {
         expect(identity.birthtimeNs).toBe("202");
         expect(syncFs.readFileSync(target, "utf8")).toBe("complete\n");
       });
+      const beforePublish = vi.fn((identity: workspace.BootstrapPublicationIdentity) => {
+        expect(identity.birthtimeNs).toBe("101");
+        expect(syncFs.existsSync(target)).toBe(false);
+      });
       try {
         await expect(
           workspace.publishBootstrapFile(
             target,
             "complete\n",
             undefined,
-            (identity) => {
-              expect(identity.birthtimeNs).toBe("101");
-              expect(syncFs.existsSync(target)).toBe(false);
-            },
+            beforePublish,
             undefined,
             afterPublish,
           ),
         ).resolves.toBe(true);
+        expect(beforePublish).toHaveBeenCalledTimes(1);
         expect(afterPublish).toHaveBeenCalledTimes(1);
         expect(await listTempSiblings(tempDir)).toEqual([]);
       } finally {
@@ -194,6 +195,59 @@ describe("bootstrap publication atomicity", () => {
       }
     },
   );
+
+  it("rejects an in-place same-size staging mutation even when metadata appears unchanged", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-bootstrap-content-change-");
+    const target = path.join(tempDir, DEFAULT_BOOTSTRAP_FILENAME);
+    const realFstat = syncFs.fstatSync.bind(syncFs);
+    const realLstat = syncFs.lstatSync.bind(syncFs);
+    let frozenMtimeNs: bigint | undefined;
+    const preserveMtime = <T extends syncFs.Stats | syncFs.BigIntStats>(observed: T): T => {
+      if (observed.isFile() && "mtimeNs" in observed) {
+        frozenMtimeNs ??= observed.mtimeNs;
+        observed.mtimeNs = frozenMtimeNs;
+      }
+      return observed;
+    };
+    const fstatSpy = vi
+      .spyOn(syncFs, "fstatSync")
+      .mockImplementation((fd, options) => preserveMtime(realFstat(fd, options) as never));
+    const lstatSpy = vi
+      .spyOn(syncFs, "lstatSync")
+      .mockImplementation((filePath, options) =>
+        preserveMtime(realLstat(filePath, options) as never),
+      );
+    const afterPublish = vi.fn();
+    try {
+      await expect(
+        workspace.publishBootstrapFile(
+          target,
+          "COMPLETE\n",
+          undefined,
+          () => {
+            const stagingDir = syncFs
+              .readdirSync(tempDir)
+              .find((name) => name.startsWith("openclaw-bootstrap-"));
+            if (!stagingDir) {
+              throw new Error("staging directory was not created");
+            }
+            syncFs.writeFileSync(
+              path.join(tempDir, stagingDir, DEFAULT_BOOTSTRAP_FILENAME),
+              "CORRUPT!\n",
+            );
+          },
+          undefined,
+          afterPublish,
+        ),
+      ).rejects.toThrow("content changed during publication");
+      expect(afterPublish).not.toHaveBeenCalled();
+      await expectPathMissing(target);
+      expect(await listTempSiblings(tempDir)).toEqual([]);
+    } finally {
+      lstatSpy.mockRestore();
+      fstatSpy.mockRestore();
+    }
+  });
 
   it.each(["existing", "racing", "failed"] as const)(
     "does not checkpoint a %s publication",

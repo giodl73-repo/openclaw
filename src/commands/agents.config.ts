@@ -10,6 +10,7 @@ import {
   resolveAgentConfig,
   resolveAgentDir,
   resolveAgentWorkspaceDir,
+  tryResolveDefaultAgentId,
   tryResolveLegacyCompatibilityAgentId,
   toAgentEntriesRecord,
 } from "../agents/agent-scope.js";
@@ -18,6 +19,8 @@ import { loadAgentIdentityFromWorkspaceAsync } from "../agents/identity-file.js"
 import { pinLegacyInheritedAuthOwnerForRosterTransition } from "../agents/legacy-inherited-auth-dir.js";
 import { pinSurvivorWorkspaceForRosterCollapse } from "../config/agent-workspace-roster-transition.js";
 import { listRouteBindings } from "../config/bindings.js";
+import { tryGetLegacyDefaultAgentId } from "../config/legacy.default-agent-owner.js";
+import { isPerAgentSessionStoreConfig } from "../config/sessions/session-store-config.js";
 import type { IdentityConfig } from "../config/types.base.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeAgentId, normalizeAgentIdStrict } from "../routing/session-key.js";
@@ -198,10 +201,14 @@ export function pruneAgentConfig(
   removedAllow: number;
   clearedOwnerRefs: string[];
   removedReferences: string[];
+  removedReferenceValues: Array<{ path: string; value: unknown }>;
+  removedConfig: string[];
+  insertedConfig: Array<{ path: string; value: unknown }>;
 } {
   const id = normalizeAgentId(agentId);
   const clearedOwnerRefs: string[] = [];
   const removedReferences: string[] = [];
+  const removedReferenceValues: Array<{ path: string; value: unknown }> = [];
   const targetsDeletedAgent = (candidate: string) => {
     const normalized = normalizeAgentIdStrict(candidate);
     return normalized.ok && normalized.value === id;
@@ -212,6 +219,7 @@ export function pruneAgentConfig(
       return value;
     }
     clearedOwnerRefs.push(path);
+    removedReferenceValues.push({ path, value: value.agentId });
     const { agentId: _agentId, ...rest } = value;
     return Object.keys(rest).length > 0 ? (rest as T) : undefined;
   };
@@ -226,7 +234,9 @@ export function pruneAgentConfig(
       if (!isReference(item)) {
         return true;
       }
-      removedReferences.push(`${pathPrefix}[${index}]`);
+      const path = `${pathPrefix}[${index}]`;
+      removedReferences.push(path);
+      removedReferenceValues.push({ path, value: item });
       return false;
     });
   const matchesAllowAgentsEntry = (candidate: string) => {
@@ -288,6 +298,10 @@ export function pruneAgentConfig(
       : clearOwnerRef(prunedDefaults?.heartbeat, "agents.defaults.heartbeat.agentId");
   if (deletedAgentOwnedHeartbeat && nextAgentsList.length > 1) {
     clearedOwnerRefs.push("agents.defaults.heartbeat");
+    removedReferenceValues.push({
+      path: "agents.defaults.heartbeat",
+      value: prunedDefaults?.heartbeat,
+    });
   }
   const nextDefaults = prunedDefaults
     ? {
@@ -334,16 +348,21 @@ export function pruneAgentConfig(
       }
     : undefined;
   const { list: _legacyList, ownership: _ownership, ...agentsConfig } = cfg.agents ?? {};
+  // Roster writes canonicalize a migrated legacy default marker into explicit ownership. The
+  // preview must expose the same topology that the config writer will persist, including 2 -> 1
+  // and 1 -> 0 removals.
+  const persistOwnership =
+    nextAgentsList.length > 1 || tryGetLegacyDefaultAgentId(cfg) !== undefined;
   const nextAgentsConfig = cfg.agents
     ? {
         ...agentsConfig,
-        ...(nextAgentsList.length > 1 ? { ownership: "explicit" as const } : {}),
+        ...(persistOwnership ? { ownership: "explicit" as const } : {}),
         defaults: nextDefaults,
         entries: nextAgents,
       }
     : nextAgents
       ? {
-          ...(nextAgentsList.length > 1 ? { ownership: "explicit" as const } : {}),
+          ...(persistOwnership ? { ownership: "explicit" as const } : {}),
           entries: nextAgents,
         }
       : undefined;
@@ -366,25 +385,79 @@ export function pruneAgentConfig(
     talk: nextTalk,
     tools: nextTools,
   };
-  const workspacePinnedConfig = pinSurvivorWorkspaceForRosterCollapse(
-    cfg,
-    preliminaryConfig,
-  ).config;
+  const workspacePin = pinSurvivorWorkspaceForRosterCollapse(cfg, preliminaryConfig);
+  const workspacePinnedConfig = workspacePin.config;
   const transitionPinnedConfig =
     agents.length > 1 && nextAgentsList.length === 1
       ? pinLegacyInheritedAuthOwnerForRosterTransition(cfg, workspacePinnedConfig)
       : workspacePinnedConfig;
+  const previousSoleAgentId = tryResolveDefaultAgentId(cfg);
+  const nextSessionStore = transitionPinnedConfig.agents?.defaults?.sessionStore;
+  const sessionStorePinnedConfig =
+    agents.length === 1 &&
+    nextAgentsList.length === 0 &&
+    previousSoleAgentId &&
+    normalizeAgentId(previousSoleAgentId) === id &&
+    !isPerAgentSessionStoreConfig(cfg.session?.store) &&
+    (nextSessionStore === undefined || !Object.hasOwn(nextSessionStore, "agentId"))
+      ? {
+          ...transitionPinnedConfig,
+          agents: {
+            ...transitionPinnedConfig.agents,
+            defaults: {
+              ...transitionPinnedConfig.agents?.defaults,
+              sessionStore: {
+                ...nextSessionStore,
+                agentId: normalizeAgentId(previousSoleAgentId),
+              },
+            },
+          },
+        }
+      : transitionPinnedConfig;
+  const insertedConfig = workspacePin.insertedPaths.map((path) => {
+    const value = path.reduce<unknown>(
+      (current, segment) =>
+        current && typeof current === "object"
+          ? (current as Record<string, unknown>)[segment]
+          : undefined,
+      workspacePinnedConfig,
+    );
+    return { path: path.join("."), value };
+  });
+  const removedConfig: string[] = [];
+  if (cfg.agents?.ownership !== undefined && nextAgentsConfig?.ownership === undefined) {
+    removedConfig.push("agents.ownership");
+  } else if (cfg.agents?.ownership === undefined && nextAgentsConfig?.ownership !== undefined) {
+    insertedConfig.push({ path: "agents.ownership", value: nextAgentsConfig.ownership });
+  }
+  if (transitionPinnedConfig !== workspacePinnedConfig) {
+    insertedConfig.push({
+      path: "agents.defaults.authInheritance.agentId",
+      value: transitionPinnedConfig.agents?.defaults?.authInheritance?.agentId,
+    });
+  }
+  if (sessionStorePinnedConfig !== transitionPinnedConfig) {
+    insertedConfig.push({
+      path: "agents.defaults.sessionStore.agentId",
+      value: sessionStorePinnedConfig.agents?.defaults?.sessionStore?.agentId,
+    });
+  }
+  insertedConfig.sort((left, right) => left.path.localeCompare(right.path));
 
   // Owner refs are cleared above, not filtered; fold them in so removedReferences is the complete
   // sorted list of everything this prune deleted for the agent (callers digest and block on it).
   removedReferences.push(...clearedOwnerRefs);
   removedReferences.sort();
+  removedReferenceValues.sort((left, right) => left.path.localeCompare(right.path));
 
   return {
-    config: transitionPinnedConfig,
+    config: sessionStorePinnedConfig,
     removedBindings: bindings.length - filteredBindings.length,
     removedAllow: allow.length - filteredAllow.length,
     clearedOwnerRefs,
     removedReferences,
+    removedReferenceValues,
+    removedConfig,
+    insertedConfig,
   };
 }

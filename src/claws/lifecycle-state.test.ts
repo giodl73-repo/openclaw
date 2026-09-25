@@ -342,7 +342,25 @@ describe("Claw status and remove", () => {
     const current = await addFixture();
     const config: OpenClawConfig = {
       ...current.getConfig(),
+      agents: {
+        ...current.getConfig().agents,
+        defaults: {
+          subagents: { allowAgents: ["WORKER"] },
+          heartbeat: { agentId: "worker" },
+          systemAgent: { agentId: "worker" },
+        },
+        entries: {
+          ...current.getConfig().agents?.entries,
+          ops: { subagents: { allowAgents: ["worker"] } },
+        },
+      },
       bindings: [{ match: { channel: "telegram", accountId: "*" }, agentId: "worker" }],
+      broadcast: { "telegram:-100": { agents: ["worker"] } },
+      hooks: {
+        allowedAgentIds: ["worker"],
+        mappings: [{ id: "audit", action: "agent", agentId: "worker" }],
+      },
+      talk: { agentId: "worker" },
       tools: { agentToAgent: { allow: ["WORKER"] } },
     } as OpenClawConfig;
 
@@ -369,6 +387,22 @@ describe("Claw status and remove", () => {
         expect.objectContaining({ kind: "sessionTranscripts", action: "trash" }),
       ]),
     );
+    expect(
+      plan.actions
+        .filter((action) => action.kind === "configReference")
+        .map((action) => action.target)
+        .toSorted(),
+    ).toEqual([
+      "agents.defaults.heartbeat",
+      "agents.defaults.subagents.allowAgents[0]",
+      "agents.defaults.systemAgent.agentId",
+      "agents.entries.ops.subagents.allowAgents[0]",
+      "agents.ownership",
+      "broadcast.telegram:-100.agents[0]",
+      "hooks.allowedAgentIds[0]",
+      "hooks.mappings[0]",
+      "talk.agentId",
+    ]);
   });
 
   it("refuses changed bindings and retains the cleanup fence", async () => {

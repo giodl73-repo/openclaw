@@ -294,6 +294,18 @@ describe("Claw remove after configured-agent adoption", () => {
         expect.objectContaining({ kind: "agent", blocked: true }),
         expect.objectContaining({ kind: "configBinding", action: "retain", blocked: true }),
         expect.objectContaining({ kind: "agentAllow", action: "retain", blocked: true }),
+        expect.objectContaining({
+          kind: "configReference",
+          target: "broadcast.telegram:-100.agents[0]",
+          action: "retain",
+          blocked: true,
+        }),
+        expect.objectContaining({
+          kind: "configReference",
+          target: "hooks.mappings[0]",
+          action: "retain",
+          blocked: true,
+        }),
       ]),
     );
 

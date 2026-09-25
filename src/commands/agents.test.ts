@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import { migratePersistedImplicitMainRoster } from "../config/legacy.roster.js";
 import type { AgentRouteBinding } from "../config/types.js";
 import { applyAgentBindings, removeAgentBindings } from "./agents.bindings.js";
 import { applyAgentConfig, buildAgentSummaries, pruneAgentConfig } from "./agents.config.js";
@@ -354,6 +355,60 @@ describe("agents helpers", () => {
     });
     // Roster-collapse pins are not references to the removed agent.
     expect(result.removedReferences).toEqual([]);
+    expect(result.removedConfig).toEqual(["agents.ownership"]);
+    expect(result.insertedConfig).toEqual([
+      { path: "agents.defaults.authInheritance.agentId", value: "main" },
+      {
+        path: "agents.entries.research.workspace",
+        value: path.resolve("/srv/fleet/research"),
+      },
+    ]);
+  });
+
+  it("reports ownership materialized while a surviving roster remains multi-agent", () => {
+    const result = pruneAgentConfig(
+      {
+        agents: { entries: { ops: {}, research: {}, writer: {} } },
+      },
+      "ops",
+    );
+
+    expect(result.config.agents?.ownership).toBe("explicit");
+    expect(result.removedConfig).toEqual([]);
+    expect(result.insertedConfig).toContainEqual({
+      path: "agents.ownership",
+      value: "explicit",
+    });
+  });
+
+  it("reports ownership materialized when a migrated legacy roster collapses to one agent", () => {
+    const migrated = migratePersistedImplicitMainRoster({
+      agents: { entries: { main: { default: true }, worker: {} } },
+    }).config as OpenClawConfig;
+
+    const result = pruneAgentConfig(migrated, "worker");
+
+    expect(result.config.agents?.ownership).toBe("explicit");
+    expect(result.insertedConfig).toContainEqual({
+      path: "agents.ownership",
+      value: "explicit",
+    });
+  });
+
+  it("pruneAgentConfig pins the removed sole agent as a fixed session-store owner", () => {
+    const result = pruneAgentConfig(
+      {
+        session: { store: "/srv/shared-sessions.sqlite" },
+        agents: { entries: { ops: {} } },
+      },
+      "ops",
+    );
+
+    expect(result.config.agents?.defaults?.sessionStore?.agentId).toBe("ops");
+    expect(result.removedConfig).toEqual([]);
+    expect(result.insertedConfig).toEqual([
+      { path: "agents.defaults.sessionStore.agentId", value: "ops" },
+    ]);
   });
 
   it("removes ambient heartbeat policy when its owner leaves a surviving fleet", () => {

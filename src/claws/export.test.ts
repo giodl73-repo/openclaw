@@ -814,6 +814,26 @@ describe("exportClawAgent", () => {
     });
   });
 
+  it("exports through the canonical agent id when the roster key is non-canonical", async () => {
+    const fixture = await installedFixture();
+    const entries = fixture.config.agents?.entries;
+    const worker = entries?.worker;
+    if (!entries || !worker) {
+      throw new Error("fixture worker missing");
+    }
+    entries.WORKER = worker;
+    delete entries.worker;
+
+    const result = await exportClawAgent("worker", join(fixture.root, "exported-worker"), {
+      env: fixture.env,
+      config: fixture.config,
+      sourceMcpServers: fixture.sourceMcpServers,
+    });
+
+    expect(result.agentId).toBe("worker");
+    expect(result.manifest.agent.id).toBe("worker");
+  });
+
   it("rejects a partial install rather than exporting an incomplete snapshot", async () => {
     const fixture = await installedFixture();
     updateClawInstallRecordStatus("worker", "partial", { env: fixture.env });

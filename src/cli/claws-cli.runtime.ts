@@ -65,7 +65,7 @@ import type {
 } from "./claws-cli.js";
 import { clawMonitorCleanupGateway } from "./claws-cli.monitor-cleanup.js";
 import { clawPackageRemovalGateway } from "./claws-cli.package-removal.js";
-import { logClawAddPlanSummary } from "./claws-cli.plan-console.js";
+import { logClawAddPlanSummary, logClawRemovePlanSummary } from "./claws-cli.plan-console.js";
 import { listCronJobsFromGateway } from "./cron-cli/list-jobs.js";
 import { callGatewayFromCli } from "./gateway-rpc.js";
 import { resolvePluginBatchReload } from "./plugins-lifecycle-client.js";
@@ -363,6 +363,7 @@ export async function runClawsAddCommand(
               adoptedFiles: workspaceOrigin.adoptedFiles,
               ownedFiles: resumeWorkspaceFiles,
               bootstrapPublication: workspaceOrigin.bootstrapPublication,
+              filePublications: workspaceOrigin.filePublications,
             },
           }
         : {}),
@@ -551,18 +552,7 @@ export async function runClawsRemoveCommand(
       writeRuntimeJson(runtime, plan);
     } else {
       logClawExperimentalWarning(runtime);
-      runtime.log(`Remove actions: ${plan.actions.length}`);
-      runtime.log(`Plan integrity: ${plan.planIntegrity}`);
-      for (const action of plan.actions.filter((candidate) => candidate.kind === "packageRef")) {
-        runtime.log(
-          `  Package ${action.target}: ${action.action}${action.reason ? ` (${action.reason})` : ""}`,
-        );
-      }
-      for (const action of plan.actions.filter((candidate) => candidate.kind === "mcpServer")) {
-        runtime.log(
-          `  MCP ${action.id}: ${action.action}${action.reason ? ` (${action.reason})` : ""}`,
-        );
-      }
+      logClawRemovePlanSummary(plan, runtime);
       if (plan.blockers.length > 0) {
         runtime.error(plan.blockers.map((blocker) => blocker.message).join("\n"));
       }

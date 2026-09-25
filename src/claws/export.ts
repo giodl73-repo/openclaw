@@ -1,18 +1,21 @@
 import { createHash } from "node:crypto";
+import { closeSync } from "node:fs";
 import { mkdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { coerceErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { stringify as stringifyYaml } from "yaml";
 import { listAgentEntries, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
-import { prepareLocalAgentAvatarFile } from "../agents/identity-avatar-file.js";
+import { openLocalAgentAvatarFile } from "../agents/identity-avatar-file.js";
 import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../agents/workspace-bootstrap-read.js";
 import { normalizeConfiguredMcpServers } from "../config/mcp-config-normalize.js";
 import type { AgentConfig } from "../config/types.agents.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { readFileDescriptorBoundedSync } from "../infra/boundary-file-read.js";
 import { FsSafeError, root as fsSafeRoot } from "../infra/fs-safe.js";
-import { isAvatarDataUrl, isAvatarHttpUrl } from "../shared/avatar-policy.js";
+import { AVATAR_MAX_BYTES, isAvatarDataUrl, isAvatarHttpUrl } from "../shared/avatar-policy.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import { resolveUserPath } from "../utils.js";
+import { resolveCanonicalClawAgent } from "./agent-adoption-apply.js";
 import { readClawStatus } from "./lifecycle-state.js";
 import type { PackageRemovalDeps } from "./package-remove.js";
 import { readClawManifestFile } from "./reader.js";
@@ -233,17 +236,23 @@ async function readPortableAvatar(params: {
   if (isAvatarDataUrl(source)) {
     return isPortableClawAvatar(source) ? { source } : {};
   }
-  const prepared = await prepareLocalAgentAvatarFile({
+  const opened = openLocalAgentAvatarFile({
     cfg: params.config,
     agentId: params.agent.id,
     source,
-    readBody: true,
   });
-  if (!prepared.ok || !prepared.file.body) {
+  if (!opened.ok) {
     return {};
   }
-  const path = normalizedRelativePath(relative(params.workspace, prepared.file.path));
-  return { source: path, sidecar: { path, content: prepared.file.body } };
+  try {
+    const content = readFileDescriptorBoundedSync(opened.file.fd, AVATAR_MAX_BYTES);
+    const path = normalizedRelativePath(relative(params.workspace, opened.file.path));
+    return { source: path, sidecar: { path, content } };
+  } catch {
+    return {};
+  } finally {
+    closeSync(opened.file.fd);
+  }
 }
 
 function derivativePackageVersion(manifest: ClawManifest, contents: ExportContent[]): string {
@@ -348,7 +357,7 @@ export async function exportClawAgent(
       `Installed Claw agent ${JSON.stringify(agentId)} is in ${JSON.stringify(record.install.status)} state; finish or repair it before export.`,
     );
   }
-  const agent = listAgentEntries(options.config).find((candidate) => candidate.id === agentId);
+  const agent = resolveCanonicalClawAgent(options.config, agentId);
   if (!agent) {
     throw new ClawExportError(
       "agent_missing",

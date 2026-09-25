@@ -9,6 +9,8 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { createAgent } from "../agents/agent-create.js";
 import { withAgentDeletion } from "../agents/agent-lifecycle-registry.js";
 import { listAgentEntries } from "../agents/agent-scope.js";
+import { pruneAgentConfig } from "../commands/agents.config.js";
+import { migratePersistedImplicitMainRoster } from "../config/legacy.roster.js";
 import { purgeAgentSessionStoreEntries } from "../config/sessions/cleanup-service.js";
 import {
   appendTranscriptMessage,
@@ -51,6 +53,7 @@ import {
   digestClawAgentConfig,
   digestClawAgentRemovalSurface,
 } from "./lifecycle-config-removal.js";
+import { planClawAgentReferenceRemoval } from "./lifecycle-reference-removal.js";
 import { quiescentClawMonitorGateway } from "./lifecycle-remove.test-support.js";
 import { applyClawRemovePlan, buildClawRemovePlan, readClawStatus } from "./lifecycle-state.js";
 import { buildClawAddPlan } from "./lifecycle.js";
@@ -705,6 +708,58 @@ describe("Claw exec approvals removal", () => {
     expect(listAgentEntries(persistedConfig).map((entry) => entry.id)).toEqual(["worker", "kept"]);
     expect(persistedConfig.session?.store).toBe(sharedPath);
     expect(readAgentDeletionJournal("worker", { env })).toBeUndefined();
+  });
+
+  it("previews and persists explicit ownership when a legacy roster collapses", async () => {
+    const root = tempDirs.make("claw-remove-legacy-collapse-");
+    const env = { OPENCLAW_STATE_DIR: join(root, "state") };
+    const configPath = join(root, "openclaw.json");
+    const rawConfig: OpenClawConfig = {
+      agents: { entries: { main: { default: true }, worker: {} } },
+    };
+    await writeFile(configPath, JSON.stringify(rawConfig));
+    setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
+    setTestEnvValue("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);
+    const config = migratePersistedImplicitMainRoster(rawConfig, { env }).config as OpenClawConfig;
+    const pruned = pruneAgentConfig(config, "worker");
+
+    const preview = planClawAgentReferenceRemoval({
+      agentId: "worker",
+      pruned,
+      adopted: false,
+      modified: false,
+    });
+    expect(preview.actions).toContainEqual(
+      expect.objectContaining({
+        kind: "configReference",
+        action: "set",
+        target: "agents.ownership",
+        details: { agentId: "worker", value: "explicit" },
+      }),
+    );
+
+    const removed = await withClawAgentConfigRemoval(
+      {
+        agentId: "worker",
+        expectedDigest: digestClawAgentConfig({ id: "worker" }),
+        expectedRemovalSurfaceDigest: digestClawAgentRemovalSurface(config, "worker"),
+        expectedState: "present",
+        fallbackWorkspace: "",
+        config,
+        stateDatabase: { env },
+        retainHistoricalAgentState: true,
+        onModified: () => new Error("claw agent modified"),
+      },
+      (commitRemoval) => commitRemoval(),
+    );
+
+    expect(removed.nextConfig.agents?.ownership).toBe("explicit");
+    const persisted = JSON.parse(await readFile(configPath, "utf8")) as OpenClawConfig;
+    expect(persisted.agents?.ownership).toBe("explicit");
+    expect(persisted.agents?.entries).toEqual(
+      expect.objectContaining({ main: expect.any(Object) }),
+    );
+    expect(persisted.agents?.entries?.worker).toBeUndefined();
   });
 
   // A failed retry must retain the journal left by the original deletion.

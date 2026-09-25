@@ -33,6 +33,7 @@ export async function moveClawWorkspaceFileNoReplace(
   from: string,
   to: string,
   assertCurrent: () => void,
+  options: { copyFallback?: boolean } = {},
 ): Promise<void> {
   try {
     await workspace.move(from, to, {
@@ -42,6 +43,9 @@ export async function moveClawWorkspaceFileNoReplace(
     return;
   } catch (error) {
     if (!(error instanceof FsSafeError) || error.code !== "helper-unavailable") {
+      throw error;
+    }
+    if (options.copyFallback === false) {
       throw error;
     }
   }

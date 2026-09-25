@@ -5,7 +5,7 @@ import type { ClawRemovePlanAction } from "./lifecycle-remove-contract.js";
 // readable when a heavily-referenced agent has dozens of routing/authorization paths pointing at it.
 const MAX_REFERENCED_PATHS_SHOWN = 16;
 
-/** Plans the configBinding/agentAllow actions and blockers for an agent's config references. */
+/** Plans every config mutation and blocker for references to an agent. */
 export function planClawAgentReferenceRemoval(params: {
   agentId: string;
   pruned: ReturnType<typeof pruneAgentConfig>;
@@ -15,7 +15,7 @@ export function planClawAgentReferenceRemoval(params: {
   // Adoption never records or creates references, so every reference to an adopted agent is
   // operator-owned; pruning them on removal deletes routing/authorization the operator wrote.
   const referencesBlocked = params.adopted && params.pruned.removedReferences.length > 0;
-  const action = referencesBlocked ? "retain" : "remove";
+  const action: ClawRemovePlanAction["action"] = referencesBlocked ? "retain" : "remove";
   const blocked = referencesBlocked || params.modified;
   const counted: Array<Pick<ClawRemovePlanAction, "kind" | "target"> & { count: number }> = [
     {
@@ -39,6 +39,36 @@ export function planClawAgentReferenceRemoval(params: {
       blocked,
       details: { count: entry.count },
     }));
+  const summarizedReference = (path: string) =>
+    path.startsWith("bindings[") || path.startsWith("tools.agentToAgent.allow[");
+  actions.push(
+    ...params.pruned.removedReferences
+      .filter((path) => !summarizedReference(path))
+      .map((path) => ({
+        kind: "configReference" as const,
+        id: path,
+        action,
+        target: path,
+        blocked,
+        details: { agentId: params.agentId },
+      })),
+    ...params.pruned.removedConfig.map((path) => ({
+      kind: "configReference" as const,
+      id: path,
+      action: "remove" as const,
+      target: path,
+      blocked: params.modified,
+      details: { agentId: params.agentId },
+    })),
+    ...params.pruned.insertedConfig.map((mutation) => ({
+      kind: "configReference" as const,
+      id: mutation.path,
+      action: "set" as const,
+      target: mutation.path,
+      blocked,
+      details: { agentId: params.agentId, value: mutation.value },
+    })),
+  );
   if (!referencesBlocked) {
     return { actions, blockers: [] };
   }
