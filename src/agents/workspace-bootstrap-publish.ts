@@ -84,6 +84,7 @@ export async function publishBootstrapFile(
 
   const workspaceRoot = await fsSafeRoot(dir, { hardlinks: "reject", symlinks: "reject" });
   const directory = await fs.lstat(dir, { bigint: true });
+  const expectedContent = Buffer.from(content);
   let cleanupError: unknown;
   const staging = await tempFile({
     rootDir: dir,
@@ -105,14 +106,35 @@ export async function publishBootstrapFile(
     });
     stagedFile = await workspaceRoot.open(path.relative(dir, staging.path));
     const identity = syncFs.fstatSync(stagedFile.handle.fd, { bigint: true });
-    const assertIdentity = (observedPath: string) => {
-      beforePersistentApply?.();
-      const currentDirectory = syncFs.lstatSync(dir, { bigint: true });
-      const currentFile = syncFs.lstatSync(observedPath, { bigint: true });
+    const assertContent = () => {
+      const observed = Buffer.alloc(expectedContent.length);
+      let offset = 0;
+      while (offset < observed.length) {
+        const bytesRead = syncFs.readSync(
+          stagedFile!.handle.fd,
+          observed,
+          offset,
+          observed.length - offset,
+          offset,
+        );
+        if (bytesRead === 0) {
+          break;
+        }
+        offset += bytesRead;
+      }
+      const grew = syncFs.readSync(
+        stagedFile!.handle.fd,
+        Buffer.alloc(1),
+        0,
+        1,
+        expectedContent.length,
+      );
+      if (offset !== observed.length || grew !== 0 || !observed.equals(expectedContent)) {
+        throw new Error("Workspace bootstrap file content changed during publication.");
+      }
+    };
+    const assertFileIdentity = (currentFile: syncFs.BigIntStats) => {
       if (
-        !currentDirectory.isDirectory() ||
-        currentDirectory.dev !== directory.dev ||
-        currentDirectory.ino !== directory.ino ||
         !currentFile.isFile() ||
         currentFile.dev !== identity.dev ||
         currentFile.ino !== identity.ino ||
@@ -123,6 +145,22 @@ export async function publishBootstrapFile(
         throw new Error("Workspace bootstrap file identity changed during publication.");
       }
     };
+    const assertIdentity = (observedPath: string) => {
+      beforePersistentApply?.();
+      const currentDirectory = syncFs.lstatSync(dir, { bigint: true });
+      const currentFile = syncFs.lstatSync(observedPath, { bigint: true });
+      if (
+        !currentDirectory.isDirectory() ||
+        currentDirectory.dev !== directory.dev ||
+        currentDirectory.ino !== directory.ino
+      ) {
+        throw new Error("Workspace bootstrap directory identity changed during publication.");
+      }
+      assertFileIdentity(currentFile);
+      assertContent();
+      assertFileIdentity(syncFs.fstatSync(stagedFile!.handle.fd, { bigint: true }));
+      assertFileIdentity(syncFs.lstatSync(observedPath, { bigint: true }));
+    };
     const publication: BootstrapPublicationIdentity = {
       directoryPath: dir,
       directoryDev: directory.dev.toString(),
@@ -131,12 +169,12 @@ export async function publishBootstrapFile(
       ino: identity.ino.toString(),
       birthtimeNs: identity.birthtimeNs.toString(),
     };
-    const assertPublication = () => {
+    const recordPublication = () => {
       assertIdentity(staging.path);
       beforePublish?.(publication);
       assertIdentity(staging.path);
     };
-    assertPublication();
+    recordPublication();
     let linked = false;
     try {
       // No await may split these operations: safe readers reject the temporary
@@ -155,7 +193,7 @@ export async function publishBootstrapFile(
           await workspaceRoot.move(path.relative(dir, staging.path), path.basename(targetPath), {
             overwrite: false,
             mutationSymlinks: "reject",
-            assertBeforeMutation: assertPublication,
+            assertBeforeMutation: () => assertIdentity(staging.path),
           });
           outcome = { kind: "created" };
         } catch (moveError) {

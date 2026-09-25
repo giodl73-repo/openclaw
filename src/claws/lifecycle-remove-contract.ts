@@ -22,6 +22,7 @@ export type ClawRemovePlanAction = {
     | "agent"
     | "configBinding"
     | "agentAllow"
+    | "configReference"
     | "workspace"
     | "agentState"
     | "sessionIndex"
@@ -34,7 +35,7 @@ export type ClawRemovePlanAction = {
     | "cronJob"
     | "installRecord";
   id: string;
-  action: "remove" | "delete" | "retain" | "release" | "uninstall" | "trash";
+  action: "remove" | "delete" | "retain" | "release" | "uninstall" | "trash" | "set";
   target: string;
   blocked: boolean;
   reason?: string;

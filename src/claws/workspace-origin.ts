@@ -259,7 +259,7 @@ export function clawBootstrapPublicationMatches(
   }
   let fd: number | undefined;
   try {
-    const directoryPath = fs.realpathSync(workspace);
+    const directoryPath = fs.realpathSync(path.dirname(path.join(workspace, relativePath)));
     const opened = openRootFileSync({
       absolutePath: path.join(workspace, relativePath),
       maxBytes: MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES,
@@ -328,19 +328,32 @@ export function openClawBootstrapRemovalAuthority(params: {
       return { owned: false, missing: false };
     }
     let closed = false;
+    let acceptedPath = params.relativePath;
+    let acceptedCtimeNs = original.ctimeNs;
     return {
       owned: true,
       ownsFile: (relativePath) => {
         const current = fs.fstatSync(fd, { bigint: true });
-        if (current.size !== original.size || current.mtimeNs !== original.mtimeNs) {
+        if (
+          current.size !== original.size ||
+          current.mtimeNs !== original.mtimeNs ||
+          (relativePath === acceptedPath && current.ctimeNs !== acceptedCtimeNs)
+        ) {
           return false;
         }
-        return clawBootstrapPublicationMatches(
+        const matches = clawBootstrapPublicationMatches(
           params.workspace,
           { ...publication, birthtimeNs: current.birthtimeNs.toString() },
           relativePath,
           current,
         );
+        if (matches) {
+          // A rename changes ctime on some filesystems. Admit that transition only when the
+          // receipt-bound inode moved to a different path; later in-place changes still revoke it.
+          acceptedPath = relativePath;
+          acceptedCtimeNs = current.ctimeNs;
+        }
+        return matches;
       },
       close: () => {
         if (!closed) {
@@ -359,6 +372,7 @@ export function openClawBootstrapRemovalAuthority(params: {
 function prepareClawWorkspacePublication(
   plan: ClawAddPlan,
   relativePath: string,
+  publicationLabel: "bootstrap" | "workspace file",
   readPublication: (marker: WorkspaceOriginMarker) => BootstrapPublicationIdentity | undefined,
   updateMarker: (
     marker: WorkspaceOriginMarker,
@@ -411,7 +425,7 @@ function prepareClawWorkspacePublication(
       marker.installId !== generation ||
       install?.plan_integrity !== plan.planIntegrity
     ) {
-      throw new Error("Claw install changed before workspace file publication.");
+      throw new Error(`Claw install changed before ${publicationLabel} publication.`);
     }
     return { current, marker };
   };
@@ -461,6 +475,7 @@ export function prepareClawBootstrapPublication(
   return prepareClawWorkspacePublication(
     plan,
     "BOOTSTRAP.md",
+    "bootstrap",
     (marker) => marker.bootstrapPublication,
     (marker, publication) => ({ ...marker, bootstrapPublication: publication }),
     options,
@@ -476,6 +491,7 @@ export function prepareClawWorkspaceFilePublication(
   return prepareClawWorkspacePublication(
     plan,
     relativePath,
+    "workspace file",
     (marker) => marker.filePublications?.[relativePath],
     (marker, publication) => ({
       ...marker,

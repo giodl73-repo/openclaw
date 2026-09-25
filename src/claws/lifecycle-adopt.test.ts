@@ -741,6 +741,7 @@ describe("planWorkspaceAdoptionTargets resume ownership", () => {
             adoptedFiles: workspaceOrigin.adoptedFiles,
             ownedFiles,
             bootstrapPublication: workspaceOrigin.bootstrapPublication,
+            filePublications: workspaceOrigin.filePublications,
           },
         },
       });
@@ -752,6 +753,28 @@ describe("planWorkspaceAdoptionTargets resume ownership", () => {
       );
       expect(resumedPlan.actions).toContainEqual(
         expect.objectContaining({ kind: "workspaceFile", id: "HEARTBEAT.md", action: "write" }),
+      );
+
+      const receiptlessPlan = await buildClawAddPlan({
+        manifest,
+        source,
+        packageBootstrap,
+        context: {
+          workspace,
+          adoptExistingWorkspace: true,
+          resumableWorkspace: workspace,
+          resumableWorkspaceOwnership: {
+            adoptedFiles: workspaceOrigin.adoptedFiles,
+            ownedFiles,
+            bootstrapPublication: workspaceOrigin.bootstrapPublication,
+          },
+        },
+      });
+      expect(receiptlessPlan.blockers).toContainEqual(
+        expect.objectContaining({ code: "workspace_file_conflict" }),
+      );
+      expect(receiptlessPlan.actions).toContainEqual(
+        expect.objectContaining({ kind: "workspaceFile", id: "HEARTBEAT.md", blocked: true }),
       );
 
       // A declared file that merely looks identical, with no ownership row for it, was never
@@ -769,6 +792,7 @@ describe("planWorkspaceAdoptionTargets resume ownership", () => {
             adoptedFiles: workspaceOrigin.adoptedFiles,
             ownedFiles: unownedFiles,
             bootstrapPublication: workspaceOrigin.bootstrapPublication,
+            filePublications: workspaceOrigin.filePublications,
           },
         },
       });

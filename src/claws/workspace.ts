@@ -1,5 +1,6 @@
 // Creates Claw-owned bootstrap and supporting files inside the new agent workspace.
 import { createHash } from "node:crypto";
+import syncFs from "node:fs";
 import { realpath } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -26,6 +27,7 @@ import { parseClawMarkdown } from "./reader.js";
 import type { ClawAddPlan, ClawAddPlanAction, ClawDiagnostic } from "./types.js";
 import {
   CLAW_ADOPTED_WORKSPACE_MARKER_PATH,
+  planAdoptsWorkspace,
   prepareClawWorkspaceFilePublication,
 } from "./workspace-origin.js";
 
@@ -121,6 +123,31 @@ function diagnostic(action: ClawAddPlanAction, code: string, message: string): C
 
 function contentDigest(content: Uint8Array): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function readOpenedWorkspaceFile(fd: number, size: bigint, label: string): Buffer {
+  if (size > BigInt(MAX_CLAW_WORKSPACE_FILE_BYTES)) {
+    throw new FsSafeError(
+      "too-large",
+      `Claw-owned workspace destination ${JSON.stringify(label)} exceeds the ${MAX_CLAW_WORKSPACE_FILE_BYTES}-byte limit.`,
+    );
+  }
+  const content = Buffer.alloc(Number(size));
+  let offset = 0;
+  while (offset < content.length) {
+    const bytesRead = syncFs.readSync(fd, content, offset, content.length - offset, offset);
+    if (bytesRead === 0) {
+      break;
+    }
+    offset += bytesRead;
+  }
+  const grew = syncFs.readSync(fd, Buffer.alloc(1), 0, 1, offset) !== 0;
+  if (offset !== content.length || grew) {
+    throw new Error(
+      `Claw-owned workspace destination ${JSON.stringify(label)} changed during inspection.`,
+    );
+  }
+  return content;
 }
 
 export async function readClawWorkspaceActionSource(params: {
@@ -357,6 +384,7 @@ export async function createClawWorkspaceFiles(
   });
   const createdFiles: PersistedClawWorkspaceFile[] = [];
   const nowMs = options.nowMs ?? Date.now();
+  const adoptedWorkspace = planAdoptsWorkspace(plan);
 
   for (const action of actions) {
     try {
@@ -432,6 +460,7 @@ export async function createClawWorkspaceFiles(
           createdFiles,
         );
       }
+      const publication = prepareClawWorkspaceFilePublication(plan, expectedRecord.path, options);
       if (await workspace.exists(targetRelative)) {
         if (!existingRecord || existingRecord.status === "failed") {
           if (action.action === "adopt") {
@@ -476,18 +505,53 @@ export async function createClawWorkspaceFiles(
             createdFiles,
           );
         }
-        const existingTarget = await workspace.read(targetRelative, {
+        const openedTarget = await workspace.open(targetRelative, {
           hardlinks: "reject",
-          maxBytes: MAX_CLAW_WORKSPACE_FILE_BYTES,
           symlinks: "reject",
         });
-        if (contentDigest(existingTarget.buffer) !== expectedRecord.contentDigest) {
+        let existingDigest: string;
+        let existingIdentity: syncFs.BigIntStats;
+        try {
+          const before = syncFs.fstatSync(openedTarget.handle.fd, { bigint: true });
+          existingDigest = contentDigest(
+            readOpenedWorkspaceFile(openedTarget.handle.fd, before.size, targetRelative),
+          );
+          existingIdentity = syncFs.fstatSync(openedTarget.handle.fd, { bigint: true });
+          if (
+            before.size !== existingIdentity.size ||
+            before.mtimeNs !== existingIdentity.mtimeNs ||
+            before.ctimeNs !== existingIdentity.ctimeNs
+          ) {
+            throw new Error(
+              `Claw-owned workspace destination ${JSON.stringify(targetRelative)} changed during inspection.`,
+            );
+          }
+        } finally {
+          await openedTarget[Symbol.asyncDispose]();
+        }
+        if (existingDigest !== expectedRecord.contentDigest) {
           throw new ClawWorkspaceWriteError(
             [
               diagnostic(
                 action,
                 "workspace_file_drift",
                 `Claw-owned workspace destination ${JSON.stringify(targetRelative)} no longer matches its recorded content.`,
+              ),
+            ],
+            createdFiles,
+          );
+        }
+        if (
+          adoptedWorkspace &&
+          action.action !== "adopt" &&
+          !publication?.ownsExisting(existingIdentity)
+        ) {
+          throw new ClawWorkspaceWriteError(
+            [
+              diagnostic(
+                action,
+                "workspace_file_ownership_conflict",
+                `Workspace destination ${JSON.stringify(targetRelative)} matches the recorded content but lacks this install's publication receipt.`,
               ),
             ],
             createdFiles,
@@ -522,7 +586,6 @@ export async function createClawWorkspaceFiles(
         persistWorkspaceFile(record, options);
       }
       try {
-        const publication = prepareClawWorkspaceFilePublication(plan, record.path, options);
         const targetParent = dirname(record.path);
         if (targetParent !== ".") {
           await workspace.mkdir(targetParent, {

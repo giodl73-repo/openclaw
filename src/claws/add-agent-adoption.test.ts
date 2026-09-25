@@ -1,7 +1,17 @@
 // Apply-time compare-and-swap coverage for adopting a configured agent.
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readFile, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  rmdir,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
@@ -930,5 +940,142 @@ describe("applyClawAddPlan agent adoption", () => {
     await expect(
       readClawStatus("worker", { env, config: changedOperatorConfig }),
     ).resolves.toMatchObject({ summary: { claws: 0 } });
+  });
+
+  it("retains pre-existing adopted files while removing files written by an unclaimed attempt", async () => {
+    const root = tempDirs.make("openclaw-claw-unclaimed-workspace-files-");
+    const workspace = join(root, "workspace");
+    await mkdir(join(root, "content"), { recursive: true });
+    await mkdir(workspace);
+    await writeFile(join(root, "content", "adopted.md"), "operator file\n");
+    await writeFile(join(root, "content", "adopted-missing.md"), "missing operator file\n");
+    await writeFile(join(root, "content", "written.md"), "claw file\n");
+    await writeFile(join(root, "content", "replaced.md"), "replaceable claw file\n");
+    await writeFile(join(root, "content", "linked.md"), "replaceable claw link\n");
+    await writeFile(join(root, "content", "missing.md"), "missing claw file\n");
+    await mkdir(join(root, "operator-target"));
+    await writeFile(join(root, "operator-target", "content.md"), "operator link target\n");
+    await writeFile(join(workspace, "adopted.md"), "operator file\n");
+    await writeFile(join(workspace, "adopted-missing.md"), "missing operator file\n");
+    const parsed = parseClawManifest({
+      schemaVersion: 1,
+      agent: { id: "worker", name: "Worker" },
+      workspace: {
+        files: [
+          { source: "content/adopted.md", path: "adopted.md" },
+          { source: "content/adopted-missing.md", path: "adopted-missing.md" },
+          { source: "content/written.md", path: "written.md" },
+          { source: "content/replaced.md", path: "replaced.md" },
+          { source: "content/linked.md", path: "linked.md" },
+          { source: "content/missing.md", path: "missing.md" },
+        ],
+      },
+    });
+    if (!parsed.ok) {
+      throw new Error(JSON.stringify(parsed.diagnostics));
+    }
+    const config: OpenClawConfig = {
+      agents: { entries: { worker: { name: "Worker", workspace } } },
+    };
+    const plan = await buildClawAddPlan({
+      manifest: parsed.manifest,
+      source: {
+        kind: "package",
+        name: "@acme/worker",
+        version: "1.0.0",
+        packageRoot: root,
+        manifestPath: join(root, "openclaw.claw.json"),
+        integrityKind: "artifact",
+        integrity: "sha256:manifest",
+        byteLength: 1,
+      },
+      context: {
+        workspace,
+        adoptExistingWorkspace: true,
+        adoptExistingAgent: true,
+        existingAgents: [{ id: "worker", name: "Worker", workspace }],
+      },
+    });
+    expect(plan.blockers).toEqual([]);
+    expect(plan.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "workspaceFile", id: "adopted.md", action: "adopt" }),
+        expect.objectContaining({ kind: "workspaceFile", id: "written.md", action: "write" }),
+      ]),
+    );
+    const env = { OPENCLAW_STATE_DIR: join(root, "state") };
+    persistClawInstallRecord(plan, { env, status: "workspace_ready", nowMs: 1 });
+    await createClawWorkspaceFiles(plan, { env, nowMs: 2 });
+    const replacement = join(workspace, "operator-replacement.tmp");
+    await writeFile(replacement, "replaceable claw file\n");
+    await unlink(join(workspace, "replaced.md"));
+    await rename(replacement, join(workspace, "replaced.md"));
+    await unlink(join(workspace, "linked.md"));
+    await symlink(
+      join(root, "operator-target"),
+      join(workspace, "linked.md"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await unlink(join(workspace, "missing.md"));
+    await unlink(join(workspace, "adopted-missing.md"));
+
+    const remove = await buildClawRemovePlan("worker", { env, config });
+    expect(remove.blockers).toEqual([]);
+    expect(remove.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "workspaceFile",
+          id: "adopted.md",
+          action: "retain",
+        }),
+        expect.objectContaining({
+          kind: "workspaceFile",
+          id: "written.md",
+          action: "delete",
+        }),
+        expect.objectContaining({
+          kind: "workspaceFile",
+          id: "replaced.md",
+          action: "retain",
+        }),
+        expect.objectContaining({
+          kind: "workspaceFile",
+          id: "linked.md",
+          action: "retain",
+          blocked: false,
+        }),
+      ]),
+    );
+    const removed = await applyClawRemovePlan(remove, {
+      env,
+      config,
+      consentPlanIntegrity: remove.planIntegrity,
+    });
+    expect(removed).toMatchObject({
+      status: "complete",
+      agentRemoved: false,
+      workspaceFiles: expect.arrayContaining([
+        { path: "adopted.md", action: "retainedUnowned" },
+        { path: "adopted-missing.md", action: "missing" },
+        { path: "written.md", action: "deleted" },
+        { path: "replaced.md", action: "retainedUnowned" },
+        { path: "linked.md", action: "retainedUnowned" },
+        { path: "missing.md", action: "missing" },
+      ]),
+    });
+    await expect(readFile(join(workspace, "adopted.md"), "utf8")).resolves.toBe("operator file\n");
+    await expect(readFile(join(workspace, "written.md"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(join(workspace, "replaced.md"), "utf8")).resolves.toBe(
+      "replaceable claw file\n",
+    );
+    await expect(readFile(join(workspace, "linked.md", "content.md"), "utf8")).resolves.toBe(
+      "operator link target\n",
+    );
+    await expect(readClawStatus("worker", { env, config })).resolves.toMatchObject({
+      records: [],
+    });
+    expect(config.agents?.entries?.worker).toBeDefined();
   });
 });

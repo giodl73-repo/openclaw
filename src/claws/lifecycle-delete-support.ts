@@ -585,24 +585,60 @@ export async function removeClawWorkspaceFile(
       return { path: record.path, action: "missing" };
     }
     const stagedPath = `${record.path}.openclaw-claw-remove-${randomUUID()}`;
-    await moveClawWorkspaceFileNoReplace(workspace, record.path, stagedPath, assertCurrent);
+    try {
+      await moveClawWorkspaceFileNoReplace(workspace, record.path, stagedPath, assertCurrent, {
+        copyFallback: !ownsFile,
+      });
+    } catch (error) {
+      if (!(ownsFile && error instanceof FsSafeError && error.code === "helper-unavailable")) {
+        throw error;
+      }
+      assertCurrent();
+      if (!ownsFile(record.path)) {
+        return { path: record.path, action: "retainedUnowned" };
+      }
+      const content = await workspace.readBytes(record.path, { maxBytes });
+      assertCurrent();
+      if (!ownsFile(record.path)) {
+        return { path: record.path, action: "retainedUnowned" };
+      }
+      const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+      if (digest !== record.contentDigest) {
+        return { path: record.path, action: "retainedModified" };
+      }
+      await workspace.remove(record.path, {
+        assertBeforeMutation: () => {
+          assertCurrent();
+          if (!ownsFile(record.path)) {
+            throw new Error("Claw workspace file identity changed before removal.", {
+              cause: error,
+            });
+          }
+        },
+      });
+      return { path: record.path, action: "deleted" };
+    }
     let outcome: Result<void, unknown>;
     try {
-      const content = await workspace.readBytes(stagedPath, { maxBytes });
-      assertCurrent();
-      const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
-      if (digest === record.contentDigest && (!ownsFile || ownsFile(stagedPath))) {
-        await workspace.remove(stagedPath, {
-          assertBeforeMutation: () => {
-            assertCurrent();
-            if (ownsFile && !ownsFile(stagedPath)) {
-              throw new Error("Claw bootstrap identity changed before removal.");
-            }
-          },
-        });
-        return { path: record.path, action: "deleted" };
+      if (ownsFile && !ownsFile(stagedPath)) {
+        outcome = ok(undefined);
+      } else {
+        const content = await workspace.readBytes(stagedPath, { maxBytes });
+        assertCurrent();
+        const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+        if (digest === record.contentDigest && (!ownsFile || ownsFile(stagedPath))) {
+          await workspace.remove(stagedPath, {
+            assertBeforeMutation: () => {
+              assertCurrent();
+              if (ownsFile && !ownsFile(stagedPath)) {
+                throw new Error("Claw bootstrap identity changed before removal.");
+              }
+            },
+          });
+          return { path: record.path, action: "deleted" };
+        }
+        outcome = ok(undefined);
       }
-      outcome = ok(undefined);
     } catch (error) {
       outcome = err(error);
     }

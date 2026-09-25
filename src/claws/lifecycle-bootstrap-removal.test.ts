@@ -80,7 +80,15 @@ async function adoptedBootstrapFixture() {
 }
 
 describe("adopted bootstrap descriptor-bound removal", () => {
-  it.each(["original", "replacement", "stale-receipt", "modified-size", "modified-mtime"] as const)(
+  it.each([
+    "original",
+    "helper-unavailable",
+    "replacement",
+    "stale-receipt",
+    "modified-after-read",
+    "modified-size",
+    "modified-mtime",
+  ] as const)(
     "preserves descriptor-bound ownership for %s across removal staging",
     async (entry) => {
       let birthtimeNs = 101n;
@@ -104,6 +112,9 @@ describe("adopted bootstrap descriptor-bound removal", () => {
       const restoreOperations: (() => void)[] = [];
       try {
         const { workspace, content, record } = await adoptedBootstrapFixture();
+        if (entry === "modified-after-read") {
+          syncFs.utimesSync(join(workspace, "BOOTSTRAP.md"), new Date(0), new Date(2_000));
+        }
         const originalPath = join(workspace, "original.md");
         const rootSpy = vi.spyOn(fsSafe, "root").mockImplementation(async (...args) => {
           const opened = await realRoot(...args);
@@ -115,6 +126,12 @@ describe("adopted bootstrap descriptor-bound removal", () => {
                 from === "BOOTSTRAP.md" ||
                 from.startsWith("BOOTSTRAP.md.openclaw-claw-remove-")
               ) {
+                if (entry === "helper-unavailable" && from === "BOOTSTRAP.md") {
+                  throw new fsSafe.FsSafeError(
+                    "helper-unavailable",
+                    "native no-replace move is unavailable",
+                  );
+                }
                 options?.assertBeforeMutation?.();
                 const fromPath = join(workspace, from);
                 const toPath = join(workspace, to);
@@ -131,6 +148,25 @@ describe("adopted bootstrap descriptor-bound removal", () => {
               }
             });
             restoreOperations.push(() => moveSpy.mockRestore());
+            const readBytes = opened.readBytes.bind(opened);
+            const readBytesSpy = vi
+              .spyOn(opened, "readBytes")
+              .mockImplementation(async (...readArgs) => {
+                const bytes = await readBytes(...readArgs);
+                if (
+                  entry === "modified-after-read" &&
+                  readArgs[0].startsWith("BOOTSTRAP.md.openclaw-claw-remove-") &&
+                  !edited
+                ) {
+                  const target = join(workspace, readArgs[0]);
+                  const beforeEdit = syncFs.statSync(target);
+                  edited = Buffer.alloc(content.length, 0x79);
+                  syncFs.writeFileSync(target, edited);
+                  syncFs.utimesSync(target, beforeEdit.atime, beforeEdit.mtime);
+                }
+                return bytes;
+              });
+            restoreOperations.push(() => readBytesSpy.mockRestore());
             const remove = opened.remove.bind(opened);
             const removeSpy = vi
               .spyOn(opened, "remove")
@@ -171,10 +207,15 @@ describe("adopted bootstrap descriptor-bound removal", () => {
           expect(await readdir(workspace)).toEqual(["BOOTSTRAP.md"]);
           return;
         }
-        expect(staged).toBe(true);
-        if (entry === "original") {
+        expect(staged).toBe(entry !== "helper-unavailable");
+        if (entry === "original" || entry === "helper-unavailable") {
           expect(removed).toEqual({ path: "BOOTSTRAP.md", action: "deleted" });
           expect(await readdir(workspace)).toEqual([]);
+        } else if (entry === "modified-after-read") {
+          expect(edited).toBeDefined();
+          expect(removed).toEqual({ path: "BOOTSTRAP.md", action: "retainedModified" });
+          expect(await readFile(join(workspace, "BOOTSTRAP.md"))).toEqual(edited);
+          expect(await readdir(workspace)).toEqual(["BOOTSTRAP.md"]);
         } else if (entry === "modified-size" || entry === "modified-mtime") {
           expect(edited).toBeDefined();
           expect(removed).toMatchObject({ path: "BOOTSTRAP.md", action: "error" });

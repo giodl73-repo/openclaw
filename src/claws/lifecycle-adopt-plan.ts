@@ -190,6 +190,7 @@ export type WorkspaceAdoptionOwnership = {
   adoptedFiles: readonly string[];
   ownedFiles: readonly PersistedClawWorkspaceFile[];
   bootstrapPublication?: BootstrapPublicationIdentity;
+  filePublications?: Readonly<Record<string, BootstrapPublicationIdentity>>;
 };
 
 /**
@@ -283,7 +284,12 @@ export async function planWorkspaceAdoptionTargets(params: {
       identical &&
       owned &&
       owned.contentDigest === pending.action.digest &&
-      owned.status !== "failed"
+      owned.status !== "failed" &&
+      clawBootstrapPublicationMatches(
+        params.workspace,
+        params.ownership?.filePublications?.[pending.action.id],
+        pending.action.id,
+      )
     ) {
       continue;
     }

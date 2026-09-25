@@ -10,6 +10,7 @@ import {
 } from "../state/openclaw-state-db.js";
 import { applyClawAddPlan } from "./add.js";
 import { buildClawAddPlan } from "./lifecycle.js";
+import { persistClawInstallRecord } from "./provenance.js";
 import { parseClawManifest } from "./schema.js";
 import type { ClawAddPlan, ClawSourceIdentity } from "./types.js";
 import { readClawWorkspaceAdoption } from "./workspace-origin.js";
@@ -478,6 +479,53 @@ describe("createClawWorkspaceFiles", () => {
     expect(readWorkspaceFileRows("workspace-agent", root)).toEqual([
       expect.objectContaining({ path: "AGENTS.md", status: "failed", updatedAtMs: 10 }),
     ]);
+  });
+
+  it("does not claim an independently created file from a pending adopted-workspace row", async () => {
+    const { root, workspace, plan } = await makeAdoptionPlan();
+    const env = stateEnv(root);
+    const action = plan.actions.find(
+      (candidate) => candidate.kind === "workspaceFile" && candidate.id === "reference/policy.md",
+    );
+    if (!action?.digest) {
+      throw new Error("expected reference/policy.md workspace action");
+    }
+    persistClawInstallRecord(plan, { env, status: "workspace_ready", nowMs: 1 });
+    openOpenClawStateDatabase({ env })
+      .db.prepare(
+        `INSERT INTO claw_workspace_files (
+           schema_version, agent_id, workspace, target_path, source_path,
+           content_digest, status, created_at_ms, updated_at_ms
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION,
+        plan.agent.finalId,
+        plan.agent.workspace,
+        "reference/policy.md",
+        "content/policy.md",
+        action.digest,
+        "pending",
+        2,
+        2,
+      );
+    await mkdir(join(workspace, "reference"));
+    await writeFile(join(workspace, "reference", "policy.md"), "Policy\n", "utf8");
+
+    await expect(createClawWorkspaceFiles(plan, { env, nowMs: 3 })).rejects.toMatchObject({
+      diagnostics: [expect.objectContaining({ code: "workspace_file_ownership_conflict" })],
+    });
+    await expect(readFile(join(workspace, "reference", "policy.md"), "utf8")).resolves.toBe(
+      "Policy\n",
+    );
+    expect(readWorkspaceFileRows(plan.agent.finalId, root)).toContainEqual(
+      expect.objectContaining({ path: "reference/policy.md", status: "pending" }),
+    );
+
+    await writeFile(join(workspace, "reference", "policy.md"), Buffer.alloc(1024 * 1024 + 1, 0x78));
+    await expect(createClawWorkspaceFiles(plan, { env, nowMs: 4 })).rejects.toMatchObject({
+      diagnostics: [expect.objectContaining({ code: "workspace_file_too-large" })],
+    });
   });
 
   it("fails closed when a previously owned destination drifts before resume", async () => {

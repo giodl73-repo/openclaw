@@ -10,8 +10,14 @@ import {
   withAgentDeletion,
   type AgentDeletionOperation,
 } from "../agents/agent-lifecycle-registry.js";
-import { pruneAgentConfig } from "../commands/agents.config.js";
+import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
+import { listAgentEntries, pruneAgentConfig } from "../commands/agents.config.js";
 import { getRuntimeConfig } from "../config/config.js";
+import {
+  inheritLegacyDefaultAgentId,
+  tryGetLegacyDefaultAgentId,
+} from "../config/legacy.default-agent-owner.js";
+import { migratePersistedImplicitMainRoster } from "../config/legacy.roster.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   AgentConfigPreconditionError,
@@ -80,6 +86,20 @@ export function clawAgentSessionStoreRemovalBlocker(
 
 export function digestClawAgentRemovalSurface(config: OpenClawConfig, agentId: string): string {
   const normalizedId = normalizeAgentId(agentId);
+  const legacyOwner = tryGetLegacyDefaultAgentId(config);
+  const pruned = pruneAgentConfig(config, agentId);
+  const survivorWorkspaces = Object.fromEntries(
+    listAgentEntries(pruned.config)
+      .map((entry) => {
+        const id = normalizeAgentId(entry.id);
+        // Resolve the retained legacy owner against the pre-collapse topology. The writer later
+        // pins that semantic workspace while canonicalizing the roster, so authored/runtime
+        // spellings hash identically without hiding explicit-main workspace changes.
+        const workspaceConfig = legacyOwner === id ? config : pruned.config;
+        return [id, resolveAgentWorkspaceDir(workspaceConfig, id)] as const;
+      })
+      .toSorted(([left], [right]) => left.localeCompare(right)),
+  );
   const surface = {
     bindings: (config.bindings ?? []).filter(
       (binding) => normalizeAgentId(binding.agentId) === normalizedId,
@@ -90,9 +110,25 @@ export function digestClawAgentRemovalSurface(config: OpenClawConfig, agentId: s
     }),
     // Cover every config path deleteAgentConfigEntry would prune so a reference added after
     // planning is rejected instead of silently deleting operator-owned routing or policy.
-    removedReferences: pruneAgentConfig(config, agentId).removedReferences,
+    removedReferences: pruned.removedReferenceValues,
+    // Bind the resulting topology, not whether each value was authored or materialized by the
+    // config reader. Legacy-roster migration can insert the same values between preview and write.
+    topologyAfter: {
+      ownership: pruned.config.agents?.ownership ?? null,
+      authInheritanceAgentId: pruned.config.agents?.defaults?.authInheritance?.agentId ?? null,
+      sessionStoreAgentId: pruned.config.agents?.defaults?.sessionStore?.agentId ?? null,
+      survivorWorkspaces,
+    },
   };
   return `sha256:${createHash("sha256").update(stableStringify(surface)).digest("hex")}`;
+}
+
+function projectRosterlessConfigMutationView(config: OpenClawConfig): OpenClawConfig {
+  if (config.agents?.ownership === "explicit" || listAgentEntries(config).length > 0) {
+    return config;
+  }
+  const clonedConfig = inheritLegacyDefaultAgentId(config, structuredClone(config));
+  return migratePersistedImplicitMainRoster(clonedConfig).config as OpenClawConfig;
 }
 
 async function commitClawAgentConfigRemoval(
@@ -112,9 +148,19 @@ async function commitClawAgentConfigRemoval(
         if (!params.retainHistoricalAgentState) {
           assertAgentSessionStoreDeletionSafe(config, params.agentId, params.stateDatabase);
         }
+        const actualRemovalSurface = digestClawAgentRemovalSurface(config, params.agentId);
+        // A missing target may be planned from raw rosterless config while the writer reread
+        // materializes its implicit main entry. Accept only that exact canonical projection.
+        const rosterlessWriterSurface =
+          params.expectedState === "missing"
+            ? digestClawAgentRemovalSurface(
+                projectRosterlessConfigMutationView(configBeforeDelete),
+                params.agentId,
+              )
+            : undefined;
         if (
-          digestClawAgentRemovalSurface(config, params.agentId) !==
-          params.expectedRemovalSurfaceDigest
+          actualRemovalSurface !== params.expectedRemovalSurfaceDigest &&
+          actualRemovalSurface !== rosterlessWriterSurface
         ) {
           throw params.onModified();
         }
