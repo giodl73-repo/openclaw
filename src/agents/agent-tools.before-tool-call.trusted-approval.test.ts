@@ -1,10 +1,10 @@
-import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setEmbeddedMode } from "../infra/embedded-mode.js";
 import {
   EmbeddedPluginApprovalBroker,
   setEmbeddedPluginApprovalBroker,
 } from "../infra/embedded-plugin-approval-broker.js";
+import type { PluginApprovalRequest } from "../infra/plugin-approvals.js";
 import { getGlobalHookRunner, resetGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { createHookRunner, type HookRunner } from "../plugins/hooks.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
@@ -16,6 +16,22 @@ vi.mock("../plugins/hook-runner-global.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../plugins/hook-runner-global.js")>();
   return { ...actual, getGlobalHookRunner: vi.fn() };
 });
+
+function nextApprovalRequest(broker: EmbeddedPluginApprovalBroker): {
+  promise: Promise<PluginApprovalRequest>;
+  dispose: () => void;
+} {
+  let unsubscribe = () => {};
+  const promise = new Promise<PluginApprovalRequest>((resolve) => {
+    unsubscribe = broker.subscribe((event) => {
+      if (event.event === "plugin.approval.requested") {
+        unsubscribe();
+        resolve(event.payload);
+      }
+    });
+  });
+  return { promise, dispose: () => unsubscribe() };
+}
 
 describe("trusted approval rewrite isolation", () => {
   const runBeforeToolCallMock = vi.fn<HookRunner["runBeforeToolCall"]>();
@@ -75,6 +91,7 @@ describe("trusted approval rewrite isolation", () => {
       setEmbeddedMode(true);
       setEmbeddedPluginApprovalBroker(broker);
       let settled = false;
+      const trustedRequestEvent = nextApprovalRequest(broker);
       const pending = runBeforeToolCallHook({
         toolName: "exec",
         toolKind: "code_mode_exec",
@@ -83,15 +100,15 @@ describe("trusted approval rewrite isolation", () => {
         settled = true;
         return result;
       });
+      let rewriteRequestEvent: ReturnType<typeof nextApprovalRequest> | undefined;
       try {
-        await vi.waitFor(() => expect(broker.listPending()).toHaveLength(1));
-        const trustedRequest = expectDefined(broker.listPending()[0], "trusted approval request");
+        const trustedRequest = await trustedRequestEvent.promise;
         expect(trustedRequest.request.title).toBe("Policy approval");
         expect(runBeforeToolCallMock).not.toHaveBeenCalled();
+        rewriteRequestEvent = nextApprovalRequest(broker);
         expect(broker.resolve(trustedRequest.id, "allow-once")).toBe(true);
 
-        await vi.waitFor(() => expect(broker.listPending()).toHaveLength(1));
-        const rewriteRequest = expectDefined(broker.listPending()[0], "rewrite approval request");
+        const rewriteRequest = await rewriteRequestEvent.promise;
         expect(rewriteRequest.id).not.toBe(trustedRequest.id);
         expect(rewriteRequest.request.title).toBe("Rewrite approval");
         expect(settled).toBe(false);
@@ -116,6 +133,8 @@ describe("trusted approval rewrite isolation", () => {
         }
         expect(broker.listPending()).toHaveLength(0);
       } finally {
+        trustedRequestEvent.dispose();
+        rewriteRequestEvent?.dispose();
         broker.stop();
         try {
           await pending;
