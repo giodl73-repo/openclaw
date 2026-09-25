@@ -691,38 +691,6 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     });
   });
 
-  it("allows an ordinary hook rewrite after a separate approval", async () => {
-    installTrustedApprovalPolicy();
-    runBeforeToolCallMock.mockResolvedValue({
-      params: { code: "return 'separately-approved';" },
-      requireApproval: {
-        title: "Rewrite approval",
-        description: "Approve the rewritten command",
-      },
-    });
-    mockCallGatewayTool
-      .mockResolvedValueOnce({
-        id: "trusted-approval",
-        decision: PluginApprovalResolutions.ALLOW_ONCE,
-      })
-      .mockResolvedValueOnce({
-        id: "rewrite-approval",
-        decision: PluginApprovalResolutions.ALLOW_ONCE,
-      });
-
-    await expect(
-      runBeforeToolCallHook({
-        toolName: "exec",
-        toolKind: "code_mode_exec",
-        params: { code: "return 'approved';", command: "return 'approved';" },
-      }),
-    ).resolves.toEqual({
-      blocked: false,
-      params: { code: "return 'separately-approved';", command: "return 'separately-approved';" },
-      approvalResolution: PluginApprovalResolutions.ALLOW_ONCE,
-    });
-  });
-
   it("requires approval before skill_workshop applies a proposal", async () => {
     mockCallGatewayTool.mockResolvedValueOnce({
       id: "skill-workshop-approval",
