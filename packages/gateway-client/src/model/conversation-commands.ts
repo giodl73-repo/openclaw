@@ -366,6 +366,14 @@ function normalizeSendInput(input: ControlModelSendInput): Record<string, unknow
   idempotencyKey?: string;
 } {
   const value = typeof input === "string" ? { message: input } : (record(input) ?? {});
+  if (Object.hasOwn(value, "expectedRunId")) {
+    throw localError(
+      "invalid-input",
+      "chat.send",
+      "expectedRunId is not supported by chat.send",
+      "UNSUPPORTED_SEND_OPTION",
+    );
+  }
   const message = text(value.message) ?? text(value.content) ?? "";
   const attachments = Array.isArray(value.attachments) ? value.attachments : undefined;
   if (!message && (!attachments || attachments.length === 0)) {
@@ -391,7 +399,6 @@ function sendOptions(input: Record<string, unknown>): Record<string, unknown> {
     "toolBindings",
     "timeoutMs",
     "expectedLeafEntryId",
-    "expectedRunId",
     "suppressCommandInterpretation",
   ]) {
     if (input[key] !== undefined) {
