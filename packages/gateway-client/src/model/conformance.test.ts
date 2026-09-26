@@ -141,7 +141,13 @@ describe("Control Model shared conformance fixtures", () => {
     it(fixture.id, async () => {
       const harness = createHarness(
         { status: "connected", epoch: 1 },
-        { approvalReplay: { approvals: [fixture.approval], truncated: false } },
+        {
+          approvalReplay: {
+            sessionKey: SESSION_KEY,
+            approvals: [fixture.approval],
+            truncated: false,
+          },
+        },
       );
       const { model, conversation } = await activatedConversation(harness);
       expect(conversation.getSnapshot().approvals).toContainEqual(

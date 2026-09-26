@@ -2,6 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  activatedConversation,
+  createHarness,
+} from "../../packages/gateway-client/src/model/conversation.test-support.js";
 import { onAgentEvent, type AgentEventPayload } from "../infra/agent-events.js";
 import { buildApprovalResolutionRef } from "../infra/approval-resolution-ref.js";
 import {
@@ -392,7 +396,7 @@ describe("operator approval session events", () => {
     );
   });
 
-  it("returns the authoritative sanitized pending set for one exact audience", () => {
+  it("returns the authoritative sanitized pending set for one exact audience", async () => {
     const databaseOptions = createDatabaseOptions();
     insertPendingApproval({
       databaseOptions,
@@ -443,6 +447,22 @@ describe("operator approval session events", () => {
       scopes: ["operator.approvals"],
       deviceId: "reviewer-device",
     });
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    harness.queue("sessions.messages.subscribe", { key: PARENT_SESSION_KEY });
+    harness.queue("sessions.messages.subscribe", {
+      key: PARENT_SESSION_KEY,
+      approvalReplay: runtime.replay(PARENT_SESSION_KEY, replayReviewer),
+    });
+    const { model, conversation } = await activatedConversation(harness);
+    try {
+      expect(conversation.getSnapshot().approvals.map((approval) => approval.id)).toEqual([
+        "source-and-parent",
+        "parent-only",
+      ]);
+      expect(conversation.getSnapshot().approvals[0]?.sourceSessionKey).toBe(SOURCE_SESSION_KEY);
+    } finally {
+      model.dispose();
+    }
     expect(runtime.replay(PARENT_SESSION_KEY, replayReviewer)).toEqual({
       sessionKey: PARENT_SESSION_KEY,
       updatedAtMs: 5_000,

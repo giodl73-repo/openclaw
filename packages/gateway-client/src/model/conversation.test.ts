@@ -1181,7 +1181,7 @@ describe("Control Model conversations", () => {
     const harness = createHarness(
       { status: "connected", epoch: 1 },
       {
-        approvalReplay: { approvals: [approval], truncated: false },
+        approvalReplay: { sessionKey: "agent:main:one", approvals: [approval], truncated: false },
         questions: [question],
       },
     );
@@ -1192,7 +1192,7 @@ describe("Control Model conversations", () => {
     harness.queue("sessions.messages.subscribe", { key: "agent:main:one" });
     harness.queue("sessions.messages.subscribe", {
       key: "agent:main:one",
-      approvalReplay: { approvals: [], truncated: false },
+      approvalReplay: { sessionKey: "agent:main:one", approvals: [], truncated: false },
     });
     harness.queue("question.list", { questions: [] });
     harness.setConnection({ status: "connected", epoch: 2 });

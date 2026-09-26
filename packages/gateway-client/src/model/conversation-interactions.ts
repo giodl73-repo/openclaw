@@ -69,7 +69,13 @@ export class ConversationInteractionStore {
 
   applyApprovalReplay(replay: unknown): void {
     const value = record(replay);
-    if (!value || !Array.isArray(value.approvals)) {
+    const sessionKey = text(value?.sessionKey);
+    if (
+      !value ||
+      !sessionKey ||
+      !this.#options.matchesSessionKey(sessionKey) ||
+      !Array.isArray(value.approvals)
+    ) {
       return;
     }
     if (value.truncated !== true) {
@@ -80,7 +86,8 @@ export class ConversationInteractionStore {
       }
     }
     for (const approval of value.approvals) {
-      this.upsertApproval(approval);
+      // The Gateway authorizes the replay audience; sourceSessionKey is provenance.
+      this.upsertApproval({ ...record(approval), sessionKey });
     }
     if (value.truncated === true) {
       this.#options.partialReasons.add("approval-replay-truncated");
