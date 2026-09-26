@@ -50,6 +50,7 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
 import type { ClawRemovePlanAction } from "./lifecycle-remove-contract.js";
+import type { ClawTrashPath, RemovedWorkspaceFile } from "./lifecycle-remove-types.js";
 import type { ClawMonitorCleanupGateway, ClawMonitorSnapshot } from "./monitor-cleanup-contract.js";
 import { deleteCachedClawInstallSchemaVersion } from "./provenance-runtime-read.js";
 import type { PersistedClawInstall } from "./provenance.js";
@@ -296,7 +297,6 @@ export type ClawCleanupTargets = {
   agentDir: string;
   sessionsDir: string;
 };
-export type ClawTrashPath = typeof moveToTrash;
 
 /** Returns true when removing a workspace would discard anything outside Claw provenance. */
 export async function workspaceContainsUntrackedEntries(
@@ -437,12 +437,6 @@ type DigestOwnedWorkspaceFileStatus = {
 };
 
 type ClawRemovableWorkspaceFile = DigestOwnedWorkspaceFile & DigestOwnedWorkspaceFileStatus;
-
-export type RemovedWorkspaceFile = {
-  path: string;
-  action: "deleted" | "missing" | "retainedModified" | "retainedUnowned" | "error";
-  message?: string;
-};
 
 export type ClawManagedFileStatus = PersistedClawWorkspaceFile & {
   state: "unchanged" | "modified" | "missing" | "unsafe";

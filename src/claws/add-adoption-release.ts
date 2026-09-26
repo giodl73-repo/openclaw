@@ -13,11 +13,8 @@ import {
   type ClawAddResult,
   type ClawCreatedWorkspaceIdentity,
 } from "./add-contract.js";
-import {
-  releaseClawRemoveRows,
-  removeClawWorkspaceFile,
-  type RemovedWorkspaceFile,
-} from "./lifecycle-delete-support.js";
+import { releaseClawRemoveRows, removeClawWorkspaceFile } from "./lifecycle-delete-support.js";
+import type { RemovedWorkspaceFile } from "./lifecycle-remove-types.js";
 import { applyClawPackageRemovals, planClawPackageRemovals } from "./package-remove.js";
 import {
   readClawPackageRefs,

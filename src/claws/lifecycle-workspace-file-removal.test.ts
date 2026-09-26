@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RemovedWorkspaceFile } from "./lifecycle-delete-support.js";
+import type { RemovedWorkspaceFile } from "./lifecycle-remove-types.js";
 import type { ClawStatusRecord } from "./lifecycle-status.js";
 import { applyClawWorkspaceFileRemovals } from "./lifecycle-workspace-file-removal.js";
 
