@@ -178,6 +178,18 @@ function mcpAppArtifact(
   );
 }
 
+function canvasUrlIdentity(messageId: string, url: string): string | null {
+  // Bound fingerprint work; the protocol normalizer still owns byte validation and failures.
+  if (messageId.length > 512 || url.length > 2_048) {
+    return null;
+  }
+  let result = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(JSON.stringify([messageId, url]))) {
+    result = BigInt.asUintN(64, (result ^ BigInt(byte)) * 0x100000001b3n);
+  }
+  return result.toString(16).padStart(16, "0");
+}
+
 function canvasArtifact(
   previewValue: unknown,
   context: ControlModelArtifactSourceContext,
@@ -195,18 +207,22 @@ function canvasArtifact(
   if (!url || !sourceId) {
     return null;
   }
+  // URL-only previews have no durable view ID; scope their fingerprint to the message.
+  const urlIdentity = viewId ? null : canvasUrlIdentity(sourceId, url);
   const requestedSandbox = presentation?.sandbox ?? preview.sandbox;
   const sandbox =
     requestedSandbox === "scripts" || requestedSandbox === "strict" ? requestedSandbox : "strict";
   return normalizeCandidate(
     {
       version: 1,
-      id: `canvas:${sourceId}`,
+      id: urlIdentity ? `canvas-url:${urlIdentity}` : `canvas:${sourceId}`,
       revision: context.messageSequence ?? 0,
       views: [
         {
           id: viewId ?? "canvas",
-          templateUri: `openclaw://canvas/${encodeURIComponent(sourceId)}`,
+          templateUri: urlIdentity
+            ? `openclaw://canvas/url/${urlIdentity}`
+            : `openclaw://canvas/${encodeURIComponent(sourceId)}`,
           dataVersion: 1,
           availability: "deferred",
           fallback: {
