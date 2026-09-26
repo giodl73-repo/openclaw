@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
+import { buildRuntimeReadiness } from "./conditions.js";
 import { createSelectedReadinessResolver } from "./selection.js";
 
 function pluginCriterion(): PluginReadinessCriterionRegistration {
@@ -106,5 +107,64 @@ describe("createSelectedReadinessResolver", () => {
         }),
       ],
     });
+  });
+
+  it("keeps a removed and re-added required criterion unknown until retired work settles", async () => {
+    const criterion = pluginCriterion();
+    let settle: (() => void) | undefined;
+    criterion.criterion.check = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          settle = () => resolve({ status: "True", reason: "RetiredReady", message: "Ready." });
+        }),
+    );
+    const resolve = createSelectedReadinessResolver();
+    const config = { gateway: { readiness: { requiredCriteria: [criterion.id] } } };
+    const first = resolve({ config, registry: { readinessCriteria: [criterion] } });
+    try {
+      await vi.waitFor(() => expect(settle).toBeTypeOf("function"));
+      const removed = await resolve({ config, registry: { readinessCriteria: [] } });
+      expect(removed.conditions[0].reason).toBe("CriterionNotRegistered");
+      const replacement = pluginCriterion();
+      const independent = pluginCriterion();
+      independent.id = "plugin.other.backend";
+      independent.pluginId = "other";
+      independent.criterion.check = vi.fn(() => ({
+        status: "True",
+        reason: "IndependentReady",
+        message: "Ready.",
+      }));
+      const params = {
+        config: {
+          gateway: { readiness: { requiredCriteria: [replacement.id, independent.id] } },
+        },
+        registry: { readinessCriteria: [replacement, independent] },
+      };
+      const pending = await resolve(params);
+      expect(replacement.criterion.check).not.toHaveBeenCalled();
+      expect(independent.criterion.check).toHaveBeenCalledTimes(1);
+      expect(pending.conditions[0]).toMatchObject({
+        status: "Unknown",
+        requirement: "required",
+        reason: "CriterionPreviousEvaluationPending",
+      });
+      expect(
+        buildRuntimeReadiness({
+          configLoaded: true,
+          gateway: "responding",
+          plugins: { errors: [] },
+          additionalConditions: pending.conditions,
+          additionalSubjects: pending.subjects,
+        }),
+      ).toMatchObject({ ready: false });
+      settle?.();
+      await first;
+      const fresh = await resolve(params);
+      expect(replacement.criterion.check).toHaveBeenCalledTimes(1);
+      expect(fresh.conditions[0].reason).toBe("StorageUnavailable");
+    } finally {
+      settle?.();
+      await first;
+    }
   });
 });

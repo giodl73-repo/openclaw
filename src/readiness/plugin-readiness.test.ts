@@ -118,17 +118,23 @@ describe("createPluginReadinessResolver", () => {
       message: "Replacement is unavailable.",
     }));
     const replacement = registration(replacementCheck);
+    retired.id = "plugin.storage.backend.check";
+    retired.criterion.id = "backend.check";
+    replacement.id = retired.id;
+    replacement.pluginId = "storage.backend";
+    replacement.criterion.id = "check";
     const resolve = createPluginReadinessResolver({ timeoutMs: 1_000, cacheTtlMs: 0 });
+    const replacementParams = {
+      registry: { readinessCriteria: [replacement] },
+      config: {},
+    };
 
     const retiredResult = resolve({
       registry: { readinessCriteria: [retired] },
       config: {},
     });
     await vi.waitFor(() => expect(resolveRetired).toBeTypeOf("function"));
-    const replacementResult = await resolve({
-      registry: { readinessCriteria: [replacement] },
-      config: {},
-    });
+    const pendingReplacement = await resolve(replacementParams);
     resolveRetired?.({
       status: "True",
       reason: "RetiredReady",
@@ -138,6 +144,16 @@ describe("createPluginReadinessResolver", () => {
     await expect(retiredResult).resolves.toMatchObject({
       conditions: [expect.objectContaining({ reason: "RetiredReady" })],
     });
+    expect(pendingReplacement.conditions[0]).toMatchObject({
+      status: "Unknown",
+      reason: "CriterionPreviousEvaluationPending",
+      subjectRef: "plugin.storage.backend/criterion/check",
+    });
+    expect(pendingReplacement.subjects).toEqual([
+      { ref: "plugin.storage.backend/criterion/check", kind: "plugin.storage.backend.criterion" },
+    ]);
+    expect(replacementCheck).not.toHaveBeenCalled();
+    const replacementResult = await resolve(replacementParams);
     expect(retiredSignal?.aborted).toBe(true);
     expect(replacementResult.conditions[0]).toMatchObject({
       status: "False",
@@ -145,6 +161,80 @@ describe("createPluginReadinessResolver", () => {
     });
     expect(replacementCheck).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["config", false],
+    ["config", true],
+    ["registry", false],
+    ["registry", true],
+    ["both", false],
+    ["both", true],
+  ] as const)(
+    "quarantines pending callbacks across repeated %s replacements (timed out: %s)",
+    async (replacement, timedOut) => {
+      vi.useFakeTimers();
+      type Result = { status: "True"; reason: string; message: string };
+      const ready: Result = { status: "True", reason: "StorageReady", message: "Ready." };
+      const pending: Array<{ resolve: (value: Result) => void; reject: (error: Error) => void }> =
+        [];
+      const check = vi.fn<PluginReadinessCriterionRegistration["criterion"]["check"]>(
+        ({ subjects }) => {
+          subjects.declare({ kind: "backend", key: "retired", identity: { id: "old" } });
+          return new Promise<Result>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          });
+        },
+      );
+      let registry = { readinessCriteria: [registration(check)] };
+      let config = {};
+      const resolve = createPluginReadinessResolver({ timeoutMs: 5, cacheTtlMs: 0 });
+      const first = resolve({ registry, config });
+      try {
+        await vi.advanceTimersByTimeAsync(timedOut ? 5 : 0);
+        const replacements = [];
+        for (let index = 0; index < 3; index += 1) {
+          if (replacement !== "config") {
+            registry = { readinessCriteria: [registration(check)] };
+          }
+          if (replacement !== "registry") {
+            config = {};
+          }
+          const result = resolve({ registry, config });
+          await vi.advanceTimersByTimeAsync(5);
+          replacements.push(await result);
+        }
+        expect(check).toHaveBeenCalledTimes(1);
+        for (const result of replacements) {
+          expect(result.conditions[0]).toMatchObject({
+            status: "Unknown",
+            reason: "CriterionPreviousEvaluationPending",
+            subjectRef: "plugin.storage/criterion/backend",
+          });
+          expect(result.subjects).toEqual([
+            { ref: "plugin.storage/criterion/backend", kind: "plugin.storage.criterion" },
+          ]);
+        }
+        if (timedOut) {
+          pending[0].reject(new Error("retired callback failed"));
+        } else {
+          pending[0].resolve(ready);
+        }
+        await first;
+        await vi.advanceTimersByTimeAsync(0);
+        check.mockReturnValue(ready);
+        const fresh = await resolve({ registry, config });
+        expect(check).toHaveBeenCalledTimes(2);
+        expect(check.mock.calls[1][0].config).toBe(config);
+        expect(fresh.conditions[0]).toMatchObject({ status: "True", reason: "StorageReady" });
+      } finally {
+        for (const callback of pending) {
+          callback.resolve(ready);
+        }
+        await first;
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("retries after the timed-out callback settles and the cache expires", async () => {
     let currentTime = 0;
