@@ -196,6 +196,100 @@ describe("Control Model conversations", () => {
     });
   });
 
+  it("forwards receipt queries and clears omitted authoritative history fields", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    harness.queue("chat.startup", {
+      messages: [],
+      inFlightRun: { runId: "run-finished" },
+      pendingInputs: { items: [{ id: "input-one" }], total: 1 },
+      inputReceipts: [{ runId: "source-one", state: "pending" }],
+    });
+    harness.queue("chat.history", {
+      messages: [],
+      pendingInputs: { items: [], total: 0 },
+      inputReceipts: [{ runId: "source-one", state: "consumed", consumedByEventId: "event-one" }],
+    });
+    const model = createControlModel({
+      gateway: harness.gateway,
+      autoRefreshSessionCatalog: false,
+      autoLoadConversationHistory: false,
+    });
+    model.start();
+    const conversation = model.conversation("agent:main:one");
+
+    await conversation.refreshHistory(undefined, "chat.startup", {
+      inputRunIds: ["source-one"],
+    });
+    expect(harness.callsFor("chat.startup")[0]?.params).toMatchObject({
+      inputRunIds: ["source-one"],
+    });
+    expect(conversation.getSnapshot().metadata).toMatchObject({
+      inFlightRun: { runId: "run-finished" },
+      pendingInputs: { total: 1 },
+      inputReceipts: [{ runId: "source-one", state: "pending" }],
+    });
+
+    await conversation.refreshHistory(undefined, "chat.history", {
+      inputRunIds: ["source-one"],
+    });
+    expect(harness.callsFor("chat.history")[0]?.params).toMatchObject({
+      inputRunIds: ["source-one"],
+    });
+    expect(conversation.getSnapshot().metadata).toMatchObject({
+      pendingInputs: { items: [], total: 0 },
+      inputReceipts: [{ runId: "source-one", state: "consumed", consumedByEventId: "event-one" }],
+    });
+    expect(conversation.getSnapshot().metadata?.inFlightRun).toBeUndefined();
+  });
+
+  it("preserves receipt queries across coalesced history refreshes", async () => {
+    const harness = createHarness({ status: "connected", epoch: 1 });
+    const firstRunIds = Array.from({ length: 30 }, (_, index) => `source-${index}`);
+    const secondRunIds = Array.from({ length: 30 }, (_, index) => `source-${index + 30}`);
+    const receipts = [...firstRunIds, ...secondRunIds].map((runId) => ({
+      runId,
+      state: "pending",
+    }));
+    const firstResponse = harness.defer("chat.history");
+    harness.queue("chat.history", {
+      messages: [],
+      inputReceipts: receipts.slice(0, 50),
+    });
+    harness.queue("chat.history", {
+      messages: [],
+      inputReceipts: receipts.slice(50),
+    });
+    const model = createControlModel({
+      gateway: harness.gateway,
+      autoRefreshSessionCatalog: false,
+      autoLoadConversationHistory: false,
+    });
+    model.start();
+    const conversation = model.conversation("agent:main:one");
+
+    const first = conversation.refreshHistory(undefined, "chat.history", {
+      inputRunIds: firstRunIds,
+    });
+    await vi.waitFor(() => expect(harness.callsFor("chat.history")).toHaveLength(1));
+    const second = conversation.refreshHistory(undefined, "chat.history", {
+      inputRunIds: secondRunIds,
+    });
+    firstResponse.resolve({
+      messages: [],
+      inputReceipts: receipts.slice(0, 30),
+    });
+
+    await Promise.all([first, second]);
+
+    expect(harness.callsFor("chat.history").map((call) => call.params.inputRunIds)).toEqual([
+      firstRunIds,
+      [...firstRunIds, ...secondRunIds].slice(0, 50),
+      [...firstRunIds, ...secondRunIds].slice(50),
+    ]);
+    expect(conversation.getSnapshot().metadata?.inputReceipts).toEqual(receipts);
+    model.dispose();
+  });
+
   it("activates exactly once per epoch and retires/release leases safely", async () => {
     const harness = createHarness();
     const model = createControlModel({ gateway: harness.gateway });

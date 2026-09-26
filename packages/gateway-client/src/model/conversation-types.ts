@@ -121,6 +121,9 @@ export type ControlModelConversationBounds = Readonly<{
   maxArtifactViews: number;
 }>;
 export type ControlModelConversationHistoryMethod = "chat.history" | "chat.startup";
+export type ControlModelConversationHistoryQuery = Readonly<{
+  inputRunIds?: readonly string[];
+}>;
 /**
  * Session message observer handles held for one connection generation. A
  * replaced generation has no wire observer left, so its handles are dropped
@@ -142,6 +145,8 @@ export type ControlModelConversationMetadata = Readonly<{
   agentsList?: DeepReadonly<unknown>;
   metadata?: DeepReadonly<unknown>;
   inFlightRun?: DeepReadonly<Record<string, unknown>>;
+  pendingInputs?: DeepReadonly<unknown>;
+  inputReceipts?: DeepReadonly<unknown>;
 }>;
 export type ControlModelConversationHistory = Readonly<{
   status: "idle" | "loading" | "ready" | "error";

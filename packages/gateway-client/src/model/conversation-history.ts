@@ -1,3 +1,4 @@
+import { CHAT_INPUT_RECEIPT_MAX_RUN_IDS } from "@openclaw/gateway-protocol/schema";
 import {
   readSessionMessageSequence,
   reduceSessionProjection,
@@ -6,6 +7,7 @@ import {
 import type {
   ControlModelConversationHistory,
   ControlModelConversationHistoryMethod,
+  ControlModelConversationHistoryQuery,
   ControlModelConversationHost,
   ControlModelConversationMetadata,
   ControlModelConversationStatus,
@@ -57,6 +59,7 @@ export class ConversationHistoryController {
   #methodRequested: ControlModelConversationHistoryMethod = "chat.history";
   #metadata: ControlModelConversationMetadata | null = null;
   #requestOptions: ControlModelRequestOptions | undefined;
+  #queryRequested: ControlModelConversationHistoryQuery | undefined;
   #generation = 0;
 
   constructor(options: ConversationHistoryControllerOptions) {
@@ -115,6 +118,7 @@ export class ConversationHistoryController {
   refresh(
     options?: ControlModelRequestOptions,
     method: ControlModelConversationHistoryMethod = "chat.history",
+    query?: ControlModelConversationHistoryQuery,
   ): Promise<void> {
     this.#requested = true;
     this.#offsetRequested = 0;
@@ -122,10 +126,18 @@ export class ConversationHistoryController {
     if (options !== undefined || this.#requestOptions === undefined) {
       this.#requestOptions = options;
     }
+    if (query?.inputRunIds?.length) {
+      this.#queryRequested = {
+        inputRunIds: [
+          ...new Set([...(this.#queryRequested?.inputRunIds ?? []), ...query.inputRunIds]),
+        ],
+      };
+    }
     if (!this.#loop) {
       const loop = this.#drain().finally(() => {
         if (this.#loop === loop) {
           this.#loop = null;
+          this.#queryRequested = undefined;
         }
       });
       this.#loop = loop;
@@ -168,6 +180,7 @@ export class ConversationHistoryController {
     const loop = this.#drain().finally(() => {
       if (this.#loop === loop) {
         this.#loop = null;
+        this.#queryRequested = undefined;
       }
     });
     this.#loop = loop;
@@ -196,10 +209,11 @@ export class ConversationHistoryController {
     while (this.#requested && !this.#options.isDisposed()) {
       this.#requested = false;
       const options = this.#requestOptions;
+      const query = this.#queryRequested;
       const method = this.#methodRequested;
       this.#requestOptions = undefined;
       try {
-        await this.#refreshOnce(this.#offsetRequested, options, method);
+        await this.#refreshOnce(this.#offsetRequested, options, method, query);
       } catch (error) {
         if (!hasError) {
           firstError = error;
@@ -218,6 +232,7 @@ export class ConversationHistoryController {
     offset: number,
     options?: ControlModelRequestOptions,
     method: ControlModelConversationHistoryMethod = "chat.history",
+    query?: ControlModelConversationHistoryQuery,
   ): Promise<void> {
     if (this.#options.isDisposed()) {
       return;
@@ -229,19 +244,44 @@ export class ConversationHistoryController {
     this.#options.setStatus("loading");
     this.#options.publish();
     try {
-      const response = await this.#options.host.gateway.request<Record<string, unknown>>(
-        method,
-        {
-          sessionKey: this.#options.sessionKey,
-          ...(this.#options.host.agentId ? { agentId: this.#options.host.agentId } : {}),
-          limit: this.#options.host.bounds.maxMessages,
-          ...(offset > 0 ? { offset } : {}),
-        },
-        options,
-      );
-      this.#options.assertEpoch(epoch, method);
-      if (generation !== this.#generation) {
-        return;
+      const inputRunIds = query?.inputRunIds ?? [];
+      const queryBatches =
+        inputRunIds.length > 0
+          ? Array.from(
+              { length: Math.ceil(inputRunIds.length / CHAT_INPUT_RECEIPT_MAX_RUN_IDS) },
+              (_, index) =>
+                inputRunIds.slice(
+                  index * CHAT_INPUT_RECEIPT_MAX_RUN_IDS,
+                  (index + 1) * CHAT_INPUT_RECEIPT_MAX_RUN_IDS,
+                ),
+            )
+          : [undefined];
+      let response: Record<string, unknown> = {};
+      const inputReceipts: unknown[] = [];
+      let receivedInputReceipts = false;
+      for (const inputRunIdsBatch of queryBatches) {
+        response = await this.#options.host.gateway.request<Record<string, unknown>>(
+          method,
+          {
+            sessionKey: this.#options.sessionKey,
+            ...(this.#options.host.agentId ? { agentId: this.#options.host.agentId } : {}),
+            limit: this.#options.host.bounds.maxMessages,
+            ...(offset > 0 ? { offset } : {}),
+            ...(inputRunIdsBatch ? { inputRunIds: [...inputRunIdsBatch] } : {}),
+          },
+          options,
+        );
+        this.#options.assertEpoch(epoch, method);
+        if (generation !== this.#generation) {
+          return;
+        }
+        if (Array.isArray(response.inputReceipts)) {
+          receivedInputReceipts = true;
+          inputReceipts.push(...response.inputReceipts);
+        }
+      }
+      if (receivedInputReceipts) {
+        response = { ...response, inputReceipts };
       }
       const page = Array.isArray(response?.messages) ? response.messages : [];
       this.#applyStartupMetadata(record(response) ?? {}, method);
@@ -321,8 +361,14 @@ export class ConversationHistoryController {
       this.#setMetadataReason("startup-metadata-malformed", read.malformed);
       return;
     }
+    const retained = { ...this.#metadata };
+    // These fields describe the exact authoritative history response. Retaining
+    // an omitted value would resurrect a completed run or stale input custody.
+    delete retained.inFlightRun;
+    delete retained.pendingInputs;
+    delete retained.inputReceipts;
     const merged = read.metadata
-      ? readStartupMetadata({ ...this.#metadata, ...read.metadata }, maxBytes)
+      ? readStartupMetadata({ ...retained, ...read.metadata }, maxBytes)
       : read;
     if (merged.metadata) {
       this.#metadata = merged.metadata;

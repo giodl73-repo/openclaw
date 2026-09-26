@@ -38,6 +38,10 @@ export function createControlModelGatewayBridge(options: {
   let deliveryScheduled = false;
   let lastConnectionKey = "";
   let disposed = false;
+  const observesPageLifecycle =
+    typeof document !== "undefined" && typeof globalThis.addEventListener === "function";
+  let pageActive = !observesPageLifecycle || document.visibilityState !== "hidden";
+  let catalogInvalidationPending = false;
   const readConnectionSnapshot = () => {
     const gateway = options.getGatewaySnapshot();
     return {
@@ -94,9 +98,26 @@ export function createControlModelGatewayBridge(options: {
   const notifyEvent = (frame: ControlModelGatewayEventFrame) => {
     safelyNotify(eventListeners, frame);
     if (frame.event === "sessions.changed" || frame.event === "session.message") {
+      if (pageActive) {
+        safelyNotify(invalidationListeners, undefined);
+      } else {
+        catalogInvalidationPending = true;
+      }
+    }
+  };
+
+  const handlePageLifecycle = (event: Event) => {
+    pageActive = event.type !== "pagehide" && document.visibilityState !== "hidden";
+    if (pageActive && catalogInvalidationPending) {
+      catalogInvalidationPending = false;
       safelyNotify(invalidationListeners, undefined);
     }
   };
+  if (observesPageLifecycle) {
+    document.addEventListener("visibilitychange", handlePageLifecycle);
+    globalThis.addEventListener("pagehide", handlePageLifecycle);
+    globalThis.addEventListener("pageshow", handlePageLifecycle);
+  }
 
   const scheduleDelivery = () => {
     if (deliveryScheduled) {
@@ -156,6 +177,7 @@ export function createControlModelGatewayBridge(options: {
     notifyConnection,
     resetLineage() {
       eventQueue = [];
+      catalogInvalidationPending = false;
     },
     queueEvent(event, client) {
       const epoch = readConnectionSnapshot().epoch;
@@ -191,6 +213,11 @@ export function createControlModelGatewayBridge(options: {
         return;
       }
       disposed = true;
+      if (observesPageLifecycle) {
+        document.removeEventListener("visibilitychange", handlePageLifecycle);
+        globalThis.removeEventListener("pagehide", handlePageLifecycle);
+        globalThis.removeEventListener("pageshow", handlePageLifecycle);
+      }
       eventQueue = [];
       connectionListeners.clear();
       invalidationListeners.clear();

@@ -281,7 +281,7 @@ const STARTUP_METADATA_TRUNCATION_MARKER = Object.freeze({
   reason: "max-startup-metadata-bytes",
 });
 const STARTUP_METADATA_STRING_KEYS = ["sessionId", "thinkingLevel", "verboseLevel"] as const;
-const STARTUP_METADATA_OBJECT_KEYS = ["sessionInfo", "inFlightRun"] as const;
+const STARTUP_METADATA_OBJECT_KEYS = ["sessionInfo", "inFlightRun", "pendingInputs"] as const;
 const STARTUP_METADATA_KEYS = [
   ...STARTUP_METADATA_STRING_KEYS,
   "defaults",
@@ -289,6 +289,8 @@ const STARTUP_METADATA_KEYS = [
   "agentsList",
   "metadata",
   "inFlightRun",
+  "pendingInputs",
+  "inputReceipts",
 ] as const;
 
 function isFiniteJsonValue(value: unknown, seen = new WeakSet<object>(), depth = 0): boolean {

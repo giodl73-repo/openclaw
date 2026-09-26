@@ -102,6 +102,40 @@ describe("disposed chat message subscriptions", () => {
     expect(second.controlModelConversation).toBe(conversation);
   });
 
+  it("projects input custody and forwards receipt queries through the model", async () => {
+    const snapshot = {
+      sessionKey: subscription.key,
+      history: { status: "ready", window: "newest", nextOffset: null, hasMore: false },
+      metadata: {
+        pendingInputs: { items: [], total: 0 },
+        inputReceipts: [{ runId: "source-one", state: "consumed", consumedByEventId: "event-one" }],
+      },
+      messages: [],
+      activeRun: null,
+    } as unknown as ControlModelConversationSnapshot;
+    const refreshHistory = vi.fn(async () => undefined);
+    const conversation = {
+      getSnapshot: () => snapshot,
+      refreshHistory,
+      loadMoreHistory: vi.fn(),
+    };
+    const state = createSubscriptionState(vi.fn());
+    state.controlModel = {
+      conversation: vi.fn(() => conversation),
+      releaseConversation: vi.fn(async () => undefined),
+    } as unknown as ControlModel;
+
+    const result = await loadControlModelChatHistory(state, { inputRunIds: ["source-one"] });
+
+    expect(refreshHistory).toHaveBeenCalledExactlyOnceWith(undefined, "chat.history", {
+      inputRunIds: ["source-one"],
+    });
+    expect(result).toMatchObject({
+      pendingInputs: { items: [], total: 0 },
+      inputReceipts: [{ runId: "source-one", state: "consumed", consumedByEventId: "event-one" }],
+    });
+  });
+
   it("releases an active message subscription when its pane is disposed", () => {
     const unsubscribeMessages = vi
       .fn<SessionCapability["unsubscribeMessages"]>()

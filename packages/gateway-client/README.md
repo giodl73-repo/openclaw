@@ -247,10 +247,8 @@ const model = createControlModel({
       const connectionEpoch = connectionSnapshot.epoch;
       return gateway.subscribeEvents((frame) => listener({ ...frame, connectionEpoch }));
     },
-    getMessageSubscriptionCoordinator: () =>
-      getGatewaySessionMessageSubscriptionCoordinator(gateway, {
-        keysEquivalent: areHostSessionKeysEquivalent,
-      }),
+    getSessionMessageSubscriptionClient: () => gateway,
+    sessionMessageKeysEquivalent: areHostSessionKeysEquivalent,
     request: (method, params, options) => gateway.request(method, params, options),
   },
 });
@@ -273,11 +271,12 @@ import. This keeps the catalog snapshot owner shared while conversation
 projection and artifact code load only for chat.
 
 The invalidation binding remains responsible for the session-catalog
-subscription and authorized `sessions.changed` invalidations. The host injects
-the canonical Gateway Client coordinator already owned by its live connection;
-Control Model acquires and releases only its own targeted leases and never
-resets that shared coordinator. The host must retire and replace the coordinator
-before publishing a new connection epoch.
+subscription and authorized `sessions.changed` invalidations. The host returns
+the current raw request client so Control Model can borrow the canonical
+coordinator already owned by the live connection. Control Model acquires and
+releases only its own targeted leases and never resets that shared coordinator.
+The host must retire and replace the coordinator before publishing a new
+connection epoch; this hook does not transfer connection teardown to the model.
 
 `subscribeEvents` adapts ordinary protocol `EventFrame` values at the
 host-owned connection boundary. Capture that connection's epoch when installing

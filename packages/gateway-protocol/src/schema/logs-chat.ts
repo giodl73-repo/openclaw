@@ -13,6 +13,8 @@ import { HumanMentionsSchema } from "./human-mentions.js";
 import { ChatSendSessionKeyString, InputProvenanceSchema, NonEmptyString } from "./primitives.js";
 import { SessionPermissionModeSchema, SessionToolOverridesSchema } from "./sessions-row.js";
 
+export { CHAT_INPUT_RECEIPT_MAX_RUN_IDS } from "./chat-history-constants.js";
+
 /** Cursor-based request for the gateway log tail endpoint. */
 export const LogsTailParamsSchema = closedObject({
   cursor: Type.Optional(Type.Integer({ minimum: 0 })),

@@ -19,6 +19,7 @@ import { ConversationToolStore } from "./conversation-tools.js";
 import {
   ControlModelCommandError,
   type ControlModelConversationHistoryMethod,
+  type ControlModelConversationHistoryQuery,
   type ControlModelConversationHost,
   type ControlModelConversationLeases,
   type ControlModelConversationSnapshot,
@@ -51,6 +52,7 @@ export type {
   ControlModelConversationBounds,
   ControlModelConversationHistory,
   ControlModelConversationHistoryMethod,
+  ControlModelConversationHistoryQuery,
   ControlModelConversationHost,
   ControlModelConversationMessage,
   ControlModelConversationMetadata,
@@ -411,9 +413,10 @@ export class ControlModelConversation {
   async refreshHistory(
     options?: ControlModelRequestOptions,
     method: ControlModelConversationHistoryMethod = "chat.history",
+    query?: ControlModelConversationHistoryQuery,
   ): Promise<void> {
     this.#assertCommandReady(method);
-    return this.#history.refresh(options, method);
+    return this.#history.refresh(options, method, query);
   }
 
   async loadMoreHistory(options?: ControlModelRequestOptions): Promise<void> {

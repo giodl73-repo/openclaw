@@ -169,7 +169,9 @@ export async function loadChatHistory(
     deltaCursor,
     inputRunIds,
     requestKeyPrefix,
-    state.controlModel ? () => loadControlModelChatHistory(state, { startup }) : undefined,
+    state.controlModel
+      ? () => loadControlModelChatHistory(state, { startup, inputRunIds })
+      : undefined,
   ).then((result) => {
     const current = requests.historyLoad;
     if (current.phase === "in-flight" && current.promise === promise) {

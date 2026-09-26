@@ -176,6 +176,18 @@ function controlModelChatMetadata(value: unknown): ChatMetadataResult | undefine
   return source as ChatMetadataResult;
 }
 
+function controlModelPendingInputs(value: unknown): ChatHistoryResult["pendingInputs"] {
+  const source = controlModelRecord(value);
+  if (!source || !Array.isArray(source.items) || !Number.isInteger(source.total)) {
+    return undefined;
+  }
+  return source as ChatHistoryResult["pendingInputs"];
+}
+
+function controlModelInputReceipts(value: unknown): ChatHistoryResult["inputReceipts"] {
+  return Array.isArray(value) ? (value as ChatHistoryResult["inputReceipts"]) : undefined;
+}
+
 type ChatHistoryInFlightRun = NonNullable<ChatHistoryResult["inFlightRun"]>;
 
 function controlModelInFlightRun(value: unknown): ChatHistoryInFlightRun | undefined {
@@ -287,6 +299,12 @@ function controlModelHistoryResult(
     defaults: controlModelDefaults(metadata?.defaults) ?? sessionResult?.defaults,
     sessionInfo: controlModelSessionInfo(metadata?.sessionInfo) ?? selectedRow,
     metadata: controlModelChatMetadata(metadata?.metadata),
+    ...(controlModelPendingInputs(metadata?.pendingInputs)
+      ? { pendingInputs: controlModelPendingInputs(metadata?.pendingInputs) }
+      : {}),
+    ...(controlModelInputReceipts(metadata?.inputReceipts)
+      ? { inputReceipts: controlModelInputReceipts(metadata?.inputReceipts) }
+      : {}),
     ...(inFlightRun ? { inFlightRun } : {}),
   };
 }
@@ -294,7 +312,7 @@ function controlModelHistoryResult(
 /** Authoritative Control Model transcript read for one explicit history load. */
 export async function loadControlModelChatHistory(
   state: ChatState,
-  opts: { startup?: boolean } = {},
+  opts: { startup?: boolean; inputRunIds?: readonly string[] } = {},
 ): Promise<ChatHistoryResult> {
   const conversation = controlModelConversationForState(state);
   if (!conversation) {
@@ -308,7 +326,11 @@ export async function loadControlModelChatHistory(
   // coalesces concurrent callers.
   for (;;) {
     try {
-      await conversation.refreshHistory(undefined, method);
+      if (opts.inputRunIds?.length) {
+        await conversation.refreshHistory(undefined, method, { inputRunIds: opts.inputRunIds });
+      } else {
+        await conversation.refreshHistory(undefined, method);
+      }
       break;
     } catch (error) {
       if (
