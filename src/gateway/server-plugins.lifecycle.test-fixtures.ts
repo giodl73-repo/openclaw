@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
+import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
 import type { PluginRuntime } from "../plugins/runtime/types.js";
 
 export const INSTANCE_BINDING_PROBE_KEY = Symbol.for("openclaw.test.gatewayInstanceBindingProbe");
@@ -38,6 +39,7 @@ export type InstanceBindingProbeCoordinator = {
   onServiceStop?: () => void;
   serviceStopCompletion: ReturnType<typeof createDeferred<void>>;
   serviceStopFailure?: "rejection" | "timeout";
+  readinessCheck?: PluginReadinessCriterionRegistration["criterion"]["check"];
   channelProof?: ChannelBindingProof;
   channelIds?: readonly string[];
   channelStops?: Array<Pick<ChannelBindingMonitor, "channelId" | "runtimeId" | "abortSignal">>;
@@ -151,6 +153,14 @@ export async function writeInstanceBindingProbePlugin(bundledRoot: string): Prom
             return coordinator.serviceStopCompletion.promise;
           }
         },
+      });
+    }
+    const readinessCheck = coordinator.readinessCheck;
+    if (readinessCheck) {
+      api.registerReadinessCriterion({
+        id: "backend",
+        description: "Synthetic backend availability.",
+        check: readinessCheck,
       });
     }
     api.registerGatewayMethod("${INSTANCE_BINDING_PROBE_METHOD}", ({ context, respond }) => {

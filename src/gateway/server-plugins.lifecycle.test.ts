@@ -1,6 +1,7 @@
 /**
  * Tests gateway plugin lifecycle loading, startup, and shutdown behavior.
  */
+import "./server-plugins.lifecycle.readiness.test-utils.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
