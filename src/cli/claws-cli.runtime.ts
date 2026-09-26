@@ -114,7 +114,7 @@ function requireClawPlanConsent(
   const code = opts.yes ? "plan_integrity_required" : "consent_required";
   const message = opts.yes
     ? `Claw ${action} consent must include --plan-integrity from the exact dry-run plan.`
-    : `Claw ${action} requires explicit consent; pass --dry-run to preview or --yes with --plan-integrity to ${action === "add" ? "create the new agent and workspace" : "remove owned state"}.`;
+    : `Claw ${action} requires explicit consent; pass --dry-run to preview or --yes with --plan-integrity to ${action === "add" ? "apply the reviewed Claw add plan" : "remove owned state"}.`;
   emitClawFailure(runtime, opts.json, message, {
     schemaVersion:
       action === "add" ? CLAW_ADD_PLAN_SCHEMA_VERSION : CLAW_REMOVE_PLAN_SCHEMA_VERSION,

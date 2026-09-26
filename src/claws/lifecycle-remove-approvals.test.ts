@@ -116,11 +116,16 @@ async function buildApprovalFixture(withMcp = false) {
 async function installApprovalAgent(
   addPlan: Awaited<ReturnType<typeof buildApprovalFixture>>,
   home: string,
+  applyOptions: Omit<
+    Parameters<typeof applyClawAddPlan>[1],
+    "commitConfig" | "consentPlanIntegrity" | "env"
+  > = {},
 ) {
   const env = { OPENCLAW_STATE_DIR: join(home, ".openclaw") };
   setTestEnvValue("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);
   let config: OpenClawConfig = {};
   await applyClawAddPlan(addPlan, {
+    ...applyOptions,
     consentPlanIntegrity: addPlan.planIntegrity,
     env,
     commitConfig: async (transform) => {
@@ -281,13 +286,7 @@ describe("Claw exec approvals removal", () => {
   it("preserves config, approvals, and files until another process closes its database", async () => {
     const addPlan = await buildApprovalFixture(true);
     await withApprovalsTempHomeConfig({}, async ({ home }) => {
-      setTestEnvValue("OPENCLAW_STATE_DIR", join(home, ".openclaw"));
-      let config: OpenClawConfig = {};
-      await applyClawAddPlan(addPlan, {
-        consentPlanIntegrity: addPlan.planIntegrity,
-        commitConfig: async (transform) => {
-          config = transform(config);
-        },
+      let { config } = await installApprovalAgent(addPlan, home, {
         installMcpServers: async () => [],
       });
       await installClawMcpServers(addPlan, {
@@ -490,15 +489,7 @@ describe("Claw exec approvals removal", () => {
     async ({ kind, schemaVersion }) => {
       const addPlan = await buildApprovalFixture();
       await withApprovalsTempHomeConfig({}, async ({ home }) => {
-        setTestEnvValue("OPENCLAW_STATE_DIR", join(home, ".openclaw"));
-        let config: OpenClawConfig = {};
-        const commitConfig = async (transform: (current: OpenClawConfig) => OpenClawConfig) => {
-          config = transform(config);
-        };
-        await applyClawAddPlan(addPlan, {
-          consentPlanIntegrity: addPlan.planIntegrity,
-          commitConfig,
-        });
+        const { config } = await installApprovalAgent(addPlan, home);
         await writeOpenClawConfig(home, config);
         const sharedDir =
           kind === "workspace"

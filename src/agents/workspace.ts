@@ -6,7 +6,6 @@
 import syncFs from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { sha256Hex } from "@openclaw/normalization-core/node-crypto";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { Minimatch } from "minimatch";
@@ -126,33 +125,6 @@ async function isGeneratedTemplateContent(fileName: string, content: string): Pr
   }
   const retired = RETIRED_GENERATED_TEMPLATE_SHA256[fileName];
   return retired !== undefined && retired.includes(sha256Hex(content));
-}
-
-function loadTemplate(name: string): Promise<string> {
-  return getOrCreatePromise(
-    workspaceTemplateCache,
-    name,
-    async () => {
-      const templateDirs = await resolveWorkspaceTemplateSearchDirs();
-      const triedPaths: string[] = [];
-      for (const templateDir of templateDirs) {
-        const templatePath = path.join(templateDir, name);
-        triedPaths.push(templatePath);
-        try {
-          const content = await fs.readFile(templatePath, "utf-8");
-          return stripFrontMatter(content);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
-            throw error;
-          }
-        }
-      }
-      throw new Error(
-        `Missing workspace template: ${name} (${triedPaths.join(", ")}). Ensure workspace templates are packaged.`,
-      );
-    },
-    { cacheRejections: false },
-  );
 }
 
 export type ExtraBootstrapLoadDiagnosticCode =
