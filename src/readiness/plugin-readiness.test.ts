@@ -214,17 +214,21 @@ describe("createPluginReadinessResolver", () => {
             { ref: "plugin.storage/criterion/backend", kind: "plugin.storage.criterion" },
           ]);
         }
+        const retired = pending[0];
+        if (!retired) {
+          throw new Error("Expected one pending callback");
+        }
         if (timedOut) {
-          pending[0].reject(new Error("retired callback failed"));
+          retired.reject(new Error("retired callback failed"));
         } else {
-          pending[0].resolve(ready);
+          retired.resolve(ready);
         }
         await first;
         await vi.advanceTimersByTimeAsync(0);
         check.mockReturnValue(ready);
         const fresh = await resolve({ registry, config });
         expect(check).toHaveBeenCalledTimes(2);
-        expect(check.mock.calls[1][0].config).toBe(config);
+        expect(check.mock.calls[1]?.[0].config).toBe(config);
         expect(fresh.conditions[0]).toMatchObject({ status: "True", reason: "StorageReady" });
       } finally {
         for (const callback of pending) {

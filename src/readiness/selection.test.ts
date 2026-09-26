@@ -110,11 +110,13 @@ describe("createSelectedReadinessResolver", () => {
   });
 
   it("keeps a removed and re-added required criterion unknown until retired work settles", async () => {
+    type Check = PluginReadinessCriterionRegistration["criterion"]["check"];
+    type Result = Awaited<ReturnType<Check>>;
     const criterion = pluginCriterion();
     let settle: (() => void) | undefined;
-    criterion.criterion.check = vi.fn(
+    criterion.criterion.check = vi.fn<Check>(
       () =>
-        new Promise((resolve) => {
+        new Promise<Result>((resolve) => {
           settle = () => resolve({ status: "True", reason: "RetiredReady", message: "Ready." });
         }),
     );
@@ -124,12 +126,12 @@ describe("createSelectedReadinessResolver", () => {
     try {
       await vi.waitFor(() => expect(settle).toBeTypeOf("function"));
       const removed = await resolve({ config, registry: { readinessCriteria: [] } });
-      expect(removed.conditions[0].reason).toBe("CriterionNotRegistered");
+      expect(removed.conditions[0]?.reason).toBe("CriterionNotRegistered");
       const replacement = pluginCriterion();
       const independent = pluginCriterion();
       independent.id = "plugin.other.backend";
       independent.pluginId = "other";
-      independent.criterion.check = vi.fn(() => ({
+      independent.criterion.check = vi.fn<Check>(() => ({
         status: "True",
         reason: "IndependentReady",
         message: "Ready.",
@@ -161,7 +163,7 @@ describe("createSelectedReadinessResolver", () => {
       await first;
       const fresh = await resolve(params);
       expect(replacement.criterion.check).toHaveBeenCalledTimes(1);
-      expect(fresh.conditions[0].reason).toBe("StorageUnavailable");
+      expect(fresh.conditions[0]?.reason).toBe("StorageUnavailable");
     } finally {
       settle?.();
       await first;

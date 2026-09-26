@@ -1,25 +1,25 @@
 import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
-import type { PluginReadinessCriterionRegistration } from "../plugins/registry-types.js";
-import { createDeferredCore } from "../shared/deferred.js";
-import type { ManagedGatewayConfigReloaderParams } from "./server-reload-contracts.js";
-import type { CanonicalGatewayReadinessResult } from "./server/readiness.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
+import type { PluginReadinessCriterionRegistration } from "../../plugins/registry-types.js";
+import { createDeferredCore } from "../../shared/deferred.js";
+import type { ManagedGatewayConfigReloaderParams } from "../server-reload-contracts.js";
 import {
   getGatewayTestPort,
   installGatewayTestHooks,
   resetTestPluginRegistry,
   setTestPluginRegistry,
   startTestGatewayServer,
-} from "./test-helpers.js";
+} from "../test-helpers.js";
+import type { CanonicalGatewayReadinessResult } from "./readiness.js";
 
 const reload = vi.hoisted(() => ({
   params: undefined as ManagedGatewayConfigReloaderParams | undefined,
 }));
 
-vi.mock("./server-reload-managed.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./server-reload-managed.js")>();
+vi.mock("../server-reload-managed.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../server-reload-managed.js")>();
   return {
     ...actual,
     startManagedGatewayConfigReloader: (params: ManagedGatewayConfigReloaderParams) => {
