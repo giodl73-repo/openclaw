@@ -437,6 +437,39 @@ const mockSuccessfulEmbeddedAttempt = () => {
   );
 };
 
+const runNativeErrorPolicyFixture = async (params: {
+  reply?: string;
+  trigger?: "cron" | "user";
+  lastToolError: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["lastToolError"];
+}) => {
+  const cfg = createEmbeddedAgentRunnerOpenAiConfig(["mock-1"]);
+  runEmbeddedAttemptMock.mockResolvedValueOnce(
+    makeEmbeddedRunnerAttempt({
+      assistantTexts: params.reply ? [params.reply] : [],
+      lastAssistant: params.reply
+        ? buildEmbeddedRunnerAssistant({
+            content: [{ type: "text", text: params.reply }],
+          })
+        : undefined,
+      lastToolError: params.lastToolError,
+    }),
+  );
+  return await runEmbeddedAgent({
+    sessionId: nextRunId("native-error-policy-session"),
+    sessionFile: nextSessionCompatibilityKey(),
+    workspaceDir,
+    config: cfg,
+    prompt: "exercise native error policy",
+    provider: "openai",
+    model: "mock-1",
+    timeoutMs: 5_000,
+    agentDir,
+    runId: nextRunId("native-error-policy"),
+    enqueue: immediateEnqueue,
+    trigger: params.trigger,
+  });
+};
+
 function firstMockCall(mock: { mock: { calls: unknown[][] } }, label: string): unknown[] {
   const call = mock.mock.calls[0];
   if (!call) {
@@ -450,6 +483,68 @@ function firstRunEmbeddedAttemptParams(): { sessionKey?: string } {
 }
 
 describe("runEmbeddedAgent", () => {
+  it("returns the assistant reply without an extra warning after a tool failure", async () => {
+    const result = await runNativeErrorPolicyFixture({
+      reply: "I could not apply the edit, so I inspected the file instead.",
+      trigger: "user",
+      lastToolError: {
+        toolName: "edit",
+        error: "synthetic edit failure",
+        mutatingAction: true,
+      },
+    });
+
+    expect(result.payloads).toEqual([
+      expect.objectContaining({
+        text: "I could not apply the edit, so I inspected the file instead.",
+      }),
+    ]);
+    expect(result.payloads?.[0]?.isError).toBeUndefined();
+    expect(result.meta.failureSignal).toBeUndefined();
+  });
+
+  it("returns the compact native warning when no assistant reply exists", async () => {
+    const result = await runNativeErrorPolicyFixture({
+      trigger: "user",
+      lastToolError: {
+        toolName: "edit",
+        error: "synthetic edit failure",
+        mutatingAction: true,
+      },
+    });
+
+    expect(result.payloads).toHaveLength(1);
+    expect(result.payloads?.[0]).toMatchObject({ isError: true });
+    expect(result.payloads?.[0]?.text).toMatch(/edit.*failed/i);
+    expect(result.payloads?.[0]?.text).not.toContain("synthetic edit failure");
+    expect(result.meta.failureSignal).toBeUndefined();
+  });
+
+  it("keeps fatal cron metadata while suppressing the extra warning after a reply", async () => {
+    const result = await runNativeErrorPolicyFixture({
+      reply: "The command requires approval and was not run.",
+      trigger: "cron",
+      lastToolError: {
+        toolName: "exec",
+        error: "SYSTEM_RUN_DENIED: approval required",
+        errorCode: "SYSTEM_RUN_DENIED",
+        mutatingAction: true,
+      },
+    });
+
+    expect(result.payloads).toEqual([
+      expect.objectContaining({ text: "The command requires approval and was not run." }),
+    ]);
+    expect(result.payloads?.[0]?.isError).toBeUndefined();
+    expect(result.meta.failureSignal).toMatchObject({
+      kind: "execution_denied",
+      source: "tool",
+      toolName: "exec",
+      code: "SYSTEM_RUN_DENIED",
+      fatalForCron: true,
+    });
+  });
+
   it("uses the configured default model when the caller omits provider and model", async () => {
     const sessionFile = nextSessionCompatibilityKey();
     const cfg = {
