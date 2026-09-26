@@ -103,6 +103,17 @@ function logSessionPurgeWarning(runtime: RuntimeEnv, agentId: string, purgeFaile
   }
 }
 
+function logTrashFailures(
+  runtime: RuntimeEnv,
+  failed: readonly AgentDeleteFailedPath[] | undefined,
+): void {
+  for (const failure of failed ?? []) {
+    runtime.error(
+      `Warning: path could not be moved to Trash: ${failure.reason}; remove it manually at ${failure.path}`,
+    );
+  }
+}
+
 async function maybeDeleteAgentThroughGateway(params: {
   agentId: string;
   deleteFiles: boolean;
@@ -279,11 +290,7 @@ export async function agentsDeleteCommand(
       runtime.log(`Deleted agent: ${agentId}`);
       logClearedOwnerRefs(runtime, result.clearedOwnerRefs);
       logSessionPurgeWarning(runtime, agentId, gatewayResult.purgeFailed === true);
-      for (const failure of gatewayResult.failed ?? []) {
-        runtime.error(
-          `Warning: path could not be moved to Trash: ${failure.reason}; remove it manually at ${failure.path}`,
-        );
-      }
+      logTrashFailures(runtime, gatewayResult.failed);
     }
     return;
   }
@@ -307,7 +314,8 @@ export async function agentsDeleteCommand(
       existingJournal ?? { agentId, agentDir, workspaceDir, sessionsDir, deleteFiles },
     );
     try {
-      prepareAgentDeleteDatabases(cfg, agentId, agentDir);
+      await prepareAgentDeleteDatabases(cfg, agentId, agentDir);
+      deletion.assertCurrent();
       const commitRoster = async () =>
         await withAgentExecApprovalsRemoved(agentId, async () => {
           deletion.assertCurrent();
@@ -393,7 +401,7 @@ export async function agentsDeleteCommand(
             quietRuntime.log(warning);
           }
           deletion.assertCurrent();
-          deleteWorkspaceState(statePlan);
+          await deleteWorkspaceState(statePlan, { assertCurrent: deletion.assertCurrent });
         } catch (error) {
           workspaceCleanupError = error instanceof Error ? error : new Error(String(error));
         }
@@ -450,6 +458,7 @@ export async function agentsDeleteCommand(
       runtime.log(`Deleted agent: ${agentId}`);
       logClearedOwnerRefs(runtime, result.clearedOwnerRefs);
       logSessionPurgeWarning(runtime, agentId, purgeFailed);
+      logTrashFailures(runtime, failed);
     }
     if (gatewayAttempt.kind === "fallback-credentials-required") {
       runtime.error(

@@ -10,6 +10,13 @@ const SURVIVOR_SCRIPT_PATH = path.resolve("scripts/e2e/upgrade-survivor-docker.s
 const E2E_INSTANCE_SCRIPT_PATH = path.resolve("scripts/lib/openclaw-e2e-instance.sh");
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
+function writePublishedRunner(root: string, script: string) {
+  // The Darwin Bash guard replays the complete fixture through /bin/bash.
+  const file = path.join(root, "published-runner.sh");
+  writeFileSync(file, script);
+  return file;
+}
+
 function run(...args: string[]) {
   return spawnSync(process.execPath, [SCRIPT_PATH, ...args], {
     encoding: "utf8",
@@ -96,7 +103,7 @@ probe_status=0
 prepare_update_restart_probe || probe_status=$?
 exit "$probe_status"
 `;
-      const result = spawnSync("bash", ["-c", script], {
+      const result = spawnSync("bash", [writePublishedRunner(root, script)], {
         encoding: "utf8",
         env: {
           ...process.env,
@@ -125,6 +132,8 @@ exit "$probe_status"
       );
       expect(existsSync(path.join(root, "installed"))).toBe(true);
       expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual({
+        agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
+        channels: { discord: { enabled: true }, whatsapp: { enabled: true } },
         plugins: { enabled: false },
         gateway: {
           port: 18789,
@@ -201,8 +210,9 @@ export const { redactSensitiveText } = await tsImport(${JSON.stringify(path.reso
       const result = spawnSync(
         "bash",
         [
-          "-c",
-          `${setup}
+          writePublishedRunner(
+            root,
+            `${setup}
 trap - EXIT ERR INT TERM
 update_repair_required=0
 mkdir -p "$HOME/.config/systemd/user" "$OPENCLAW_STATE_DIR"
@@ -252,6 +262,7 @@ openclaw_e2e_maybe_timeout() {
 fi
 exit "$probe_status"
 `,
+          ),
         ],
         {
           encoding: "utf8",
@@ -341,8 +352,9 @@ exit "$probe_status"
     const result = spawnSync(
       "bash",
       [
-        "-c",
-        `${setup}
+        writePublishedRunner(
+          root,
+          `${setup}
 trap - EXIT ERR INT TERM
 SCENARIO=base
 UPDATE_RESTART_MODE=auto-auth
@@ -363,6 +375,7 @@ probe_status=0
 repair_fixture_plugin_consent || probe_status=$?
 exit "$probe_status"
 `,
+        ),
       ],
       {
         encoding: "utf8",
@@ -390,8 +403,9 @@ exit "$probe_status"
       const result = spawnSync(
         "bash",
         [
-          "-c",
-          `${setup}
+          writePublishedRunner(
+            root,
+            `${setup}
 trap - EXIT ERR INT TERM
 handler() {
   ${conditional ? "return 47" : "bash -c 'exit 47'"}
@@ -399,6 +413,7 @@ handler() {
 }
 ${conditional ? 'probe_status=0; phase preparation handler || probe_status=$?; exit "$probe_status"' : "phase preparation handler"}
 `,
+          ),
         ],
         {
           encoding: "utf8",
@@ -425,13 +440,15 @@ ${conditional ? 'probe_status=0; phase preparation handler || probe_status=$?; e
     const configPath = path.join(root, "openclaw.json");
     const snapshotPath = path.join(root, "openclaw.authored.json");
     const authoredConfig =
-      '{"channels":{"discord":{"dm":{"policy":"allowlist","allowFrom":["123"]}}}}\n';
+      '{"meta":{"lastTouchedVersion":"2026.7.1-2"},"channels":{"discord":{"dm":{"policy":"allowlist","allowFrom":["123"]}}},"plugins":{"entries":{"matrix":{"enabled":true}}}}\n';
     writeFileSync(configPath, authoredConfig);
 
     const park = run("park-restart-probe", configPath, snapshotPath, "19876");
     expect(park.status, park.stderr).toBe(0);
     expect(readFileSync(snapshotPath, "utf8")).toBe(authoredConfig);
     expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+      meta: { lastTouchedVersion: "2026.7.1-2" },
+      channels: { discord: { dm: { policy: "allowlist", allowFrom: ["123"] } } },
       plugins: { enabled: false },
       gateway: {
         port: 19876,

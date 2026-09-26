@@ -13,7 +13,107 @@ function loadSkillsFromPath(dir: string) {
   return loadSkills({ cwd: dir, agentDir: dir, skillPaths: [dir], includeDefaults: false });
 }
 
+describe("loadSingleSkillDirectory", () => {
+  it.each([true, false])(
+    "keeps cached content isolated from caller mutations, paths and read limits (declared name: %s)",
+    async (declaredName) => {
+      const root = tempDirs.make("openclaw-skill-content-cache-");
+      const raw = [
+        "---",
+        ...(declaredName ? ["name: shared-cache-facts"] : []),
+        "description: Cached instructions",
+        "---",
+        "Instructions without a heading.",
+      ].join("\n");
+      for (const name of ["first-copy", "second-copy"]) {
+        const dir = path.join(root, name);
+        await fs.mkdir(dir);
+        await fs.writeFile(path.join(dir, "SKILL.md"), raw);
+      }
+      const firstParams = {
+        skillDir: path.join(root, "first-copy"),
+        rootRealPath: await fs.realpath(root),
+        source: "openclaw-bundled",
+      };
+      const first = loadSingleSkillDirectory(firstParams)!;
+      const hash = first.skill.contentHash;
+      first.frontmatter.description = "Caller mutation";
+      first.skill.description = "Caller mutation";
+      first.skill.sourceInfo.scope = "temporary";
+      expect(loadSingleSkillDirectory({ ...firstParams, maxBytes: 1 })).toBeNull();
+
+      const skillDir = path.join(root, "second-copy");
+      const second = loadSingleSkillDirectory({
+        ...firstParams,
+        skillDir,
+        source: "openclaw-workspace",
+      });
+      expect(second?.frontmatter.description).toBe("Cached instructions");
+      expect(second?.skill).toMatchObject({
+        name: declaredName ? "shared-cache-facts" : "second-copy",
+        displayName: declaredName ? "Shared Cache Facts" : "Second Copy",
+        description: "Cached instructions",
+        contentHash: hash,
+        filePath: path.join(skillDir, "SKILL.md"),
+        baseDir: skillDir,
+        source: "openclaw-workspace",
+        sourceInfo: {
+          path: path.join(skillDir, "SKILL.md"),
+          baseDir: skillDir,
+          source: "openclaw-workspace",
+          scope: "project",
+        },
+      });
+    },
+  );
+});
+
 describe("loadSkills", () => {
+  it.each([
+    ["LF", "---", "---", "\n"],
+    ["CRLF", "---", "---", "\r\n"],
+    ["BOM", "\uFEFF---", "---", "\n"],
+    ["opening delimiter whitespace", "---   ", "---", "\n"],
+    ["closing delimiter whitespace", "---", "---\t", "\n"],
+    ["CR", "---", "---", "\r"],
+  ])("uses the body title after accepted %s frontmatter", async (_label, opening, closing, eol) => {
+    const skillDir = tempDirs.make("openclaw-skill-title-");
+    await fs.writeFile(
+      path.join(skillDir, "SKILL.md"),
+      [
+        opening,
+        "name: change-log",
+        "description: Summarize changes",
+        "# Metadata comment",
+        closing,
+        "# Release Notes",
+      ].join(eol),
+    );
+    const session = loadSkillsFromPath(skillDir);
+    const diagnostics: LocalSkillLoadDiagnostic[] = [];
+    const local = loadSingleSkillDirectory({
+      skillDir,
+      source: "workspace",
+      rootRealPath: await fs.realpath(skillDir),
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+
+    expect(session.diagnostics).toEqual([]);
+    expect(diagnostics).toEqual([]);
+    expect(session.skills[0]?.displayName).toBe("Release Notes");
+    expect(local?.skill.displayName).toBe("Release Notes");
+  });
+
+  it("humanizes the identifier when the skill has no H1", async () => {
+    const skillDir = tempDirs.make("openclaw-skill-title-");
+    await fs.writeFile(
+      path.join(skillDir, "SKILL.md"),
+      "---\nname: daily-brief\ndescription: Summarize updates\n---\nSkill body without a title.\n",
+    );
+
+    expect(loadSkillsFromPath(skillDir).skills[0]?.displayName).toBe("Daily Brief");
+  });
+
   it.each(["user", "project", "path"] as const)(
     "preserves %s session provenance and its untrimmed fallback name beside local loading",
     async (source) => {
@@ -40,6 +140,7 @@ describe("loadSkills", () => {
           name: " padded-name",
           displayName: "Shared Title",
           description: "Padded metadata.",
+          contentHash: expect.any(String),
           filePath,
           baseDir: skillDir,
           source,
@@ -72,6 +173,7 @@ describe("loadSkills", () => {
         name: "padded-name",
         displayName: "Shared Title",
         description: "Padded metadata.",
+        contentHash: session.skills[0]!.contentHash,
         filePath,
         baseDir: skillDir,
         source: "workspace",

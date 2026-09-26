@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../agents/prepared-model-catalog.js", () => ({
   loadProviderScopedThinkingCatalog: vi.fn(async () => []),
-  loadPreparedModelCatalog: mocks.loadModelCatalog,
+  readPreparedModelCatalog: mocks.loadModelCatalog,
 }));
 
 vi.mock("../commands/doctor-gateway-services.js", () => ({
@@ -869,7 +869,7 @@ describe("CORE_HEALTH_CHECKS", () => {
         createDeps({
           async collectWorkspaceSuggestionNotes(): Promise<readonly string[]> {
             return [
-              "- Tip: back up the agent workspace in a private git repo; keep ~/.openclaw out of git (credentials, sessions). Details: /concepts/agent-workspace#git-backup-recommended",
+              "- Tip: back up the agent workspace in a private git repo; keep ~/.openclaw out of git (credentials, sessions). Details: /concepts/agent-workspace#git-backup-recommended-private",
               "Memory system not found in workspace.",
             ];
           },
@@ -896,7 +896,7 @@ describe("CORE_HEALTH_CHECKS", () => {
         checkId: "core/doctor/workspace-suggestions",
         severity: "info",
         message:
-          "Tip: back up the agent workspace in a private git repo; keep ~/.openclaw out of git (credentials, sessions). Details: /concepts/agent-workspace#git-backup-recommended",
+          "Tip: back up the agent workspace in a private git repo; keep ~/.openclaw out of git (credentials, sessions). Details: /concepts/agent-workspace#git-backup-recommended-private",
       }),
     );
     expect(findings).toContainEqual(
@@ -1001,6 +1001,8 @@ describe("CORE_HEALTH_CHECKS", () => {
                 "google/gemini-2.5-flash",
                 "google/gemini-3.8-flash",
                 "google-gemini-cli/gemini-2.5-pro",
+                "openrouter/auto",
+                "openrouter/deepseek/deepseek-v4-pro",
               ],
             },
             imageModel: { primary: "no-such-provider/no-such-model" },
@@ -1052,5 +1054,9 @@ describe("CORE_HEALTH_CHECKS", () => {
     expect(findings).not.toContainEqual(
       expect.objectContaining({ target: "google/gemini-2.5-flash" }),
     );
+    // OpenRouter plans no catalog rows, so an unlisted id there is not a finding.
+    for (const target of ["openrouter/openrouter/auto", "openrouter/deepseek/deepseek-v4-pro"]) {
+      expect(findings).not.toContainEqual(expect.objectContaining({ target }));
+    }
   });
 });

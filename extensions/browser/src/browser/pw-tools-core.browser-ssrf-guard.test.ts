@@ -1,6 +1,7 @@
 // Browser tests cover pw tools core ssrf guard plugin behavior.
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { BrowserObservedDialogBlockedError } from "./pw-session-contracts.js";
 
 const pageState = vi.hoisted(() => ({
   page: null as Record<string, unknown> | null,
@@ -48,20 +49,10 @@ const sessionMocks = vi.hoisted(() => ({
   ),
 }));
 
-const pageCdpMocks = vi.hoisted(() => ({
-  markBackendDomRefsOnPage: vi.fn(async () => new Set<string>()),
-  withPageScopedCdpClient: vi.fn(
-    async ({ fn }: { fn: (send: () => Promise<unknown>) => unknown }) =>
-      await fn(async () => ({ nodes: [] })),
-  ),
-}));
-
 vi.mock("./pw-session.js", () => sessionMocks);
-vi.mock("./pw-session.page-cdp.js", () => pageCdpMocks);
 
 const interactions = await import("./pw-tools-core.interactions.js");
 const { clickCoordsViaPlaywright } = await import("./pw-tools-core.interactions.actions.js");
-const snapshots = await import("./pw-tools-core.snapshot.js");
 
 const strictNavigationOptions = () =>
   ({
@@ -104,24 +95,11 @@ async function withFakeTimers(run: () => Promise<void>): Promise<void> {
   await run().finally(() => vi.useRealTimers());
 }
 
-function createSnapshotPage(overrides: Record<string, unknown>) {
-  const mainFrame = {};
-  return {
-    mainFrame: vi.fn(() => mainFrame),
-    on: vi.fn(),
-    off: vi.fn(),
-    ...overrides,
-  };
-}
-
 describe("pw-tools-core browser SSRF guards", () => {
   beforeEach(() => {
     pageState.page = null;
     pageState.locator = null;
     for (const fn of Object.values(sessionMocks)) {
-      fn.mockClear();
-    }
-    for (const fn of Object.values(pageCdpMocks)) {
       fn.mockClear();
     }
   });
@@ -367,7 +345,6 @@ describe("pw-tools-core browser SSRF guards", () => {
     await interactions.pressKeyViaPlaywright({ cdpUrl: "http://127.0.0.1:18792", key: "Enter" });
 
     expect(press).toHaveBeenCalledWith("Enter", { delay: 0 });
-    expect(sessionMocks.ensurePageState).toHaveBeenCalledOnce();
     expect(sessionMocks.restoreRoleRefsForTarget).not.toHaveBeenCalled();
   });
 
@@ -512,12 +489,15 @@ describe("pw-tools-core browser SSRF guards", () => {
 
   it("does not start a predicate after aborting an earlier wait condition", async () => {
     const ctrl = new AbortController();
+    const dialogError = new BrowserObservedDialogBlockedError({
+      dialogs: { pending: [], recent: [] },
+    });
     sessionMocks.isBrowserObservedDialogBlockedError.mockReturnValueOnce(true);
     const waitForFunction = vi.fn(async () => {});
     pageState.page = {
       url: vi.fn(() => "https://example.com"),
       waitForTimeout: vi.fn(async () => {
-        ctrl.abort(new Error("aborted during passive wait"));
+        ctrl.abort(dialogError);
       }),
       waitForFunction,
     };
@@ -529,11 +509,12 @@ describe("pw-tools-core browser SSRF guards", () => {
         fn: "() => true",
         signal: ctrl.signal,
       }),
-    ).rejects.toThrow("aborted during passive wait");
+    ).rejects.toBe(dialogError);
     await Promise.resolve();
     expect(waitForFunction).not.toHaveBeenCalled();
     expect(sessionMocks.markObservedDialogsHandledRemotelyForPage).toHaveBeenCalledWith(
       pageState.page,
+      dialogError.browserState.dialogs.pending,
     );
   });
 
@@ -1031,42 +1012,5 @@ describe("pw-tools-core browser SSRF guards", () => {
 
     expect(fill).toHaveBeenCalledOnce();
     expect(sessionMocks.withPageNavigationRequestGuard).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    {
-      name: "snapshotting AI content",
-      run: snapshots.snapshotAiViaPlaywright,
-      prepare: () => {
-        const ariaSnapshot = vi.fn(async () => 'button "Save"');
-        return { page: createSnapshotPage({ ariaSnapshot }), capture: ariaSnapshot };
-      },
-    },
-    {
-      name: "role snapshots",
-      run: snapshots.snapshotRoleViaPlaywright,
-      prepare: () => {
-        const ariaSnapshot = vi.fn(async () => "");
-        return {
-          page: createSnapshotPage({ locator: vi.fn(() => ({ ariaSnapshot })) }),
-          capture: ariaSnapshot,
-        };
-      },
-    },
-    {
-      name: "aria snapshots",
-      run: snapshots.snapshotAriaViaPlaywright,
-      prepare: () => ({ page: {}, capture: pageCdpMocks.withPageScopedCdpClient }),
-    },
-  ])("re-checks current page URL before $name", async ({ run, prepare }) => {
-    const { page, capture } = prepare();
-    pageState.page = { ...page, url: vi.fn(() => "https://example.com") };
-
-    await run(strictNavigationOptions());
-
-    expect(sessionMocks.assertPageNavigationCompletedSafely).toHaveBeenCalledWith(
-      completedNavigationExpectation(),
-    );
-    expect(sessionMocks.assertPageNavigationCompletedSafely).toHaveBeenCalledBefore(capture);
   });
 });

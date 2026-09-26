@@ -1,12 +1,13 @@
 /* @vitest-environment jsdom */
 
+import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openEditor } from "../../../lib/editor-links.ts";
 import {
   clearNativeGatewayTestState,
   setNativeGatewayTestState,
 } from "../../../test-helpers/native-gateways.ts";
-import { hasUniformLineEndings } from "./chat-sidebar.ts";
+import { hasUniformLineEndings, type SidebarContent } from "./chat-sidebar.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -196,6 +197,13 @@ describe("markdown sidebar", () => {
       rawButton!.click();
       await panel.updateComplete;
 
+      expect(panel.querySelector(".sidebar-title")?.textContent?.trim()).toBe("Source");
+      expect(panel.querySelector(".sidebar-markdown-shell__eyebrow")?.textContent?.trim()).toBe(
+        "Source",
+      );
+      expect(panel.querySelector(".sidebar-markdown-shell__hint")).toBeNull();
+      expect(panel.querySelector(".sidebar-markdown-shell__toolbar button")).toBeNull();
+
       const reader = panel.querySelector(".sidebar-markdown-reader");
       const copyButton = reader?.querySelector<HTMLButtonElement>(".code-block-copy");
       expect(copyButton).toBeInstanceOf(HTMLButtonElement);
@@ -209,6 +217,16 @@ describe("markdown sidebar", () => {
       expect.soft(reader?.querySelector("pre code")?.textContent).toBe(`${source}\n`);
       expect.soft(reader?.querySelector("strong")).toBeNull();
       expect.soft(writeText).toHaveBeenCalledWith(source);
+
+      panel.content = { kind: "markdown", content: "## Fresh preview" };
+      await panel.updateComplete;
+      expect(panel.querySelector(".sidebar-markdown-shell__eyebrow")?.textContent?.trim()).toBe(
+        "Rendered Markdown",
+      );
+      expect(panel.querySelector(".sidebar-markdown-reader h2")?.textContent).toBe("Fresh preview");
+      expect(
+        panel.querySelector(".sidebar-markdown-shell__toolbar button")?.textContent?.trim(),
+      ).toBe("View Raw Text");
     } finally {
       for (const [index, [, delay]] of schedule.mock.calls.entries()) {
         if (delay === 1_500) {
@@ -510,8 +528,8 @@ describe("markdown sidebar", () => {
   it.each([
     ["external.html", "https://files.example/external.html", "text/html"],
     ["external.txt", "https://files.example/external.txt", "text/plain"],
+    ["external.pdf", "https://files.example/external.pdf", "application/pdf"],
     ["bundle.zip", "/__openclaw__/media/bundle.zip", "application/zip"],
-    ["brief.pdf", "/__openclaw__/media/brief.pdf", "application/pdf"],
   ] as const)(
     "renders document %s as a Files card without previewing it",
     async (title, src, mimeType) => {
@@ -540,6 +558,56 @@ describe("markdown sidebar", () => {
       expect(download?.target).toBe("_blank");
       expect(download?.rel).toBe("noreferrer");
       expect(fetchMock).not.toHaveBeenCalled();
+      panel.remove();
+    },
+  );
+
+  it.each(["load", "error"] as const)(
+    "keeps the image placeholder through metadata until the image emits %s",
+    async (outcome) => {
+      let pending = true;
+      let src = "/diagram.png";
+      const content = {
+        kind: "attachment",
+        attachmentKind: "image",
+        title: "diagram.png",
+        mimeType: "image/png",
+        width: 600,
+        height: 400,
+        resolveSource: () => (pending ? { status: "pending" } : { status: "ready", src }),
+      } satisfies SidebarContent;
+      const panel = Object.assign(document.createElement("openclaw-chat-detail-panel"), {
+        content,
+      });
+      document.body.append(panel);
+      await vi.waitFor(() => expect(panel.querySelector('[role="status"]')).not.toBeNull());
+      const presentation = panel.querySelector('[role="status"]');
+      const header = panel.querySelector(".chat-assistant-attachment-card__header");
+      pending = false;
+      panel.content = { ...panel.content };
+      const image = await vi.waitFor(() =>
+        expectDefined(panel.querySelector(".sidebar-attachment-preview__image"), "Preview image"),
+      );
+      expect(panel.querySelector('[role="status"]')).toBe(presentation);
+      expect(panel.querySelector(".chat-assistant-attachment-card__header")).toBe(header);
+      image.dispatchEvent(new Event(outcome));
+      expect(image.getAttribute("data-preview")).toBe(outcome === "load" ? "ready" : "error");
+      src = "/next.png";
+      panel.content = { ...panel.content };
+      const next = await vi.waitFor(() => {
+        const current = expectDefined(
+          panel.querySelector(".sidebar-attachment-preview__image"),
+          "Next preview image",
+        );
+        expect(current).not.toBe(image);
+        return current;
+      });
+      image.dispatchEvent(new Event("load"));
+      expect(next.hasAttribute("data-preview")).toBe(false);
+      panel.remove();
+      next.dispatchEvent(new Event("load"));
+      document.body.append(panel);
+      expect(next.getAttribute("data-preview")).toBe("ready");
       panel.remove();
     },
   );

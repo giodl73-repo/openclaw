@@ -9,6 +9,7 @@ import { resolveConfiguredAgentId } from "../agents/agent-scope-config.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { formatCliJsonFailure, rethrowExpectedCliError } from "../cli/failure-output.js";
 import { callGatewayFromCliWithTransport } from "../cli/gateway-rpc.js";
+import { quoteCliArg } from "../cli/quote-cli-arg.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
@@ -47,12 +48,10 @@ type SessionsLifecycleResult = {
   worktreePreserved?: PreservedSessionWorktree;
 };
 
-type SessionsListRow = Pick<SessionRow, "key" | "sessionId" | "archived" | "isMain">;
+type SessionsListRow = Pick<SessionRow, "key" | "sessionId" | "agentId" | "archived" | "isMain">;
 
-type SessionsListResult = {
-  sessions?: SessionsListRow[];
-  hasMore?: boolean;
-  nextOffset?: number | null;
+type SessionsDescribeResult = {
+  session: SessionsListRow | null;
 };
 
 type SessionsPatchResult = {
@@ -62,10 +61,6 @@ type SessionsPatchResult = {
 };
 
 type SessionsLifecycleRpcOptions = Parameters<typeof callGatewayFromCliWithTransport>[1];
-
-// Keep each read bounded while exhausting pagination when an invalid key must
-// be distinguished from a session outside the first Gateway list page.
-const SESSION_TARGET_PAGE_SIZE = 200;
 
 function resolveLifecycleAgentId(rawAgent: string | undefined): string | undefined {
   const requested = rawAgent?.trim();
@@ -102,41 +97,20 @@ async function listRequestedSessions(
   agent: string | undefined,
   rpcOptions: SessionsLifecycleRpcOptions,
 ): Promise<Map<string, SessionsListRow>> {
-  const wanted = new Set(keys);
   const found = new Map<string, SessionsListRow>();
-  let offset = 0;
-
-  while (wanted.size > found.size) {
-    const page = (await callGatewayFromCliWithTransport(
-      "sessions.list",
+  for (const key of new Set(keys)) {
+    const response = (await callGatewayFromCliWithTransport(
+      "sessions.describe",
       rpcOptions,
-      {
-        limit: SESSION_TARGET_PAGE_SIZE,
-        ...(offset > 0 ? { offset } : {}),
-        archived: "all",
-        includeGlobal: true,
-        includeUnknown: true,
-        configuredAgentsOnly: true,
-        ...(agent ? { agentId: agent } : {}),
-      },
+      { key, ...(agent ? { agentId: agent } : {}) },
       { defaultTimeoutMs: 30_000 },
-    )) as SessionsListResult;
-    if (!page || !Array.isArray(page.sessions)) {
-      throw new Error("Gateway returned an invalid sessions.list response.");
+    )) as SessionsDescribeResult;
+    if (!response || !("session" in response)) {
+      throw new Error("Gateway returned an invalid sessions.describe response.");
     }
-    for (const row of page.sessions) {
-      if (wanted.has(row.key) && !found.has(row.key)) {
-        found.set(row.key, row);
-      }
+    if (response.session) {
+      found.set(key, response.session);
     }
-    if (found.size === wanted.size || page.hasMore !== true) {
-      break;
-    }
-    const nextOffset = page.nextOffset;
-    if (typeof nextOffset !== "number" || nextOffset <= offset) {
-      throw new Error("Gateway returned invalid sessions.list pagination.");
-    }
-    offset = nextOffset;
   }
 
   return found;
@@ -148,6 +122,7 @@ function outputLifecycleResults(
   results: SessionsLifecycleResult[],
   runtime: RuntimeEnv,
   json: boolean,
+  deletedSessions?: ReadonlyMap<SessionsLifecycleResult, SessionsListRow>,
 ): void {
   const ok = results.every((result) => result.ok);
   if (json) {
@@ -173,10 +148,20 @@ function outputLifecycleResults(
         case "already_archived":
           runtime.log(`Session ${result.key} is already archived.`);
           break;
-        case "deleted":
+        case "deleted": {
           runtime.log(`Deleted session ${result.key}.`);
-          for (const archived of result.archived ?? []) {
+          const archivedTranscripts = result.archived ?? [];
+          for (const archived of archivedTranscripts) {
             runtime.log(`Archived transcript: ${archived}`);
+          }
+          if (archivedTranscripts.length > 0) {
+            const agentId = deletedSessions?.get(result)?.agentId;
+            runtime.log("Archived transcripts can remain eligible for memory search.");
+            runtime.log(
+              agentId
+                ? `To remove indexed memories for this session, run openclaw memory forget --agent ${quoteCliArg(agentId)} --session ${quoteCliArg(result.key)} on the Gateway host or container using its state and configuration.`
+                : "Run openclaw memory forget on the Gateway host or container using its state and configuration; select the owning agent with --agent and this session with --session.",
+            );
           }
           if (result.worktreePreserved) {
             const preserved = result.worktreePreserved;
@@ -185,6 +170,7 @@ function outputLifecycleResults(
             );
           }
           break;
+        }
         case "would_archive":
           runtime.log(`[dry-run] archive session ${result.key}`);
           break;
@@ -239,6 +225,7 @@ async function runSessionsLifecycleCommand(
   const results = keys.map((key): SessionsLifecycleResult | undefined =>
     key && sessions.has(key) ? undefined : notFoundResult(key, agent),
   );
+  const deletedSessions = new Map<SessionsLifecycleResult, SessionsListRow>();
   const listedTargets = keys.flatMap((key, index) => {
     const session = sessions.get(key);
     return session ? [{ index, session }] : [];
@@ -337,13 +324,16 @@ async function runSessionsLifecycleCommand(
           results[index] = notFoundResult(session.key, agent);
           continue;
         }
-        results[index] = {
+        const result: SessionsLifecycleResult = {
           key: response.key ?? session.key,
           ok: true,
           status: "deleted",
           archived: response.archived ?? [],
           ...(response.worktreePreserved ? { worktreePreserved: response.worktreePreserved } : {}),
         };
+        results[index] = result;
+        // Distinct listed aliases can return the same canonical key after deletion.
+        deletedSessions.set(result, session);
       }
     } catch (error) {
       results[index] = {
@@ -361,6 +351,7 @@ async function runSessionsLifecycleCommand(
     results.filter((result) => result !== undefined),
     runtime,
     Boolean(opts.json),
+    deletedSessions,
   );
 }
 
