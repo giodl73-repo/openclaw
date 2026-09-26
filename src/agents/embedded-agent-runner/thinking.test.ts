@@ -754,7 +754,7 @@ describe("wrapAnthropicStreamWithRecovery", () => {
     },
   );
 
-  it("retries pre-content terminal stream-error events with omitted-reasoning text", async () => {
+  it.each([false, true])("recovers terminal stream errors (promised=%s)", async (promised) => {
     let callCount = 0;
     const contexts: Array<{ messages?: AgentMessage[] }> = [];
     const finalMessage = createTestAssistantMessage({
@@ -779,12 +779,12 @@ describe("wrapAnthropicStreamWithRecovery", () => {
           }
           stream.end();
         });
-        return stream;
+        return promised ? Promise.resolve(stream) : stream;
       }) as Parameters<typeof wrapAnthropicStreamWithRecovery>[0],
       { id: "test-session" },
     );
 
-    const response = wrapped(
+    const response = (await wrapped(
       {} as never,
       {
         messages: castAgentMessages([
@@ -795,7 +795,7 @@ describe("wrapAnthropicStreamWithRecovery", () => {
         ]),
       } as never,
       {} as never,
-    ) as { result: () => Promise<unknown> } & AsyncIterable<unknown>;
+    )) as { result: () => Promise<unknown> } & AsyncIterable<unknown>;
     const events: unknown[] = [];
     for await (const event of response) {
       events.push(event);
@@ -846,7 +846,7 @@ describe("wrapAnthropicStreamWithRecovery", () => {
     expect(callCount).toBe(1);
   });
 
-  it("does not retry terminal stream-error events after output was yielded", async () => {
+  it.each([false, true])("does not retry after output (promised=%s)", async (promised) => {
     let callCount = 0;
     const partialMessage = createTestAssistantMessage({
       content: [{ type: "text", text: "" }],
@@ -862,12 +862,12 @@ describe("wrapAnthropicStreamWithRecovery", () => {
           stream.push({ type: "error", reason: "error", error: errorMessage });
           stream.end();
         });
-        return stream;
+        return promised ? Promise.resolve(stream) : stream;
       }) as Parameters<typeof wrapAnthropicStreamWithRecovery>[0],
       { id: "test-session" },
     );
 
-    const response = wrapped({} as never, { messages: [] } as never, {} as never) as {
+    const response = (await wrapped({} as never, { messages: [] } as never, {} as never)) as {
       result: () => Promise<unknown>;
     } & AsyncIterable<unknown>;
     const events: unknown[] = [];
