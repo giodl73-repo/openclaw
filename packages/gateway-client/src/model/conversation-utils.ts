@@ -102,6 +102,13 @@ export function normalizeGatewayError(error: unknown, command: string): ControlM
     category = "aborted";
   } else if (lower.includes("forbidden") || lower.includes("unauthorized")) {
     category = "forbidden";
+  } else if (
+    lowerCode === "invalid_request" &&
+    (lowerReason === "approval_not_found" || lowerReason === "question_not_found")
+  ) {
+    category = "not-found";
+  } else if (lowerCode === "invalid_request" && lowerReason === "approval_already_resolved") {
+    category = "conflict";
   } else if (lower.includes("invalid")) {
     category = "invalid-input";
   } else if (lower.includes("not_found") || lower.includes("not-found")) {
