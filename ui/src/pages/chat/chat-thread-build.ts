@@ -171,28 +171,28 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
     timestamp: number | null;
     rawBaseIdentity: string | null;
   }> = [];
-  const takeModelSource = (message: unknown) => {
+  const takeModelSource = (message: unknown, preview?: CanvasToolPreview) => {
     const keys = controlModelArtifactSourceKeys(message);
     if (keys.length === 0) {
       return undefined;
     }
     const canonicalKey = keys.length > 1 ? keys[0] : undefined;
     const fallbackKey = keys.at(-1);
-    const index =
-      canonicalKey !== undefined
-        ? remainingModelSources.findIndex((source) =>
-            controlModelArtifactSourceKeys(source.message).includes(canonicalKey),
-          )
-        : remainingModelSources.findIndex((source) => {
-            const sourceKeys = controlModelArtifactSourceKeys(source.message);
-            return (
-              fallbackKey !== undefined && sourceKeys.length === 1 && sourceKeys[0] === fallbackKey
-            );
-          });
-    if (index === -1) {
+    const candidates = remainingModelSources.filter((source) => {
+      const sourceKeys = controlModelArtifactSourceKeys(source.message);
+      return canonicalKey !== undefined
+        ? sourceKeys.includes(canonicalKey)
+        : fallbackKey !== undefined && sourceKeys.length === 1 && sourceKeys[0] === fallbackKey;
+    });
+    // A message can offer several views. Match its raw preview before borrowing
+    // presentation metadata; a single offer can still replace a retired identity.
+    const selected =
+      (preview && candidates.find((source) => canvasPreviewsMatch(source.preview, preview))) ||
+      (candidates.length === 1 || !preview ? candidates[0] : undefined);
+    if (!selected) {
       return undefined;
     }
-    return remainingModelSources.splice(index, 1)[0];
+    return remainingModelSources.splice(remainingModelSources.indexOf(selected), 1)[0];
   };
   const searchFiltering = props.searchOpen === true && Boolean(props.searchQuery?.trim());
   const persistedCanvasSourceKeys = new Set<string>();
@@ -274,7 +274,9 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
 
     const isToolResult = normalized.role.toLowerCase() === "toolresult";
     const rawPersistedCanvasSource = isToolResult ? extractChatMessagePreview(msg) : null;
-    const projectedPersistedCanvasSource = isToolResult ? takeModelSource(msg) : undefined;
+    const projectedPersistedCanvasSource = isToolResult
+      ? takeModelSource(msg, rawPersistedCanvasSource?.preview)
+      : undefined;
     if (projectedPersistedCanvasSource) {
       const fallbackKey = controlModelArtifactSourceKeys(projectedPersistedCanvasSource.message).at(
         -1,
@@ -289,7 +291,7 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
         });
       }
     }
-    const persistedCanvasSource =
+    const primaryCanvasSource =
       rawPersistedCanvasSource && projectedPersistedCanvasSource
         ? {
             ...rawPersistedCanvasSource,
@@ -299,7 +301,16 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
             ),
           }
         : (rawPersistedCanvasSource ?? projectedPersistedCanvasSource ?? null);
-    if (persistedCanvasSource) {
+    const persistedCanvasSources = primaryCanvasSource ? [primaryCanvasSource] : [];
+    if (isToolResult) {
+      // Siblings belong to this persisted turn, including when an assistant
+      // already embeds one of them. Do not lift them into the current live turn.
+      for (let sibling = takeModelSource(msg); sibling; sibling = takeModelSource(msg)) {
+        persistedCanvasSources.push(sibling);
+      }
+    }
+    const renderedCanvasPreviews: CanvasToolPreview[] = [];
+    for (const persistedCanvasSource of persistedCanvasSources) {
       const sourceKeys = controlModelArtifactSourceKeys(msg);
       if (sourceKeys.length > 1 && sourceKeys[0]) {
         persistedCanvasSourceKeys.add(sourceKeys[0]);
@@ -310,34 +321,35 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
         // the incumbent call+view identity as a secondary persisted/live fence.
         persistedCanvasIdentities.add(identity);
       }
-    }
-    const matchingCanvas =
-      persistedCanvasSource &&
-      canvasTurns[i]!.previews.find(({ preview }) =>
+      if (
+        renderedCanvasPreviews.some((preview) =>
+          canvasPreviewsMatch(preview, persistedCanvasSource.preview),
+        )
+      ) {
+        continue;
+      }
+      renderedCanvasPreviews.push(persistedCanvasSource.preview);
+      const matchingCanvas = canvasTurns[i]!.previews.find(({ preview }) =>
         canvasPreviewsMatch(preview, persistedCanvasSource.preview),
       );
-    if (persistedCanvasSource && matchingCanvas) {
-      // Enrich the owned display row, including a later assistant shortcode,
-      // without changing transcript input or introducing a second widget card.
-      matchingCanvas.item.message = appendCanvasBlockToAssistantMessage(
-        matchingCanvas.item.message,
-        persistedCanvasSource.preview,
-        persistedCanvasSource.text,
-      );
-    }
-    const renderPersistedPreview =
-      persistedCanvasSource != null &&
-      !matchingCanvas &&
-      (!searchFiltering || canvasTurns[i]!.lastMatchingAssistantIndex > i);
-    if (persistedCanvasSource && renderPersistedPreview) {
-      items.push({
-        kind: "message",
-        key: canvasAssistantItemKey(msg, persistedCanvasSource, itemKey),
-        message: createCanvasAssistantMessage(
-          persistedCanvasSource,
-          persistedCanvasSource.timestamp ?? transcriptPositionTimestamp(history, i),
-        ),
-      });
+      if (matchingCanvas) {
+        // Enrich the owned display row, including a later assistant shortcode,
+        // without changing transcript input or introducing a second widget card.
+        matchingCanvas.item.message = appendCanvasBlockToAssistantMessage(
+          matchingCanvas.item.message,
+          persistedCanvasSource.preview,
+          persistedCanvasSource.text,
+        );
+      } else if (!searchFiltering || canvasTurns[i]!.lastMatchingAssistantIndex > i) {
+        items.push({
+          kind: "message",
+          key: canvasAssistantItemKey(msg, persistedCanvasSource, itemKey),
+          message: createCanvasAssistantMessage(
+            persistedCanvasSource,
+            persistedCanvasSource.timestamp ?? transcriptPositionTimestamp(history, i),
+          ),
+        });
+      }
     }
 
     if (!props.showToolCalls && isToolResult) {
@@ -501,7 +513,7 @@ export function buildChatItems(props: BuildChatItemsProps): Array<ChatItem | Mes
       consumedPersistedSources.splice(consumedIndex, 1);
       continue;
     }
-    const projected = takeModelSource(message);
+    const projected = takeModelSource(message, preview.preview);
     liftedCanvasSources.push({
       message,
       key: projection.item.key,
