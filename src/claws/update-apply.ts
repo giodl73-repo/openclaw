@@ -396,15 +396,10 @@ async function applyClawUpdatePlanOwned(
     if (actions.length === 0) {
       return { appliedIds: [], rollback: async () => undefined };
     }
-    const execution = await applyPackage(
-      { ...fresh, actions },
-      params.targetManifest,
-      targetAddPlan,
-      {
-        ...options,
-        runtimeBatch,
-      },
-    );
+    const execution = await applyPackage({ ...fresh, actions }, targetAddPlan, {
+      ...options,
+      runtimeBatch,
+    });
     assertAgentMutationLeaseOwned(options);
     return execution;
   };

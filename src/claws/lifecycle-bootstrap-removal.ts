@@ -1,6 +1,7 @@
 import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../agents/workspace-bootstrap-read.js";
-import { removeClawWorkspaceFile, type RemovedWorkspaceFile } from "./lifecycle-delete-support.js";
+import { removeClawWorkspaceFile } from "./lifecycle-delete-support.js";
 import type { ClawRemovePlanAction } from "./lifecycle-remove-contract.js";
+import type { RemovedWorkspaceFile } from "./lifecycle-remove-types.js";
 import type { ClawStatusRecord } from "./lifecycle-status.js";
 import {
   openClawBootstrapRemovalAuthority,

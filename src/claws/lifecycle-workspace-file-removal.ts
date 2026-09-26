@@ -1,12 +1,13 @@
-import { removeClawWorkspaceFile, type RemovedWorkspaceFile } from "./lifecycle-delete-support.js";
+import { removeClawWorkspaceFile } from "./lifecycle-delete-support.js";
 import type { ClawRemovePlanAction } from "./lifecycle-remove-contract.js";
+import type { RemovedWorkspaceFile } from "./lifecycle-remove-types.js";
 import type { ClawStatusRecord } from "./lifecycle-status.js";
 import {
   clawBootstrapPublicationMatches,
   openClawBootstrapRemovalAuthority,
 } from "./workspace-origin.js";
 
-export function isUnclaimedAdoptedWorkspaceFile(
+function isUnclaimedAdoptedWorkspaceFile(
   record: ClawStatusRecord | undefined,
   unclaimed: boolean,
   path: string,
@@ -18,7 +19,7 @@ export function isUnclaimedAdoptedWorkspaceFile(
   );
 }
 
-export function isUnclaimedAdoptedWorkspaceFileUnowned(
+function isUnclaimedAdoptedWorkspaceFileUnowned(
   record: ClawStatusRecord | undefined,
   unclaimed: boolean,
   file: Pick<ClawStatusRecord["workspaceFiles"][number], "workspace" | "path" | "state">,

@@ -99,7 +99,7 @@ export function isUnclaimedCollision(
   );
 }
 
-export function clearUnownedInstallRecord(
+function clearUnownedInstallRecord(
   agentId: string,
   expectedStatuses: ClawInstallStatus[],
   options: ClawAddApplyOptions,

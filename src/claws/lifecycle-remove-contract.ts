@@ -5,7 +5,7 @@ import type { purgeAgentSessionStoreEntries } from "../config/sessions/cleanup-s
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import type { ClawCronGateway } from "./cron.js";
-import type { ClawTrashPath, RemovedWorkspaceFile } from "./lifecycle-delete-support.js";
+import type { ClawTrashPath, RemovedWorkspaceFile } from "./lifecycle-remove-types.js";
 import type { ClawMonitorCleanupGateway } from "./monitor-cleanup-contract.js";
 import type { ClawPackageRemovalGateway } from "./package-remove-contract.js";
 import type {
