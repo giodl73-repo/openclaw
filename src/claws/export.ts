@@ -1,18 +1,16 @@
 import { createHash } from "node:crypto";
-import { closeSync } from "node:fs";
 import { mkdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { coerceErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { stringify as stringifyYaml } from "yaml";
 import { listAgentEntries, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
-import { openLocalAgentAvatarFile } from "../agents/identity-avatar-file.js";
+import { prepareLocalAgentAvatarFile } from "../agents/identity-avatar-file.js";
 import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../agents/workspace-bootstrap-read.js";
 import { normalizeConfiguredMcpServers } from "../config/mcp-config-normalize.js";
 import type { AgentConfig } from "../config/types.agents.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { readFileDescriptorBoundedSync } from "../infra/boundary-file-read.js";
 import { FsSafeError, root as fsSafeRoot } from "../infra/fs-safe.js";
-import { AVATAR_MAX_BYTES, isAvatarDataUrl, isAvatarHttpUrl } from "../shared/avatar-policy.js";
+import { isAvatarDataUrl, isAvatarHttpUrl } from "../shared/avatar-policy.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import { resolveUserPath } from "../utils.js";
 import { resolveCanonicalClawAgent } from "./agent-adoption-apply.js";
@@ -236,23 +234,17 @@ async function readPortableAvatar(params: {
   if (isAvatarDataUrl(source)) {
     return isPortableClawAvatar(source) ? { source } : {};
   }
-  const opened = openLocalAgentAvatarFile({
+  const prepared = await prepareLocalAgentAvatarFile({
     cfg: params.config,
     agentId: params.agent.id,
     source,
+    readBody: true,
   });
-  if (!opened.ok) {
+  if (!prepared.ok || !prepared.file.body) {
     return {};
   }
-  try {
-    const content = readFileDescriptorBoundedSync(opened.file.fd, AVATAR_MAX_BYTES);
-    const path = normalizedRelativePath(relative(params.workspace, opened.file.path));
-    return { source: path, sidecar: { path, content } };
-  } catch {
-    return {};
-  } finally {
-    closeSync(opened.file.fd);
-  }
+  const path = normalizedRelativePath(relative(params.workspace, prepared.file.path));
+  return { source: path, sidecar: { path, content: prepared.file.body } };
 }
 
 function derivativePackageVersion(manifest: ClawManifest, contents: ExportContent[]): string {

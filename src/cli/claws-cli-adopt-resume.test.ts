@@ -297,6 +297,26 @@ describe("claws add adopted-workspace resume", () => {
       createdAtMs: 1,
       updatedAtMs: 1,
     });
+    const heartbeatPublisher = workspaceOrigin.prepareClawWorkspaceFilePublication(
+      plan,
+      "HEARTBEAT.md",
+    );
+    if (!heartbeatPublisher) {
+      throw new Error("expected adopted workspace file publisher");
+    }
+    const heartbeatDirectoryPath = syncFs.realpathSync(workspace);
+    const heartbeat = syncFs.lstatSync(join(workspace, "HEARTBEAT.md"), { bigint: true });
+    const heartbeatDirectory = syncFs.lstatSync(heartbeatDirectoryPath, { bigint: true });
+    const heartbeatPublication = {
+      directoryPath: heartbeatDirectoryPath,
+      directoryDev: heartbeatDirectory.dev.toString(),
+      directoryIno: heartbeatDirectory.ino.toString(),
+      dev: heartbeat.dev.toString(),
+      ino: heartbeat.ino.toString(),
+      birthtimeNs: heartbeat.birthtimeNs.toString(),
+    };
+    heartbeatPublisher.beforePublish(heartbeatPublication);
+    heartbeatPublisher.afterPublish(heartbeatPublication);
     mocks.logs.length = 0;
 
     // A dry-run preview of this resumable install must never open the state database writably:

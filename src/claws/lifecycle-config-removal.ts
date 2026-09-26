@@ -123,10 +123,7 @@ export function digestClawAgentRemovalSurface(config: OpenClawConfig, agentId: s
   return `sha256:${createHash("sha256").update(stableStringify(surface)).digest("hex")}`;
 }
 
-function projectRosterlessConfigMutationView(config: OpenClawConfig): OpenClawConfig {
-  if (config.agents?.ownership === "explicit" || listAgentEntries(config).length > 0) {
-    return config;
-  }
+function projectConfigMutationView(config: OpenClawConfig): OpenClawConfig {
   const clonedConfig = inheritLegacyDefaultAgentId(config, structuredClone(config));
   return migratePersistedImplicitMainRoster(clonedConfig).config as OpenClawConfig;
 }
@@ -149,18 +146,15 @@ async function commitClawAgentConfigRemoval(
           assertAgentSessionStoreDeletionSafe(config, params.agentId, params.stateDatabase);
         }
         const actualRemovalSurface = digestClawAgentRemovalSurface(config, params.agentId);
-        // A missing target may be planned from raw rosterless config while the writer reread
-        // materializes its implicit main entry. Accept only that exact canonical projection.
-        const rosterlessWriterSurface =
-          params.expectedState === "missing"
-            ? digestClawAgentRemovalSurface(
-                projectRosterlessConfigMutationView(configBeforeDelete),
-                params.agentId,
-              )
-            : undefined;
+        // The config writer may canonicalize legacy/default roster shape while loading the same
+        // consented config. Accept only that exact projection, never arbitrary live drift.
+        const writerSurface = digestClawAgentRemovalSurface(
+          projectConfigMutationView(configBeforeDelete),
+          params.agentId,
+        );
         if (
           actualRemovalSurface !== params.expectedRemovalSurfaceDigest &&
-          actualRemovalSurface !== rosterlessWriterSurface
+          actualRemovalSurface !== writerSurface
         ) {
           throw params.onModified();
         }
@@ -169,10 +163,10 @@ async function commitClawAgentConfigRemoval(
         if (params.expectedState === "missing") {
           throw params.onModified();
         }
-        if (
-          digestClawAgentConfig(canonicalizeClawAgent(agent, params.agentId)) !==
-          params.expectedDigest
-        ) {
+        const actualAgentDigest = digestClawAgentConfig(
+          canonicalizeClawAgent(agent, params.agentId),
+        );
+        if (actualAgentDigest !== params.expectedDigest) {
           throw params.onModified();
         }
       },
