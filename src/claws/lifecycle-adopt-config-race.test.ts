@@ -7,7 +7,6 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { createConfigIO } from "../config/io.js";
 import { mutateConfigFile, withConfigMutationExclusive } from "../config/mutate.js";
 import { resetConfigRuntimeState } from "../config/runtime-snapshot.js";
-import { closeIdleSqliteCoordinators } from "../infra/sqlite-coordinator.js";
 import { KeyedAsyncQueue } from "../plugin-sdk/keyed-async-queue.js";
 import {
   closeOpenClawStateDatabaseAsync,
@@ -23,9 +22,6 @@ const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
     await closeOpenClawStateDatabaseAsync();
     closeOpenClawStateDatabaseForTest();
     resetConfigRuntimeState();
-    for (const dir of tempDirs.dirs) {
-      closeIdleSqliteCoordinators(dir);
-    }
     cleanup();
   });
 });

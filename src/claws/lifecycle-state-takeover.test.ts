@@ -171,13 +171,22 @@ describe("Claw workspace deletion ownership", () => {
         error: { message: expect.stringContaining("no longer owns") },
       });
       expect(replaced).toBe(true);
-      await expect(readFile(join(current.plan.agent.workspace, filename), "utf8")).resolves.toBe(
-        boundary === "staged replacement" ? "replacement\n" : "managed\n",
-      );
+      if (boundary === "staged read") {
+        await expect(
+          readFile(join(current.plan.agent.workspace, filename), "utf8"),
+        ).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      } else {
+        await expect(readFile(join(current.plan.agent.workspace, filename), "utf8")).resolves.toBe(
+          boundary === "staged replacement" ? "replacement\n" : "managed\n",
+        );
+      }
       const staged = (await readdir(current.plan.agent.workspace)).filter((name) =>
         name.includes(".openclaw-claw-remove-"),
       );
-      if (boundary === "staged replacement") {
+      if (boundary !== "discovery") {
+        // A revoked operation cannot restore a pathname; retain staged bytes for the new owner.
         expect(staged).toHaveLength(1);
         await expect(
           readFile(join(current.plan.agent.workspace, staged[0]!), "utf8"),

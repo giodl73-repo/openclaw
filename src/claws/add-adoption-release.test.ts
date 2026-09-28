@@ -1,9 +1,10 @@
 // Rollback boundary for an adoption whose config commit never landed.
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import * as fsSafe from "@openclaw/fs-safe/root";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import {
   mergeWorkspaceSetupState,
@@ -21,6 +22,9 @@ import {
 } from "./workspace.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+vi.mock(import("@openclaw/fs-safe/root"), async (importOriginal) => ({
+  ...(await importOriginal()),
+}));
 afterEach(() => closeOpenClawStateDatabaseForTest());
 
 function digest(content: string): string {
@@ -114,6 +118,65 @@ function expectReleased(result: ClawAddResult): void {
 }
 
 describe("releaseUncommittedAgentAdoption", () => {
+  it.each(["move", "remove"] as const)(
+    "retains file bytes when the add lease is revoked at the rollback %s boundary",
+    async (boundary) => {
+      const root = tempDirs.make("openclaw-claw-release-lease-");
+      const workspace = join(root, "workspace");
+      await mkdir(workspace);
+      await writeFile(join(workspace, "SOUL.md"), "managed content");
+      const realRoot = fsSafe.root;
+      let revoked = false;
+      const rootSpy = vi.spyOn(fsSafe, "root").mockImplementation(async (...args) => {
+        const opened = await realRoot(...args);
+        if (opened.rootReal === realpathSync(workspace)) {
+          if (boundary === "move") {
+            const move = opened.move.bind(opened);
+            opened.move = async (...moveArgs) => {
+              revoked = true;
+              return move(...moveArgs);
+            };
+          } else {
+            const remove = opened.remove.bind(opened);
+            opened.remove = async (...removeArgs) => {
+              revoked = true;
+              return remove(...removeArgs);
+            };
+          }
+        }
+        return opened;
+      });
+      try {
+        await expect(
+          release({
+            plan: planWith(workspace, []),
+            install: installRecord(workspace),
+            workspaceFiles: [ownedFile(workspace, "SOUL.md", "managed content")],
+            options: {
+              env: { OPENCLAW_STATE_DIR: join(root, "state") },
+              assertApplyLeaseOwned: () => {
+                if (revoked) {
+                  throw new Error("add lease revoked");
+                }
+              },
+            },
+          }),
+        ).rejects.toThrow("add lease revoked");
+        expect(revoked).toBe(true);
+        const files = await readdir(workspace);
+        expect(files.length).toBeGreaterThan(0);
+        for (const file of files) {
+          expect(await readFile(join(workspace, file), "utf8")).toBe("managed content");
+        }
+        if (boundary === "move") {
+          expect(files).toEqual(["SOUL.md"]);
+        }
+      } finally {
+        rootSpy.mockRestore();
+      }
+    },
+  );
+
   it("keeps a declared file the attempt adopted instead of writing", async () => {
     const root = tempDirs.make("openclaw-claw-release-adopted-");
     const workspace = join(root, "workspace");

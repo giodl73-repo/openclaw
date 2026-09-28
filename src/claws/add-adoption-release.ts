@@ -100,9 +100,8 @@ async function releaseUnclaimedClawAdoption(params: {
   options: ClawAddApplyOptions;
 }): Promise<{ released: boolean; retained: string[]; workspaceRemoved: boolean }> {
   assertApplyLeaseOwned(params.options);
-  // This rollback happens before a removal operation exists, so there is no lifecycle journal
-  // fence to revalidate or complete. The config commit itself remains serialized by add.ts.
-  const noLifecycleFence = () => {};
+  // Rollback has no deletion journal; the original add lease fences every final mutation.
+  const assertCurrent = () => assertApplyLeaseOwned(params.options);
   // A declared file that already existed with identical content was adopted, not written, so the
   // attempt owns its row but never owned its bytes. Dropping the row is the whole rollback.
   const adoptedPaths = new Set(
@@ -133,8 +132,8 @@ async function releaseUnclaimedClawAdoption(params: {
           params.install.agentId,
           [],
           retained,
-          noLifecycleFence,
-          noLifecycleFence,
+          assertCurrent,
+          assertCurrent,
           params.options,
           true,
         );
@@ -158,7 +157,7 @@ async function releaseUnclaimedClawAdoption(params: {
           authority.owned
             ? await removeClawWorkspaceFile(
                 { ...file, state: "unchanged" },
-                noLifecycleFence,
+                assertCurrent,
                 undefined,
                 authority.ownsFile,
               )
@@ -173,9 +172,7 @@ async function releaseUnclaimedClawAdoption(params: {
         }
       }
     } else {
-      removals.push(
-        await removeClawWorkspaceFile({ ...file, state: "unchanged" }, noLifecycleFence),
-      );
+      removals.push(await removeClawWorkspaceFile({ ...file, state: "unchanged" }, assertCurrent));
     }
     assertApplyLeaseOwned(params.options);
   }
@@ -204,7 +201,7 @@ async function releaseUnclaimedClawAdoption(params: {
                   contentDigest: params.install.bootstrap.contentDigest,
                   state: "unchanged",
                 },
-                noLifecycleFence,
+                assertCurrent,
                 MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES,
                 authority?.owned ? authority.ownsFile : authority ? () => false : undefined,
               );
@@ -276,8 +273,8 @@ async function releaseUnclaimedClawAdoption(params: {
       params.install.agentId,
       completedWorkspaceFileRemovals(removals),
       retained,
-      noLifecycleFence,
-      noLifecycleFence,
+      assertCurrent,
+      assertCurrent,
       params.options,
       true,
     );
@@ -291,7 +288,10 @@ async function releaseUnclaimedClawAdoption(params: {
       params.options,
     );
     assertApplyLeaseOwned(params.options);
-    const outcome = await applyClawPackageRemovals(decisions, params.options);
+    const outcome = await applyClawPackageRemovals(decisions, {
+      ...params.options,
+      assertCurrent,
+    });
     assertApplyLeaseOwned(params.options);
     // A referenced package another Claw still owns stays installed; only a failed uninstall
     // leaves state this attempt cannot account for.
@@ -306,8 +306,8 @@ async function releaseUnclaimedClawAdoption(params: {
       params.install.agentId,
       completedWorkspaceFileRemovals(removals),
       retained,
-      noLifecycleFence,
-      noLifecycleFence,
+      assertCurrent,
+      assertCurrent,
       params.options,
       true,
     );
@@ -319,8 +319,8 @@ async function releaseUnclaimedClawAdoption(params: {
     params.install.agentId,
     removals,
     [],
-    noLifecycleFence,
-    noLifecycleFence,
+    assertCurrent,
+    assertCurrent,
     params.options,
     true,
   );
@@ -364,6 +364,7 @@ export async function releaseUncommittedAgentAdoption(params: {
       : params.createdWorkspaceIdentity,
     options: params.options,
   });
+  assertApplyLeaseOwned(params.options);
   const released = release.released;
   if (!released) {
     (params.options.updateRecord ?? updateClawInstallRecordStatus)(

@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Root as FsSafeCoreRoot } from "@openclaw/fs-safe/root";
+import { FsSafeError } from "@openclaw/fs-safe/errors";
+import { root as fsSafeRoot } from "@openclaw/fs-safe/root";
 import { coerceErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { err, ok, type Result } from "@openclaw/normalization-core/result";
 import {
@@ -34,7 +35,6 @@ import { resolveCronJobConfigRevision } from "../cron/config-revision.js";
 import { loadedCronStoreFromRows } from "../cron/store/row-codec.js";
 import type { CronJobRow } from "../cron/store/schema.js";
 import { isSystemMonitorDeclaration } from "../cron/system-owned-declaration.js";
-import { FsSafeError, root as fsSafeRoot } from "../infra/fs-safe.js";
 import {
   compileSqliteQueryBindings,
   executeSqliteQuerySync,
@@ -319,7 +319,7 @@ export async function workspaceContainsUntrackedEntries(
   }
   try {
     await fs.stat(workspaceRoot);
-    const workspace = (await fsSafeRoot(workspaceRoot)) as FsSafeCoreRoot;
+    const workspace = await fsSafeRoot(workspaceRoot);
     for await (const entry of workspace.walk("", { symlinkPolicy: "include" })) {
       const expected = entry.kind === "directory" ? trackedDirectories : tracked;
       if (!expected.has(path.normalize(entry.relativePath))) {
@@ -569,11 +569,21 @@ export async function removeClawWorkspaceFile(
       return { path: record.path, action: "missing" };
     }
     const stagedPath = `${record.path}.openclaw-claw-remove-${randomUUID()}`;
+    const ownershipLost = new Error("Claw workspace file identity changed before staging.");
+    const assertStagingOwned = () => {
+      assertCurrent();
+      if (ownsFile && !ownsFile(record.path)) {
+        throw ownershipLost;
+      }
+    };
     try {
-      await moveClawWorkspaceFileNoReplace(workspace, record.path, stagedPath, assertCurrent, {
+      await moveClawWorkspaceFileNoReplace(workspace, record.path, stagedPath, assertStagingOwned, {
         copyFallback: !ownsFile,
       });
     } catch (error) {
+      if (error === ownershipLost) {
+        return { path: record.path, action: "retainedUnowned" };
+      }
       if (!(ownsFile && error instanceof FsSafeError && error.code === "helper-unavailable")) {
         throw error;
       }
@@ -626,9 +636,9 @@ export async function removeClawWorkspaceFile(
     } catch (error) {
       outcome = err(error);
     }
-    // Undo this attempt's staging even after ownership loss; never replace new content.
+    // Restore staged content only while the lifecycle operation still owns mutation authority.
     try {
-      await moveClawWorkspaceFileNoReplace(workspace, stagedPath, record.path, () => undefined);
+      await moveClawWorkspaceFileNoReplace(workspace, stagedPath, record.path, assertCurrent);
     } catch (error) {
       throw new AggregateError(
         [...(outcome.ok ? [] : [outcome.error]), error],

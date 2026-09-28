@@ -825,9 +825,7 @@ describe("exportClawAgent", () => {
     delete entries.worker;
 
     const result = await exportClawAgent("worker", join(fixture.root, "exported-worker"), {
-      env: fixture.env,
-      config: fixture.config,
-      sourceMcpServers: fixture.sourceMcpServers,
+      ...fixture.exportOptions,
     });
 
     expect(result.agentId).toBe("worker");

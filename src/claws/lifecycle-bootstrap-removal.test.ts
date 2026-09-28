@@ -3,12 +3,13 @@ import { createHash } from "node:crypto";
 import syncFs from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { FsSafeError } from "@openclaw/fs-safe/errors";
+import * as fsSafe from "@openclaw/fs-safe/root";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { readWorkspaceStateSnapshot } from "../agents/workspace-state-store.js";
 import { seedWorkspaceBootstrap } from "../agents/workspace.js";
 import type { OpenClawConfig } from "../config/config.js";
-import * as fsSafe from "../infra/fs-safe.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { applyClawAddPlan } from "./add.js";
 import { seedClawPackageBootstrap } from "./bootstrap.js";
@@ -19,6 +20,10 @@ import { deleteClawInstallRecord, persistClawInstallRecord } from "./provenance.
 import { stateEnv } from "./provenance.test-helpers.js";
 import { parseClawManifest } from "./schema.js";
 import { prepareClawBootstrapPublication, readClawWorkspaceAdoption } from "./workspace-origin.js";
+
+vi.mock(import("@openclaw/fs-safe/root"), async (importOriginal) => ({
+  ...(await importOriginal()),
+}));
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => closeOpenClawStateDatabaseForTest());
@@ -84,6 +89,7 @@ describe("adopted bootstrap descriptor-bound removal", () => {
     "original",
     "helper-unavailable",
     "replacement",
+    "replacement-before-staging",
     "stale-receipt",
     "modified-after-read",
     "modified-size",
@@ -126,8 +132,13 @@ describe("adopted bootstrap descriptor-bound removal", () => {
                 from === "BOOTSTRAP.md" ||
                 from.startsWith("BOOTSTRAP.md.openclaw-claw-remove-")
               ) {
+                if (entry === "replacement-before-staging" && !replaced) {
+                  replaced = true;
+                  syncFs.renameSync(join(workspace, from), originalPath);
+                  syncFs.writeFileSync(join(workspace, from), content);
+                }
                 if (entry === "helper-unavailable" && from === "BOOTSTRAP.md") {
-                  throw new fsSafe.FsSafeError(
+                  throw new FsSafeError(
                     "helper-unavailable",
                     "native no-replace move is unavailable",
                   );
@@ -200,6 +211,15 @@ describe("adopted bootstrap descriptor-bound removal", () => {
           birthtimeNs = 303n;
         }
         const removed = await removeClawBootstrap(record, () => undefined);
+        if (entry === "replacement-before-staging") {
+          expect(replaced).toBe(true);
+          expect(staged).toBe(false);
+          expect(removed).toEqual({ path: "BOOTSTRAP.md", action: "retainedUnowned" });
+          expect(await readFile(join(workspace, "BOOTSTRAP.md"))).toEqual(content);
+          expect(await readFile(originalPath)).toEqual(content);
+          expect((await readdir(workspace)).toSorted()).toEqual(["BOOTSTRAP.md", "original.md"]);
+          return;
+        }
         if (entry === "stale-receipt") {
           expect(removed).toEqual({ path: "BOOTSTRAP.md", action: "retainedUnowned" });
           expect(staged).toBe(false);

@@ -391,7 +391,7 @@ describe("package-root BOOTSTRAP.md", () => {
       expect.objectContaining({ kind: "bootstrap", action: "delete", blocked: false }),
     );
     expect(removePlan.actions).toContainEqual(
-      expect.objectContaining({ kind: "workspace", action: "retain" }),
+      expect.objectContaining({ kind: "workspace", action: "trash" }),
     );
     const removed = await removeBootstrap(removePlan, config, env);
 
@@ -423,7 +423,7 @@ describe("package-root BOOTSTRAP.md", () => {
       expect.objectContaining({ kind: "bootstrap", action: "delete", blocked: false }),
     );
     expect(removePlan.actions).toContainEqual(
-      expect.objectContaining({ kind: "workspace", action: "retain" }),
+      expect.objectContaining({ kind: "workspace", action: "trash" }),
     );
     const removed = await removeBootstrap(removePlan, config, env);
 
