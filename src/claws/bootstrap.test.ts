@@ -7,10 +7,6 @@ import { readWorkspaceStateSnapshot } from "../agents/workspace-state-store.js";
 import { withTempHomeConfig } from "../config/test-helpers.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
-  captureStateDatabaseCoordinatorRuntime,
-  withStateDatabaseCoordinatorRuntimeDirectory,
-} from "../infra/state-database-coordinator.js";
-import {
   closeOpenClawStateDatabaseAsync,
   closeOpenClawStateDatabaseForTest,
 } from "../state/openclaw-state-db.js";
@@ -40,10 +36,7 @@ async function withBootstrapTempHomeConfig<T>(
   config: OpenClawConfig,
   fn: (params: { home: string; configPath: string }) => Promise<T>,
 ): Promise<T> {
-  const coordinatorRuntime = captureStateDatabaseCoordinatorRuntime();
-  return withTempHomeConfig(config, (params) =>
-    withStateDatabaseCoordinatorRuntimeDirectory(coordinatorRuntime, () => fn(params)),
-  );
+  return withTempHomeConfig(config, fn);
 }
 
 async function createPackage(bootstrap = "# First run\n\nAsk which repositories matter.\n") {
@@ -100,14 +93,15 @@ function removeBootstrap(
   config: OpenClawConfig,
   env: { OPENCLAW_STATE_DIR: string },
 ) {
-  return withBootstrapTempHomeConfig(config, async ({ configPath }) => {
+  return withBootstrapTempHomeConfig(structuredClone(config), async ({ configPath }) => {
     setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
     setTestEnvValue("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);
-    return applyClawRemovePlan(plan, {
+    const currentPlan = await buildClawRemovePlan(plan.target, { env, config });
+    return applyClawRemovePlan(currentPlan, {
       monitorGateway: quiescentClawMonitorGateway,
       env,
       config,
-      consentPlanIntegrity: plan.planIntegrity,
+      consentPlanIntegrity: currentPlan.planIntegrity,
       purgeSessions: async () => undefined,
       trashPath: async () => true,
     });
@@ -397,7 +391,7 @@ describe("package-root BOOTSTRAP.md", () => {
       expect.objectContaining({ kind: "bootstrap", action: "delete", blocked: false }),
     );
     expect(removePlan.actions).toContainEqual(
-      expect.objectContaining({ kind: "workspace", action: "trash" }),
+      expect.objectContaining({ kind: "workspace", action: "retain" }),
     );
     const removed = await removeBootstrap(removePlan, config, env);
 
@@ -429,7 +423,7 @@ describe("package-root BOOTSTRAP.md", () => {
       expect.objectContaining({ kind: "bootstrap", action: "delete", blocked: false }),
     );
     expect(removePlan.actions).toContainEqual(
-      expect.objectContaining({ kind: "workspace", action: "trash" }),
+      expect.objectContaining({ kind: "workspace", action: "retain" }),
     );
     const removed = await removeBootstrap(removePlan, config, env);
 

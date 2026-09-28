@@ -7,10 +7,6 @@ import * as configMutate from "../config/mutate.js";
 import { withTempHomeConfig } from "../config/test-helpers.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
-  captureStateDatabaseCoordinatorRuntime,
-  withStateDatabaseCoordinatorRuntimeDirectory,
-} from "../infra/state-database-coordinator.js";
-import {
   beginAgentDeletionJournal,
   readAgentDeletionJournal,
 } from "../state/agent-deletion-journal.js";
@@ -92,12 +88,7 @@ async function withMcpTempHomeConfig<T>(
   config: OpenClawConfig,
   fn: (params: { home: string; configPath: string }) => Promise<T>,
 ): Promise<T> {
-  // Windows derives the shared-state coordinator directory from the active home.
-  // Carry the fixture's established scope across withTempHomeConfig's home switch.
-  const coordinatorRuntime = captureStateDatabaseCoordinatorRuntime();
-  return withTempHomeConfig(config, (params) =>
-    withStateDatabaseCoordinatorRuntimeDirectory(coordinatorRuntime, () => fn(params)),
-  );
+  return withTempHomeConfig(config, fn);
 }
 
 describe("Claw MCP removal", () => {
@@ -239,12 +230,12 @@ describe("Claw MCP removal", () => {
       ...current.getConfig(),
       mcp: { servers: { docs: sourceServer } },
     };
-    const plan = await buildClawRemovePlan("worker", { env: current.env, config });
     const unsetMcpServer = vi.fn();
 
     const result = await withMcpTempHomeConfig(config, async ({ configPath }) => {
       setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
       setTestEnvValue("OPENCLAW_STATE_DIR", current.env.OPENCLAW_STATE_DIR);
+      const plan = await buildClawRemovePlan("worker", { env: current.env, config });
       const removed = await applyClawRemovePlan(plan, {
         monitorGateway: quiescentClawMonitorGateway,
         consentPlanIntegrity: plan.planIntegrity,
@@ -282,11 +273,6 @@ describe("Claw MCP removal", () => {
         },
       },
     };
-    const plan = await buildClawRemovePlan("worker", {
-      env: current.env,
-      config,
-      sourceMcpServers: { docs: sourceServer },
-    });
     const unsetMcpServer = vi
       .fn()
       .mockResolvedValue({ ok: true, path: "config", config: {}, mcpServers: {}, removed: true });
@@ -294,6 +280,11 @@ describe("Claw MCP removal", () => {
     const result = await withMcpTempHomeConfig(config, async ({ configPath }) => {
       setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
       setTestEnvValue("OPENCLAW_STATE_DIR", current.env.OPENCLAW_STATE_DIR);
+      const plan = await buildClawRemovePlan("worker", {
+        env: current.env,
+        config,
+        sourceMcpServers: { docs: sourceServer },
+      });
       return applyClawRemovePlan(plan, {
         monitorGateway: quiescentClawMonitorGateway,
         consentPlanIntegrity: plan.planIntegrity,
@@ -322,15 +313,15 @@ describe("Claw MCP removal", () => {
     const current = await addMcpFixture();
     await recordManagedMcp(current);
     const config = current.getConfig();
-    const plan = await buildClawRemovePlan("worker", {
-      env: current.env,
-      config,
-      sourceMcpServers: {},
-    });
 
     const result = await withMcpTempHomeConfig(config, async ({ configPath }) => {
       setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
       setTestEnvValue("OPENCLAW_STATE_DIR", current.env.OPENCLAW_STATE_DIR);
+      const plan = await buildClawRemovePlan("worker", {
+        env: current.env,
+        config,
+        sourceMcpServers: {},
+      });
       return applyClawRemovePlan(plan, {
         monitorGateway: quiescentClawMonitorGateway,
         consentPlanIntegrity: plan.planIntegrity,

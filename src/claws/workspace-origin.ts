@@ -383,7 +383,7 @@ function prepareClawWorkspacePublication(
   | {
       beforePublish: (publication: BootstrapPublicationIdentity) => void;
       afterPublish: (publication: BootstrapPublicationIdentity) => void;
-      ownsExisting: (file: fs.BigIntStats) => boolean;
+      ownsExisting: (file?: fs.BigIntStats) => boolean;
       assertCurrent: () => void;
     }
   | undefined {

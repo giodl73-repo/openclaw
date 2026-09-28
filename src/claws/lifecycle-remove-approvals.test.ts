@@ -21,10 +21,6 @@ import { withTempHomeConfig, writeOpenClawConfig } from "../config/test-helpers.
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { loadExecApprovals, saveExecApprovals } from "../infra/exec-approvals.js";
 import { resolveRuntimeWorkerArgv, resolveRuntimeWorkerUrl } from "../infra/runtime-worker-url.js";
-import {
-  captureStateDatabaseCoordinatorRuntime,
-  withStateDatabaseCoordinatorRuntimeDirectory,
-} from "../infra/state-database-coordinator.js";
 import { onSessionIdentityMutation } from "../sessions/session-lifecycle-events.js";
 import {
   beginAgentDeletionJournal,
@@ -80,10 +76,7 @@ async function withApprovalsTempHomeConfig<T>(
   config: OpenClawConfig,
   fn: (params: { home: string; configPath: string }) => Promise<T>,
 ): Promise<T> {
-  const coordinatorRuntime = captureStateDatabaseCoordinatorRuntime();
-  return withTempHomeConfig(config, (params) =>
-    withStateDatabaseCoordinatorRuntimeDirectory(coordinatorRuntime, () => fn(params)),
-  );
+  return withTempHomeConfig(config, fn);
 }
 
 async function buildApprovalFixture(withMcp = false) {

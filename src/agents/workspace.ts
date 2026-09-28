@@ -1,3 +1,4 @@
+import * as syncFs from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { sha256Hex } from "@openclaw/normalization-core/node-crypto";
@@ -524,7 +525,7 @@ export async function seedWorkspaceBootstrap(params: {
   existingFile?: "claim" | "conflict";
   beforePublish?: (identity: BootstrapPublicationIdentity) => void;
   afterPublish?: (identity: BootstrapPublicationIdentity) => void;
-  ownsExisting?: (file: syncFs.BigIntStats) => boolean;
+  ownsExisting?: (file?: syncFs.BigIntStats) => boolean;
   assertCurrent?: () => void;
 }): Promise<"seeded" | "already-seeded" | "consumed"> {
   if (params.content.byteLength > MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES) {
@@ -567,7 +568,7 @@ export async function seedWorkspaceBootstrap(params: {
       0o600,
       params.afterPublish,
     ));
-  if (!created || params.ownsExisting) {
+  if (!created) {
     const opened = await openRootFile({
       absolutePath: bootstrapPath,
       rootPath: dir,
@@ -598,7 +599,7 @@ export async function seedWorkspaceBootstrap(params: {
       // A later safe open of an unrelated identical file cannot lend this read authority.
       if (
         params.ownsExisting
-          ? !params.ownsExisting(after)
+          ? !params.ownsExisting(after) && !params.ownsExisting()
           : !created && params.existingFile === "conflict"
       ) {
         throw new WorkspaceBootstrapSeedConflictError(
