@@ -113,24 +113,16 @@ function readFirstEnsureSessionInput(ensure: {
 installAcpRuntimeTurnContractSuite({
   name: "ACPX wrapper",
   createHarness(scenario: AcpRuntimeTurnContractScenario) {
-    const cancelCalls: Array<{ reason?: string } | undefined> = [];
-    const closeStreamCalls: Array<{ reason?: string } | undefined> = [];
     const { runtime, delegate } = makeRuntime(makeEmptySessionStore());
     vi.spyOn(delegate, "startTurn").mockReturnValue(
       makeTurn(
         { requestId: scenario.requestId },
         {
-          promptStarted: scenario.promptStarted ?? Promise.resolve(),
-          events: (async function* () {
-            yield* scenario.events;
-          })(),
-          result: Promise.resolve(scenario.result),
-          async cancel(input) {
-            cancelCalls.push(input);
-          },
-          async closeStream(input) {
-            closeStreamCalls.push(input);
-          },
+          promptStarted: scenario.promptStarted,
+          events: scenario.events,
+          result: scenario.result,
+          cancel: scenario.cancel,
+          closeStream: scenario.closeStream,
         },
       ),
     );
@@ -144,7 +136,7 @@ installAcpRuntimeTurnContractSuite({
       mode: "prompt",
       requestId: scenario.requestId,
     });
-    return { turn, cancelCalls, closeStreamCalls };
+    return { turn };
   },
 });
 

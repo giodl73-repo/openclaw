@@ -962,9 +962,6 @@
     "./plugin-sdk/acp-runtime-backend": {
       "default": "./dist/plugin-sdk/acp-runtime-backend.js"
     },
-    "./plugin-sdk/acp-runtime-contract-testing": {
-      "default": "./dist/plugin-sdk/acp-runtime-contract-testing.js"
-    },
     "./plugin-sdk/acp-binding-runtime": {
       "default": "./dist/plugin-sdk/acp-binding-runtime.js"
     },
