@@ -104,6 +104,20 @@ describe("tool errors", () => {
     expect(extractToolErrorCode(rootCode)).toBe("output_limit_exceeded");
   });
 
+  it("extracts structured node invoke failure codes after sanitization", () => {
+    const result = sanitizeToolResult({
+      details: {
+        status: "failed",
+        nodeInvokeFailure: {
+          failureCode: "SYSTEM_RUN_DENIED",
+          message: "execution denied by node policy",
+        },
+      },
+    });
+
+    expect(extractToolErrorCode(result)).toBe("SYSTEM_RUN_DENIED");
+  });
+
   it("does not extract error codes from prose-only tool output", () => {
     expect(
       extractToolErrorCode({
