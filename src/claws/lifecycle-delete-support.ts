@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { FsSafeError } from "@openclaw/fs-safe/errors";
-import { root as fsSafeRoot } from "@openclaw/fs-safe/root";
+import type { Root as FsSafeCoreRoot } from "@openclaw/fs-safe/root";
 import { coerceErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { err, ok, type Result } from "@openclaw/normalization-core/result";
 import {
@@ -35,6 +34,7 @@ import { resolveCronJobConfigRevision } from "../cron/config-revision.js";
 import { loadedCronStoreFromRows } from "../cron/store/row-codec.js";
 import type { CronJobRow } from "../cron/store/schema.js";
 import { isSystemMonitorDeclaration } from "../cron/system-owned-declaration.js";
+import { FsSafeError, root as fsSafeRoot } from "../infra/fs-safe.js";
 import {
   compileSqliteQueryBindings,
   executeSqliteQuerySync,
@@ -319,7 +319,7 @@ export async function workspaceContainsUntrackedEntries(
   }
   try {
     await fs.stat(workspaceRoot);
-    const workspace = await fsSafeRoot(workspaceRoot);
+    const workspace = (await fsSafeRoot(workspaceRoot)) as FsSafeCoreRoot;
     for await (const entry of workspace.walk("", { symlinkPolicy: "include" })) {
       const expected = entry.kind === "directory" ? trackedDirectories : tracked;
       if (!expected.has(path.normalize(entry.relativePath))) {
