@@ -65,6 +65,8 @@
     "!dist/plugin-sdk/acp-binding-runtime.d.ts",
     "!dist/plugin-sdk/acp-runtime.d.ts",
     "!dist/plugin-sdk/acp-runtime-backend.d.ts",
+    "!dist/plugin-sdk/acp-runtime-contract-testing.js",
+    "!dist/plugin-sdk/acp-runtime-contract-testing.d.ts",
     "!dist/plugin-sdk/agent-core.d.ts",
     "!dist/plugin-sdk/agent-harness-exec-review-runtime.d.ts",
     "!dist/plugin-sdk/agent-harness-completion.d.ts",
@@ -959,6 +961,9 @@
     },
     "./plugin-sdk/acp-runtime-backend": {
       "default": "./dist/plugin-sdk/acp-runtime-backend.js"
+    },
+    "./plugin-sdk/acp-runtime-contract-testing": {
+      "default": "./dist/plugin-sdk/acp-runtime-contract-testing.js"
     },
     "./plugin-sdk/acp-binding-runtime": {
       "default": "./dist/plugin-sdk/acp-binding-runtime.js"
