@@ -207,6 +207,7 @@ export function installAcpRuntimeTurnContractSuite(params: {
       const cancelCalls: TurnControlInput[] = [];
       const closeStreamCalls: TurnControlInput[] = [];
       const streamClosed = deferred<void>();
+      const result = deferred<AcpRuntimeTurnResult>();
       const expectedResult: AcpRuntimeTurnResult = {
         status: "completed",
         stopReason: "end_turn",
@@ -226,7 +227,7 @@ export function installAcpRuntimeTurnContractSuite(params: {
         scenario({
           requestId: "contract-close-stream",
           events,
-          result: Promise.resolve(expectedResult),
+          result: result.promise,
           async cancel(input) {
             cancelCalls.push(input);
           },
@@ -243,6 +244,7 @@ export function installAcpRuntimeTurnContractSuite(params: {
       expect(closeStreamCalls).toEqual([{ reason: "consumer-stopped" }]);
       expect(cancelCalls).toEqual([]);
       await expect(nextEvent).resolves.toEqual({ done: true, value: undefined });
+      result.resolve(expectedResult);
       await expect(turn.result).resolves.toEqual(expectedResult);
     });
   });
