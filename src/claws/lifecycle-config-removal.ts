@@ -125,6 +125,7 @@ export function digestClawAgentRemovalSurface(config: OpenClawConfig, agentId: s
 
 function projectConfigMutationView(config: OpenClawConfig): OpenClawConfig {
   const clonedConfig = inheritLegacyDefaultAgentId(config, structuredClone(config));
+  // SAFETY: legacy roster migration preserves the OpenClawConfig schema while normalizing shape.
   return migratePersistedImplicitMainRoster(clonedConfig).config as OpenClawConfig;
 }
 

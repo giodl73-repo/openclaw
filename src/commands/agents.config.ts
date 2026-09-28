@@ -221,6 +221,7 @@ export function pruneAgentConfig(
     clearedOwnerRefs.push(path);
     removedReferenceValues.push({ path, value: value.agentId });
     const { agentId: _agentId, ...rest } = value;
+    // SAFETY: removing the optional owner field leaves the same config object shape T minus agentId.
     return Object.keys(rest).length > 0 ? (rest as T) : undefined;
   };
   // Shared by every reference-array prune site below: drop matching entries and record their
@@ -418,7 +419,7 @@ export function pruneAgentConfig(
     const value = path.reduce<unknown>(
       (current, segment) =>
         current && typeof current === "object"
-          ? (current as Record<string, unknown>)[segment]
+          ? (current as Record<string, unknown>)[segment] // SAFETY: object guard permits path lookup.
           : undefined,
       workspacePinnedConfig,
     );

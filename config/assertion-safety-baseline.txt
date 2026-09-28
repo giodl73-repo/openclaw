@@ -2006,7 +2006,6 @@ src/commands/agent-exec.ts	1
 src/commands/agent-via-gateway.ts	7
 src/commands/agents.commands.bind.ts	2
 src/commands/agents.commands.identity.ts	1
-src/commands/agents.config.ts	1
 src/commands/agents.providers.ts	8
 src/commands/audit.ts	1
 src/commands/backup-restore.ts	1
