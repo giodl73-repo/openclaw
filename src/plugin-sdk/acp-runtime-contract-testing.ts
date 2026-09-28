@@ -176,13 +176,19 @@ export function installAcpRuntimeTurnContractSuite(params: {
     it("forwards cancellation with its reason without closing the event stream", async () => {
       const cancelCalls: TurnControlInput[] = [];
       const closeStreamCalls: TurnControlInput[] = [];
+      const result = deferred<AcpRuntimeTurnResult>();
+      const expectedResult: AcpRuntimeTurnResult = {
+        status: "cancelled",
+        stopReason: "user-request",
+      };
       const { turn } = await createHarness(
         params.createHarness,
         scenario({
           requestId: "contract-cancel",
-          result: Promise.resolve({ status: "cancelled", stopReason: "user-request" }),
+          result: result.promise,
           async cancel(input) {
             cancelCalls.push(input);
+            result.resolve(expectedResult);
           },
           async closeStream(input) {
             closeStreamCalls.push(input);
@@ -194,12 +200,17 @@ export function installAcpRuntimeTurnContractSuite(params: {
 
       expect(cancelCalls).toEqual([{ reason: "user-request" }]);
       expect(closeStreamCalls).toEqual([]);
+      await expect(turn.result).resolves.toEqual(expectedResult);
     });
 
     it("forwards early stream closure, unblocks iteration, and does not cancel work", async () => {
       const cancelCalls: TurnControlInput[] = [];
       const closeStreamCalls: TurnControlInput[] = [];
       const streamClosed = deferred<void>();
+      const expectedResult: AcpRuntimeTurnResult = {
+        status: "completed",
+        stopReason: "end_turn",
+      };
       const events: AsyncIterable<AcpRuntimeEvent> = {
         [Symbol.asyncIterator]() {
           return {
@@ -215,6 +226,7 @@ export function installAcpRuntimeTurnContractSuite(params: {
         scenario({
           requestId: "contract-close-stream",
           events,
+          result: Promise.resolve(expectedResult),
           async cancel(input) {
             cancelCalls.push(input);
           },
@@ -231,6 +243,7 @@ export function installAcpRuntimeTurnContractSuite(params: {
       expect(closeStreamCalls).toEqual([{ reason: "consumer-stopped" }]);
       expect(cancelCalls).toEqual([]);
       await expect(nextEvent).resolves.toEqual({ done: true, value: undefined });
+      await expect(turn.result).resolves.toEqual(expectedResult);
     });
   });
 }
