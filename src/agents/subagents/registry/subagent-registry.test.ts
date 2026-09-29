@@ -2141,6 +2141,7 @@ describe("subagent registry seam flow", () => {
           outputSchema: { type: "object" },
           swarmRequesterSessionKey: "agent:main:main",
         });
+        await vi.advanceTimersByTimeAsync(0);
       } finally {
         await settleRootWork();
       }
