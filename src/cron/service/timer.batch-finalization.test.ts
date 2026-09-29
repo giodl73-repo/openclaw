@@ -877,8 +877,10 @@ describe("cron batch outcome finalization", () => {
 
         expect(findCronTask(first.id)?.status).toBe("succeeded");
         expect(findCronTask(second.id)).toBeUndefined();
-        expect(isCronJobActive(second.id)).toBe(true);
-        await vi.waitFor(() => expect(isCronJobActive(first.id)).toBe(false));
+        await vi.waitFor(() => {
+          expect(isCronJobActive(first.id)).toBe(false);
+          expect(isCronJobActive(second.id), "blocked sibling remains active").toBe(true);
+        });
         expect(events).toContainEqual(
           expect.objectContaining({ action: "finished", jobId: first.id, status: "ok" }),
         );
@@ -947,11 +949,11 @@ describe("cron batch outcome finalization", () => {
         });
 
         expect(findCronTask(lastJob.id)).toBeUndefined();
-        expect(isCronJobActive(lastJob.id)).toBe(true);
         await vi.waitFor(() => {
           for (const job of jobs.slice(0, -1)) {
             expect(isCronJobActive(job.id)).toBe(false);
           }
+          expect(isCronJobActive(lastJob.id), "blocked sibling remains active").toBe(true);
         });
         for (const job of jobs.slice(0, -1)) {
           expect(findCronTask(job.id)?.status).toBe("succeeded");
