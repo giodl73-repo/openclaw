@@ -244,6 +244,9 @@ export function installAcpRuntimeTurnContractSuite(params: {
       expect(closeStreamCalls).toEqual([{ reason: "consumer-stopped" }]);
       expect(cancelCalls).toEqual([]);
       await expect(nextEvent).resolves.toEqual({ done: true, value: undefined });
+      await expect(Promise.race([turn.result, Promise.resolve("pending")])).resolves.toBe(
+        "pending",
+      );
       result.resolve(expectedResult);
       await expect(turn.result).resolves.toEqual(expectedResult);
     });
