@@ -25,6 +25,7 @@ import { resolveSkillCollectionReviewMonitorSpecs } from "../../cron/skill-colle
 import { cronStoreKey } from "../../cron/store/key.js";
 import { hasActiveCronRunReceiptsForAgent } from "../../cron/store/run-receipt-drain.js";
 import type { CronJob, CronJobCreate } from "../../cron/types.js";
+import { closeSkillsWatchersForWorkspace } from "../../skills/runtime/refresh.js";
 import { readAgentDeletionJournal } from "../../state/agent-deletion-journal.js";
 import { sleep } from "../../utils/sleep.js";
 import type { GatewayRequestContext, GatewayRequestHandlers, RespondFn } from "./types.js";

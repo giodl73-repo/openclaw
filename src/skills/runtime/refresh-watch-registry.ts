@@ -60,6 +60,7 @@ export type PendingSkillsWatchChange = {
 export async function unsubscribeWorkspaceFromPath(
   workspaceDir: string,
   watchTarget: WatchTarget,
+  options: { rejectCloseFailure?: boolean } = {},
 ): Promise<void> {
   const state = pathWatchers.get(watchTarget.path);
   if (!state) {
@@ -73,9 +74,12 @@ export async function unsubscribeWorkspaceFromPath(
           pathWatchers.delete(watchTarget.path);
         }
       },
-      () => {
+      (error: unknown) => {
         // Failed physical retirement retains this logical owner; never rearm it.
         state.failed = true;
+        if (options.rejectCloseFailure) {
+          throw error;
+        }
       },
     );
   }

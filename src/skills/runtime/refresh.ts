@@ -497,18 +497,26 @@ function subscribeWorkspaceToPath(
 function disposeWorkspaceWatchState(
   watcherKey: string,
   watchTargets: readonly WatchTarget[] = workspaceWatchTargets.get(watcherKey) ?? [],
+  options: { rejectCloseFailure?: boolean } = {},
 ): Promise<void> {
   disposeRemoteSkillsWatcher(watcherKey);
   const teardowns = watchTargets.map((watchTarget) =>
-    unsubscribeWorkspaceFromPath(watcherKey, watchTarget),
+    unsubscribeWorkspaceFromPath(watcherKey, watchTarget, options),
   );
-  workspaceWatchTargets.delete(watcherKey);
-  workspaceWatchOwners.delete(watcherKey);
-  workspaceWatchTargetCache.delete(watcherKey);
-  workspaceWatchLastEnsuredAt.delete(watcherKey);
+  const forgetWorkspace = () => {
+    workspaceWatchTargets.delete(watcherKey);
+    workspaceWatchOwners.delete(watcherKey);
+    workspaceWatchTargetCache.delete(watcherKey);
+    workspaceWatchLastEnsuredAt.delete(watcherKey);
+  };
+  if (!options.rejectCloseFailure) {
+    forgetWorkspace();
+  }
   // Reacquisition invalidates after an unwatched interval. Disposal itself does
   // not change skills, including for other subscriptions sharing this workspace.
-  return Promise.all(teardowns).then(() => undefined);
+  return Promise.all(teardowns).then(() => {
+    forgetWorkspace();
+  });
 }
 
 function disposeWorkspaceWatchStateDetached(watcherKey: string): void {
@@ -715,7 +723,11 @@ export async function closeSkillsWatchersForWorkspace(workspaceDir: string): Pro
   const watcherKeys = Array.from(workspaceWatchOwners)
     .filter(([, owner]) => resolveRealpathOrAbsolute(owner.workspaceDir) === canonicalWorkspaceDir)
     .map(([watcherKey]) => watcherKey);
-  await Promise.all(watcherKeys.map((watcherKey) => disposeWorkspaceWatchState(watcherKey)));
+  await Promise.all(
+    watcherKeys.map((watcherKey) =>
+      disposeWorkspaceWatchState(watcherKey, undefined, { rejectCloseFailure: true }),
+    ),
+  );
 }
 
 export async function closeSkillsWatchers(resetState = false): Promise<void> {
