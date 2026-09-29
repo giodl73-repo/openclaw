@@ -877,8 +877,8 @@ describe("cron batch outcome finalization", () => {
 
         expect(findCronTask(first.id)?.status).toBe("succeeded");
         expect(findCronTask(second.id)).toBeUndefined();
-        expect(isCronJobActive(first.id)).toBe(false);
         expect(isCronJobActive(second.id)).toBe(true);
+        await vi.waitFor(() => expect(isCronJobActive(first.id)).toBe(false));
         expect(events).toContainEqual(
           expect.objectContaining({ action: "finished", jobId: first.id, status: "ok" }),
         );
@@ -946,12 +946,16 @@ describe("cron batch outcome finalization", () => {
           expect(persistedJobs.find((job) => job.id === lastJob.id)?.state.runningAtMs).toBe(dueAt);
         });
 
-        for (const job of jobs.slice(0, -1)) {
-          expect(findCronTask(job.id)?.status).toBe("succeeded");
-          expect(isCronJobActive(job.id)).toBe(false);
-        }
         expect(findCronTask(lastJob.id)).toBeUndefined();
         expect(isCronJobActive(lastJob.id)).toBe(true);
+        await vi.waitFor(() => {
+          for (const job of jobs.slice(0, -1)) {
+            expect(isCronJobActive(job.id)).toBe(false);
+          }
+        });
+        for (const job of jobs.slice(0, -1)) {
+          expect(findCronTask(job.id)?.status).toBe("succeeded");
+        }
       } finally {
         releaseFinalRun.resolve({ status: "ok", summary: "finished final job" });
         await batch;
