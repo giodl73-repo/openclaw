@@ -75,6 +75,7 @@ describe("configured agent adoption built CLI e2e", () => {
         await instance.state.writeConfig({
           ...JSON.parse(await readFile(configPath, "utf8")),
           agents: {
+            ownership: "explicit",
             defaults: {
               heartbeat: { agentId: "main" },
               systemAgent: { agentId: "main" },
