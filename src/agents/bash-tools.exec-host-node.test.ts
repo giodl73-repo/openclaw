@@ -870,6 +870,48 @@ describe("executeNodeHostCommand", () => {
     expect(callGatewayToolMock).toHaveBeenCalledTimes(4);
   });
 
+  it("preserves a node policy denial through the Gateway unavailable wrapper", async () => {
+    const defaultImplementation = callGatewayToolMock.getMockImplementation();
+    callGatewayToolMock.mockImplementation(
+      async (method: string, options: unknown, callParams: MockNodeInvokeParams | undefined) => {
+        if (method === "node.invoke" && callParams?.command === "system.run") {
+          throw createNodeInvokeFailure({
+            code: "UNAVAILABLE",
+            message: "SYSTEM_RUN_DENIED: node policy denied proof command",
+          });
+        }
+        if (!defaultImplementation) {
+          throw new Error("missing default gateway mock");
+        }
+        return await defaultImplementation(method, options, callParams);
+      },
+    );
+    const autoReviewer = allowReviewer();
+    resolveExecHostApprovalContextMock.mockReturnValue(createHostPolicy("allowlist", "on-miss"));
+    requiresExecApprovalMock.mockImplementation(
+      (value?: { allowlistSatisfied?: boolean; durableApprovalSatisfied?: boolean }) =>
+        value?.allowlistSatisfied !== true && value?.durableApprovalSatisfied !== true,
+    );
+
+    const result = await executeNodeHostCommand(
+      createNodeHostRequest({
+        security: "allowlist",
+        ask: "on-miss",
+        autoReview: true,
+        autoReviewer,
+      }),
+    );
+
+    expect(result.details).toMatchObject({
+      status: "failed",
+      reason: "policy-denied",
+      nodeInvokeFailure: {
+        failureCode: "SYSTEM_RUN_DENIED",
+        message: "SYSTEM_RUN_DENIED: node policy denied proof command",
+      },
+    });
+  });
+
   it("denies non-interactive approval requests without creating operator events", async () => {
     resolveExecHostApprovalContextMock.mockReturnValue(createHostPolicy("full", "always"));
     const result = await executeNodeHostCommand(
