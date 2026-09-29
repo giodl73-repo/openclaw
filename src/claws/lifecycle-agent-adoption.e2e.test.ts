@@ -6,7 +6,9 @@ import { runQaGatewayFixture } from "../../test/helpers/qa-gateway-cleanup.js";
 import {
   appendTranscriptEvent,
   loadSessionEntry,
+  loadSessionEntryReadOnly,
   loadTranscriptEvents,
+  readTranscriptExportSnapshotReadOnlySync,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
 import { readAgentDatabaseDeletionSnapshot } from "../state/agent-deletion-journal.read.js";
@@ -212,13 +214,17 @@ describe("configured agent adoption built CLI e2e", () => {
         expect(config.agents.entries["workspace-agent"]).toBeUndefined();
         await expect(access(join(workspace, "SOUL.md"))).rejects.toThrow();
         await expect(access(agentDatabase)).resolves.toBeUndefined();
-        expect(loadSessionEntry(sessionScope)).toMatchObject({ sessionId });
-        await expect(
-          loadTranscriptEvents({
-            ...sessionScope,
-            sessionId,
-          }),
-        ).resolves.toContainEqual(transcriptEvent);
+        // Retained history remains readable without reclaiming the deleted writable identity.
+        expect(loadSessionEntryReadOnly(sessionScope)).toMatchObject({ sessionId });
+        const retainedTranscript = readTranscriptExportSnapshotReadOnlySync({
+          ...sessionScope,
+          sessionId,
+        });
+        expect(retainedTranscript?.sessionKey).toBe(sessionKey);
+        expect(retainedTranscript?.events).toContainEqual(transcriptEvent);
+        expect(() => loadSessionEntry(sessionScope)).toThrow(
+          "OpenClaw agent database is unavailable while agent workspace-agent is deleted.",
+        );
         await expect(readFile(stateSentinel, "utf8")).resolves.toBe("pre-claws-agent-state\n");
         await expect(readFile(transcriptSentinel, "utf8")).resolves.toBe(
           "pre-claws-transcript-sentinel\n",
