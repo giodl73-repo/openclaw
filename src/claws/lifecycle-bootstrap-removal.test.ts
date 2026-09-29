@@ -92,12 +92,19 @@ describe("adopted bootstrap descriptor-bound removal", () => {
     "replacement-before-staging",
     "stale-receipt",
     "modified-after-read",
+    "modified-after-read-helper-unavailable",
+    "modified-before-unlink",
+    "modified-before-unlink-helper-unavailable",
     "modified-size",
     "modified-mtime",
   ] as const)(
     "preserves descriptor-bound ownership for %s across removal staging",
     async (entry) => {
+      const helperUnavailable = entry.endsWith("helper-unavailable");
+      const modifiedAfterRead = entry.startsWith("modified-after-read");
+      const modifiedBeforeUnlink = entry.startsWith("modified-before-unlink");
       let birthtimeNs = 101n;
+      let frozenCtimeNs: bigint | undefined;
       const realFstat = syncFs.fstatSync.bind(syncFs);
       // Keep all physical metadata real except the unsupported creation-time observation.
       const statSpy = vi.spyOn(syncFs, "fstatSync").mockImplementation((fd, options) => {
@@ -105,6 +112,9 @@ describe("adopted bootstrap descriptor-bound removal", () => {
           const observed = realFstat(fd, { bigint: true });
           if (observed.isFile()) {
             observed.birthtimeNs = birthtimeNs;
+            if (frozenCtimeNs !== undefined) {
+              observed.ctimeNs = frozenCtimeNs;
+            }
           }
           return observed;
         }
@@ -118,8 +128,12 @@ describe("adopted bootstrap descriptor-bound removal", () => {
       const restoreOperations: (() => void)[] = [];
       try {
         const { workspace, content, record } = await adoptedBootstrapFixture();
-        if (entry === "modified-after-read") {
+        if (modifiedAfterRead || modifiedBeforeUnlink) {
           syncFs.utimesSync(join(workspace, "BOOTSTRAP.md"), new Date(0), new Date(2_000));
+          // Coarse timestamps must not hide a same-length, mtime-restored in-place edit.
+          frozenCtimeNs = syncFs.statSync(join(workspace, "BOOTSTRAP.md"), {
+            bigint: true,
+          }).ctimeNs;
         }
         const originalPath = join(workspace, "original.md");
         const rootSpy = vi.spyOn(fsSafe, "root").mockImplementation(async (...args) => {
@@ -137,7 +151,7 @@ describe("adopted bootstrap descriptor-bound removal", () => {
                   syncFs.renameSync(join(workspace, from), originalPath);
                   syncFs.writeFileSync(join(workspace, from), content);
                 }
-                if (entry === "helper-unavailable" && from === "BOOTSTRAP.md") {
+                if (helperUnavailable && from === "BOOTSTRAP.md") {
                   throw new FsSafeError(
                     "helper-unavailable",
                     "native no-replace move is unavailable",
@@ -165,8 +179,9 @@ describe("adopted bootstrap descriptor-bound removal", () => {
               .mockImplementation(async (...readArgs) => {
                 const bytes = await readBytes(...readArgs);
                 if (
-                  entry === "modified-after-read" &&
-                  readArgs[0].startsWith("BOOTSTRAP.md.openclaw-claw-remove-") &&
+                  modifiedAfterRead &&
+                  (helperUnavailable ||
+                    readArgs[0].startsWith("BOOTSTRAP.md.openclaw-claw-remove-")) &&
                   !edited
                 ) {
                   const target = join(workspace, readArgs[0]);
@@ -182,6 +197,13 @@ describe("adopted bootstrap descriptor-bound removal", () => {
             const removeSpy = vi
               .spyOn(opened, "remove")
               .mockImplementation(async (...removeArgs) => {
+                if (modifiedBeforeUnlink && !edited) {
+                  const target = join(workspace, removeArgs[0]);
+                  const beforeEdit = syncFs.statSync(target);
+                  edited = Buffer.alloc(content.length, 0x79);
+                  syncFs.writeFileSync(target, edited);
+                  syncFs.utimesSync(target, beforeEdit.atime, beforeEdit.mtime);
+                }
                 // remove is entered after the staged file's digest was checked. Change that
                 // same object before fs-safe admits unlink, without replacing its inode.
                 if ((entry === "modified-size" || entry === "modified-mtime") && !edited) {
@@ -227,16 +249,20 @@ describe("adopted bootstrap descriptor-bound removal", () => {
           expect(await readdir(workspace)).toEqual(["BOOTSTRAP.md"]);
           return;
         }
-        expect(staged).toBe(entry !== "helper-unavailable");
+        expect(staged).toBe(!helperUnavailable);
         if (entry === "original" || entry === "helper-unavailable") {
           expect(removed).toEqual({ path: "BOOTSTRAP.md", action: "deleted" });
           expect(await readdir(workspace)).toEqual([]);
-        } else if (entry === "modified-after-read") {
+        } else if (modifiedAfterRead) {
           expect(edited).toBeDefined();
           expect(removed).toEqual({ path: "BOOTSTRAP.md", action: "retainedModified" });
           expect(await readFile(join(workspace, "BOOTSTRAP.md"))).toEqual(edited);
           expect(await readdir(workspace)).toEqual(["BOOTSTRAP.md"]);
-        } else if (entry === "modified-size" || entry === "modified-mtime") {
+        } else if (
+          entry === "modified-size" ||
+          entry === "modified-mtime" ||
+          modifiedBeforeUnlink
+        ) {
           expect(edited).toBeDefined();
           expect(removed).toMatchObject({ path: "BOOTSTRAP.md", action: "error" });
           expect(await readFile(join(workspace, "BOOTSTRAP.md"))).toEqual(edited);

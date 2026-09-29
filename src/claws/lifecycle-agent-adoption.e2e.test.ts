@@ -9,6 +9,7 @@ import {
   loadTranscriptEvents,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
+import { readAgentDatabaseDeletionSnapshot } from "../state/agent-deletion-journal.read.js";
 import {
   closeOpenClawAgentDatabasesForTest,
   resolveOpenClawAgentSqlitePath,
@@ -41,29 +42,30 @@ describe("configured agent adoption built CLI e2e", () => {
         const agentDir = join(stateDir, "agents", "workspace-agent");
         const agentDatabase = resolveOpenClawAgentSqlitePath({
           agentId: "workspace-agent",
-          env: { OPENCLAW_STATE_DIR: stateDir },
+          env: instance.env,
         });
         const sessionStorePath = join(agentDir, "sessions", "sessions.json");
         const sessionKey = "agent:workspace-agent:pre-claws";
         const sessionId = "pre-claws-session";
+        // The instance does not apply its environment to this fixture's process.
+        const sessionScope = {
+          agentId: "workspace-agent",
+          env: instance.env,
+          sessionKey,
+          storePath: sessionStorePath,
+        };
         const stateSentinel = join(agentDir, "pre-claws-state.txt");
         const transcriptSentinel = join(agentDir, "sessions", "pre-claws-transcript.jsonl");
         const undeclared = join(workspace, "operator-notes.md");
         await mkdir(join(agentDir, "sessions"), { recursive: true });
-        await upsertSessionEntryCore(
-          { agentId: "workspace-agent", sessionKey, storePath: sessionStorePath },
-          { sessionId, updatedAt: 1 },
-        );
+        await upsertSessionEntryCore(sessionScope, { sessionId, updatedAt: 1 });
         const transcriptEvent = {
           id: "pre-claws-event",
           marker: "pre-claws-history",
           timestamp: "1970-01-01T00:00:00.001Z",
           type: "metadata",
         };
-        await appendTranscriptEvent(
-          { agentId: "workspace-agent", sessionId, sessionKey, storePath: sessionStorePath },
-          transcriptEvent,
-        );
+        await appendTranscriptEvent({ ...sessionScope, sessionId }, transcriptEvent);
         await writeFile(stateSentinel, "pre-claws-agent-state\n", "utf8");
         await writeFile(transcriptSentinel, "pre-claws-transcript-sentinel\n", "utf8");
         await writeFile(undeclared, "operator-owned\n", "utf8");
@@ -87,15 +89,17 @@ describe("configured agent adoption built CLI e2e", () => {
           },
           talk: { agentId: "main" },
         });
-        expect(
-          loadSessionEntry({ agentId: "workspace-agent", sessionKey, storePath: sessionStorePath }),
-        ).toMatchObject({ sessionId });
+        expect(readAgentDatabaseDeletionSnapshot(instance.env)).toMatchObject({
+          retainedDeletions: { status: "empty" },
+          registeredAgentDatabases: expect.arrayContaining([
+            expect.objectContaining({ agentId: "workspace-agent", path: agentDatabase }),
+          ]),
+        });
+        expect(loadSessionEntry(sessionScope)).toMatchObject({ sessionId });
         await expect(
           loadTranscriptEvents({
-            agentId: "workspace-agent",
+            ...sessionScope,
             sessionId,
-            sessionKey,
-            storePath: sessionStorePath,
           }),
         ).resolves.toContainEqual(transcriptEvent);
         closeOpenClawAgentDatabasesForTest();
@@ -208,15 +212,11 @@ describe("configured agent adoption built CLI e2e", () => {
         expect(config.agents.entries["workspace-agent"]).toBeUndefined();
         await expect(access(join(workspace, "SOUL.md"))).rejects.toThrow();
         await expect(access(agentDatabase)).resolves.toBeUndefined();
-        expect(
-          loadSessionEntry({ agentId: "workspace-agent", sessionKey, storePath: sessionStorePath }),
-        ).toMatchObject({ sessionId });
+        expect(loadSessionEntry(sessionScope)).toMatchObject({ sessionId });
         await expect(
           loadTranscriptEvents({
-            agentId: "workspace-agent",
+            ...sessionScope,
             sessionId,
-            sessionKey,
-            storePath: sessionStorePath,
           }),
         ).resolves.toContainEqual(transcriptEvent);
         await expect(readFile(stateSentinel, "utf8")).resolves.toBe("pre-claws-agent-state\n");

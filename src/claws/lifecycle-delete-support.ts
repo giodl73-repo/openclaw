@@ -551,7 +551,7 @@ export async function removeClawWorkspaceFile(
   record: ClawRemovableWorkspaceFile,
   assertCurrent: () => void,
   maxBytes = 1024 * 1024,
-  ownsFile?: (relativePath: string) => boolean,
+  ownsFile?: (relativePath: string, contentDigest?: string) => boolean,
 ): Promise<RemovedWorkspaceFile> {
   if (record.state === "missing") {
     return { path: record.path, action: "missing" };
@@ -597,13 +597,13 @@ export async function removeClawWorkspaceFile(
         return { path: record.path, action: "retainedUnowned" };
       }
       const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
-      if (digest !== record.contentDigest) {
+      if (digest !== record.contentDigest || !ownsFile(record.path, record.contentDigest)) {
         return { path: record.path, action: "retainedModified" };
       }
       await workspace.remove(record.path, {
         assertBeforeMutation: () => {
           assertCurrent();
-          if (!ownsFile(record.path)) {
+          if (!ownsFile(record.path, record.contentDigest)) {
             throw new Error("Claw workspace file identity changed before removal.", {
               cause: error,
             });
@@ -620,11 +620,14 @@ export async function removeClawWorkspaceFile(
         const content = await workspace.readBytes(stagedPath, { maxBytes });
         assertCurrent();
         const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
-        if (digest === record.contentDigest && (!ownsFile || ownsFile(stagedPath))) {
+        if (
+          digest === record.contentDigest &&
+          (!ownsFile || ownsFile(stagedPath, record.contentDigest))
+        ) {
           await workspace.remove(stagedPath, {
             assertBeforeMutation: () => {
               assertCurrent();
-              if (ownsFile && !ownsFile(stagedPath)) {
+              if (ownsFile && !ownsFile(stagedPath, record.contentDigest)) {
                 throw new Error("Claw bootstrap identity changed before removal.");
               }
             },

@@ -7,6 +7,7 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../agents/workspace-bootstrap-read.js";
 import type { BootstrapPublicationIdentity } from "../agents/workspace.js";
 import { isRootFileMissingFailure, openRootFileSync } from "../infra/boundary-file-read.js";
+import { hashFileDescriptorSync } from "../infra/file-descriptor.js";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -298,7 +299,11 @@ export function clawBootstrapPublicationMatches(
 
 export type ClawBootstrapRemovalAuthority =
   | { owned: false; missing: boolean }
-  | { owned: true; ownsFile: (relativePath: string) => boolean; close: () => void };
+  | {
+      owned: true;
+      ownsFile: (relativePath: string, contentDigest?: string) => boolean;
+      close: () => void;
+    };
 
 /** Pin the exact published bootstrap object so a digest-identical replacement stays unowned. */
 export function openClawBootstrapRemovalAuthority(params: {
@@ -332,7 +337,7 @@ export function openClawBootstrapRemovalAuthority(params: {
     let acceptedCtimeNs = original.ctimeNs;
     return {
       owned: true,
-      ownsFile: (relativePath) => {
+      ownsFile: (relativePath, contentDigest) => {
         const current = fs.fstatSync(fd, { bigint: true });
         if (
           current.size !== original.size ||
@@ -353,7 +358,14 @@ export function openClawBootstrapRemovalAuthority(params: {
           acceptedPath = relativePath;
           acceptedCtimeNs = current.ctimeNs;
         }
-        return matches;
+        // Timestamp granularity can hide an in-place edit. Deletion also requires the
+        // pinned object's current bytes, read from offset zero at each mutation guard.
+        return (
+          matches &&
+          (contentDigest === undefined ||
+            `sha256:${hashFileDescriptorSync(fd, MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES).sha256}` ===
+              contentDigest)
+        );
       },
       close: () => {
         if (!closed) {
