@@ -487,10 +487,17 @@ session transcripts, workspace directory, or undeclared workspace files. Those
 historical artifacts remain on disk, and discoverable, after the Claw install
 record is removed.
 
-Adopted-agent ownership uses a newer install-record format as a downgrade
-fence. Builds that predate configured-agent adoption reject that record before
-status, update, or removal can mutate it. Complete the lifecycle with a build
-that supports configured-agent adoption before downgrading.
+Adopted-agent ownership uses the v3 install-record format. The v2026.9.6 Claw
+reader accepts only v1 and v2 records and rejects v3 before status, update, or
+removal can mutate the install. This is not a compatibility guarantee for every
+older release.
+
+Use a build that supports configured-agent adoption to complete removal while
+retaining the pre-existing history. Removing a Claw does not reverse database
+schema migrations or make a newer database readable by an older binary. Before
+downgrading, follow [database recovery](/reference/database-schemas/integrity-and-recovery#downgrade-recovery),
+including restoring a verified pre-update backup with its matching release when
+required. Do not lower schema markers or rewrite v3 ownership as v1 or v2.
 
 ## Inspect installed state
 

@@ -24,6 +24,7 @@ import {
   closeOpenClawStateDatabaseAsync,
   closeOpenClawStateDatabaseForTest,
 } from "../state/openclaw-state-db.js";
+import { createClawAgentAdoptionFixture } from "./add-agent-adoption.test-support.js";
 import { applyClawAddPlan } from "./add.js";
 import { seedClawPackageBootstrap } from "./bootstrap.js";
 import { applyClawRemovePlan, buildClawRemovePlan, readClawStatus } from "./lifecycle-state.js";
@@ -31,7 +32,7 @@ import { buildClawAddPlan } from "./lifecycle.js";
 import { ClawPackageInstallError } from "./packages.js";
 import { persistClawInstallRecord, readClawInstallRecord } from "./provenance.js";
 import { parseClawManifest } from "./schema.js";
-import type { ClawAddPlan, ClawSourceIdentity } from "./types.js";
+import type { ClawAddPlan } from "./types.js";
 import {
   CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION,
   ClawWorkspaceWriteError,
@@ -63,99 +64,8 @@ const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
   });
 });
 
-async function fixture(
-  options: {
-    createWorkspace?: boolean;
-    plugin?: boolean;
-    bootstrap?: boolean;
-    managedFile?: boolean;
-  } = {},
-): Promise<{
-  root: string;
-  plan: ClawAddPlan;
-  config: OpenClawConfig;
-}> {
-  const root = tempDirs.make("openclaw-claw-agent-adopt-apply-");
-  const workspace = join(root, "workspace");
-  if (options.createWorkspace !== false) {
-    await mkdir(workspace);
-  }
-  if (options.managedFile) {
-    await mkdir(join(root, "content"));
-    await writeFile(join(root, "content", "SKILL.md"), "managed by claw");
-  }
-  const parsed = parseClawManifest({
-    schemaVersion: 1,
-    agent: { id: "worker", name: "Worker" },
-    ...(options.managedFile
-      ? { workspace: { files: [{ source: "content/SKILL.md", path: "SKILL.md" }] } }
-      : {}),
-    ...(options.plugin
-      ? {
-          packages: [
-            {
-              kind: "plugin" as const,
-              source: "clawhub" as const,
-              ref: "@acme/audit",
-              version: "1.0.0",
-            },
-          ],
-        }
-      : {}),
-  });
-  if (!parsed.ok) {
-    throw new Error(JSON.stringify(parsed.diagnostics));
-  }
-  const source: ClawSourceIdentity = {
-    kind: "package",
-    name: "@acme/worker",
-    version: "1.0.0",
-    packageRoot: root,
-    manifestPath: join(root, "openclaw.claw.json"),
-    integrityKind: "artifact",
-    integrity: "sha256:manifest",
-    byteLength: 1,
-  };
-  const existing = { id: "worker", name: "Worker", workspace, default: true };
-  const bootstrapContent = "# First run\n";
-  const bootstrapPath = join(root, "BOOTSTRAP.md");
-  if (options.bootstrap) {
-    await writeFile(bootstrapPath, bootstrapContent);
-  }
-  const plan = await buildClawAddPlan({
-    manifest: parsed.manifest,
-    source,
-    ...(options.bootstrap
-      ? {
-          packageBootstrap: {
-            sourcePath: "BOOTSTRAP.md",
-            realPath: bootstrapPath,
-            byteLength: Buffer.byteLength(bootstrapContent),
-            digest: `sha256:${createHash("sha256").update(bootstrapContent).digest("hex")}`,
-          },
-        }
-      : {}),
-    context: {
-      workspace,
-      adoptExistingAgent: true,
-      existingAgents: [existing],
-      ...(options.plugin
-        ? {
-            packagePreflight: async () => ({
-              ok: true as const,
-              action: "install" as const,
-              integrity: `sha256:${"a".repeat(64)}`,
-              installId: "audit",
-            }),
-          }
-        : {}),
-    },
-  });
-  return {
-    root,
-    plan,
-    config: { agents: { entries: { worker: { name: "Worker", workspace, default: true } } } },
-  };
+function fixture(options: Parameters<typeof createClawAgentAdoptionFixture>[1] = {}) {
+  return createClawAgentAdoptionFixture(tempDirs.make("openclaw-claw-agent-adopt-apply-"), options);
 }
 
 describe("applyClawAddPlan agent adoption", () => {
