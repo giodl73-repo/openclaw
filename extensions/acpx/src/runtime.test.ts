@@ -121,8 +121,8 @@ installAcpRuntimeTurnContractSuite({
           promptStarted: scenario.promptStarted,
           events: scenario.events,
           result: scenario.result,
-          cancel: scenario.cancel,
-          closeStream: scenario.closeStream,
+          cancel: (input) => scenario.cancel(input),
+          closeStream: (input) => scenario.closeStream(input),
         },
       ),
     );
