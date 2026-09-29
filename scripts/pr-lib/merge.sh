@@ -602,6 +602,7 @@ merge_run() {
   local MERGE_ADMIN_EVIDENCE="${9:-}" confirmed_admin="${10:-false}" MERGE_PRIOR_CI_PROOF=""
   local MERGE_USE_PRIOR_CI_ADMIN=false
   local MERGE_PRIOR_CI_REST_OBSERVATION=false
+  local MERGE_PRIOR_CI_RECALCULATED=false
   if [ -n "$MERGE_ADMIN_EVIDENCE" ] || [ "$confirmed_admin" = true ]; then
     [ -n "$MERGE_ADMIN_EVIDENCE" ] && [ "$confirmed_admin" = true ] && [ "$auto_merge_requested" = false ] &&
       [ -z "$legacy_directory$refusal_directory" ] && [ "$cancel_auto" = false ] &&
@@ -633,13 +634,13 @@ merge_run() {
       ! printf '%s\n' "$MERGE_OUTCOME_RECORD" | jq -e --arg refusal "$refusal_directory" --arg replacement "$replacement_head" --argjson admin "$MERGE_USE_PRIOR_CI_ADMIN" '
         .phase == "intent" and
         (if $admin then .method == "squash" and
-          (if $replacement != "" then .route == "auto" and .cancellation.state == "confirmed" and .head != $replacement
+          (if $replacement != "" then .route == "auto" and .cancellation.state == "confirmed"
            else .accepted == false and .route == "admin" and .priorCiAdmin.dispatchTransport == "rest" end)
          else (.accepted == false and (.route == "immediate" or ($refusal != "" and .route == "auto" and .method == "squash"))) or
           (.route == "auto" and .cancellation.state == "confirmed") end)
       ' >/dev/null; then
       if [ "$MERGE_USE_PRIOR_CI_ADMIN" = true ]; then
-        merge_outcome_stop "operator admin recovery requires an exact rejected prior-CI intent or a confirmed auto cancellation with an explicit different replacement; no attempt was authorized"
+        merge_outcome_stop "operator admin recovery requires an exact rejected prior-CI intent or a confirmed auto cancellation with an explicit selected head; no attempt was authorized"
       else
         merge_outcome_stop "operator recovery requires the exact unaccepted immediate intent or confirmed auto cancellation; no attempt was authorized"
       fi
@@ -825,7 +826,7 @@ merge_run() {
   fi
 
   local crabbox_final_main_sha="" route=immediate
-  local MERGE_ADMISSION_ACTIVE=true
+  local MERGE_ADMISSION_ACTIVE=true MERGE_PRIOR_CI_OBSERVED_MAIN=""
   local admission_attempt previous_observation=""
   # Only fresh admission waits for calculation; retained intent reconciles immediately.
   # Pin PR/policy facts and each projection as soon as it becomes known.
@@ -1032,9 +1033,10 @@ merge_run() {
     merge_outcome_stable "$pr" || return 1
     verify_prior_ci_admin "$pr" "$PREP_HEAD_SHA" || return 1
     # A later main may reuse local objects, never start another lazy/explicit fetch.
+    MERGE_PRIOR_CI_RECALCULATED=false
     GIT_NO_LAZY_FETCH=1 merge_outcome_stable "$pr" true || return 1
-    if [ "$MERGE_PRIOR_CI_REST_OBSERVATION" = true ]; then
-      # Complete REST snapshots read policy/checks too; revalidate live authority after that work.
+    if [ "$MERGE_PRIOR_CI_REST_OBSERVATION" = true ] || [ "$MERGE_PRIOR_CI_RECALCULATED" = true ]; then
+      # Complete REST reads and delayed recalculation need fresh authority before dispatch.
       verify_prior_ci_admin "$pr" "$PREP_HEAD_SHA" || return 1
     fi
     # No awaited operation may replace the operator's bytes after validation.

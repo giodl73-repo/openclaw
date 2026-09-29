@@ -2952,6 +2952,11 @@ describe("test selector native source facts", () => {
       "😀",
       "\ud83d",
       "\ude00",
+      // Failure links cross between dense ASCII rows and sparse non-ASCII edges.
+      "d😀foo",
+      "中 abc",
+      "😀xyz",
+      "é😀",
       "null\0",
       "aaa",
       "aaaa",
@@ -2970,6 +2975,53 @@ describe("test selector native source facts", () => {
         };
       });
       expect(readTestSelectorSourceFacts(cwd, files, terms, 1024 * 1024)).toEqual(expected);
+    });
+  });
+
+  it("keeps request order across a striped multi-worker source scan", () => {
+    // Enough files for several scan workers; each row must return to its request slot.
+    const rows = Array.from({ length: 600 }, (_, index) => ({
+      file: `f${String(index).padStart(3, "0")}.ts`,
+      dependency: `./dep-${index}.js`,
+      readable: index % 7 !== 3,
+      matched: index % 3 === 0,
+    }));
+    const sources = Object.fromEntries(
+      rows
+        .filter(({ readable }) => readable)
+        .map(({ file, dependency, matched }) => [
+          file,
+          `import "${dependency}";\n${matched ? "// needle\n" : ""}`,
+        ]),
+    );
+    withTinyFileTree(sources, (cwd) => {
+      const files = rows.map(({ file }) => ({ file, parseImports: true }));
+      expect(
+        readTestSelectorSourceFacts(cwd, files, ["needle"], 16 * 1024 * 1024, {
+          matchingOnly: true,
+        }),
+      ).toEqual(
+        rows
+          .filter(({ readable, matched }) => readable && matched)
+          .map(({ file, dependency }) => ({
+            file,
+            imports: [dependency],
+            typeOnlyImports: [],
+            matches: ["needle"],
+            references: ["needle"],
+          })),
+      );
+      expect(readTestSelectorSourceFacts(cwd, files, [], 16 * 1024 * 1024)).toEqual(
+        rows
+          .filter(({ readable }) => readable)
+          .map(({ file, dependency }) => ({
+            file,
+            imports: [dependency],
+            typeOnlyImports: [],
+            matches: [],
+            references: [],
+          })),
+      );
     });
   });
 
