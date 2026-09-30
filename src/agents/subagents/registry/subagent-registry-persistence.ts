@@ -350,10 +350,13 @@ export async function persistSubagentRegistryChangesAsync(
   });
 }
 
-/** Keep the live pointers that identify execution and cancellation owners during staging. */
+/** Keep the live pointers that identify execution, cancellation, and reply owners during staging. */
 export function captureSubagentRunMutationSnapshot(entry: SubagentRunRecord): SubagentRunRecord {
   const snapshot = structuredClone(entry);
   snapshot.execution = entry.execution;
+  if (snapshot.completion && entry.completion?.terminalReply) {
+    snapshot.completion.terminalReply = entry.completion.terminalReply;
+  }
   // An absent optional owner must remain absent for exact preimage comparison.
   if (Object.hasOwn(entry, "killIntent")) {
     snapshot.killIntent = entry.killIntent;

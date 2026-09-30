@@ -4,6 +4,7 @@ import { captureOpenClawStateWorkerContext } from "../../../state/openclaw-state
 import * as stateWorker from "../../../state/openclaw-state-worker-store.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
 import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
+import { readSubagentRunAnnounceResultUsing } from "../announce/subagent-announce-result.js";
 import type { SubagentLifecycleWakeContext } from "./subagent-registry-lifecycle-context.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import {
@@ -30,10 +31,20 @@ it("keeps a known requester wake commit while native staging waits for its ackno
       createdAt: Date.now() - 20,
       endedAt: Date.now() - 10,
       outcome: { status: "ok" },
-      completion: { required: true, resultText: "Retained result" },
+      completion: {
+        required: true,
+        resultText: "Retained result",
+        terminalReply: { disposition: "visible", text: "Retained result" },
+      },
       delivery: { status: "pending" },
       requesterSettleWake: { status: "dispatching", attemptCount: 3, rearmGeneration: 1 },
     });
+    entry.execution.transcriptTarget = {
+      agentId: "main",
+      sessionId: "snapshot-session",
+      sessionKey: entry.childSessionKey,
+      storePath: "snapshot-store",
+    };
     subagentRuns.set(entry.runId, entry);
     const unexpected = (): never => {
       throw new Error("Unexpected lifecycle side effect");
@@ -101,6 +112,33 @@ it("keeps a known requester wake commit while native staging waits for its ackno
     if (!original) {
       throw new Error("Missing original requester wake operation");
     }
+    const terminalReply = entry.completion?.terminalReply;
+    const completion = entry.completion;
+    const execution = entry.execution;
+    const releaseTranscript = createDeferredCore();
+    const findTranscriptEvent = vi.fn(async () => {
+      await releaseTranscript.promise;
+      return {
+        event: {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Complete retained result" }],
+          },
+        },
+      };
+    });
+    const announceRead = readSubagentRunAnnounceResultUsing(entry, {
+      findTranscriptEvent,
+      findSessionTranscriptArchiveEventReadOnly: unexpected,
+      getRuntimeConfig: unexpected,
+      readSubagentSessionEntry: unexpected,
+      resolveAgentIdFromSessionKey: unexpected,
+      resolveSessionStorePathCore: unexpected,
+    }).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
     const ackReached = createDeferredCore();
     const releaseAck = createDeferredCore();
     const execute = stateWorker.runOpenClawStateWorkerOperation;
@@ -153,9 +191,28 @@ it("keeps a known requester wake commit while native staging waits for its ackno
         }),
       ]);
       expect(getPendingWakeCommit(context, entry)).toBe(original);
+      expect(entry.cleanupHandled).toBeUndefined();
+      // The real reader must finish against the original reply while the unrelated write waits.
+      releaseTranscript.resolve();
+      const announcement = await announceRead;
+      if ("error" in announcement) {
+        throw announcement.error;
+      }
+      expect(findTranscriptEvent).toHaveBeenCalledWith(execution.transcriptTarget, {
+        kind: "visible-final",
+        runId: entry.runId,
+      });
+      expect(announcement.value.text).toBe("Complete retained result");
+      expect(announcement.value.isCurrent()).toBe(true);
+      expect(entry.completion?.terminalReply).toBe(terminalReply);
+      expect(entry.completion).not.toBe(completion);
+      expect(entry.execution).toBe(execution);
       releaseAck.resolve();
       expect(await publication).toEqual({ outcome: "committed", publication: "published" });
       expect(getPendingWakeCommit(context, entry)).toBe(original);
+      expect(entry.cleanupHandled).toBe(true);
+      expect(entry.completion?.terminalReply).toBe(terminalReply);
+      expect(announcement.value.isCurrent()).toBe(true);
       releaseWake.resolve();
       await pendingWake;
       expect(getPendingWakeCommit(context, entry)).toBe(original);
@@ -164,10 +221,13 @@ it("keeps a known requester wake commit while native staging waits for its ackno
       await retryPendingWakeCommit(context, original);
       expect(commit).toHaveBeenCalledTimes(2);
       expect(getPendingWakeCommit(context, entry)).toBeUndefined();
+      entry.completion = { required: true, terminalReply: { disposition: "silent" } };
+      expect(announcement.value.isCurrent()).toBe(false);
     } finally {
+      releaseTranscript.resolve();
       releaseAck.resolve();
       releaseWake.resolve();
-      await Promise.all([joinedPublication, pendingWake]);
+      await Promise.all([joinedPublication, pendingWake, announceRead]);
       held.mockRestore();
       vi.useRealTimers();
       subagentRuns.delete(entry.runId);

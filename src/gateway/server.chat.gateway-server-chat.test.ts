@@ -1674,6 +1674,7 @@ describe("gateway server chat", () => {
           idempotencyKey: "idem-write-scope-verbose-no-persist",
         });
         expect(sendRes.ok).toBe(true);
+        await requestExecution.waitForCompletion("idem-write-scope-verbose-no-persist");
 
         const waitRes = await rpcReq(scopedWs, "agent.wait", {
           runId: "idem-write-scope-verbose-no-persist",
