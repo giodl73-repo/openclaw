@@ -1029,6 +1029,58 @@ describe("msteams monitor handler authz", () => {
     expect(ctx.BodyForAgent).toBe("Current message");
   });
 
+  it("observes allowed and mismatched quotes at final agent context", async () => {
+    const dispatchFinalContext = async (quoteSenderId: string) => {
+      mockThreadContext({
+        parent: createThreadMessage({
+          id: "parent-msg",
+          user: { id: "alice-aad", displayName: "Alice" },
+          content: "Allowlisted thread parent",
+        }),
+      });
+      const { deps } = createDeps(createThreadAllowlistConfig({ groupAllowFrom: ["alice-aad"] }));
+      const handler = createMSTeamsMessageHandler(deps);
+      await handler(
+        createChannelThreadActivity({
+          text: "<at>Bot</at> ask <at>Bob</at>\n\nforwarded body",
+          attachments: [
+            {
+              contentType: "text/html",
+              content:
+                '<blockquote itemtype="http://schema.skype.com/Forward">' +
+                "<p>forwarded body</p></blockquote>",
+            },
+          ],
+          entities: [
+            { type: "mention", text: "<at>Bot</at>", mentioned: { id: "bot-id", name: "Bot" } },
+            { type: "mention", text: "<at>Bob</at>", mentioned: { id: "bob-id", name: "Bob" } },
+            {
+              type: "quotedReply",
+              quotedReply: {
+                senderId: quoteSenderId,
+                senderName: quoteSenderId === "alice-aad" ? "Alice" : "Mallory",
+                preview: "Sanitized quoted preview",
+              },
+            },
+          ],
+        }),
+      );
+      return recordFromMockCall(firstSettledDispatch().ctxPayload);
+    };
+
+    const allowed = await dispatchFinalContext("alice-aad");
+    expect(allowed.BodyForAgent).toBe(
+      "ask @Bob\n\n[Forwarded message]\nforwarded body\n[/Forwarded message]",
+    );
+    expect(allowed.ReplyToBody).toBe("Sanitized quoted preview");
+    expect(allowed.ReplyToSender).toBe("Alice");
+
+    const mismatched = await dispatchFinalContext("mallory-aad");
+    expect(mismatched.BodyForAgent).toBe(allowed.BodyForAgent);
+    expect(mismatched.ReplyToBody).toBeUndefined();
+    expect(mismatched.ReplyToSender).toBeUndefined();
+  });
+
   it("does not let an allowed entity authorize a body from another Reply block", async () => {
     mockThreadContext({
       parent: createThreadMessage({
