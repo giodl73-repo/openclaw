@@ -4,6 +4,10 @@ import path from "node:path";
 import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
 import { getChildLogger } from "../logging/logger.js";
 import { formatErrorMessage } from "./errors.js";
+import {
+  isPrivateDirectoryCreationRefused,
+  markPrivateDirectoryCreationRefused,
+} from "./private-directory-creation.js";
 import { markSqliteInspectionOperation } from "./sqlite-error-diagnostics.js";
 import {
   createPrivateSqliteTempDirectorySync,
@@ -191,7 +195,10 @@ export function sqliteSnapshotStagingError(
     ? "free disk space/quota"
     : "check filesystem health and write permissions";
   const message = `${cause instanceof Error ? cause.message : String(cause)}${sqliteErrcode !== undefined ? ` (SQLite errcode=${sqliteErrcode})` : ""}; snapshot staging root ${allocation ? tempDir : path.dirname(tempDir)}: ${guidance} or set XDG_CACHE_HOME to a writable filesystem`;
-  return new Error(message, { cause });
+  const error = new Error(message, { cause });
+  return isPrivateDirectoryCreationRefused(cause)
+    ? markPrivateDirectoryCreationRefused(error)
+    : error;
 }
 
 export async function createSqliteSnapshotStagingDirectory(
@@ -276,7 +283,13 @@ export function createSqliteSnapshotStagingTokenSync(
   // A shared parent token fences admission until the child's own token is held.
   // No mkdir of root: a late orphan must abort if reclamation already won.
   const parentDirectory = stagingParent(root);
-  const parent = parentDirectory ? snapshotToken(parentDirectory, "read") : undefined;
+  let parent: SnapshotToken | undefined;
+  try {
+    parent = parentDirectory ? snapshotToken(parentDirectory, "read") : undefined;
+  } catch (error) {
+    // Parent admission finishes before any new staging directory is attempted.
+    throw markPrivateDirectoryCreationRefused(error);
+  }
   let directory: string | undefined;
   try {
     // A selected installation may launch a worker without token admission.

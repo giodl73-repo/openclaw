@@ -139,6 +139,7 @@ scripts/lib/managed-windows-job-launcher.mts
 scripts/lib/managed-windows-job.mts
 scripts/lib/merge-head-diff-base.mjs
 scripts/lib/native-session-catalogs.json
+scripts/lib/npm-json-output.mts
 scripts/lib/numeric-options.mjs
 scripts/lib/official-external-channel-catalog.json
 scripts/lib/official-external-plugin-catalog.json
@@ -411,7 +412,6 @@ src/config/io.observe-recovery.ts
 src/config/io.observe-state.ts
 src/config/io.observe-suspicious.ts
 src/config/io.observe.ts
-src/config/io.owner-display-secret.ts
 src/config/io.plugin-metadata.ts
 src/config/io.read-helpers.ts
 src/config/io.recovery.ts
@@ -740,6 +740,7 @@ src/infra/path-guards.ts
 src/infra/plain-object.ts
 src/infra/ports-lsof.ts
 src/infra/ports-netstat.ts
+src/infra/private-directory-creation.ts
 src/infra/private-mode.ts
 src/infra/process-env.ts
 src/infra/prototype-keys.ts
