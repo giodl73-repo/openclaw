@@ -30,6 +30,9 @@ scenario:
   execution:
     kind: flow
     channel: telegram
+    config:
+      requiredProviderMode: live-frontier
+      requiredChannelDriver: live
     retryCount: 0
     suiteIsolation: isolated
     isolationReason: Creates and removes a current-session automation in an isolated Gateway using a leased Telegram Test Server bot.
