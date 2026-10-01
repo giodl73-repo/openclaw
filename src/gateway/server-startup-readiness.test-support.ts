@@ -66,7 +66,7 @@ export function expectCoreAgentDatabaseReadiness(
       });
       recordAgentDatabaseAdmissions([refusal], { source: "startup", env: state.env });
       const log = { info: vi.fn() };
-      logGatewayReady({ getReadiness, log });
+      void logGatewayReady({ getReadiness, log });
       expect(log.info).toHaveBeenCalledTimes(agentId === "worker" ? 1 : 0);
       expect(getReadiness()).toMatchObject(
         agentId === "worker"

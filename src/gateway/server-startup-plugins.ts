@@ -340,6 +340,7 @@ export async function loadGatewayStartupPluginRuntime(params: {
     return {
       pluginRegistry: currentPluginRegistry,
       gatewayMethods: params.baseMethods,
+      resolvedConfig: params.cfg,
     };
   }
   const loaded = prepareGatewayPluginLoad({
