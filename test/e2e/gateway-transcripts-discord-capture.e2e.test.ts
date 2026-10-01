@@ -15,6 +15,7 @@ import type {
 import type { OpenClawConfig } from "../../src/config/types.openclaw.js";
 import { buildMockOpenAiResponsesProvider } from "../../src/gateway/test-openai-responses-model.js";
 import type { OpenClawPluginApi } from "../../src/plugins/types.js";
+import { closeSkillsWatchers } from "../../src/skills/runtime/refresh.js";
 import { resolveRelativeBundledPluginPublicModuleId } from "../../src/test-utils/bundled-plugin-public-surface.js";
 import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../../src/test-utils/env.js";
 import { withIsolatedTestHome } from "../../test/test-env.js";
@@ -919,6 +920,7 @@ describe("Gateway admitted Discord transcript capture", () => {
               await gateway.server.close({ reason: "synthetic transcript capture cleanup" });
             }
           }
+          await closeSkillsWatchers(true);
         } finally {
           providerServer.closeAllConnections();
           await new Promise<void>((resolve) => {
