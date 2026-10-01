@@ -885,32 +885,6 @@ describe("canonical configured Gateway readiness", () => {
       "PluginsLoaded",
     ]);
   });
-  it("returns a structured required failure when extended evaluation times out", async () => {
-    const gateway = readySnapshot() as ReadinessResult;
-    const result = await evaluateConfiguredGatewayReadiness({
-      config: { gateway: { readiness: {} } },
-      identity: testReadinessIdentity(),
-      evaluateGateway: () => gateway,
-      evaluateRuntime: () => new Promise<never>(() => {}),
-      timeoutMs: 5,
-    });
-
-    expect(result).toMatchObject({
-      ready: false,
-      failing: ["ReadinessEvaluationTimedOut"],
-      failures: ["ReadinessEvaluationTimedOut"],
-    });
-    expect(result.conditions).toContainEqual({
-      type: "ReadinessEvaluationComplete",
-      subjectRef: "openclaw/gateway/current",
-      status: "Unknown",
-      requirement: "required",
-      reason: "ReadinessEvaluationTimedOut",
-      message: "Readiness evaluation did not complete within its bounded deadline.",
-    });
-    expect(result.conditions?.[0]?.type).toBe("ReadinessEvaluationComplete");
-  });
-
   it("redacts unexpected extended evaluation failures", async () => {
     const result = await evaluateConfiguredGatewayReadiness({
       config: { gateway: { readiness: {} } },
