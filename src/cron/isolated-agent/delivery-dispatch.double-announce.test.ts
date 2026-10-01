@@ -2117,6 +2117,68 @@ describe("dispatchCronDelivery", () => {
     });
   });
 
+  it("mirrors implicit delivery into the exact session that supplied its stored route", async () => {
+    const sourceSessionKey = "agent:main:thread:42";
+    mockResolvedOutboundRoute({
+      sessionKey: "agent:main:telegram:direct:123456",
+      baseSessionKey: "agent:main:telegram:direct:123456",
+    });
+    const params = makeBaseParams({
+      synthesizedText: "Implicit named-session cron update.",
+      resolvedDeliveryMode: "implicit",
+    });
+    params.job.sessionKey = sourceSessionKey;
+    params.resolvedDelivery = {
+      ...makeResolvedDelivery({ mode: "implicit" }),
+      sourceSessionKey,
+    };
+
+    const state = await dispatchCronDelivery(params);
+
+    expect(state.disposition).toBeUndefined();
+    expect(state.delivered).toBe(true);
+    expect(resolveOutboundSessionRoute).not.toHaveBeenCalled();
+    expect(appendAssistantMessageToSessionTranscript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: sourceSessionKey,
+        text: "Implicit named-session cron update.",
+      }),
+    );
+  });
+
+  it.each(["agent:other:thread:42", "AGENT:MAIN:THREAD:42", "agent:main::thread:42"])(
+    "falls back from untrusted source-session provenance %s",
+    async (sourceSessionKey) => {
+      mockResolvedOutboundRoute({
+        sessionKey: "agent:main:telegram:direct:resolved-route",
+        baseSessionKey: "agent:main:telegram:direct:resolved-route",
+      });
+      const params = makeBaseParams({
+        synthesizedText: "Untrusted provenance cron update.",
+        resolvedDeliveryMode: "implicit",
+      });
+      params.resolvedDelivery = makeResolvedDelivery({
+        mode: "implicit",
+        sourceSessionKey,
+      });
+
+      const state = await dispatchCronDelivery(params);
+
+      expect(state.disposition).toBeUndefined();
+      expect(state.delivered).toBe(true);
+      expect(resolveOutboundSessionRoute).toHaveBeenCalledTimes(1);
+      expect(appendAssistantMessageToSessionTranscript).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: "agent:main:telegram:direct:resolved-route",
+          text: "Untrusted provenance cron update.",
+        }),
+      );
+      expect(appendAssistantMessageToSessionTranscript).not.toHaveBeenCalledWith(
+        expect.objectContaining({ sessionKey: sourceSessionKey }),
+      );
+    },
+  );
+
   it.each([
     ["structured silent cleanup", SILENT_REPLY_TOKEN, true, true],
     ["trailing text reply", "Nothing actionable found today.\n\nNO_REPLY", false, false],
