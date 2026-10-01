@@ -18,6 +18,9 @@ import {
   startTestGatewayServer,
 } from "./test-helpers.server.js";
 
+// The shared server helper mocks plugin loading; this suite exercises a real fixture plugin.
+vi.doUnmock("../plugins/loader.js");
+
 installGatewayTestHooks({ scope: "suite" });
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 

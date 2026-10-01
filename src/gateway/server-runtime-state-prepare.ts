@@ -500,7 +500,9 @@ export async function prepareGatewayKernelState(params: {
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   const readinessIdentity = createGatewayReadinessIdentity();
-  const resolveSelectedReadiness = createSelectedReadinessResolver();
+  const resolveSelectedReadiness = createSelectedReadinessResolver({
+    coreSubjects: readinessIdentity.subjects,
+  });
   const evaluateRuntimeReadiness = async () => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const snapshot = pluginRuntime.readinessSnapshot;

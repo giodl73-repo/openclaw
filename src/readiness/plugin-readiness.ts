@@ -154,6 +154,7 @@ export function createPluginReadinessResolver(options?: {
   timeoutMs?: number;
   cacheTtlMs?: number;
   now?: () => number;
+  coreSubjects?: readonly ReadinessSubject[];
 }) {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const cacheTtlMs = options?.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
@@ -198,6 +199,7 @@ export function createPluginReadinessResolver(options?: {
         subjectCollection = createPluginReadinessSubjectCollection({
           pluginId: registration.pluginId,
           criterionId: registration.criterion.id,
+          coreSubjects: options?.coreSubjects,
         });
       } catch {
         return Promise.resolve({
