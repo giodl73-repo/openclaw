@@ -129,6 +129,7 @@ function buildReadinessEvaluationFailure(
     evaluatedAtMs: Date.now(),
     identity: reconcileReadinessIdentity({
       base: identity,
+      // SAFETY: this condition sets subjectRef to identity.producerRef above.
       references: [condition as ReadinessCondition & { subjectRef: string }],
     }),
     ready: false,
@@ -523,6 +524,7 @@ function mergeReadinessResults(
     identity: reconcileReadinessIdentity({
       base: identity,
       subjects: runtime.identity.subjects,
+      // SAFETY: the loop above rejects every condition without a subjectRef.
       references: conditions as Array<ReadinessCondition & { subjectRef: string }>,
     }),
     ready: failures.length === 0,
@@ -550,6 +552,7 @@ function projectLegacyGatewayReadiness(
     evaluatedAtMs: Date.now(),
     identity: reconcileReadinessIdentity({
       base: identity,
+      // SAFETY: every projected condition receives the gateway fallback subjectRef above.
       references: conditions as Array<ReadinessCondition & { subjectRef: string }>,
     }),
     conditions,
