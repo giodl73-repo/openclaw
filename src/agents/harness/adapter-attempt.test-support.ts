@@ -1,5 +1,7 @@
+import path from "node:path";
 import { expect, vi } from "vitest";
 import type { TranscriptEntryAnchor } from "../../config/sessions/transcript-entry-anchor.js";
+import * as agentEvents from "../../infra/agent-events.js";
 import type { AssistantMessage } from "../../llm/types.js";
 import type { appendSessionTranscriptMessageByIdentityStrict } from "../../plugin-sdk/session-transcript-runtime.js";
 import type { UserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.types.js";
@@ -23,8 +25,6 @@ const mocks = vi.hoisted(() => ({
 
 export { mocks };
 
-vi.mock("../../config/sessions/paths.js", () => ({ resolveStorePath: () => "/test/store" }));
-vi.mock("../../infra/agent-events.js", () => ({ emitAgentEvent: mocks.emitEvent }));
 // This module defines the strict append operation; do not mock the harness SDK barrel.
 vi.mock("../../plugin-sdk/session-transcript-runtime.js", () => ({
   appendSessionTranscriptMessageByIdentityStrict: mocks.append,
@@ -49,7 +49,7 @@ export const terminalAnchor: TranscriptEntryAnchor = {
   agentId: "main",
   sessionId: "session-1",
   sessionKey: "agent:main:test",
-  storePath: "/test/store",
+  storePath: path.resolve("/test/store"),
   generation: "generation-1",
   entryId: "assistant-1",
   rawSeq: 3,
@@ -118,6 +118,7 @@ export function createHostFixture() {
     onAttemptTimeout: vi.fn(),
   };
   const input: AgentHarnessAttemptParamsV2 = {
+    config: { session: { store: terminalAnchor.storePath } },
     agentId: "main",
     sessionId: terminalAnchor.sessionId,
     sessionKey: terminalAnchor.sessionKey,
@@ -207,6 +208,7 @@ export function expectReleased(fixture: ReturnType<typeof createHostFixture>) {
 
 export function resetHostFixture() {
   vi.resetAllMocks();
+  vi.spyOn(agentEvents, "emitAgentEvent").mockImplementation(mocks.emitEvent);
   mocks.buildPrompt.mockResolvedValue({
     prompt: "hooked hello",
     developerInstructions: "instructions",

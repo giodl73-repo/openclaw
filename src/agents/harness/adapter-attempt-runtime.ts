@@ -1,4 +1,4 @@
-import { resolveStorePath } from "../../config/sessions/paths.js";
+import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { appendSessionTranscriptMessageByIdentityStrict } from "../../plugin-sdk/session-transcript-runtime.js";
 import { resolveBootstrapContextForRun } from "../bootstrap-files.js";
@@ -46,7 +46,7 @@ export async function runAgentHarnessAdapterAttempt(
     agentId,
     sessionKey,
     sessionId: input.sessionId,
-    storePath: resolveStorePath(input.config?.session?.store, { agentId }),
+    storePath: resolveSessionStorePathCore(input.config?.session?.store, { agentId }),
   };
   let text = "";
   let reasoning = "";
