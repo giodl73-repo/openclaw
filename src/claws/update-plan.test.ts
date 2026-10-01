@@ -347,7 +347,7 @@ describe("buildClawUpdatePlan", () => {
     expect(withTarget.targetAgent).toMatchObject({
       id: "worker",
       workspace: current.addPlan.agent.workspace,
-      tools: { profile: "full", allow: ["read"] },
+      tools: { profile: "full", allow: ["read", "skills_read"] },
     });
     expect(withTarget.targetAgent?.tools).not.toEqual(params.targetOpenClawProfile?.agent.tools);
     const { planIntegrity, ...authenticatedPlan } = plan;

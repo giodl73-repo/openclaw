@@ -87,22 +87,25 @@ async function respondWithLifecycleResult(
 }
 
 function projectResourceStatus(record: ClawStatusRecord): ClawResourceStatus[] {
+  // Adopted removal releases ownership without deleting the existing agent or files.
+  const adopted = record.install.agentOrigin === "adopted";
+  const origin: ClawResourceStatus["origin"] = adopted ? "pre-existing" : "claw-introduced";
   return [
     {
       kind: "agent",
       id: record.install.agentId,
       state: record.agentState,
       relationship: "managed",
-      origin: "claw-introduced",
-      independentOwner: false,
+      origin,
+      independentOwner: adopted,
     },
     ...record.workspaceFiles.map((file) => ({
       kind: "workspace-file" as const,
       id: file.path,
       state: file.state,
       relationship: "managed" as const,
-      origin: "claw-introduced" as const,
-      independentOwner: false,
+      origin,
+      independentOwner: adopted,
     })),
     ...record.packages.map((pkg) => ({
       kind: pkg.kind,

@@ -94,7 +94,7 @@ describe("Claw gateway projections", () => {
     ).toBe(false);
   });
 
-  it("keeps inventory and ownership while omitting secret-bearing lifecycle fields", () => {
+  it("keeps inventory and ownership while omitting secret-bearing lifecycle fields", async () => {
     const record = {
       install: {
         claw: {
@@ -174,6 +174,59 @@ describe("Claw gateway projections", () => {
     expect(serialized).not.toContain("/secret/");
     expect(serialized).not.toContain("sha256:");
     expect(serialized).not.toContain("private cron prompt");
+
+    vi.stubEnv("OPENCLAW_EXPERIMENTAL_CLAWS", "1");
+    for (const [agentOrigin, origin, independentOwner] of [
+      ["created", "claw-introduced", false],
+      ["adopted", "pre-existing", true],
+    ] as const) {
+      record.install.agentOrigin = agentOrigin;
+      reads.inventory.mockResolvedValueOnce({
+        installs: [record.install],
+        workspaceFiles: record.workspaceFiles,
+        packages: record.packages,
+        mcpServers: record.mcpServers,
+        cronJobs: record.cronJobs,
+      });
+      reads.status.mockResolvedValueOnce({ records: [record] });
+      const respond = vi.fn();
+      await clawsHandlers["claws.status"]!({
+        req: { type: "req", id: `status-${agentOrigin}`, method: "claws.status" },
+        params: { target: "analyst" },
+        respond,
+        context: { getRuntimeConfig: () => ({}) } as never,
+        client: null,
+        isWebchatConnect: () => false,
+      });
+      expect(respond).toHaveBeenCalledExactlyOnceWith(true, {
+        ...result,
+        records: [
+          {
+            ...result.records[0],
+            resources: [
+              {
+                kind: "agent",
+                id: "analyst",
+                state: "present",
+                relationship: "managed",
+                origin,
+                independentOwner,
+              },
+              {
+                kind: "workspace-file",
+                id: "SOUL.md",
+                state: "unchanged",
+                relationship: "managed",
+                origin,
+                independentOwner,
+              },
+              ...result.records[0]!.resources.slice(2),
+            ],
+          },
+        ],
+      });
+      expect(validateClawsStatusResult(respond.mock.calls[0]?.[1])).toBe(true);
+    }
 
     record.packages[0]!.extensionCompatibility = {
       state: "drifted",
