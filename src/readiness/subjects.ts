@@ -10,8 +10,6 @@ export const CORE_READINESS_SUBJECT_REFS = {
   plugins: "openclaw/plugins/active",
   workspace: "openclaw/workspace/default",
 } as const;
-const OPENCLAW_INSTANCE_ID_ENV = "OPENCLAW_INSTANCE_ID";
-const OPENCLAW_HOST_INSTANCE_ID = process.env[OPENCLAW_INSTANCE_ID_ENV]?.trim();
 
 const SUBJECT_REF_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,191}$/;
 const SUBJECT_KIND_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/;
@@ -66,16 +64,6 @@ function isValidOpaqueIdentity(value: string | undefined): boolean {
 
 function fingerprintIdentity(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
-
-function resolveHostInstanceId(params?: {
-  hostInstanceId?: string;
-  env?: NodeJS.ProcessEnv;
-}): string | undefined {
-  return (
-    params?.hostInstanceId ??
-    (params?.env ? params.env[OPENCLAW_INSTANCE_ID_ENV] : OPENCLAW_HOST_INSTANCE_ID)
-  );
 }
 
 function mergeCompatibleSubjects(
@@ -155,30 +143,27 @@ function createCoreSubjects(params?: {
 export function createGatewayReadinessIdentity(params?: {
   hostInstanceId?: string;
   createGatewayInstanceId?: () => string;
-  env?: NodeJS.ProcessEnv;
 }): ReadinessIdentity {
-  const hostInstanceId = resolveHostInstanceId(params);
   const gatewayInstanceId = (params?.createGatewayInstanceId ?? randomUUID)();
   return {
     producerRef: CORE_READINESS_SUBJECT_REFS.gateway,
-    subjects: createCoreSubjects({ gatewayInstanceId, hostInstanceId }),
+    subjects: createCoreSubjects({ gatewayInstanceId, hostInstanceId: params?.hostInstanceId }),
   };
 }
 
 export function createProcessReadinessIdentity(params?: {
   hostInstanceId?: string;
-  env?: NodeJS.ProcessEnv;
 }): ReadinessIdentity {
-  const hostInstanceId = resolveHostInstanceId(params);
   return {
     producerRef: CORE_READINESS_SUBJECT_REFS.process,
-    subjects: createCoreSubjects({ hostInstanceId }),
+    subjects: createCoreSubjects({ hostInstanceId: params?.hostInstanceId }),
   };
 }
 
 export function createPluginReadinessSubjectCollection(params: {
   pluginId: string;
   criterionId: string;
+  coreSubjects?: readonly ReadinessSubject[];
 }): PluginSubjectCollection {
   const pluginId = normalizePluginSubjectPart(params.pluginId);
   const criterionId = normalizePluginSubjectPart(params.criterionId);
@@ -263,7 +248,9 @@ export function createPluginReadinessSubjectCollection(params: {
       try {
         assertNoParentCycles(
           new Map([
-            ...createCoreSubjects().map((subject) => [subject.ref, subject] as const),
+            ...(params.coreSubjects ?? createCoreSubjects()).map(
+              (subject) => [subject.ref, subject] as const,
+            ),
             ...subjects.entries(),
           ]),
         );

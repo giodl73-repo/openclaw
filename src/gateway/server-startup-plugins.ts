@@ -402,3 +402,10 @@ export async function loadGatewayStartupPluginRuntime(params: {
     throw error;
   }
 }
+
+export type GatewayStartupPluginRuntime = {
+  pluginRegistry: PluginRegistry;
+  gatewayMethods: string[];
+  resolvedConfig?: OpenClawConfig;
+  retireGatewayRuntimeBindings?: () => void;
+};

@@ -25,15 +25,15 @@ describe("readiness subjects", () => {
 
   it("keeps host, process, and Gateway renewal scopes separate", () => {
     const first = createGatewayReadinessIdentity({
-      env: { OPENCLAW_INSTANCE_ID: "pod-7/restart-2" },
+      hostInstanceId: "pod-7/restart-2",
       createGatewayInstanceId: () => "gateway-1",
     });
     const second = createGatewayReadinessIdentity({
-      env: { OPENCLAW_INSTANCE_ID: "pod-7/restart-2" },
+      hostInstanceId: "pod-7/restart-2",
       createGatewayInstanceId: () => "gateway-2",
     });
     const replacement = createGatewayReadinessIdentity({
-      env: { OPENCLAW_INSTANCE_ID: "pod-8/restart-1" },
+      hostInstanceId: "pod-8/restart-1",
       createGatewayInstanceId: () => "gateway-3",
     });
 
@@ -178,6 +178,25 @@ describe("readiness subjects", () => {
     expect(collection.validateReferences(child)).toBe(false);
     collection.collector.declare({ kind: "backend", key: "primary" });
     expect(collection.validateReferences(child)).toBe(true);
+  });
+
+  it("validates plugin subjects against the active host-instance identity", () => {
+    const identity = createGatewayReadinessIdentity({
+      hostInstanceId: "pod-7/restart-2",
+      createGatewayInstanceId: () => "gateway-1",
+    });
+    const collection = createPluginReadinessSubjectCollection({
+      pluginId: "storage",
+      criterionId: "backend",
+      coreSubjects: identity.subjects,
+    });
+    const backend = collection.collector.declare({
+      kind: "backend",
+      key: "primary",
+      parentRef: CORE_READINESS_SUBJECT_REFS.hostInstance,
+    });
+
+    expect(collection.validateReferences(backend)).toBe(true);
   });
 
   it("enriches a core placeholder with compatible owner identity", () => {

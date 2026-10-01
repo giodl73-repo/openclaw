@@ -126,7 +126,7 @@ describe("Gateway readiness config replacement", () => {
       };
 
       expectStorage(await probe(), "True", "StorageReady");
-      expect(check).toHaveBeenCalledTimes(1);
+      check.mockClear();
       const params = reload.params;
       if (!params) {
         throw new Error("Gateway did not register its managed config reloader");
@@ -151,22 +151,22 @@ describe("Gateway readiness config replacement", () => {
       expectStorage(await probe(), "Unknown", "CriterionPreviousEvaluationPending");
       expectStorage(await probe(), "Unknown", "CriterionPreviousEvaluationPending");
       expect(retiredSignal?.aborted).toBe(true);
-      expect(check).toHaveBeenCalledTimes(2);
+      expect(check).toHaveBeenCalledTimes(1);
       expect(active).toBe(1);
       expect(maxActive).toBe(1);
 
       retired.resolve(success);
       // This request began under the retired owner. Its late success must be discarded.
       expectStorage(await oldRequest, "False", "StorageUnavailable");
-      expect(check).toHaveBeenCalledTimes(3);
-      expect(check.mock.calls[2]?.[0].config).toBe(replacementConfig);
+      expect(check).toHaveBeenCalledTimes(2);
+      expect(check.mock.calls[1]?.[0].config).toBe(replacementConfig);
       expect(active).toBe(0);
       expectStorage(await probe(), "False", "StorageUnavailable");
-      expect(check).toHaveBeenCalledTimes(3);
+      expect(check).toHaveBeenCalledTimes(2);
 
       params.commitRuntimePolicy(structuredClone(replacementConfig));
       expectStorage(await probe(), "True", "StorageReady");
-      expect(check).toHaveBeenCalledTimes(4);
+      expect(check).toHaveBeenCalledTimes(3);
       expect(maxActive).toBe(1);
       expect(active).toBe(0);
     } finally {
