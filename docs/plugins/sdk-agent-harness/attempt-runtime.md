@@ -52,6 +52,17 @@ settled-turn finalization, and exact native tool-effect accounting remain outsid
 this ordinary-turn contract. A second engine must establish which parts really
 generalize before this becomes a supported SDK contract.
 
+Qualification has three distinct layers: the reusable ACP turn suite checks the
+runtime boundary, the host tests check orchestration, and a composition test must
+join the actual ACP adapter and stream consumer to that executor. Controlled
+native turns do not qualify a real engine, process cleanup, or packaged behavior.
+
+A live check must select an existing native ACP runtime, such as `acp-opencode`,
+and verify the recorded runtime identity. The ACP conversation-bind smoke and
+the native `codex` app-server smoke use different execution paths; neither alone
+proves this extraction. Use an isolated session to check streaming, follow-up
+continuity, approval denial, cancellation, and recovery after a native failure.
+
 ## Guarded active-run injection
 
 Backends that accept source-bound controls advertise `messageInjectionV2` on
