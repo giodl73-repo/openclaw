@@ -9,7 +9,11 @@ import { digestClawValue } from "./digest.js";
 import { readClawInventory } from "./inventory-read.js";
 import { persistClawPackageRef } from "./provenance.js";
 import { makeProvenancePlan, stateEnv } from "./provenance.test-helpers.js";
-import { persistClawInstallRecordAsync, withClawMutationGuard } from "./state-write.js";
+import {
+  persistClawInstallRecordAsync,
+  updateClawInstallRecordAsync,
+  withClawMutationGuard,
+} from "./state-write.js";
 
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
   afterEach(async () => {
@@ -71,20 +75,44 @@ describe("Claw worker inventory", () => {
     },
   );
 
-  it("reads existing provenance through the canonical read worker", async () => {
-    const root = tempDirs.make("claw-inventory-worker-");
-    const { plan } = await makeProvenancePlan(root, { schemaVersion: 1, agent: { id: "worker" } });
-    const env = stateEnv(root);
-    const record = await persistClawInstallRecordAsync(plan, { env, nowMs: 123 });
-    const inventory = await readClawInventory({ env });
-    expect(inventory).toEqual({
-      installs: [record],
-      packages: [],
-      workspaceFiles: [],
-      mcpServers: [],
-      cronJobs: [],
-    });
-  });
+  it.each(["created", "adopted"] as const)(
+    "preserves %s agent ownership and config digest through worker writes and inventory",
+    async (agentOrigin) => {
+      const root = tempDirs.make("claw-inventory-worker-");
+      const { plan } = await makeProvenancePlan(root, {
+        schemaVersion: 1,
+        agent: { id: "worker" },
+      });
+      const env = stateEnv(root);
+      const record = await persistClawInstallRecordAsync(plan, { env, nowMs: 123, agentOrigin });
+      expect(record.agentOrigin).toBe(agentOrigin);
+      expect(record.schemaVersion).toBe(
+        agentOrigin === "adopted"
+          ? "openclaw.clawInstallRecord.v3"
+          : "openclaw.clawInstallRecord.v2",
+      );
+      const inventory = await readClawInventory({ env });
+      expect(inventory).toEqual({
+        installs: [record],
+        packages: [],
+        workspaceFiles: [],
+        mcpServers: [],
+        cronJobs: [],
+      });
+      const agentConfigDigest = digestClawValue({ inheritedSetting: "synthetic" });
+      const updated = await updateClawInstallRecordAsync(plan, {
+        env,
+        nowMs: 456,
+        agentConfigDigest,
+      });
+      expect(updated).toMatchObject({
+        agentOrigin,
+        schemaVersion: record.schemaVersion,
+        agentConfigDigest,
+      });
+      expect((await readClawInventory({ env })).installs).toEqual([updated]);
+    },
+  );
 
   it("preserves populated extension provenance through the inventory worker", async () => {
     const root = tempDirs.make("claw-inventory-extension-");

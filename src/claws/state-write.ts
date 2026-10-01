@@ -65,6 +65,7 @@ export async function persistClawInstallRecordAsync(
         expectedExistingRecord: options.expectedExistingRecord,
         expectedExistingPlan: options.expectedExistingPlan,
         deferLegacyPlanUpgrade: options.deferLegacyPlanUpgrade,
+        agentOrigin: options.agentOrigin,
       },
     },
   });
@@ -84,7 +85,12 @@ export async function updateClawInstallRecordAsync(
     type: "claws.state.updateClawInstallRecord",
     input: {
       args: [arg0],
-      options: { status: options.status, nowMs: options.nowMs, expectedClaw: options.expectedClaw },
+      options: {
+        status: options.status,
+        nowMs: options.nowMs,
+        expectedClaw: options.expectedClaw,
+        agentConfigDigest: options.agentConfigDigest,
+      },
     },
   });
 }
