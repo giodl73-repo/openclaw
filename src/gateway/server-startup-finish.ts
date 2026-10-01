@@ -300,8 +300,12 @@ export async function finishGatewayStartup(params: {
           },
           onStartupPluginsLoaded: async (loaded) => {
             const activationCleanup: Promise<void>[] = [];
-            const prepared = await prepareAttachedPluginRuntime(loaded, (completion) =>
-              activationCleanup.push(completion),
+            const prepared = await prepareAttachedPluginRuntime(
+              {
+                ...loaded,
+                resolvedConfig: loaded.resolvedConfig ?? gatewayPluginConfigAtStart,
+              },
+              (completion) => activationCleanup.push(completion),
             );
             try {
               if (
@@ -396,10 +400,10 @@ export async function finishGatewayStartup(params: {
     ...collectGatewayProcessMemoryUsageMb(),
     ...(minimalTestGateway ? [] : await collectGatewayWorkerPoolMetrics()),
   ]);
-  if (getReadiness().ready) {
+  if ((await getReadiness()).ready) {
     startupTrace.mark("ready");
     if (sidecarStartup === "defer") {
-      logGatewayReady({ getReadiness, log });
+      await logGatewayReady({ getReadiness, log });
     }
   }
   finishGatewayRestartTrace("restart.ready", collectGatewayProcessMemoryUsageMb());
@@ -592,6 +596,7 @@ export async function finishGatewayStartup(params: {
       nodeReapprovalCoordinator.updateConfig(rateLimit);
       terminalLaunchPolicy.commitConfig();
       workerEnvironmentService?.schedulePreparedRefill();
+      pluginRuntime.readinessSnapshot = { config: nextConfig, registry: pluginRuntime.registry };
     },
     acceptTerminalConfig: terminalLaunchPolicy.acceptConfig,
     channelManager,
