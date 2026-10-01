@@ -120,6 +120,7 @@ export class ClawsPage extends OpenClawLightDomElement {
       if (!status.records.some((record) => record.agentId === this.selected)) {
         this.selected = null;
       }
+      this.loading = false;
       const doctor = await scope.client.request("claws.doctor", {});
       if (!this.gateway.isCurrent(scope) || generation !== this.readGeneration) {
         return;

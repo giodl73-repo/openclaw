@@ -649,6 +649,19 @@ describe("Claws Plugins tab", () => {
     await click("Confirm changes");
     expect(page.querySelector(".claws-row")?.textContent).toContain("0.2.0");
     expect(page.querySelector(".claws-row")?.textContent).toContain("partial");
+    expect(page.textContent).not.toContain("Loading Claws...");
+    expect(page.querySelector<HTMLButtonElement>('[aria-label="Refresh"]')?.disabled).toBe(false);
+    expect(page.querySelector<HTMLButtonElement>(".claws-row")?.disabled).toBe(false);
+    page.querySelector<HTMLButtonElement>(".claws-row")!.click();
+    await settleLitElement(page);
+    for (const label of ["Add Claw", "Continue setup in chat", "Update", "Remove"]) {
+      expect(
+        [...page.querySelectorAll<HTMLButtonElement>("button")].find(
+          (button) => button.textContent?.trim() === label,
+        )?.disabled,
+        label,
+      ).toBe(false);
+    }
     diagnostics.reject(new Error("Diagnostics unavailable"));
     await settleLitElement(page);
     expect(page.querySelector(".claws-row")?.textContent).toContain("0.2.0");
@@ -657,6 +670,51 @@ describe("Claws Plugins tab", () => {
     expect(page.querySelector("openclaw-modal-dialog")).toBeNull();
     expect(request.mock.calls.filter(([method]) => method.endsWith(".apply"))).toHaveLength(1);
   });
+  it.each(["resolved", "rejected"])(
+    "ignores %s stale diagnostics while a newer inventory refresh is pending",
+    async (outcome) => {
+      const diagnostics = createDeferred<unknown>();
+      const inventory = createDeferred<unknown>();
+      let refreshing = false;
+      const { page, click, request } = await mount({
+        handler: (method) => {
+          if (method === "claws.status" && refreshing) {
+            return inventory.promise;
+          }
+          if (method === "claws.doctor") {
+            return refreshing
+              ? {
+                  ...clawDoctor,
+                  findings: [{ severity: "warning", message: "Current diagnostic finding" }],
+                  summary: { info: 0, warnings: 1, errors: 0 },
+                }
+              : diagnostics.promise;
+          }
+        },
+      });
+      refreshing = true;
+      await click("Refresh");
+      expect(request.mock.calls.filter(([method]) => method === "claws.status")).toHaveLength(2);
+      if (outcome === "resolved") {
+        diagnostics.resolve({
+          ...clawDoctor,
+          findings: [{ severity: "warning", message: "Stale diagnostic finding" }],
+          summary: { info: 0, warnings: 1, errors: 0 },
+        });
+      } else {
+        diagnostics.reject(new Error("Stale diagnostic error"));
+      }
+      await settleLitElement(page);
+      expect(page.querySelector<HTMLButtonElement>('[aria-label="Refresh"]')?.disabled).toBe(true);
+      expect(page.textContent).not.toContain("Stale diagnostic");
+      inventory.resolve(clawStatus([{ ...clawRecord, version: "0.3.0" }]));
+      await settleLitElement(page);
+      expect(page.querySelector(".claws-row")?.textContent).toContain("0.3.0");
+      expect(page.textContent).toContain("Current diagnostic finding");
+      expect(page.textContent).not.toContain("Stale diagnostic");
+      expect(page.querySelector<HTMLButtonElement>('[aria-label="Refresh"]')?.disabled).toBe(false);
+    },
+  );
   it("does not request diagnostics after an inventory read outlives its connection", async () => {
     const inventory = createDeferred<unknown>();
     const { page, harness, request } = await mount({
