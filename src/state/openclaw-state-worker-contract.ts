@@ -20,6 +20,7 @@ import type { AuditEventListQuery, AuditEventListPage } from "../audit/audit-eve
 import type { AuditWriterOperations } from "../audit/audit-event-writer.types.js";
 import type { ChannelIngressWorkerOperations } from "../channels/message/ingress-queue.worker-contract.js";
 import type { ClawInstallSchemaVersionRow } from "../claws/provenance-runtime-read.kernel.js";
+import type { ClawStateWorkerOperations } from "../claws/state-worker-contract.js";
 import type { readSqliteDatabaseBloat } from "../commands/doctor-db-bloat.read.js";
 import type { ConfigHealthPatch } from "../config/io.health-state.kernel.js";
 import type {
@@ -120,6 +121,7 @@ export type OpenClawStateWorkerOpenPreparation = { type: "deviceIdentity"; ident
 
 /** Commands share one physical shared-state actor; bindings belong to commands, not open input. */
 export type OpenClawStateWorkerOperations = UpdateRunReconciliationOperations &
+  ClawStateWorkerOperations &
   UpdateRunWriteOperations &
   RepositoryWorkspaceWorkerOperations &
   CaptureWorkerOperations &
@@ -179,6 +181,14 @@ export type OpenClawStateWorkerOperations = UpdateRunReconciliationOperations &
     "workspace.replaceAttestation": {
       input: WorkspaceAttestationInput;
       output: WorkspaceAttestation;
+    };
+    "workspace.mergeSetup": {
+      input: Parameters<
+        typeof import("../agents/workspace-state-store.kernel.js").mergeWorkspaceSetupStateInDatabase
+      >[1];
+      output: ReturnType<
+        typeof import("../agents/workspace-state-store.kernel.js").mergeWorkspaceSetupStateInDatabase
+      >;
     };
     "updateRuns.reconcileInterrupted": {
       input: InterruptedUpdateSettlement;

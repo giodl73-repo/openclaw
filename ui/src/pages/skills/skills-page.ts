@@ -422,6 +422,7 @@ class SkillsPage extends OpenClawLightDomElement {
         this.surface === "discovery"
           ? renderPluginsHubHeader({
               active: "skills",
+              gateway: this.context.gateway.snapshot,
               onSelect: (tab) => this.selectHubTab(tab),
               secondaryAction: {
                 label: t("skillDiscovery.settings"),

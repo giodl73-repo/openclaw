@@ -82,6 +82,7 @@ export function renderSkillWorkshopPage(
     <section class="content--skill-workshop">
       ${renderPluginsHubHeader({
         active: "skill-workshop",
+        gateway: context.gateway.snapshot,
         onSelect: (tab) => context.navigate(tab),
       })}
       <wa-tab-panel

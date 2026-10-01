@@ -12,6 +12,7 @@ import {
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import { readClawCronRefs, type PersistedClawCronRef } from "./cron.js";
 import { digestClawValue } from "./digest.js";
+import type { ClawInventory } from "./inventory-read.kernel.js";
 import {
   ClawRemoveError,
   inspectClawBootstrap,
@@ -186,6 +187,7 @@ export async function readClawStatus(
     listMcpServers?: typeof listConfiguredMcpServers;
     packageDeps?: PackageRemovalDeps;
     packagePreflight?: ClawPackagePreflight;
+    inventory?: ClawInventory;
   } = {},
 ): Promise<ClawStatusResult> {
   const config = options.config ?? getRuntimeConfig();
@@ -203,11 +205,19 @@ export async function readClawStatus(
   const configuredMcpServers = normalizeConfiguredMcpServers(
     options.sourceMcpServers ?? sourceConfig.mcp?.servers,
   );
-  const allInstalls = readClawInstallRecords(options);
+  const allInstalls = options.inventory?.installs ?? readClawInstallRecords(options);
   const installAgentIds = new Set(allInstalls.map((install) => install.agentId));
-  const allPackageRefs = readClawPackageRefs(options);
-  const allWorkspaceFiles = readAllClawWorkspaceFiles(options);
+  const allPackageRefs = options.inventory?.packages ?? readClawPackageRefs(options);
+  const allWorkspaceFiles = options.inventory?.workspaceFiles ?? readAllClawWorkspaceFiles(options);
   const orphanAgentIds = new Set<string>();
+  for (const ref of [
+    ...(options.inventory?.mcpServers ?? []),
+    ...(options.inventory?.cronJobs ?? []),
+  ]) {
+    if (!installAgentIds.has(ref.agentId)) {
+      orphanAgentIds.add(ref.agentId);
+    }
+  }
   for (const packageRef of allPackageRefs) {
     if (!installAgentIds.has(packageRef.agentId)) {
       orphanAgentIds.add(packageRef.agentId);
@@ -238,9 +248,10 @@ export async function readClawStatus(
     const packageRefs = allPackageRefs.filter(
       (packageRef) => packageRef.agentId === install.agentId,
     );
-    const workspaceFiles = installAgentIds.has(install.agentId)
-      ? readClawWorkspaceFiles(install.agentId, options)
-      : allWorkspaceFiles.filter((file) => file.agentId === install.agentId);
+    const workspaceFiles =
+      !options.inventory && installAgentIds.has(install.agentId)
+        ? readClawWorkspaceFiles(install.agentId, options)
+        : allWorkspaceFiles.filter((file) => file.agentId === install.agentId);
     const bootstrap = installAgentIds.has(install.agentId)
       ? await inspectClawBootstrap(install, options)
       : {
@@ -270,11 +281,15 @@ export async function readClawStatus(
             }),
         ),
       ),
-      mcpServers: (options.readOnly
-        ? readClawMcpServerRefs(install.agentId, options)
-        : reconcileClawMcpServerRefs(install.agentId, configuredMcpServers, options)
+      mcpServers: (options.inventory
+        ? options.inventory.mcpServers.filter((ref) => ref.agentId === install.agentId)
+        : options.readOnly
+          ? readClawMcpServerRefs(install.agentId, options)
+          : reconcileClawMcpServerRefs(install.agentId, configuredMcpServers, options)
       ).map((ref) => inspectMcpServer(ref, configuredMcpServers)),
-      cronJobs: readClawCronRefs(install.agentId, options),
+      cronJobs: options.inventory
+        ? options.inventory.cronJobs.filter((ref) => ref.agentId === install.agentId)
+        : readClawCronRefs(install.agentId, options),
     });
   }
   const packages = records.flatMap((record) => record.packages);

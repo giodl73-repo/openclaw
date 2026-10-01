@@ -1934,6 +1934,7 @@ export const en: TranslationMap & {
     cron: "Automations",
     skills: "Skills",
     plugins: "Plugins",
+    claws: "Claws",
     skillWorkshop: "Skill workshop",
     devices: "Devices",
     cloudWorkers: "Cloud workers",
@@ -1982,6 +1983,7 @@ export const en: TranslationMap & {
     cron: "Scheduled tasks and recurring agent runs.",
     skills: "Manage your agent skills",
     plugins: "Extend your Claw with tools",
+    claws: "",
     skillWorkshop:
       "The skills your agent uses now, suggestions waiting for review, and past decisions.",
     devices: "Paired devices, pairing approvals, and exec bindings.",
@@ -2316,6 +2318,7 @@ export const en: TranslationMap & {
     hubTablistLabel: "Session sections",
   },
   pluginsPage: {},
+  clawsPage: {},
   labsPage: {
     intro:
       "Labs contains experimental capabilities that may change, break, or disappear between releases.",

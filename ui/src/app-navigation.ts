@@ -35,7 +35,12 @@ export const SIDEBAR_NAV_ROUTES = [
 // Routes presented as tabs of the Plugins hub. The sidebar highlights the
 // Plugins entry for all of them, mirroring how config covers settings routes.
 export function isPluginsHubRoute(routeId: NavigationRouteId): boolean {
-  return routeId === "plugins" || routeId === "skills" || routeId === "skill-workshop";
+  return (
+    routeId === "plugins" ||
+    routeId === "skills" ||
+    routeId === "skill-workshop" ||
+    routeId === "claws"
+  );
 }
 
 // Worktrees renders as a tab of the Sessions hub; the sidebar highlights the
@@ -346,6 +351,7 @@ const NAVIGATION_PRESENTATION: Record<NavigationRouteId, NavigationPresentation>
   skills: navigationPresentation("bookOpenText", "skills"),
   "skill-settings": navigationPresentation("bookOpenText", "skills"),
   plugins: navigationPresentation("plug", "plugins"),
+  claws: navigationPresentation("box", "claws"),
   "plugin-settings": navigationPresentation("plug", "plugins"),
   "skill-workshop": navigationPresentation("wrench", "skillWorkshop"),
   device: navigationPresentation("monitor", "device"),

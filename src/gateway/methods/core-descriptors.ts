@@ -42,6 +42,12 @@ const SIDECAR_CONTROL_PLANE_WRITE = { startup: true, controlPlaneWrite: true } a
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
 export const CORE_GATEWAY_METHOD_SPECS = [
+  ["claws.status", "claws", "operator.read", "2026.9"],
+  ["claws.doctor", "claws", "operator.read", "2026.9"],
+  ["claws.catalog.detail", "claws", "operator.read", "2026.9"],
+  ["claws.add.plan", "claws", "operator.read", "2026.9"],
+  ["claws.add.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
+  ["claws.update.plan", "claws", "operator.read", "2026.9"],
   ["health", "health", "operator.read", "<=2026.7"],
   ["diagnostics.stability", "diagnostics", "operator.read", "<=2026.7"],
   ["doctor.memory.status", "doctor", "operator.read", "<=2026.7"],

@@ -4,11 +4,11 @@ import { validateCronAddParams } from "../../packages/gateway-protocol/src/index
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { cronJobReadView } from "../cron/job-read-view.js";
 import { normalizeCronJobCreate } from "../cron/normalize.js";
+import * as workerAdmission from "../infra/sqlite-worker-operation-admission.js";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import {
-  closeOpenClawStateDatabaseForTest,
-  openOpenClawStateDatabase,
-} from "../state/openclaw-state-db.js";
-import {
+  ClawCronInstallError,
   clawCronGatewayInput,
   clawCronGatewayJobMatchesRef,
   deleteClawCronRef,
@@ -17,28 +17,33 @@ import {
   readClawCronRefs,
   upsertClawCronRef,
 } from "./cron.js";
+import { readClawInventory } from "./inventory-read.js";
 import { buildClawAddPlan } from "./lifecycle.js";
 import { parseClawManifest } from "./schema.js";
+import * as clawState from "./state-write.js";
 import type { ClawSourceIdentity } from "./types.js";
 
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-afterEach(() => closeOpenClawStateDatabaseForTest());
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await closeStateDatabaseForTest();
+    cleanup();
+  }),
+);
 
-async function fixture() {
+async function fixture(jobIds = ["daily-report"]) {
   const root = tempDirs.make("openclaw-claw-cron-");
   const parsed = parseClawManifest({
     schemaVersion: 1,
     agent: { id: "worker" },
-    cronJobs: [
-      {
-        id: "daily-report",
-        name: "Daily report",
-        schedule: { cron: "0 9 * * *", timezone: "UTC" },
-        session: "main",
-        message: "Prepare the report",
-        delivery: { mode: "announce", channel: "last" },
-      },
-    ],
+    cronJobs: jobIds.map((id) => ({
+      id,
+      name: "Daily report",
+      schedule: { cron: "0 9 * * *", timezone: "UTC" },
+      session: "main",
+      message: "Prepare the report",
+      delivery: { mode: "announce", channel: "last" },
+    })),
   });
   if (!parsed.ok) {
     throw new Error(JSON.stringify(parsed.diagnostics));
@@ -93,6 +98,167 @@ function listedCronJob(
 }
 
 describe("installClawCronJobs", () => {
+  it.each(["failed", "conflict", "created"] as const)(
+    "preserves observed refs when %s outcome bookkeeping loses authority at commit",
+    async (outcome) => {
+      const current = await fixture(["daily-report", "second-report"]);
+      const liveJobs: string[] = [];
+      let secondEffectSettled = false;
+      let retired = false;
+      const refusedStages: string[] = [];
+      const originalAdmission = workerAdmission.createSqliteWorkerOperationAdmission;
+      vi.spyOn(workerAdmission, "createSqliteWorkerOperationAdmission").mockImplementation(
+        (admit, attachment) =>
+          originalAdmission((request, grant) => {
+            if (secondEffectSettled && !retired && request.stage === "commit") {
+              retired = true;
+              refusedStages.push(request.stage);
+            }
+            admit(request, grant);
+          }, attachment),
+      );
+      const add = vi.fn(async (input: Record<string, unknown>) => {
+        clawState.assertClawMutationCurrent();
+        const key = String(input.declarationKey);
+        if (key.endsWith(":second-report")) {
+          secondEffectSettled = true;
+          if (outcome === "failed") {
+            throw new Error("scheduler response lost");
+          }
+        }
+        liveJobs.push(key);
+        return { id: `scheduler-${liveJobs.length}` };
+      });
+      const list = async () => {
+        if (liveJobs.length === 0) {
+          return { jobs: [] };
+        }
+        const pending = (await readClawInventory({ env: current.env })).cronJobs.find(
+          (ref) => ref.manifestId === "second-report",
+        );
+        if (!pending) {
+          throw new Error("Expected confirmed pending ref");
+        }
+        const drifted = listedCronJob(current.plan.agent.finalId, pending, "scheduler-drifted");
+        secondEffectSettled = true;
+        return {
+          jobs: [{ ...drifted, payload: { kind: "agentTurn", message: "Changed declaration" } }],
+        };
+      };
+      const failure = await clawState
+        .withClawMutationGuard(
+          () => {
+            if (retired) {
+              throw new Error("Cron owner retired");
+            }
+          },
+          () =>
+            installClawCronJobs(current.plan, {
+              env: current.env,
+              nowMs: 42,
+              gateway: { add, ...(outcome === "conflict" ? { list } : {}) },
+            }),
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(failure).toBeInstanceOf(ClawCronInstallError);
+      expect(refusedStages).toEqual(["commit"]);
+      const persisted = (await readClawInventory({ env: current.env })).cronJobs;
+      expect(failure).toMatchObject({
+        code:
+          outcome === "failed"
+            ? "cron_install_failed"
+            : outcome === "conflict"
+              ? "cron_reconcile_conflict"
+              : "cron_provenance_failed",
+        message:
+          outcome === "failed"
+            ? "scheduler response lost"
+            : outcome === "conflict"
+              ? "The existing cron declaration does not match the consented Claw job."
+              : "cron.add succeeded, but its scheduler id could not be persisted: Cron owner retired",
+        cronJobs: persisted,
+      });
+      expect(persisted).toMatchObject([
+        {
+          manifestId: "daily-report",
+          status: "complete",
+          schedulerJobId: "scheduler-1",
+          updatedAtMs: 42,
+        },
+        { manifestId: "second-report", status: "pending", updatedAtMs: 42 },
+      ]);
+      expect(persisted[1]).not.toHaveProperty("error");
+      expect(persisted[1]).not.toHaveProperty("schedulerJobId");
+      expect(liveJobs).toHaveLength(outcome === "created" ? 2 : 1);
+      expect(add).toHaveBeenCalledTimes(outcome === "conflict" ? 1 : 2);
+    },
+  );
+
+  it("retains earlier confirmed refs when the next pending write loses authority", async () => {
+    const current = await fixture(["daily-report", "second-report"]);
+    let retired = false;
+    const persistPending = clawState.persistClawCronPendingRefAsync;
+    vi.spyOn(clawState, "persistClawCronPendingRefAsync").mockImplementation(
+      async (plan, job, options) => {
+        retired ||= job.id === "second-report";
+        return persistPending(plan, job, options);
+      },
+    );
+    const add = vi.fn(async () => ({ id: "scheduler-first" }));
+    const failure = await clawState
+      .withClawMutationGuard(
+        () => {
+          if (retired) {
+            throw new Error("pending authority retired");
+          }
+        },
+        () => installClawCronJobs(current.plan, { env: current.env, gateway: { add } }),
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    const persisted = (await readClawInventory({ env: current.env })).cronJobs;
+    expect(failure).toBeInstanceOf(ClawCronInstallError);
+    expect(failure).toMatchObject({
+      code: "cron_install_failed",
+      message: "pending authority retired",
+      cronJobs: persisted,
+    });
+    expect(persisted).toMatchObject([{ manifestId: "daily-report", status: "complete" }]);
+    expect(add).toHaveBeenCalledOnce();
+  });
+
+  it("retains confirmed complete refs when a later reconciliation read rejects", async () => {
+    const current = await fixture(["daily-report", "second-report"]);
+    const refs = await installClawCronJobs(current.plan, {
+      env: current.env,
+      gateway: { add: async (input) => ({ id: String(input.declarationKey) }) },
+    });
+    const add = vi.fn();
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({
+        jobs: refs.map((ref) =>
+          listedCronJob(current.plan.agent.finalId, ref, ref.schedulerJobId!),
+        ),
+      })
+      .mockRejectedValueOnce(new Error("reconciliation read unavailable"));
+    await expect(
+      installClawCronJobs(current.plan, { env: current.env, gateway: { add, list } }),
+    ).rejects.toMatchObject({
+      code: "cron_install_failed",
+      message: "reconciliation read unavailable",
+      cronJobs: refs,
+    });
+    expect(add).not.toHaveBeenCalled();
+    expect((await readClawInventory({ env: current.env })).cronJobs).toEqual(refs);
+  });
+
   it("pins declarations and execution to the final agent id", async () => {
     const current = await fixture();
     const calls: string[] = [];
@@ -281,17 +447,13 @@ describe("installClawCronJobs", () => {
       { manifestId: "daily-report", status: "pending", error: "response lost" },
     ]);
 
+    const [pending] = readClawCronRefs("worker-two", { env: current.env });
     const refs = await installClawCronJobs(current.plan, {
       env: current.env,
       gateway: {
         add,
         list: vi.fn().mockResolvedValue({
-          jobs: [
-            {
-              id: "scheduler-after-lost-response",
-              declarationKey: "claw:worker-two:daily-report",
-            },
-          ],
+          jobs: [listedCronJob("worker-two", pending!, "scheduler-after-lost-response")],
         }),
       },
     });
@@ -302,6 +464,38 @@ describe("installClawCronJobs", () => {
     ]);
     expect(refs[0]).not.toHaveProperty("error");
     expect(refs).toEqual(readClawCronRefs("worker-two", { env: current.env }));
+  });
+
+  it("does not adopt a drifted job while reconciling pending provenance", async () => {
+    const current = await fixture();
+    await expect(
+      installClawCronJobs(current.plan, {
+        env: current.env,
+        gateway: {
+          add: async () => {
+            throw new Error("response lost");
+          },
+        },
+      }),
+    ).rejects.toMatchObject({ code: "cron_install_failed" });
+    const [pending] = readClawCronRefs("worker-two", { env: current.env });
+    const job = listedCronJob("worker-two", pending!, "scheduler-drifted");
+    const add = vi.fn();
+    await expect(
+      installClawCronJobs(current.plan, {
+        env: current.env,
+        gateway: {
+          add,
+          list: async () => ({
+            jobs: [{ ...job, payload: { kind: "agentTurn", message: "changed" } }],
+          }),
+        },
+      }),
+    ).rejects.toMatchObject({ code: "cron_reconcile_conflict" });
+    expect(add).not.toHaveBeenCalled();
+    expect(readClawCronRefs("worker-two", { env: current.env })).toMatchObject([
+      { status: "pending" },
+    ]);
   });
 
   it("converges concurrent installs through the declaration key", async () => {

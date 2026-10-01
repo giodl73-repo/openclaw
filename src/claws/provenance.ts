@@ -2,6 +2,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import { stableStringify } from "@openclaw/normalization-core";
+import { z } from "zod";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 import { coerceRequiredSqliteNumber as sqliteNumber } from "../infra/sqlite-number.js";
 import type { DB } from "../state/openclaw-state-db.generated.js";
@@ -63,12 +64,12 @@ export type PersistedClawInstall = {
 
 type ClawInstallRow = {
   schema_version: string;
-  source_kind: "package" | "development";
+  source_kind: string;
   claw_name: string;
   claw_version: string;
   package_root: string;
   manifest_path: string;
-  integrity_kind: "artifact" | "development-snapshot";
+  integrity_kind: string;
   integrity: string;
   source_byte_length: number | bigint;
   manifest_schema_version: number | bigint;
@@ -79,21 +80,21 @@ type ClawInstallRow = {
   agent_owned_paths_json: string;
   bootstrap_source_path: string | null;
   bootstrap_content_digest: string | null;
-  status: ClawInstallStatus;
+  status: string;
   added_at_ms: number | bigint;
   updated_at_ms: number | bigint;
 };
 
-function rowToRecord(row: ClawInstallRow): PersistedClawInstall {
+export function rowToRecord(row: ClawInstallRow): PersistedClawInstall {
   return {
     schemaVersion: installRecordSchema.parseClawInstallRecordSchemaVersion(row.schema_version),
     claw: {
-      kind: row.source_kind,
+      kind: z.enum(["package", "development"]).parse(row.source_kind),
       name: row.claw_name,
       version: row.claw_version,
       packageRoot: row.package_root,
       manifestPath: row.manifest_path,
-      integrityKind: row.integrity_kind,
+      integrityKind: z.enum(["artifact", "development-snapshot"]).parse(row.integrity_kind),
       integrity: row.integrity,
       byteLength: sqliteNumber(row.source_byte_length),
     },
@@ -106,7 +107,9 @@ function rowToRecord(row: ClawInstallRow): PersistedClawInstall {
     agentConfigDigest: row.agent_config_digest,
     agentOwnedPaths: JSON.parse(row.agent_owned_paths_json) as string[],
     ...clawBootstrapProvenanceFromRow(row),
-    status: row.status,
+    status: z
+      .enum(["pending", "workspace_ready", "config_committed", "complete", "partial"])
+      .parse(row.status),
     addedAtMs: sqliteNumber(row.added_at_ms),
     updatedAtMs: sqliteNumber(row.updated_at_ms),
   };

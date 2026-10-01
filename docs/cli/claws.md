@@ -29,6 +29,68 @@ The current CLI reads a local package directory, `CLAW.md`, or grouped JSON mani
 Publishing, searching, and installing whole Claws through ClawHub are a
 separate registry track and are not part of this command surface yet.
 
+## Control UI
+
+The experimental **Plugins > Claws** tab inspects Claws through the Gateway.
+Set `OPENCLAW_EXPERIMENTAL_CLAWS=1` on the Gateway process and restart it to
+enable the tab and its RPC methods. There is no separate browser flag. A direct
+visit to `/claws` while the experiment is disabled shows an unavailable state.
+
+Choose **Add Claw**, enter a ClawHub package name and optional version and agent
+ID, then review the resolved exact release. The preview includes the publisher,
+proposed changes, requested capabilities, setup requirements, and any trust
+warning or blockers. Configured-permission snapshots include inherited core-tool
+policy, sandbox settings, filesystem restrictions, heartbeat cadence, memory-search
+policy, and subagent target policy. Memory distinguishes indexed sources from
+searchable sources, conversation recall, session indexing, and the count of extra
+paths without revealing those paths. Subagent policy distinguishes explicit
+targets, wildcard enrollment of configured agents, and implicit same-agent
+spawning; requiring an explicit agent ID disables that implicit route. Update
+previews show current and proposed snapshots. These configuration facts do not
+guarantee live tool access, memory availability, delegation admission, or sandbox enforcement; unresolved permissions are
+listed explicitly. A snapshot unavailable because its consent cannot be verified
+is omitted, without hiding the remaining blocked preview. An unavailable memory
+secret owner marks only memory search unresolved; it is not shown as disabled.
+
+Scheduled-job previews compare **recorded declarations** with **proposed
+declarations**, preserving the planner's actions, including unchanged, removed,
+and manual-review jobs. Each declaration shows its cron expression, timezone,
+agent main or isolated session, and automatic delivery intent. Recorded status
+and scheduler-ID presence describe Claw provenance, not whether a live job is
+enabled, healthy, or still present. Invalid or ambiguous recorded declarations
+are marked unresolved, without exposing their contents.
+
+These previews do not reveal job messages, display names, scheduler IDs, or
+delivery recipients. Last-channel delivery depends on local runtime routing;
+no automatic delivery does not prohibit message tools. Live job state, timing
+defaults such as staggering, delivery routes, and scheduled execution permissions
+remain unresolved. An empty declaration list means no package-declared jobs,
+not that the agent has no other scheduled work.
+
+Applying from the Control UI is currently blocked until the preview completely
+discloses effective permissions, including inherited permissions, memory,
+delegation, and scheduled jobs.
+Publisher identity and an exact-plan digest do not replace that disclosure.
+Plugin-bearing Claws also require the plugin owner's capability-consent flow.
+
+Installed entries show the associated agent, version, setup state, managed and
+referenced resources, and doctor findings. **Continue setup in chat** opens the
+native new conversation screen for that agent; it does not send a message or
+complete bootstrap automatically. **Update** resolves a release and previews
+changes for the selected installed agent. Update application and removal are
+not available through this tab yet; use the CLI's reviewed lifecycle flow.
+
+Reading inventory and previewing changes requires `operator.read`; mutation
+RPCs require `operator.admin`, which does not bypass plan blockers. A reconnect or operator change invalidates
+the preview. When an apply outcome is unconfirmed, check that Gateway's Claw
+status before repeating the operation; the browser does not automatically retry.
+
+The registry must independently support Claw packages. `OPENCLAW_CLAWHUB_URL`
+selects the registry used by the Gateway, including for staging. Neither this
+routing setting nor the OpenClaw experiment flag enables publishing in ClawHub.
+This initial tab accepts package names directly; catalog search and adoption of
+existing agents are outside this UI flow.
+
 ## Bundled role Claws
 
 The bundled `coordinator`, `researcher`, `writer`, and `reviewer` roles are Claw
@@ -389,6 +451,14 @@ and retries activation. Successfully realized shared requirements remain install
 if a later Claw phase fails. Disabled or metadata-only entries remain unevaluated;
 their source has not been verified by runtime execution. With no local Gateway,
 installation retains the existing restart requirement.
+
+If a later add phase fails, the partial result retains the original phase error
+and observed resource records even when authority loss prevents failure
+bookkeeping or workspace cleanup. `installRecord` reports the last acknowledged
+phase, not a newly persisted `partial` phase or a fresh inventory read. Pending
+MCP or cron provenance does not prove that the external operation made no change.
+No later phase or automatic retry follows the failure. Check `claws status`,
+the affected resource, and `openclaw doctor` before previewing a retry.
 
 ## Inspect installed state
 

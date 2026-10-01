@@ -17,7 +17,10 @@ import {
 import { importSandboxRegistryRow } from "../agents/sandbox/registry-import.worker.js";
 import { writeSandboxRegistry } from "../agents/sandbox/registry-write.worker.js";
 import { writeSubagentRunValuesInDatabase } from "../agents/subagents/registry/subagent-registry.store.kernel.js";
-import { replaceWorkspaceAttestationInDatabase } from "../agents/workspace-state-store.kernel.js";
+import {
+  replaceWorkspaceAttestationInDatabase,
+  mergeWorkspaceSetupStateInDatabase,
+} from "../agents/workspace-state-store.kernel.js";
 import {
   isWorktreeWorkerCommand,
   executeWorktreeWorkerCommand,
@@ -527,6 +530,14 @@ export function executeSharedStateCommand(
     return runOpenClawStateWriteTransaction((writer) => {
       requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: undefined });
       const result = replaceWorkspaceAttestationInDatabase(writer, command.input);
+      requestSqliteWorkerOperationAdmission({ stage: "commit", facts: undefined });
+      return result;
+    }, writeOptions);
+  }
+  if (command.type === "workspace.mergeSetup") {
+    return runOpenClawStateWriteTransaction((writer) => {
+      requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: undefined });
+      const result = mergeWorkspaceSetupStateInDatabase(writer, command.input);
       requestSqliteWorkerOperationAdmission({ stage: "commit", facts: undefined });
       return result;
     }, writeOptions);

@@ -69,3 +69,4 @@ export * from "./schema/worker-inference.js";
 export * from "./schema/worktrees.js";
 export * from "./schema/tools-catalog.js";
 export * from "./schema/transcripts.js";
+export * from "./schema/claws.js";

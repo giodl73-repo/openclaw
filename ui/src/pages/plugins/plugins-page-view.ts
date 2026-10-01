@@ -228,6 +228,7 @@ export function renderPluginsPage(model: PluginsPageViewModel) {
       model.surface === "discovery" && !catalogDetail
         ? renderPluginsHubHeader({
             active: "plugins",
+            gateway: model.context.gateway.snapshot,
             onSelect: actions.selectHubTab,
             secondaryAction: {
               label: t("pluginsPage.pluginSettings"),

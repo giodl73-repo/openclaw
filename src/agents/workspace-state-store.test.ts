@@ -2,13 +2,14 @@
 // and atomic attestation hash replacement.
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as workerAdmission from "../infra/sqlite-worker-operation-admission.js";
 import {
-  closeOpenClawStateDatabaseForTest,
   openExistingOpenClawStateDatabaseReadOnly,
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -19,6 +20,7 @@ import {
   writeWorkspaceFileCache,
 } from "./workspace-file-cache.js";
 import {
+  resolveWorkspaceStateAliases,
   resolveWorkspaceStateIdentity,
   WorkspaceAliasRepointedError,
 } from "./workspace-state-identity.js";
@@ -42,10 +44,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   if (testState) {
     retireWorkspaceFileCache(testState.workspaceDir);
   }
-  closeOpenClawStateDatabaseForTest();
+  await closeStateDatabaseForTest();
   await testState?.cleanup();
   testState = undefined;
 });
@@ -103,7 +106,7 @@ describe("workspace state store", () => {
       ]),
     });
 
-    closeOpenClawStateDatabaseForTest();
+    await closeStateDatabaseForTest();
 
     const snapshot = await readWorkspaceStateSnapshot(dir);
     expect(snapshot.setupExists).toBe(true);
@@ -168,7 +171,8 @@ describe("workspace state store", () => {
         nowMs: 1_000,
       });
       const before = await readWorkspaceStateSnapshot(dir);
-      const db = openOpenClawStateDatabase().db;
+      const database = openOpenClawStateDatabase();
+      const { db } = database;
       fs.symlinkSync(dir, alias, process.platform === "win32" ? "junction" : "dir");
       const filePath = path.join(dir, "AGENTS.md");
       writeWorkspaceFileCache({ filePath, content: "cached", identity: "identity" });
@@ -180,6 +184,7 @@ describe("workspace state store", () => {
       const operations = {
         merge: () =>
           mergeWorkspaceSetupState(dir, { setupCompletedAt: "2026-07-16T02:00:00.000Z" }, 2_000, {
+            database,
             assertCurrent,
           }),
         expire: () =>
@@ -192,8 +197,53 @@ describe("workspace state store", () => {
       expect(await readWorkspaceStateSnapshot(dir)).toEqual(before);
       expect(readWorkspaceFileCache(filePath, "identity")).toBe("cached");
       expect(
-        db.prepare("SELECT alias_key FROM workspace_path_aliases WHERE alias_path = ?").get(alias),
+        db
+          .prepare("SELECT alias_key FROM workspace_path_aliases WHERE alias_key = ?")
+          .get(resolveWorkspaceStateAliases(alias)[0]!.workspaceKey),
       ).toBeUndefined();
+    },
+  );
+
+  it.each(["before-dispatch", "transaction", "commit"] as const)(
+    "preserves setup, aliases, and cache when worker merge authority retires at %s",
+    async (stage) => {
+      const dir = workspaceDir();
+      const alias = testState!.path("worker-workspace-link");
+      await mergeWorkspaceSetupState(dir, { bootstrapSeededAt: "2026-07-16T01:00:00.000Z" }, 1_000);
+      const before = await readWorkspaceStateSnapshot(dir);
+      const db = openOpenClawStateDatabase().db;
+      const readAliases = () =>
+        db.prepare("SELECT * FROM workspace_path_aliases ORDER BY alias_key").all();
+      const aliasesBefore = readAliases();
+      fs.symlinkSync(dir, alias, process.platform === "win32" ? "junction" : "dir");
+      const filePath = path.join(dir, "AGENTS.md");
+      writeWorkspaceFileCache({ filePath, content: "cached", identity: "identity" });
+      const originalAdmission = workerAdmission.createSqliteWorkerOperationAdmission;
+      let retired = stage === "before-dispatch";
+      vi.spyOn(workerAdmission, "createSqliteWorkerOperationAdmission").mockImplementation(
+        (admit, attachment) =>
+          originalAdmission((request, grant) => {
+            retired ||= request.stage === stage;
+            admit(request, grant);
+          }, attachment),
+      );
+      const error = new Error("workspace owner retired");
+      const assertCurrent = vi.fn(() => {
+        if (retired) {
+          throw error;
+        }
+      });
+
+      await expect(
+        mergeWorkspaceSetupState(alias, { setupCompletedAt: "2026-07-16T02:00:00.000Z" }, 2_000, {
+          assertCurrent,
+        }),
+      ).rejects.toBe(error);
+      expect(assertCurrent).toHaveBeenCalled();
+      expect(retired).toBe(true);
+      expect(await readWorkspaceStateSnapshot(dir)).toEqual(before);
+      expect(readAliases()).toEqual(aliasesBefore);
+      expect(readWorkspaceFileCache(filePath, "identity")).toBe("cached");
     },
   );
 
@@ -363,7 +413,7 @@ describe("workspace state store", () => {
     await mergeWorkspaceSetupState(dir, { bootstrapSeededAt: "2026-07-16T01:00:00.000Z" }, 1_000, {
       env,
     });
-    closeOpenClawStateDatabaseForTest();
+    await closeStateDatabaseForTest();
     fs.symlinkSync(dir, alias, process.platform === "win32" ? "junction" : "dir");
     const database = await openExistingOpenClawStateDatabaseReadOnly({ env });
     if (!database) {
@@ -466,9 +516,11 @@ describe("workspace state store", () => {
     await mergeWorkspaceSetupState(alias, { bootstrapSeededAt: "2026-07-16T01:00:00.000Z" }, 1_000);
     writeWorkspaceFileCache({ filePath, content: "cached", identity: "identity" });
     const deletion = prepareWorkspaceStateDeletion(alias);
-    openOpenClawStateDatabase()
+    const lexicalAlias = resolveWorkspaceStateAliases(alias)[0]!;
+    const corrupted = openOpenClawStateDatabase()
       .db.prepare("UPDATE workspace_path_aliases SET alias_path = ? WHERE alias_path = ?")
-      .run(`${alias}-mismatch`, alias);
+      .run(`${lexicalAlias.workspacePath}-mismatch`, lexicalAlias.workspacePath);
+    expect(corrupted.changes).toBe(1);
 
     try {
       await expect(
@@ -582,7 +634,7 @@ describe("workspace state store", () => {
     const filePath = path.join(dir, "AGENTS.md");
     writeWorkspaceFileCache({ filePath, content: "cached", identity: "identity" });
     const databasePath = resolveOpenClawStateSqlitePath();
-    closeOpenClawStateDatabaseForTest();
+    await closeStateDatabaseForTest();
     fs.rmSync(path.dirname(databasePath), { recursive: true, force: true });
 
     await deleteState(dir);

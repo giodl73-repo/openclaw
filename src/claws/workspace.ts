@@ -22,6 +22,9 @@ import {
 } from "../state/openclaw-state-db.js";
 import { clawContainedRelativePath } from "./path-containment.js";
 import { parseClawMarkdown } from "./reader.js";
+import { readWorkspaceFileAsync } from "./state-read.js";
+import { assertClawMutationCurrent } from "./state-write.js";
+import { persistWorkspaceFileAsync, updateWorkspaceFileStatusAsync } from "./state-write.js";
 import type { ClawAddPlan, ClawAddPlanAction, ClawDiagnostic } from "./types.js";
 
 export const CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION =
@@ -72,7 +75,7 @@ function selectWorkspaceFiles(db: DatabaseSync) {
     ]);
 }
 
-function rowToWorkspaceFile(
+export function rowToWorkspaceFile(
   row: WorkspaceFileRow,
   schemaVersion: PersistedClawWorkspaceFile["schemaVersion"] = CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION,
 ): PersistedClawWorkspaceFile {
@@ -151,7 +154,7 @@ export async function readClawWorkspaceActionSource(params: {
   return { content: parsed.body, sourcePath, sourceRelative };
 }
 
-function persistWorkspaceFile(
+export function persistWorkspaceFile(
   record: PersistedClawWorkspaceFile,
   options: OpenClawStateDatabaseOptions,
 ): void {
@@ -165,7 +168,7 @@ function persistWorkspaceFile(
   }, options);
 }
 
-function readWorkspaceFile(
+export function readWorkspaceFile(
   agentId: string,
   targetPath: string,
   options: OpenClawStateDatabaseOptions,
@@ -181,16 +184,24 @@ function readWorkspaceFile(
     if (!row) {
       return undefined;
     }
-    if (
-      row.schema_version !== CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION ||
-      (row.status !== "pending" && row.status !== "complete" && row.status !== "failed")
-    ) {
-      throw new Error(
-        `Claw workspace file ${JSON.stringify(targetPath)} has unsupported provenance state.`,
-      );
-    }
+    assertSupportedClawWorkspaceFileState(row.schema_version, row.status, targetPath);
     return rowToWorkspaceFile(row);
   }, options);
+}
+
+export function assertSupportedClawWorkspaceFileState(
+  schemaVersion: string,
+  status: string,
+  targetPath: string,
+): void {
+  if (
+    schemaVersion !== CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION ||
+    (status !== "pending" && status !== "complete" && status !== "failed")
+  ) {
+    throw new Error(
+      `Claw workspace file ${JSON.stringify(targetPath)} has unsupported provenance state.`,
+    );
+  }
 }
 
 function sameWorkspaceFileOwner(
@@ -207,7 +218,7 @@ function sameWorkspaceFileOwner(
   );
 }
 
-function updateWorkspaceFileStatus(
+export function updateWorkspaceFileStatus(
   record: PersistedClawWorkspaceFile,
   expectedStatuses: PersistedClawWorkspaceFile["status"][],
   options: OpenClawStateDatabaseOptions,
@@ -377,7 +388,7 @@ export async function createClawWorkspaceFiles(
         createdAtMs: nowMs,
         updatedAtMs: nowMs,
       };
-      const existingRecord = readWorkspaceFile(
+      const existingRecord = await readWorkspaceFileAsync(
         expectedRecord.agentId,
         expectedRecord.path,
         options,
@@ -409,7 +420,7 @@ export async function createClawWorkspaceFiles(
         const previousStatus = existingRecord.status;
         existingRecord.status = "complete";
         existingRecord.updatedAtMs = nowMs;
-        updateWorkspaceFileStatus(existingRecord, [previousStatus], options);
+        await updateWorkspaceFileStatusAsync(existingRecord, [previousStatus], options);
         createdFiles.push(existingRecord);
         continue;
       }
@@ -418,22 +429,24 @@ export async function createClawWorkspaceFiles(
         const previousStatus = record.status;
         record.status = "pending";
         record.updatedAtMs = nowMs;
-        updateWorkspaceFileStatus(record, [previousStatus], options);
+        await updateWorkspaceFileStatusAsync(record, [previousStatus], options);
       } else {
-        persistWorkspaceFile(record, options);
+        await persistWorkspaceFileAsync(record, options);
       }
       try {
+        assertClawMutationCurrent();
         await workspace.write(targetRelative, resolvedSource.content, {
+          assertBeforeMutation: assertClawMutationCurrent,
           mkdir: true,
           overwrite: false,
         });
         record.status = "complete";
-        updateWorkspaceFileStatus(record, ["pending"], options);
+        await updateWorkspaceFileStatusAsync(record, ["pending"], options);
         createdFiles.push(record);
       } catch (error) {
         record.status = "failed";
         try {
-          updateWorkspaceFileStatus(record, ["pending"], options);
+          await updateWorkspaceFileStatusAsync(record, ["pending"], options);
         } catch {
           // A pending row intentionally remains as evidence of uncertain owner state.
           record.status = "pending";

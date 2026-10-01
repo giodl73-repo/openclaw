@@ -1,0 +1,181 @@
+.claws-workspace {
+  max-width: 1100px;
+  padding: 16px 24px;
+  letter-spacing: 0;
+}
+
+.claws-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.claws-toolbar h2,
+.claws-toolbar h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.claws-list {
+  border-top: 1px solid var(--border);
+}
+
+.claws-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(60px, 100px) minmax(100px, 150px);
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 72px;
+  padding: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+
+.claws-row:hover,
+.claws-row.is-selected {
+  background: var(--bg-hover);
+}
+
+.claws-row-name,
+.claws-resource-list li > span:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.claws-row-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.claws-detail {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.claws-facts {
+  display: grid;
+  grid-template-columns: minmax(90px, 120px) minmax(0, 1fr);
+  gap: 8px 16px;
+}
+
+.claws-facts dt {
+  color: var(--muted);
+}
+
+.claws-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.claws-permission-snapshot {
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.claws-permission-snapshot h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.claws-permission-tools {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.claws-permission-tools code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.claws-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.claws-resource-list {
+  list-style: none;
+  padding: 0;
+}
+
+.claws-resource-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.claws-resource-list li > span {
+  min-width: 0;
+}
+
+.claws-dialog {
+  padding: 24px;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  letter-spacing: 0;
+}
+
+.claws-dialog h3 {
+  font-size: 15px;
+}
+
+.claws-dialog .field {
+  margin-block: 16px;
+}
+
+.claws-dialog input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+}
+
+.claws-risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+@media (max-width: 560px) {
+  .claws-workspace {
+    padding: 12px;
+  }
+
+  .claws-row {
+    grid-template-columns: 24px minmax(0, 1fr) minmax(70px, 110px);
+    gap: 8px;
+  }
+
+  .claws-row > .chip {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .claws-dialog {
+    padding: 16px;
+  }
+
+  .claws-toolbar {
+    flex-wrap: wrap;
+  }
+}

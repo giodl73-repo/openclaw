@@ -32,6 +32,9 @@ import {
   updateClawPackageRefStatus,
   type PersistedClawPackageRef,
 } from "./provenance.js";
+import { readClawPackageRefsAsync } from "./state-read.js";
+import { assertClawMutationCurrent, withClawMutationGuard } from "./state-write.js";
+import { persistClawPackageRefAsync, updateClawPackageRefStatusAsync } from "./state-write.js";
 import type {
   ClawAddPlan,
   ClawAddPlanAction,
@@ -314,9 +317,24 @@ async function installClawPackagesUnlocked(
   const installSkill = deps.installSkill ?? installSkillFromClawHub;
   const preflightPlugin = deps.preflightPlugin ?? preflightPluginInstall;
   const preflightSkill = deps.preflightSkill ?? preflightSkillFromClawHub;
-  const persistPackageRef = deps.persistPackageRef ?? persistClawPackageRef;
-  const completePackageRef = deps.completePackageRef ?? updateClawPackageRefStatus;
-  const readPackageRefs = deps.readPackageRefs ?? readClawPackageRefs;
+  let currentPackageLease: MaintainedClawPackageLifecycleLease | null = null;
+  const assertPackageCurrent = () => {
+    if (!currentPackageLease) {
+      throw new Error("Package lifecycle owner is unavailable.");
+    }
+    currentPackageLease.assertCurrent();
+  };
+  const persistPackageRef = (...args: Parameters<typeof persistClawPackageRef>) =>
+    withClawMutationGuard(
+      assertPackageCurrent,
+      async () => await (deps.persistPackageRef ?? persistClawPackageRefAsync)(...args),
+    );
+  const completePackageRef = (...args: Parameters<typeof updateClawPackageRefStatus>) =>
+    withClawMutationGuard(
+      assertPackageCurrent,
+      async () => await (deps.completePackageRef ?? updateClawPackageRefStatusAsync)(...args),
+    );
+  const readPackageRefs = deps.readPackageRefs ?? readClawPackageRefsAsync;
   const acquirePackageLease = deps.acquirePackageLease ?? acquireClawPackageLifecycleLease;
   const resolvePlugin = deps.resolvePlugin ?? resolveInstalledClawHubPlugin;
   const installedPackages: PersistedClawPackageRef[] = [];
@@ -344,6 +362,7 @@ async function installClawPackagesUnlocked(
         throw new Error(`Could not acquire package lifecycle lease for ${pkg.ref}.`);
       }
       packageLease = maintainClawPackageLifecycleLease(acquiredLease);
+      currentPackageLease = packageLease;
       if (pkg.kind === "skill") {
         const preflight = await preflightSkill({
           workspaceDir: plan.agent.workspace,
@@ -369,7 +388,7 @@ async function installClawPackagesUnlocked(
         }
         if (preflight.action === "reuse") {
           installedPackages.push(
-            persistPackageRef(plan, pkg, {
+            await persistPackageRef(plan, pkg, {
               ...options,
               status: "complete",
               relationship: "managed",
@@ -379,7 +398,7 @@ async function installClawPackagesUnlocked(
           );
           continue;
         }
-        let packageRef = persistPackageRef(plan, pkg, {
+        let packageRef = await persistPackageRef(plan, pkg, {
           ...options,
           status: "pending",
           relationship: "managed",
@@ -396,12 +415,16 @@ async function installClawPackagesUnlocked(
           version: pkg.version,
           expectedIntegrity: pkg.integrity,
           clawManaged: true,
+          beforePersistentApply: () => {
+            assertClawMutationCurrent();
+            packageLease?.assertCurrent();
+          },
         });
         packageLease.assertCurrent();
         if (!installed.ok) {
           throw new Error(installed.error);
         }
-        packageRef = completePackageRef(packageRef, "complete", options);
+        packageRef = await completePackageRef(packageRef, "complete", options);
         installedPackages[installedPackages.length - 1] = packageRef;
         continue;
       }
@@ -426,7 +449,7 @@ async function installClawPackagesUnlocked(
               pkg,
               preflight,
               expectedIntegrity: pkg.integrity,
-              refs: readPackageRefs({
+              refs: await readPackageRefs({
                 ...options,
                 agentId: plan.agent.finalId,
                 kind: pkg.kind,
@@ -499,7 +522,7 @@ async function installClawPackagesUnlocked(
         if (resumableRequirement) {
           options.runtimeBatch?.retain(probe.pluginId);
           installedPackages.push(
-            persistPackageRef(plan, pkg, {
+            await persistPackageRef(plan, pkg, {
               ...options,
               status: "complete",
               relationship: resumableRequirement.relationship,
@@ -509,7 +532,7 @@ async function installClawPackagesUnlocked(
           );
           continue;
         }
-        const existingRefs = readPackageRefs({
+        const existingRefs = await readPackageRefs({
           ...options,
           kind: pkg.kind,
           source: pkg.source,
@@ -523,7 +546,7 @@ async function installClawPackagesUnlocked(
           ) &&
           !ownerInstallIsNewerThanRefs(preflight.installedAt, existingRefs);
         installedPackages.push(
-          persistPackageRef(plan, pkg, {
+          await persistPackageRef(plan, pkg, {
             ...options,
             status: "complete",
             relationship: "referenced",
@@ -534,7 +557,7 @@ async function installClawPackagesUnlocked(
         continue;
       }
 
-      let packageRef = persistPackageRef(plan, pkg, {
+      let packageRef = await persistPackageRef(plan, pkg, {
         ...options,
         status: "pending",
         relationship: "referenced",
@@ -572,7 +595,7 @@ async function installClawPackagesUnlocked(
         });
       }
       packageLease.assertCurrent();
-      packageRef = completePackageRef(packageRef, "complete", options);
+      packageRef = await completePackageRef(packageRef, "complete", options);
       installedPackages[installedPackages.length - 1] = packageRef;
     } catch (error) {
       try {
@@ -584,7 +607,7 @@ async function installClawPackagesUnlocked(
       const pending = installedPackages.at(-1);
       if (pending?.status === "pending") {
         try {
-          installedPackages[installedPackages.length - 1] = completePackageRef(
+          installedPackages[installedPackages.length - 1] = await completePackageRef(
             pending,
             "failed",
             options,
@@ -611,14 +634,17 @@ async function installClawPackagesUnlocked(
             });
           }
           rollbackLease = maintainClawPackageLifecycleLease(acquiredRollbackLease);
-          const sharedRefs = readPackageRefs({
-            ...options,
-            kind: "plugin",
-            source: "clawhub",
-            ref: packageRef.ref,
-            version: packageRef.version,
-            integrity: packageRef.integrity,
-          }).filter(
+          currentPackageLease = rollbackLease;
+          const sharedRefs = (
+            await readPackageRefs({
+              ...options,
+              kind: "plugin",
+              source: "clawhub",
+              ref: packageRef.ref,
+              version: packageRef.version,
+              integrity: packageRef.integrity,
+            })
+          ).filter(
             (ref) =>
               ref.agentId !== plan.agent.finalId &&
               (ref.status === "pending" || ref.status === "complete"),
@@ -629,7 +655,7 @@ async function installClawPackagesUnlocked(
             );
             continue;
           }
-          const currentRefs = readPackageRefs({
+          const currentRefs = await readPackageRefs({
             ...options,
             kind: "plugin",
             source: "clawhub",
@@ -669,7 +695,7 @@ async function installClawPackagesUnlocked(
             deferRuntime: options.runtimeBatch?.install(),
           });
           rollbackLease.assertCurrent();
-          installedPackages[installedPlugin.packageIndex] = completePackageRef(
+          installedPackages[installedPlugin.packageIndex] = await completePackageRef(
             installedPackages[installedPlugin.packageIndex] ?? packageRef,
             "rolled_back",
             options,

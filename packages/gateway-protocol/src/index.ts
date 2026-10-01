@@ -66,6 +66,8 @@ export * from "./migration-api.js";
 export * from "./restart-unavailable.js";
 export type * from "./public-session-catalog.js";
 export * from "./validator-registry.js";
+export * from "./schema/claws.js";
+export * from "./validator-registry-claws.js";
 export type {
   SecretStoreEntry,
   SecretsStoreDeleteParams,

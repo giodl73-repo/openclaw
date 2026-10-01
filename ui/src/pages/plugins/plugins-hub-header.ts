@@ -1,5 +1,6 @@
 import { html, nothing, type TemplateResult } from "lit";
 import { subtitleForRoute, titleForRoute } from "../../app-navigation.ts";
+import type { ApplicationGatewaySnapshot } from "../../app/context.ts";
 import { shellLayoutTraits } from "../../app/shell-layout-traits.ts";
 import { renderLearnMoreLink } from "../../components/settings-ui.ts";
 import { renderPluginsHubTabs, type PluginsHubTab } from "./plugins-hub.ts";
@@ -8,11 +9,13 @@ const HUB_DOCS_URLS = {
   plugins: "https://docs.openclaw.ai/plugins/manage-plugins",
   skills: "https://docs.openclaw.ai/tools/skills",
   "skill-workshop": "https://docs.openclaw.ai/tools/skill-workshop",
+  claws: "https://docs.openclaw.ai/cli/claws",
 } as const;
 
 type PluginsHubHeaderProps = {
   active: PluginsHubTab;
   onSelect: (tab: PluginsHubTab) => void;
+  gateway?: ApplicationGatewaySnapshot | null;
   secondaryAction?: {
     label: string;
     icon?: TemplateResult;
@@ -33,7 +36,7 @@ export function renderPluginsHubHeader(props: PluginsHubHeaderProps): TemplateRe
         </div>
       </div>
       <div class="hub-page-header__tabs">
-        ${renderPluginsHubTabs({ active: props.active, onSelect: props.onSelect })}
+        ${renderPluginsHubTabs({ active: props.active, onSelect: props.onSelect, gateway: props.gateway })}
       </div>
       <div class="hub-page-header__actions">
         ${

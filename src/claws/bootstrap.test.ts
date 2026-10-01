@@ -6,7 +6,7 @@ import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../agents/workspace-bootstra
 import { readWorkspaceStateSnapshot } from "../agents/workspace-state-store.js";
 import { withTempHomeConfig } from "../config/test-helpers.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { setTestEnvValue } from "../test-utils/env.js";
 import { applyClawAddPlan } from "./add.js";
 import { seedClawPackageBootstrap } from "./bootstrap.js";
@@ -21,9 +21,12 @@ import {
 import { readClawManifestFile } from "./reader.js";
 import { parseClawManifest } from "./schema.js";
 
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-
-afterEach(() => closeOpenClawStateDatabaseForTest());
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
+  afterEach(async () => {
+    await closeStateDatabaseForTest();
+    cleanup();
+  }),
+);
 
 async function createPackage(bootstrap = "# First run\n\nAsk which repositories matter.\n") {
   const root = tempDirs.make("openclaw-claw-bootstrap-");
@@ -322,7 +325,7 @@ describe("package-root BOOTSTRAP.md", () => {
 
     const removed = await removeBootstrap(removePlan, {}, env);
 
-    expect(removed).toMatchObject({
+    expect(removed, JSON.stringify(removed)).toMatchObject({
       status: "complete",
       bootstrap: { path: "BOOTSTRAP.md", action: "deleted" },
     });
@@ -373,7 +376,7 @@ describe("package-root BOOTSTRAP.md", () => {
     );
     const removed = await removeBootstrap(removePlan, config, env);
 
-    expect(removed).toMatchObject({
+    expect(removed, JSON.stringify(removed)).toMatchObject({
       status: "complete",
       bootstrap: { path: "BOOTSTRAP.md", action: "deleted" },
     });
