@@ -105,21 +105,29 @@ export class ClawsPage extends OpenClawLightDomElement {
     }
     const generation = ++this.readGeneration;
     this.readError = null;
+    this.doctor = null;
     this.loading = true;
     try {
       const status = await scope.client.request("claws.status", {});
+      if (!this.gateway.isCurrent(scope) || generation !== this.readGeneration) {
+        return;
+      }
+      if (!validateClawsStatusResult(status)) {
+        throw new Error(t("clawsPage.invalidResponse"));
+      }
+      // Inventory is authoritative even when the separate diagnostic read fails.
+      this.status = status;
+      if (!status.records.some((record) => record.agentId === this.selected)) {
+        this.selected = null;
+      }
       const doctor = await scope.client.request("claws.doctor", {});
       if (!this.gateway.isCurrent(scope) || generation !== this.readGeneration) {
         return;
       }
-      if (!validateClawsStatusResult(status) || !validateClawsDoctorResult(doctor)) {
+      if (!validateClawsDoctorResult(doctor)) {
         throw new Error(t("clawsPage.invalidResponse"));
       }
-      this.status = status;
       this.doctor = doctor;
-      if (!status.records.some((record) => record.agentId === this.selected)) {
-        this.selected = null;
-      }
     } catch (error) {
       if (this.gateway.isCurrent(scope) && generation === this.readGeneration) {
         this.readError = formatUiError(error);

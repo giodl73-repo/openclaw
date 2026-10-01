@@ -598,6 +598,123 @@ describe("Claws Plugins tab", () => {
     expect(request.mock.calls.filter(([method]) => method === "claws.add.apply")).toHaveLength(1);
     expect(request.mock.calls.filter(([method]) => method === "claws.status")).toHaveLength(2);
   });
+  it.each(["rejected", "invalid"])(
+    "keeps valid inventory when diagnostics are %s",
+    async (failure) => {
+      const { page } = await mount({
+        handler: (method) => {
+          if (method === "claws.doctor") {
+            return failure === "rejected"
+              ? Promise.reject(new Error("Diagnostics unavailable"))
+              : { schemaVersion: "invalid" };
+          }
+        },
+      });
+      expect(page.querySelector(".claws-row")?.textContent).toContain(clawRecord.name);
+      expect(page.querySelector("[role=alert]")?.textContent).toBeTruthy();
+      expect(page.querySelector<HTMLButtonElement>(".claws-row")?.disabled).toBe(false);
+    },
+  );
+  it("publishes reconciled inventory before diagnostics settle without retrying an uncertain write", async () => {
+    const diagnostics = createDeferred<unknown>();
+    let applied = false;
+    const { page, click, input, request } = await mount({
+      handler: (method) => {
+        if (method === "claws.add.apply") {
+          applied = true;
+          return Promise.reject(new Error("Connection lost"));
+        }
+        if (applied && method === "claws.status") {
+          return clawStatus([{ ...clawRecord, version: "0.2.0", status: "partial" }]);
+        }
+        if (applied && method === "claws.doctor") {
+          return diagnostics.promise;
+        }
+      },
+    });
+    await click("Add Claw");
+    await input("packageName", clawRecord.name);
+    await click("Review changes");
+    await click("Confirm changes");
+    expect(page.querySelector(".claws-row")?.textContent).toContain("0.2.0");
+    expect(page.querySelector(".claws-row")?.textContent).toContain("partial");
+    diagnostics.reject(new Error("Diagnostics unavailable"));
+    await settleLitElement(page);
+    expect(page.querySelector(".claws-row")?.textContent).toContain("0.2.0");
+    expect(page.textContent).toContain("operation was not confirmed");
+    expect(page.textContent).toContain("Diagnostics unavailable");
+    expect(page.querySelector("openclaw-modal-dialog")).toBeNull();
+    expect(request.mock.calls.filter(([method]) => method.endsWith(".apply"))).toHaveLength(1);
+  });
+  it("does not request diagnostics after an inventory read outlives its connection", async () => {
+    const inventory = createDeferred<unknown>();
+    const { page, harness, request } = await mount({
+      handler: (method) => (method === "claws.status" ? inventory.promise : undefined),
+    });
+    harness.publish({ ...harness.gateway.snapshot, phase: "reconnecting" });
+    inventory.resolve(clawStatus());
+    await settleLitElement(page);
+    expect(request).not.toHaveBeenCalledWith("claws.doctor", expect.anything());
+    expect(page.querySelector(".claws-row")).toBeNull();
+  });
+  it("clears stale findings when a diagnostic refresh fails and restores them on recovery", async () => {
+    let diagnosticsFail = false;
+    const { page, click } = await mount({
+      handler: (method) => {
+        if (method === "claws.doctor") {
+          return diagnosticsFail
+            ? Promise.reject(new Error("Diagnostics unavailable"))
+            : {
+                ...clawDoctor,
+                findings: [{ severity: "warning", message: "Scheduled work needs attention" }],
+                summary: { info: 0, warnings: 1, errors: 0 },
+              };
+        }
+      },
+    });
+    expect(page.textContent).toContain("Scheduled work needs attention");
+    diagnosticsFail = true;
+    await click("Refresh");
+    expect(page.textContent).not.toContain("Scheduled work needs attention");
+    expect(page.textContent).toContain("Diagnostics unavailable");
+    expect(page.querySelector(".claws-row")?.textContent).toContain(clawRecord.name);
+    diagnosticsFail = false;
+    await click("Refresh");
+    expect(page.textContent).toContain("Scheduled work needs attention");
+    expect(page.textContent).not.toContain("Diagnostics unavailable");
+  });
+  it("discards late diagnostics after a same-client reconnect", async () => {
+    const diagnostics = createDeferred<unknown>();
+    let reconnected = false;
+    const { page, harness, client } = await mount({
+      handler: (method) => {
+        if (method === "claws.doctor" && !reconnected) {
+          return diagnostics.promise;
+        }
+        if (method === "claws.status" && reconnected) {
+          return clawStatus([]);
+        }
+      },
+    });
+    harness.publish({ ...harness.gateway.snapshot, phase: "reconnecting" });
+    reconnected = true;
+    harness.publish({
+      ...harness.gateway.snapshot,
+      client,
+      phase: "connected",
+      hello: gatewayHelloForMethods(clawMethods),
+    });
+    await settleLitElement(page);
+    diagnostics.resolve({
+      ...clawDoctor,
+      findings: [{ severity: "warning", message: "Stale diagnostic finding" }],
+      summary: { info: 0, warnings: 1, errors: 0 },
+    });
+    await settleLitElement(page);
+    expect(page.textContent).not.toContain("Stale diagnostic finding");
+    expect(page.querySelector(".claws-row")).toBeNull();
+    expect(page.querySelector<HTMLButtonElement>('[aria-label="Refresh"]')?.disabled).toBe(false);
+  });
   it("does not fall back to the default agent when the fresh roster is unavailable", async () => {
     const { page, click, refreshAgents, navigate } = await mount();
     refreshAgents.mockResolvedValue(null);
