@@ -26,13 +26,23 @@ import { cronStoreKey } from "../../cron/store/key.js";
 import { hasActiveCronRunReceiptsForAgent } from "../../cron/store/run-receipt-drain.js";
 import type { CronJob, CronJobCreate } from "../../cron/types.js";
 import { readAgentDeletionJournal } from "../../state/agent-deletion-journal.js";
+import { withArtifactPreservingStateReads } from "../../state/openclaw-state-db-readonly.js";
 import { sleep } from "../../utils/sleep.js";
-import type { GatewayRequestContext, GatewayRequestHandlers, RespondFn } from "./types.js";
+import type {
+  GatewayRequestContext,
+  GatewayRequestHandlerOptions,
+  GatewayRequestHandlers,
+} from "./types.js";
 
 type ClawMonitorContext = Pick<
   GatewayRequestContext,
   "cron" | "cronStorePath" | "getRuntimeConfig" | "isConfigReloadSettled"
 >;
+
+type ClawMonitorRequestOptions = Pick<
+  GatewayRequestHandlerOptions,
+  "params" | "respond" | "signal" | "sessionMutationCommitGuard" | "hasCurrentClientAuthority"
+> & { context: ClawMonitorContext };
 
 const text = z.string().min(1).max(4096);
 const target = { agentId: text, binding: clawMonitorCleanupBindingSchema };
@@ -161,6 +171,7 @@ async function waitForDrain(
       }
     }
     await sleep(50);
+    assertCurrent();
   } while (performance.now() < deadline);
   throw new Error(
     "Gateway monitor cancellation, run drainage, or config convergence is incomplete; preview and retry Claw removal.",
@@ -172,11 +183,10 @@ export const clawsMonitorHandlers = {
     params,
     respond,
     context,
-  }: {
-    params: Record<string, unknown>;
-    respond: RespondFn;
-    context: ClawMonitorContext;
-  }) => {
+    signal,
+    sessionMutationCommitGuard,
+    hasCurrentClientAuthority,
+  }: ClawMonitorRequestOptions) => {
     const parsed = paramsSchema.safeParse(params);
     if (!parsed.success) {
       respond(
@@ -190,6 +200,11 @@ export const clawsMonitorHandlers = {
     try {
       const cron = context.cron;
       const assertBinding = () => {
+        signal?.throwIfAborted();
+        sessionMutationCommitGuard?.();
+        if (hasCurrentClientAuthority?.() === false) {
+          throw new Error("Claw monitor cleanup request authority is no longer current.");
+        }
         if (
           !isDeepStrictEqual(input.binding, resolveClawMonitorCleanupBinding(context.cronStorePath))
         ) {
@@ -204,10 +219,11 @@ export const clawsMonitorHandlers = {
       };
       assertBinding();
       if (input.phase === "inspect") {
-        const jobs = await cron.list({ includeDisabled: true });
-        assertBinding();
-        respond(true, { monitors: inspectMonitors(context, input.agentId, jobs) }, undefined);
-        return;
+        return await withArtifactPreservingStateReads(async () => {
+          const jobs = await cron.list({ includeDisabled: true });
+          assertBinding();
+          respond(true, { monitors: inspectMonitors(context, input.agentId, jobs) }, undefined);
+        });
       }
       const assertCurrent = () => {
         assertBinding();
@@ -253,6 +269,7 @@ export const clawsMonitorHandlers = {
             throw new Error("Attached scheduled work changed before monitor cancellation.");
           }
         });
+        assertCurrent();
       }
       await waitForDrain(context, input.agentId, input.phase === "drain", assertCurrent);
       const journal = assertCurrent();

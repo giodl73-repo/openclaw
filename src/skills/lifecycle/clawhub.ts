@@ -198,13 +198,24 @@ export async function installSkillFromClawHub(
     "ownerHandle" | "requestedReference" | "trustState" | "expectedClawHubState"
   >,
 ): Promise<InstallClawHubSkillResult> {
+  params.beforePersistentApply?.();
+  const run = async () => {
+    params.beforePersistentApply?.();
+    const result = await installRequestedSkillFromClawHub(params);
+    params.beforePersistentApply?.();
+    return result;
+  };
+  let result: InstallClawHubSkillResult;
   if (params.clawManaged) {
-    return await installRequestedSkillFromClawHub(params);
+    result = await run();
+  } else {
+    result = await withClawPackageLifecycleLease(
+      { kind: "skill", source: "clawhub", ref: params.slug, workspace: params.workspaceDir },
+      run,
+    );
   }
-  return await withClawPackageLifecycleLease(
-    { kind: "skill", source: "clawhub", ref: params.slug, workspace: params.workspaceDir },
-    () => installRequestedSkillFromClawHub(params),
-  );
+  params.beforePersistentApply?.();
+  return result;
 }
 
 export async function updateSkillsFromClawHub(params: {

@@ -76,9 +76,13 @@ const log = createSubsystemLogger("agents/lifecycle");
 /** Acquire before the config lock and retain ownership through cleanup and recovery. */
 export function withAgentDeletion<T>(
   agentId: string,
-  run: (begin: (entry: AgentDeletionInput) => AgentDeletionOperation) => Promise<T>,
-  options: OpenClawStateDatabaseOptions = {},
+  run: (
+    begin: (entry: AgentDeletionInput) => AgentDeletionOperation,
+    assertCurrent: () => void,
+  ) => Promise<T>,
+  options: OpenClawStateDatabaseOptions & { beforePersistentApply?: () => void } = {},
 ): Promise<T> {
+  options.beforePersistentApply?.();
   const id = normalizeAgentId(agentId);
   const statePath = path.resolve(
     options.path ?? resolveOpenClawStateSqlitePath(options.env ?? process.env),
@@ -100,13 +104,16 @@ export function withAgentDeletion<T>(
       let begun = false;
       let closed = false;
       try {
-        return await run((entry) => {
+        options.beforePersistentApply?.();
+        const begin = (entry: AgentDeletionInput): AgentDeletionOperation => {
+          options.beforePersistentApply?.();
           if (closed || begun || normalizeAgentId(entry.agentId) !== id) {
             throw new Error(`Agent ${id} deletion already began or has a different target.`);
           }
           begun = true;
           const operationId = crypto.randomUUID();
           const journal = runOpenClawStateWriteTransaction((database) => {
+            options.beforePersistentApply?.();
             lease.assertOwnedInTransaction(database.db);
             const cancelCronRuns = captureActiveCronJobAgentDeletion(
               id,
@@ -155,13 +162,17 @@ export function withAgentDeletion<T>(
             }
             return id;
           };
-          const assertCurrent = (database?: OpenClawStateDatabase) => {
+          const assertOwned = (database?: OpenClawStateDatabase) => {
             const current = closed
               ? undefined
               : database
                 ? readAgentDeletionJournalInDatabase(database, id)
                 : readAgentDeletionJournal(id, stateOptions);
             assertJournal(database?.path ?? statePath, current ? [current] : [], database);
+          };
+          const assertCurrent = (database?: OpenClawStateDatabase) => {
+            options.beforePersistentApply?.();
+            assertOwned(database);
           };
           const mutateJournal = <Result>(mutate: () => Result): Result =>
             runOpenClawStateWriteTransaction((database) => {
@@ -182,7 +193,10 @@ export function withAgentDeletion<T>(
               statePath,
               assertAdmission: () => assertNoOpenClawAgentDatabaseLeases(id, stateOptions),
               assertCurrent,
-              assertJournal,
+              assertJournal: (currentStatePath, entries) => {
+                options.beforePersistentApply?.();
+                return assertJournal(currentStatePath, entries);
+              },
               withCommit: (commit) => {
                 let committed = false;
                 try {
@@ -229,13 +243,19 @@ export function withAgentDeletion<T>(
             completeInTransaction,
             finish: () => runOpenClawStateWriteTransaction(completeInTransaction, stateOptions),
             rollback: () =>
-              mutateJournal(() => {
+              runOpenClawStateWriteTransaction((database) => {
+                // Recovery releases this claim even after its request authority expires.
+                assertOwned(database);
                 if (!removeAgentDeletionJournal(id, operationId, stateOptions)) {
                   throw new Error(`Failed to roll back deletion journal for agent ${id}.`);
                 }
                 closed = true;
-              }),
+              }, stateOptions),
           };
+        };
+        return await run(begin, () => {
+          options.beforePersistentApply?.();
+          lease.assertOwned();
         });
       } finally {
         closed = true;

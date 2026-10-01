@@ -63,6 +63,63 @@ function manifest(): ClawManifest {
 }
 
 describe("applyClawMcpUpdate", () => {
+  it("rolls back a committed MCP change after request revocation without completing provenance", async () => {
+    const previous = ref("docs", oldDocs);
+    let currentRef = previous;
+    let server: Record<string, unknown> = oldDocs;
+    let authorized = true;
+    const beforePersistentApply = () => {
+      if (!authorized) {
+        throw new Error("Request revoked.");
+      }
+    };
+    const setServer = vi.fn<NonNullable<Parameters<typeof applyClawMcpUpdate>[2]["setServer"]>>(
+      async (params) => {
+        params.assertCurrent?.();
+        server = params.server;
+        await Promise.resolve();
+        authorized = false;
+        return { ok: true, path: "config", config: {}, mcpServers: { docs: server } };
+      },
+    );
+    const upsertRef = vi.fn((value: PersistedClawMcpServerRef) => {
+      currentRef = value;
+    });
+
+    await expect(
+      applyClawMcpUpdate(
+        plan([
+          {
+            kind: "mcpServer",
+            id: "docs",
+            action: "change",
+            target: "mcp.servers.docs",
+            blocked: false,
+            reason: "changed",
+          },
+        ]),
+        manifest(),
+        {
+          config: {},
+          sourceMcpServers: { docs: oldDocs },
+          beforePersistentApply,
+          readRefs: () => [currentRef],
+          readRefsByName: () => [currentRef],
+          upsertRef,
+          setServer,
+        },
+      ),
+    ).rejects.toMatchObject({ message: "Request revoked.", partial: false });
+
+    expect(setServer).toHaveBeenCalledTimes(2);
+    expect(server).toEqual(oldDocs);
+    expect(currentRef).toEqual(previous);
+    expect(upsertRef).not.toHaveBeenCalledWith(
+      expect.objectContaining({ configDigest: digestClawMcpServer(newDocs), status: "complete" }),
+      expect.anything(),
+    );
+  });
+
   it("applies add, change, and remove with CAS writes and reversible ownership", async () => {
     const currentRefs = [ref("docs", oldDocs), ref("legacy", legacy)];
     const setServer = vi.fn(async () => ({
@@ -129,17 +186,20 @@ describe("applyClawMcpUpdate", () => {
       server: newDocs,
       expectedServer: oldDocs,
       recordIndependentOwner: false,
+      assertCurrent: expect.any(Function),
     });
     expect(setServer).toHaveBeenNthCalledWith(2, {
       name: "remote",
       server: remote,
       createOnly: true,
       recordIndependentOwner: false,
+      assertCurrent: expect.any(Function),
     });
     expect(unsetServer).toHaveBeenCalledWith({
       name: "legacy",
       expectedServer: legacy,
       recordIndependentOwner: false,
+      assertCurrent: expect.any(Function),
     });
 
     await execution.rollback();
@@ -149,17 +209,20 @@ describe("applyClawMcpUpdate", () => {
       server: legacy,
       createOnly: true,
       recordIndependentOwner: false,
+      assertCurrent: expect.any(Function),
     });
     expect(unsetServer).toHaveBeenNthCalledWith(2, {
       name: "remote",
       expectedServer: remote,
       recordIndependentOwner: false,
+      assertCurrent: expect.any(Function),
     });
     expect(setServer).toHaveBeenNthCalledWith(4, {
       name: "docs",
       server: oldDocs,
       expectedServer: newDocs,
       recordIndependentOwner: false,
+      assertCurrent: expect.any(Function),
     });
     expect(upsertRef).toHaveBeenCalledTimes(7);
     expect(deleteRef).toHaveBeenCalledTimes(2);

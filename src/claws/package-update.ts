@@ -95,6 +95,7 @@ export async function applyClawPackageUpdate(
             false,
           );
         }
+        options.beforePersistentApply?.();
         replaceExpected(previous, undefined, options);
         undo.push(async () => replaceExpected(undefined, previous, options));
         appliedIds.push(action.id);
@@ -179,6 +180,7 @@ export async function applyClawPackageUpdate(
         installedAtMs: preservesExistingEdge && previous ? previous.installedAtMs : nowMs,
         updatedAtMs: nowMs,
       };
+      options.beforePersistentApply?.();
       replaceExpected(previous, claimed, options);
       undo.push(async () => replaceExpected(claimed, previous, options));
       const refs = await installPackages(
@@ -211,6 +213,7 @@ export async function applyClawPackageUpdate(
                 : preflight;
             },
             persistPackageRef: (_plan, _pkg, persistOptions) => {
+              options.beforePersistentApply?.();
               const next = {
                 ...claimed,
                 status: persistOptions?.status ?? "complete",
@@ -229,9 +232,13 @@ export async function applyClawPackageUpdate(
               claimed = next;
               return next;
             },
-            completePackageRef: (ref, status) => {
+            completePackageRef: (ref, status, persistOptions) => {
+              // Installer rollback supplies recovery options under its fresh package lease.
+              if (status !== "rolled_back") {
+                options.beforePersistentApply?.();
+              }
               const next = { ...ref, status, updatedAtMs: nowMs };
-              replaceExpected(claimed, next, options);
+              replaceExpected(claimed, next, persistOptions ?? options);
               claimed = next;
               return next;
             },
@@ -241,6 +248,7 @@ export async function applyClawPackageUpdate(
           },
         },
       );
+      options.beforePersistentApply?.();
       const installed = refs.find(
         (ref) => clawPackageKey(ref) === action.id && ref.version === target.version,
       );
@@ -251,6 +259,7 @@ export async function applyClawPackageUpdate(
         );
       }
       if (digest(installed) !== digest(claimed)) {
+        options.beforePersistentApply?.();
         replaceExpected(claimed, installed, options);
         claimed = installed;
       }

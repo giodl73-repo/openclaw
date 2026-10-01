@@ -1,7 +1,7 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { replaceFileAtomicSync } from "@openclaw/fs-safe/atomic";
+import { replaceFileAtomic, replaceFileAtomicSync } from "@openclaw/fs-safe/atomic";
 import { normalizeOptionalString as normalizeOptionalStringValue } from "@openclaw/normalization-core/string-coerce";
 import {
   getAgentWorkspaceAccess,
@@ -263,9 +263,35 @@ export async function readClawHubSkillsLockfile(
 async function writeClawHubSkillsLockfile(
   workspaceDir: string,
   lockfile: ClawHubSkillsLockfile,
+  beforePersistentApply?: () => void,
 ): Promise<void> {
-  await writeJson(path.join(workspaceDir, DOT_DIR, "lock.json"), lockfile, {
-    trailingNewline: true,
+  await writeClawHubTrackingJson(
+    path.join(workspaceDir, DOT_DIR, "lock.json"),
+    lockfile,
+    beforePersistentApply,
+  );
+}
+
+async function writeClawHubTrackingJson(
+  filePath: string,
+  value: ClawHubSkillOrigin | ClawHubSkillsLockfile,
+  beforePersistentApply?: () => void,
+): Promise<void> {
+  if (!beforePersistentApply) {
+    await writeJson(filePath, value, { trailingNewline: true });
+    return;
+  }
+  // writeJson has no mutation guard; use its atomic publication owner directly.
+  beforePersistentApply();
+  await replaceFileAtomic({
+    filePath,
+    content: `${JSON.stringify(value, null, 2)}\n`,
+    mode: 0o600,
+    dirMode: 0o777 & ~process.umask(),
+    copyFallbackOnPermissionError: true,
+    syncTempFile: true,
+    syncParentDir: true,
+    assertBeforeMutation: beforePersistentApply,
   });
 }
 
@@ -366,8 +392,13 @@ export async function readClawHubSkillOriginStrict(
 async function writeClawHubSkillOrigin(
   skillDir: string,
   origin: ClawHubSkillOrigin,
+  beforePersistentApply?: () => void,
 ): Promise<void> {
-  await writeJson(path.join(skillDir, DOT_DIR, "origin.json"), origin, { trailingNewline: true });
+  await writeClawHubTrackingJson(
+    path.join(skillDir, DOT_DIR, "origin.json"),
+    origin,
+    beforePersistentApply,
+  );
 }
 
 async function readInstalledSkillFileLock(
@@ -389,7 +420,8 @@ export async function recordClawHubSkillInstall(
   params: Parameters<WorkspaceSkillLifecycle["recordClawHubSkillInstall"]>[0],
 ): Promise<void> {
   const { origin, verification } = params;
-  await writeClawHubSkillOrigin(params.skillDir, origin);
+  params.beforePersistentApply?.();
+  await writeClawHubSkillOrigin(params.skillDir, origin, params.beforePersistentApply);
   const lock = await readClawHubSkillsLockfile(params.workspaceDir);
   lock.skills[origin.slug] = {
     version: origin.installedVersion,
@@ -404,7 +436,9 @@ export async function recordClawHubSkillInstall(
     ...(origin.fileTreeSha256 ? { fileTreeSha256: origin.fileTreeSha256 } : {}),
     ...(verification ? { verification } : {}),
   };
-  await writeClawHubSkillsLockfile(params.workspaceDir, lock);
+  params.beforePersistentApply?.();
+  await writeClawHubSkillsLockfile(params.workspaceDir, lock, params.beforePersistentApply);
+  params.beforePersistentApply?.();
 }
 
 export function resolveWorkspaceClawHubSkills(workspaceDir: string) {

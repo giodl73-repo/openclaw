@@ -93,6 +93,45 @@ function listedCronJob(
 }
 
 describe("installClawCronJobs", () => {
+  it.each(["wait", "add"] as const)(
+    "retains pending cron ownership when authority expires during %s",
+    async (revokeAt) => {
+      const current = await fixture();
+      let authorized = true;
+      const add = vi.fn(async () => {
+        authorized = false;
+        return { id: "scheduler-created" };
+      });
+      const operation = installClawCronJobs(current.plan, {
+        env: current.env,
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("browser authority revoked");
+          }
+        },
+        gateway: {
+          add,
+          waitUntilAgentAvailable: async () => {
+            authorized = revokeAt !== "wait";
+          },
+        },
+      });
+      await expect(operation).rejects.toMatchObject({
+        code: revokeAt === "wait" ? "cron_install_failed" : "cron_provenance_failed",
+        cronJobs: [
+          expect.objectContaining({
+            status: "pending",
+            ...(revokeAt === "add" ? { schedulerJobId: "scheduler-created" } : {}),
+          }),
+        ],
+      });
+      expect(add).toHaveBeenCalledTimes(revokeAt === "add" ? 1 : 0);
+      expect(readClawCronRefs(current.plan.agent.finalId, { env: current.env })).toMatchObject([
+        { status: "pending" },
+      ]);
+    },
+  );
+
   it("pins declarations and execution to the final agent id", async () => {
     const current = await fixture();
     const calls: string[] = [];

@@ -177,6 +177,13 @@ class ClawToolProfileConsentStateError extends Error {
   }
 }
 
+export function isClawToolPolicyConsentResolutionError(error: unknown): boolean {
+  return (
+    error instanceof ClawToolProfileConsentError ||
+    error instanceof ClawToolProfileConsentStateError
+  );
+}
+
 export function resolveClawToolPolicyConsent(params: {
   agentTools?: object;
   agentId?: string;

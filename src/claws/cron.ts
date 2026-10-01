@@ -20,7 +20,7 @@ import type { ClawAddPlan, ClawCronJob } from "./types.js";
 export const CLAW_CRON_REF_SCHEMA_VERSION = "openclaw.clawCronRef.v1" as const;
 
 export type PersistedClawCronRef = {
-  schemaVersion: typeof CLAW_CRON_REF_SCHEMA_VERSION;
+  schemaVersion: string;
   agentId: string;
   manifestId: string;
   declarationKey: string;
@@ -54,9 +54,9 @@ export class ClawCronInstallError extends Error {
   }
 }
 
-function rowToRef(row: CronRefRow): PersistedClawCronRef {
+export function rowToRef(row: CronRefRow): PersistedClawCronRef {
   return {
-    schemaVersion: CLAW_CRON_REF_SCHEMA_VERSION,
+    schemaVersion: row.schema_version,
     agentId: row.agent_id,
     manifestId: row.manifest_id,
     declarationKey: row.declaration_key,
@@ -88,10 +88,11 @@ function refToRow(ref: PersistedClawCronRef): CronRefRow {
 function persistPendingRef(
   plan: ClawAddPlan,
   job: ClawCronJob,
-  options: OpenClawStateDatabaseOptions & { nowMs?: number },
+  options: OpenClawStateDatabaseOptions & { nowMs?: number; beforePersistentApply?: () => void },
 ): PersistedClawCronRef {
   const nowMs = options.nowMs ?? Date.now();
   const declarationKey = `claw:${plan.agent.finalId}:${job.id}`;
+  options.beforePersistentApply?.();
   const database = openOpenClawStateDatabase(options);
   const query = getNodeSqliteKysely<CronRefDatabase>(database.db)
     .selectFrom("claw_cron_refs")
@@ -129,6 +130,7 @@ function persistPendingRef(
     updatedAtMs: nowMs,
   };
   runOpenClawStateWriteTransaction(({ db }) => {
+    options.beforePersistentApply?.();
     executeSqliteQuerySync(
       db,
       getNodeSqliteKysely<CronRefDatabase>(db)
@@ -142,7 +144,7 @@ function persistPendingRef(
 function updateRef(
   ref: PersistedClawCronRef,
   update: { schedulerJobId?: string; status: PersistedClawCronRef["status"]; error?: string },
-  options: OpenClawStateDatabaseOptions & { nowMs?: number },
+  options: OpenClawStateDatabaseOptions & { nowMs?: number; beforePersistentApply?: () => void },
 ): PersistedClawCronRef {
   // Omitted fields are cleared in SQLite and must not survive in the returned result.
   const { schedulerJobId: _schedulerJobId, error: _error, ...retained } = ref;
@@ -151,7 +153,9 @@ function updateRef(
     ...update,
     updatedAtMs: options.nowMs ?? Date.now(),
   };
+  options.beforePersistentApply?.();
   runOpenClawStateWriteTransaction(({ db }) => {
+    options.beforePersistentApply?.();
     executeSqliteQuerySync(
       db,
       getNodeSqliteKysely<CronRefDatabase>(db)
@@ -205,7 +209,10 @@ function schedulerJobRecordByDeclarationKey(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-export function clawCronGatewayInput(agentId: string, ref: PersistedClawCronRef) {
+export function clawCronGatewayInput(
+  agentId: string,
+  ref: Pick<PersistedClawCronRef, "job" | "declarationKey">,
+) {
   const job = ref.job;
   return {
     name: job.name ?? job.id,
@@ -277,6 +284,7 @@ export function clawCronGatewayJobMatchesRef(
 export async function installClawCronJobs(
   plan: ClawAddPlan,
   options: OpenClawStateDatabaseOptions & {
+    beforePersistentApply?: () => void;
     gateway?: Pick<ClawCronGateway, "add" | "list" | "waitUntilAgentAvailable">;
     nowMs?: number;
   } = {},
@@ -295,96 +303,120 @@ export async function installClawCronJobs(
   const refs: PersistedClawCronRef[] = [];
   let agentAvailable = false;
   for (const action of actions) {
-    const details = action.details as (ClawCronJob & { agentId?: string }) | undefined;
-    if (!details?.id) {
-      throw new ClawCronInstallError(
-        "cron_plan_invalid",
-        `Cron action ${action.id} is invalid.`,
-        refs,
-      );
-    }
-    const job: ClawCronJob = {
-      id: details.id,
-      ...(details.name ? { name: details.name } : {}),
-      schedule: details.schedule,
-      session: details.session,
-      message: details.message,
-      ...(details.delivery ? { delivery: details.delivery } : {}),
-    };
-    const pending = persistPendingRef(plan, job, options);
-    refs.push(pending);
-    let result: { id: string } | undefined;
-    if (pending.status === "complete" && pending.schedulerJobId) {
-      if (!options.gateway.list) {
-        continue;
-      }
-      if (!agentAvailable) {
-        await options.gateway.waitUntilAgentAvailable?.(plan.agent.finalId);
-        agentAvailable = true;
-      }
-      const listedJob = schedulerJobRecordByDeclarationKey(
-        await options.gateway.list(plan.agent.finalId),
-        pending.declarationKey,
-      );
-      if (listedJob) {
-        if (!clawCronGatewayJobMatchesRef(plan.agent.finalId, pending, listedJob)) {
-          throw new ClawCronInstallError(
-            "cron_reconcile_conflict",
-            `Cron declaration ${JSON.stringify(pending.manifestId)} changed after installation.`,
-            refs,
-          );
-        }
-        result = listedJob;
-        if (result.id !== pending.schedulerJobId) {
-          refs[refs.length - 1] = updateRef(
-            pending,
-            { status: "complete", schedulerJobId: result.id },
-            options,
-          );
-        }
-        continue;
-      }
-      throw new ClawCronInstallError(
-        "cron_reconcile_conflict",
-        `Cron declaration ${JSON.stringify(pending.manifestId)} is missing; remove and add the Claw again to recreate it safely.`,
-        refs,
-      );
-    }
     try {
-      if (!agentAvailable) {
-        await options.gateway.waitUntilAgentAvailable?.(plan.agent.finalId);
-        agentAvailable = true;
+      options.beforePersistentApply?.();
+      const details = action.details as (ClawCronJob & { agentId?: string }) | undefined;
+      if (!details?.id) {
+        throw new ClawCronInstallError(
+          "cron_plan_invalid",
+          `Cron action ${action.id} is invalid.`,
+          refs,
+        );
       }
-      if (options.gateway.list) {
-        result = schedulerJobRecordByDeclarationKey(
+      const job: ClawCronJob = {
+        id: details.id,
+        ...(details.name ? { name: details.name } : {}),
+        schedule: details.schedule,
+        session: details.session,
+        message: details.message,
+        ...(details.delivery ? { delivery: details.delivery } : {}),
+      };
+      const pending = persistPendingRef(plan, job, options);
+      refs.push(pending);
+      let result: { id: string } | undefined;
+      if (pending.status === "complete" && pending.schedulerJobId) {
+        if (!options.gateway.list) {
+          continue;
+        }
+        if (!agentAvailable) {
+          await options.gateway.waitUntilAgentAvailable?.(plan.agent.finalId);
+          options.beforePersistentApply?.();
+          agentAvailable = true;
+        }
+        const listedJob = schedulerJobRecordByDeclarationKey(
           await options.gateway.list(plan.agent.finalId),
           pending.declarationKey,
         );
+        options.beforePersistentApply?.();
+        if (listedJob) {
+          if (!clawCronGatewayJobMatchesRef(plan.agent.finalId, pending, listedJob)) {
+            throw new ClawCronInstallError(
+              "cron_reconcile_conflict",
+              `Cron declaration ${JSON.stringify(pending.manifestId)} changed after installation.`,
+              refs,
+            );
+          }
+          result = listedJob;
+          if (result.id !== pending.schedulerJobId) {
+            refs[refs.length - 1] = updateRef(
+              pending,
+              { status: "complete", schedulerJobId: result.id },
+              options,
+            );
+          }
+          continue;
+        }
+        throw new ClawCronInstallError(
+          "cron_reconcile_conflict",
+          `Cron declaration ${JSON.stringify(pending.manifestId)} is missing; remove and add the Claw again to recreate it safely.`,
+          refs,
+        );
       }
-      result ??= clawCronSchedulerJobFromResult(
-        await options.gateway.add(clawCronGatewayInput(plan.agent.finalId, pending)),
-      );
-      if (!result) {
-        throw new Error("cron.add returned no scheduler job id");
+      try {
+        if (!agentAvailable) {
+          await options.gateway.waitUntilAgentAvailable?.(plan.agent.finalId);
+          options.beforePersistentApply?.();
+          agentAvailable = true;
+        }
+        if (options.gateway.list) {
+          result = schedulerJobRecordByDeclarationKey(
+            await options.gateway.list(plan.agent.finalId),
+            pending.declarationKey,
+          );
+          options.beforePersistentApply?.();
+        }
+        // The Gateway adapter must also guard its own scheduler commit after dispatch.
+        options.beforePersistentApply?.();
+        result ??= clawCronSchedulerJobFromResult(
+          await options.gateway.add(clawCronGatewayInput(plan.agent.finalId, pending)),
+        );
+        if (!result) {
+          throw new Error("cron.add returned no scheduler job id");
+        }
+      } catch (error) {
+        const message = coerceErrorMessage(error);
+        // Retaining uncertainty is failure settlement, not another authorized add.
+        refs[refs.length - 1] = updateRef(
+          pending,
+          { status: "pending", error: message },
+          {
+            ...options,
+            beforePersistentApply: undefined,
+          },
+        );
+        throw new ClawCronInstallError("cron_install_failed", message, refs);
+      }
+      try {
+        // Preserve the returned scheduler identity if authority prevents the provenance write.
+        refs[refs.length - 1] = { ...pending, schedulerJobId: result.id };
+        refs[refs.length - 1] = updateRef(
+          pending,
+          { status: "complete", schedulerJobId: result.id },
+          options,
+        );
+      } catch (error) {
+        const message = coerceErrorMessage(error);
+        throw new ClawCronInstallError(
+          "cron_provenance_failed",
+          `cron.add succeeded, but its scheduler id could not be persisted: ${message}`,
+          refs,
+        );
       }
     } catch (error) {
-      const message = coerceErrorMessage(error);
-      refs[refs.length - 1] = updateRef(pending, { status: "pending", error: message }, options);
-      throw new ClawCronInstallError("cron_install_failed", message, refs);
-    }
-    try {
-      refs[refs.length - 1] = updateRef(
-        pending,
-        { status: "complete", schedulerJobId: result.id },
-        options,
-      );
-    } catch (error) {
-      const message = coerceErrorMessage(error);
-      throw new ClawCronInstallError(
-        "cron_provenance_failed",
-        `cron.add succeeded, but its scheduler id could not be persisted: ${message}`,
-        refs,
-      );
+      if (error instanceof ClawCronInstallError) {
+        throw error;
+      }
+      throw new ClawCronInstallError("cron_install_failed", coerceErrorMessage(error), refs);
     }
   }
   return refs;

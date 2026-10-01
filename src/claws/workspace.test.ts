@@ -1,9 +1,10 @@
 // Tests create-only Claw workspace files and immediate per-file provenance.
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import * as fsSafe from "../infra/fs-safe.js";
 import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
@@ -78,6 +79,42 @@ async function makePlan(params?: {
 function stateEnv(root: string) {
   return { OPENCLAW_STATE_DIR: join(root, "state") };
 }
+
+it("rechecks authority inside the filesystem owner and retains pending file evidence", async () => {
+  const { root, workspace, plan } = await makePlan();
+  const originalRoot = fsSafe.root;
+  let authorized = true;
+  const rootSpy = vi.spyOn(fsSafe, "root").mockImplementation(async (...args) => {
+    const owned = await originalRoot(...args);
+    const write = owned.write.bind(owned);
+    owned.write = async (...writeArgs) => {
+      await Promise.resolve();
+      authorized = false;
+      return await write(...writeArgs);
+    };
+    return owned;
+  });
+  try {
+    await expect(
+      createClawWorkspaceFiles(plan, {
+        env: stateEnv(root),
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("browser authority revoked");
+          }
+        },
+      }),
+    ).rejects.toMatchObject({
+      createdFiles: [expect.objectContaining({ path: "AGENTS.md", status: "pending" })],
+    });
+    expect(readClawWorkspaceFiles(plan.agent.finalId, { env: stateEnv(root) })).toMatchObject([
+      { path: "AGENTS.md", status: "pending" },
+    ]);
+    await expect(readFile(join(workspace, "AGENTS.md"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    rootSpy.mockRestore();
+  }
+});
 
 type WorkspaceFileRow = {
   schema_version: string;

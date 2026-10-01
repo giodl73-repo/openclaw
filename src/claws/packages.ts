@@ -314,8 +314,16 @@ async function installClawPackagesUnlocked(
   const installSkill = deps.installSkill ?? installSkillFromClawHub;
   const preflightPlugin = deps.preflightPlugin ?? preflightPluginInstall;
   const preflightSkill = deps.preflightSkill ?? preflightSkillFromClawHub;
-  const persistPackageRef = deps.persistPackageRef ?? persistClawPackageRef;
-  const completePackageRef = deps.completePackageRef ?? updateClawPackageRefStatus;
+  const persistPackageRef: typeof persistClawPackageRef = (...args) => {
+    options.beforePersistentApply?.();
+    return (deps.persistPackageRef ?? persistClawPackageRef)(...args);
+  };
+  const settlePackageRef = deps.completePackageRef ?? updateClawPackageRefStatus;
+  const recoveryOptions = { ...options, beforePersistentApply: undefined };
+  const completePackageRef: typeof updateClawPackageRefStatus = (...args) => {
+    options.beforePersistentApply?.();
+    return settlePackageRef(...args);
+  };
   const readPackageRefs = deps.readPackageRefs ?? readClawPackageRefs;
   const acquirePackageLease = deps.acquirePackageLease ?? acquireClawPackageLifecycleLease;
   const resolvePlugin = deps.resolvePlugin ?? resolveInstalledClawHubPlugin;
@@ -325,6 +333,7 @@ async function installClawPackagesUnlocked(
   for (const action of plan.actions.filter((candidate) => candidate.kind === "package")) {
     let packageLease: MaintainedClawPackageLifecycleLease | null = null;
     try {
+      options.beforePersistentApply?.();
       const pkg = packageFromAction(action);
       const leaseArtifact =
         pkg.kind === "skill"
@@ -344,6 +353,11 @@ async function installClawPackagesUnlocked(
         throw new Error(`Could not acquire package lifecycle lease for ${pkg.ref}.`);
       }
       packageLease = maintainClawPackageLifecycleLease(acquiredLease);
+      const ownedLease = packageLease;
+      const assertCurrent = () => {
+        options.beforePersistentApply?.();
+        ownedLease.assertCurrent();
+      };
       if (pkg.kind === "skill") {
         const preflight = await preflightSkill({
           workspaceDir: plan.agent.workspace,
@@ -351,7 +365,7 @@ async function installClawPackagesUnlocked(
           version: pkg.version,
           expectedIntegrity: pkg.integrity,
         });
-        packageLease.assertCurrent();
+        assertCurrent();
         if (!preflight.ok) {
           throw new Error(preflight.error);
         }
@@ -390,14 +404,16 @@ async function installClawPackagesUnlocked(
         // The installer has no mutation receipt. Mark the boundary before calling it so a throw
         // after an on-disk change is treated as uncertain instead of falsely reported as rolled back.
         options.onExternalMutation?.(pkg);
+        assertCurrent();
         const installed = await installSkill({
           workspaceDir: plan.agent.workspace,
           slug: pkg.ref,
           version: pkg.version,
           expectedIntegrity: pkg.integrity,
           clawManaged: true,
+          beforePersistentApply: assertCurrent,
         });
-        packageLease.assertCurrent();
+        assertCurrent();
         if (!installed.ok) {
           throw new Error(installed.error);
         }
@@ -411,7 +427,7 @@ async function installClawPackagesUnlocked(
         rawSpec: `clawhub:${pkg.ref}@${pkg.version}`,
         expectedVersion: pkg.version,
       });
-      packageLease.assertCurrent();
+      assertCurrent();
       if (!preflight.ok) {
         throw new Error(
           preflight.code === "plugin_version_conflict"
@@ -446,7 +462,7 @@ async function installClawPackagesUnlocked(
       const probe = await probeClawPluginArtifact(pkg, true, {
         probePlugin: deps.probePlugin,
       });
-      packageLease.assertCurrent();
+      assertCurrent();
       if (!probe.ok) {
         throw new Error(probe.error);
       }
@@ -546,6 +562,7 @@ async function installClawPackagesUnlocked(
       // The installer has no mutation receipt. Mark the boundary before calling it so a throw
       // after an on-disk change is treated as uncertain instead of falsely reported as rolled back.
       options.onExternalMutation?.(pkg);
+      assertCurrent();
       await installPlugin({
         request: {
           source: "clawhub",
@@ -556,7 +573,7 @@ async function installClawPackagesUnlocked(
           expectedPluginId: probe.pluginId,
         },
         env: options.env,
-        beforePersistentApply: packageLease.assertCurrent,
+        beforePersistentApply: assertCurrent,
         logger: createPluginInstallLogger(runtime),
         confirmInstall: resolveClawHubInstallConfirmation(),
         ...resolvePluginCapabilityConsentCliOptions({ action: "install", runtime }),
@@ -571,7 +588,7 @@ async function installClawPackagesUnlocked(
           packageIndex: installedPackages.length - 1,
         });
       }
-      packageLease.assertCurrent();
+      assertCurrent();
       packageRef = completePackageRef(packageRef, "complete", options);
       installedPackages[installedPackages.length - 1] = packageRef;
     } catch (error) {
@@ -669,10 +686,11 @@ async function installClawPackagesUnlocked(
             deferRuntime: options.runtimeBatch?.install(),
           });
           rollbackLease.assertCurrent();
-          installedPackages[installedPlugin.packageIndex] = completePackageRef(
+          // Compensation owns a fresh package lease independently of browser authority.
+          installedPackages[installedPlugin.packageIndex] = settlePackageRef(
             installedPackages[installedPlugin.packageIndex] ?? packageRef,
             "rolled_back",
-            options,
+            recoveryOptions,
           );
         } catch (rollbackError) {
           rollbackErrors.push(

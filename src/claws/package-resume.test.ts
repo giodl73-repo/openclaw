@@ -6,15 +6,20 @@ import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
+import { readClawInventory } from "./inventory-read.js";
 import {
   findResumableIntroducedPluginRequirement,
   readClawResumeStateReadOnly,
 } from "./package-resume.js";
 import type { PersistedClawPackageRef } from "./provenance.js";
 
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-
-afterEach(() => closeOpenClawStateDatabaseForTest());
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
+  afterEach(async () => {
+    await closeStateDatabaseForTest();
+    cleanup();
+  }),
+);
 
 /** Reproduces a current-main same-version database that predates the additive columns. */
 function createBaseShapeClawState(env: { OPENCLAW_STATE_DIR: string }): string {
@@ -156,5 +161,22 @@ describe("findResumableIntroducedPluginRequirement", () => {
     expect(state?.packageRefs).toHaveLength(1);
     expect(state?.packageRefs[0]?.extension).toBeUndefined();
     expect(before.equals(await readFile(databasePath))).toBe(true);
+  });
+
+  it("reads base-shape package provenance through the inventory worker without mutating it", async () => {
+    const env = { OPENCLAW_STATE_DIR: tempDirs.make("openclaw-claw-inventory-base-") };
+    const databasePath = createBaseShapeClawState(env);
+    const before = await readFile(databasePath);
+    const state = await readClawResumeStateReadOnly("incident-2", { env, path: databasePath });
+
+    const inventory = await readClawInventory({ env, path: databasePath });
+
+    expect(state).toBeDefined();
+    expect(inventory.installs).toEqual([state?.record]);
+    expect(inventory.packages).toEqual(state?.packageRefs);
+    expect(inventory.packages).toHaveLength(1);
+    expect(inventory.packages[0]?.extension).toBeUndefined();
+    await closeStateDatabaseForTest();
+    expect(await readFile(databasePath)).toEqual(before);
   });
 });

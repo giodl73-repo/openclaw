@@ -1,14 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
-import { tableHasColumn } from "../state/openclaw-state-db-schema-helpers.js";
+import { legacySafeColumnProjection } from "./provenance-legacy-columns.js";
 
 export function selectClawBootstrapProvenanceColumns(db: DatabaseSync): string {
-  const sourcePath = tableHasColumn(db, "claw_installs", "bootstrap_source_path")
-    ? "bootstrap_source_path"
-    : "NULL AS bootstrap_source_path";
-  const contentDigest = tableHasColumn(db, "claw_installs", "bootstrap_content_digest")
-    ? "bootstrap_content_digest"
-    : "NULL AS bootstrap_content_digest";
-  return `${sourcePath}, ${contentDigest}`;
+  return legacySafeColumnProjection(db, "claw_installs", [
+    "bootstrap_source_path",
+    "bootstrap_content_digest",
+  ]);
 }
 
 export function clawBootstrapProvenanceFromRow(row: {

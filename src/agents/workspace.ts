@@ -539,6 +539,7 @@ export async function seedWorkspaceBootstrap(params: {
   content: Buffer;
   nowMs?: number;
   stateOptions?: OpenClawStateDatabaseOptions;
+  beforePersistentApply?: () => void;
 }): Promise<"seeded" | "already-seeded" | "consumed"> {
   if (params.content.byteLength > MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES) {
     throw new WorkspaceBootstrapSeedConflictError(
@@ -557,21 +558,32 @@ export async function seedWorkspaceBootstrap(params: {
 
   const dir = resolveUserPath(params.dir);
   const bootstrapPath = path.join(dir, DEFAULT_BOOTSTRAP_FILENAME);
-  const initialState = (await readCanonicalWorkspaceStateSnapshot(dir, params.stateOptions)).setup;
+  params.beforePersistentApply?.();
+  const initialState = (
+    await readCanonicalWorkspaceStateSnapshot(
+      dir,
+      params.stateOptions,
+      params.beforePersistentApply,
+    )
+  ).setup;
+  params.beforePersistentApply?.();
   if (initialState.setupCompletedAt) {
     return "consumed";
   }
   const bootstrapExists = await pathExists(bootstrapPath);
+  params.beforePersistentApply?.();
   if (initialState.bootstrapSeededAt && !bootstrapExists) {
     return "consumed";
   }
 
   await fs.mkdir(dir, { recursive: true });
   const workspaceRoot = await fsSafeRoot(dir, {
+    assertBeforeMutation: params.beforePersistentApply,
     hardlinks: "reject",
     maxBytes: MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES,
     symlinks: "reject",
   });
+  params.beforePersistentApply?.();
   let created = false;
   if (!bootstrapExists) {
     try {
@@ -588,6 +600,7 @@ export async function seedWorkspaceBootstrap(params: {
       }
     }
   }
+  params.beforePersistentApply?.();
 
   if (!created) {
     const statExistingBootstrap = () =>
@@ -599,6 +612,7 @@ export async function seedWorkspaceBootstrap(params: {
       });
     await retryAsync(
       async () => {
+        params.beforePersistentApply?.();
         const statBefore = await statExistingBootstrap();
         const existing = await readWorkspaceFileWithGuards({
           filePath: bootstrapPath,
@@ -631,6 +645,7 @@ export async function seedWorkspaceBootstrap(params: {
           workspaceDir: dir,
           useCache: false,
         });
+        params.beforePersistentApply?.();
         if (!stable.ok || !Buffer.from(stable.content, "utf8").equals(params.content)) {
           throw new WorkspaceBootstrapSeedConflictError(
             "Existing BOOTSTRAP.md differs from the consented Claw bootstrap.",
@@ -648,15 +663,17 @@ export async function seedWorkspaceBootstrap(params: {
 
   if (!initialState.bootstrapSeededAt) {
     const nowMs = params.nowMs ?? Date.now();
+    params.beforePersistentApply?.();
     await mergeWorkspaceSetupState(
       dir,
       {
         bootstrapSeededAt: new Date(nowMs).toISOString(),
       },
       nowMs,
-      params.stateOptions,
+      { ...params.stateOptions, assertCurrent: params.beforePersistentApply },
     );
   }
+  params.beforePersistentApply?.();
   return created ? "seeded" : "already-seeded";
 }
 

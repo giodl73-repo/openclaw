@@ -55,6 +55,7 @@ export async function applyClawCronUpdate(
   options: OpenClawStateDatabaseOptions & {
     cronGateway?: ClawCronGateway;
     nowMs?: number;
+    beforePersistentApply?: () => void;
     readRefs?: typeof readClawCronRefs;
     upsertRef?: typeof upsertClawCronRef;
     deleteRef?: typeof deleteClawCronRef;
@@ -91,8 +92,12 @@ export async function applyClawCronUpdate(
       agentAvailable = true;
     }
   };
-  const add = async (ref: PersistedClawCronRef): Promise<string> => {
+  const add = async (
+    ref: PersistedClawCronRef,
+    beforePersistentApply?: () => void,
+  ): Promise<string> => {
     await waitForAgent();
+    beforePersistentApply?.();
     let raw: unknown;
     try {
       raw = await gateway.add(clawCronGatewayInput(updatePlan.agentId, ref));
@@ -114,6 +119,7 @@ export async function applyClawCronUpdate(
 
   try {
     for (const action of actions) {
+      options.beforePersistentApply?.();
       const previous = currentRefs.get(action.id);
       if (previous && action.currentDigest && digest(previous.job) !== action.currentDigest) {
         throw new ClawCronUpdateError(
@@ -134,6 +140,7 @@ export async function applyClawCronUpdate(
             `Cron declaration ${JSON.stringify(action.id)} is no longer safely removable.`,
           );
         }
+        options.beforePersistentApply?.();
         upsertRef({ ...previous, status: "pending", updatedAtMs: nowMs }, options);
         try {
           await gateway.remove(previous.schedulerJobId);
@@ -144,6 +151,7 @@ export async function applyClawCronUpdate(
           const restoredId = await add(previous);
           upsertRef({ ...previous, schedulerJobId: restoredId, updatedAtMs: nowMs }, options);
         });
+        options.beforePersistentApply?.();
         deleteRef(updatePlan.agentId, action.id, options);
         appliedIds.push(action.id);
         continue;
@@ -157,9 +165,23 @@ export async function applyClawCronUpdate(
       }
       // A readiness failure must leave this declaration's ownership untouched.
       await waitForAgent();
+      options.beforePersistentApply?.();
       const pending = targetRef({ agentId: updatePlan.agentId, job, previous, nowMs });
       upsertRef(pending, options);
-      const schedulerJobId = await add(pending);
+      let schedulerJobId: string;
+      try {
+        schedulerJobId = await add(pending, options.beforePersistentApply);
+      } catch (error) {
+        if (!(error instanceof ClawCronUpdateError && error.partial)) {
+          // No dispatch occurred: release only this attempt's pending declaration.
+          if (previous) {
+            upsertRef(previous, options);
+          } else {
+            deleteRef(updatePlan.agentId, action.id, options);
+          }
+        }
+        throw error;
+      }
       if (action.action === "change") {
         if (!previous?.schedulerJobId || schedulerJobId !== previous.schedulerJobId) {
           try {
@@ -187,6 +209,7 @@ export async function applyClawCronUpdate(
           deleteRef(updatePlan.agentId, action.id, options);
         });
       }
+      options.beforePersistentApply?.();
       upsertRef({ ...pending, schedulerJobId, status: "complete" }, options);
       appliedIds.push(action.id);
     }

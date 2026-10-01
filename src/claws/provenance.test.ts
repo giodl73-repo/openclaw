@@ -12,6 +12,7 @@ import { replaceClawPackageRefExpected } from "./package-update-provenance.js";
 import { ClawPackageInstallError } from "./packages.js";
 import {
   clawInstallRecordMatchesPlan,
+  deleteClawInstallRecord,
   persistClawInstallRecord,
   persistClawPackageRef,
   readClawInstallRecord,
@@ -221,6 +222,40 @@ describe("Claw root install provenance", () => {
     ).toThrow("did not match the expected phase");
     expect(readClawInstallRecord("worker", options)?.status).toBe("complete");
   });
+
+  it.each(["status", "delete"] as const)(
+    "fences %s settlement against both same-phase changes and replacement installs",
+    async (operation) => {
+      const { root, plan } = await makePlan();
+      const options = { env: stateEnv(root), status: "pending" as const, nowMs: 1 };
+      const original = persistClawInstallRecord(plan, options);
+      const settle = (expectedRecord: typeof original) => {
+        const guarded = { ...options, expectedRecord, expectedStatuses: ["pending" as const] };
+        if (operation === "status") {
+          updateClawInstallRecordStatus("worker", "partial", guarded);
+        } else {
+          deleteClawInstallRecord("worker", guarded);
+        }
+      };
+
+      updateClawInstallRecordStatus("worker", "pending", { ...options, nowMs: 2 });
+      const modified = readClawInstallRecord("worker", options);
+      expect(() => settle(original)).toThrow("changed before settlement");
+      expect(readClawInstallRecord("worker", options)).toEqual(modified);
+
+      deleteClawInstallRecord("worker", options);
+      const replacement = persistClawInstallRecord(plan, { ...options, nowMs: 3 });
+      expect(() => settle(original)).toThrow("changed before settlement");
+      expect(readClawInstallRecord("worker", options)).toEqual(replacement);
+
+      settle(replacement);
+      expect(readClawInstallRecord("worker", options)).toEqual(
+        operation === "delete"
+          ? undefined
+          : { ...replacement, status: "partial", updatedAtMs: options.nowMs },
+      );
+    },
+  );
 
   it("advances package identity while preserving install creation time", async () => {
     const { root, plan } = await makePlan();

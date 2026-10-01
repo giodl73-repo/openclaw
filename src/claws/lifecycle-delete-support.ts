@@ -42,10 +42,10 @@ import {
 import type { RuntimeEnv } from "../runtime.js";
 import { unregisterOpenClawAgentDatabases } from "../state/openclaw-agent-db-registry.js";
 import type { OpenClawStateDatabase } from "../state/openclaw-state-db-contract.js";
+import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
 import { tableExists } from "../state/openclaw-state-db-schema-helpers.js";
 import type { DB } from "../state/openclaw-state-db.generated.js";
 import {
-  openOpenClawStateDatabase,
   runOpenClawStateWriteTransaction,
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
@@ -140,38 +140,41 @@ export function readAttachedCronJobs(
   agentId: string,
   options: OpenClawStateDatabaseOptions,
 ): AttachedCronJob[] {
-  const { db } = openOpenClawStateDatabase(options);
-  if (!tableExists(db, "cron_jobs")) {
-    return [];
-  }
-  const { compiled, bind } = compileSqliteQueryBindings<string>((parameter) => {
-    const boundAgentId = parameter((value) => value);
-    return getNodeSqliteKysely<ClawRemovalDatabase>(db)
-      .selectFrom("cron_jobs")
-      .selectAll()
-      .where((eb) =>
-        eb.or([eb("agent_id", "=", boundAgentId), eb("owner_agent_id", "=", boundAgentId)]),
-      )
-      .orderBy("job_id")
-      .orderBy("store_key");
-  });
-  const rows =
-    db /* sqlite-allow-raw: preserve native inventory errors outside the write-transaction owner. */
-      .prepare(compiled.sql)
-      .all(...bind(agentId)) as CronJobRow[];
-  return rows.map((row) => {
-    const job = loadedCronStoreFromRows([row]).store.jobs[0];
-    return {
-      id: row.job_id,
-      name: row.name,
-      enabled: row.enabled === 1,
-      agentId: row.agent_id,
-      ownerAgentId: row.owner_agent_id,
-      storeKey: row.store_key,
-      declarationKey: row.declaration_key,
-      revision: job ? resolveCronJobConfigRevision(job) : undefined,
-    };
-  });
+  return (
+    withExistingOpenClawStateDatabaseReadOnly(({ db }) => {
+      if (!tableExists(db, "cron_jobs")) {
+        return [];
+      }
+      const { compiled, bind } = compileSqliteQueryBindings<string>((parameter) => {
+        const boundAgentId = parameter((value) => value);
+        return getNodeSqliteKysely<ClawRemovalDatabase>(db)
+          .selectFrom("cron_jobs")
+          .selectAll()
+          .where((eb) =>
+            eb.or([eb("agent_id", "=", boundAgentId), eb("owner_agent_id", "=", boundAgentId)]),
+          )
+          .orderBy("job_id")
+          .orderBy("store_key");
+      });
+      const rows =
+        db /* sqlite-allow-raw: preserve native inventory errors outside the write-transaction owner. */
+          .prepare(compiled.sql)
+          .all(...bind(agentId)) as CronJobRow[];
+      return rows.map((row) => {
+        const job = loadedCronStoreFromRows([row]).store.jobs[0];
+        return {
+          id: row.job_id,
+          name: row.name,
+          enabled: row.enabled === 1,
+          agentId: row.agent_id,
+          ownerAgentId: row.owner_agent_id,
+          storeKey: row.store_key,
+          declarationKey: row.declaration_key,
+          revision: job ? resolveCronJobConfigRevision(job) : undefined,
+        };
+      });
+    }, options) ?? []
+  );
 }
 
 /** Offline preview keeps local blockers; only a serving owner can make a monitor removable. */
@@ -254,7 +257,7 @@ export async function cleanupClawAgentFilesystem(params: {
   const trashPath: ClawTrashPath = (pathname, runtime) => {
     params.assertCurrent();
     return params.trashPath
-      ? params.trashPath(pathname, runtime)
+      ? params.trashPath(pathname, runtime, params.assertCurrent)
       : moveToTrash(pathname, runtime, params.assertCurrent);
   };
   const survivingDatabaseFilePaths = resolveSurvivingDatabaseFilePaths(
@@ -464,14 +467,17 @@ export async function removeClawWorkspaceFile(
     }
     const stagedPath = `${record.path}.openclaw-claw-remove-${randomUUID()}`;
     assertCurrent();
-    await workspace.move(record.path, stagedPath, { overwrite: false });
+    await workspace.move(record.path, stagedPath, {
+      overwrite: false,
+      assertBeforeMutation: assertCurrent,
+    });
     let outcome: Result<void, unknown>;
     try {
       const content = await workspace.readBytes(stagedPath, { maxBytes });
       assertCurrent();
       const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
       if (digest === record.contentDigest) {
-        await workspace.remove(stagedPath);
+        await workspace.remove(stagedPath, { assertBeforeMutation: assertCurrent });
         return { path: record.path, action: "deleted" };
       }
       outcome = ok(undefined);

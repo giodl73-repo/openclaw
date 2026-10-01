@@ -174,7 +174,11 @@ describe("Claw exec approvals removal", () => {
       expect(loadSessionEntryReadOnly(workerScope)).toBeUndefined();
       expect(loadSessionEntryReadOnly(keptScope)?.sessionId).toBe("kept-session");
       expect(target.db.isOpen).toBe(false);
-      expect(trashPath).not.toHaveBeenCalledWith(dirname(target.path), expect.anything());
+      expect(trashPath).not.toHaveBeenCalledWith(
+        dirname(target.path),
+        expect.anything(),
+        expect.any(Function),
+      );
       expect(readAgentDeletionJournal("worker")?.cleanupCompleted).toBe(true);
     });
   });
@@ -524,7 +528,11 @@ describe("Claw exec approvals removal", () => {
             consentPlanIntegrity: plan.planIntegrity,
           }),
         ).resolves.toMatchObject({ status: "complete" });
-        expect(trashPath).not.toHaveBeenCalledWith(sharedDir, expect.anything());
+        expect(trashPath).not.toHaveBeenCalledWith(
+          sharedDir,
+          expect.anything(),
+          expect.any(Function),
+        );
         expect((await stat(foreignPath)).ino).toBe(before.ino);
       });
     },

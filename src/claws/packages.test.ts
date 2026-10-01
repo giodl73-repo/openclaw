@@ -381,6 +381,44 @@ describe("preflightClawPackage isolated plugin inspection", () => {
 });
 
 describe("installClawPackages", () => {
+  it("passes live authority into the skill owner and retains pending evidence on revocation", async () => {
+    let authorized = true;
+    const installSkill = vi.fn(async (params: { beforePersistentApply?: () => void }) => {
+      await Promise.resolve();
+      authorized = false;
+      params.beforePersistentApply?.();
+      return { ok: true as const, slug: "triage", version: "1.2.3", targetDir: "/tmp/triage" };
+    });
+    const persistPackageRef = vi
+      .fn()
+      .mockReturnValue({ kind: "skill", ref: "@owner/triage", status: "pending" });
+    await expect(
+      installClawPackages(
+        plan([
+          { kind: "skill", source: "clawhub", ref: "@owner/triage", version: "1.2.3", integrity },
+        ]),
+        {
+          beforePersistentApply: () => {
+            if (!authorized) {
+              throw new Error("browser authority revoked");
+            }
+          },
+          deps: {
+            installSkill,
+            persistPackageRef,
+            acquirePackageLease,
+            preflightSkill: vi.fn().mockResolvedValue({ ok: true, action: "install", integrity }),
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "package_install_failed",
+      installedPackages: [{ kind: "skill", ref: "@owner/triage", status: "pending" }],
+    });
+    expect(installSkill).toHaveBeenCalledOnce();
+    expect(persistPackageRef).toHaveBeenCalledOnce();
+  });
+
   const extension = {
     id: "audit-tools",
     format: "claude" as const,

@@ -9,14 +9,18 @@ import {
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
 import { OPENCLAW_STATE_MAINTENANCE_SCHEMA_COMPATIBILITY } from "../state/openclaw-state-schema-compatibility.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { readClawResumeStateReadOnly } from "./package-resume.js";
 import { parseClawManifest } from "./schema.js";
 import type { ClawSourceIdentity } from "./types.js";
 import { buildClawUpdatePlan } from "./update-plan.js";
 
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-
-afterEach(() => closeOpenClawStateDatabaseForTest());
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
+  afterEach(async () => {
+    await closeStateDatabaseForTest();
+    cleanup();
+  }),
+);
 
 function createBaseShapeState(params: {
   env: { OPENCLAW_STATE_DIR: string };
@@ -121,6 +125,7 @@ describe("read-only Claw state compatibility", () => {
     expect(plan.blockers).not.toContainEqual(
       expect.objectContaining({ code: "claw_identity_mismatch" }),
     );
+    await closeStateDatabaseForTest();
     expect(before.equals(await readFile(fixture.databasePath))).toBe(true);
   });
 
@@ -134,6 +139,7 @@ describe("read-only Claw state compatibility", () => {
 
     expect(state?.record).toMatchObject({ agentId: "legacy-worker", status: "complete" });
     expect(state?.record.bootstrap).toBeUndefined();
+    await closeStateDatabaseForTest();
     expect(before.equals(await readFile(fixture.databasePath))).toBe(true);
   });
 });

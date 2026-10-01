@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { __setFsSafeTestHooksForTest } from "@openclaw/fs-safe/test-hooks";
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
@@ -22,12 +23,22 @@ import {
   quiescentClawMonitorGateway,
 } from "./lifecycle-remove.test-support.js";
 import { applyClawRemovePlan, buildClawRemovePlan } from "./lifecycle-state.js";
-import { readClawInstallRecord, persistClawPackageRef, readClawPackageRefs } from "./provenance.js";
-import { readClawWorkspaceFiles, upsertClawWorkspaceFile } from "./workspace.js";
+import {
+  persistClawInstallRecord,
+  readClawInstallRecord,
+  persistClawPackageRef,
+  readClawPackageRefs,
+} from "./provenance.js";
+import {
+  CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION,
+  readClawWorkspaceFiles,
+  upsertClawWorkspaceFile,
+} from "./workspace.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  __setFsSafeTestHooksForTest(undefined);
   for (const cleanup of cleanups.splice(0).toReversed()) {
     await cleanup();
   }
@@ -87,6 +98,127 @@ function expireDeletionLease(): void {
 }
 
 describe("Claw removal operation ownership", () => {
+  it("retains adopted provenance when authority expires during locked workspace inspection", async () => {
+    const state = await createOpenClawTestState({ prefix: "claw-adopted-authority-" });
+    cleanups.push(() => state.cleanup());
+    await state.writeConfig({});
+    const root = state.path("source");
+    await fs.mkdir(root);
+    const { plan } = await buildClawRemovalFixture(root, { withFile: true });
+    await fs.mkdir(plan.agent.workspace);
+    await fs.writeFile(path.join(plan.agent.workspace, "SOUL.md"), "managed\n");
+    const { id: _id, ...entry } = plan.agent.config;
+    await state.writeConfig({ agents: { entries: { worker: entry } } });
+    const installed = persistClawInstallRecord(plan, { agentOrigin: "adopted" });
+    const file = plan.actions.find((action) => action.kind === "workspaceFile");
+    if (!file?.digest) {
+      throw new Error("Expected a managed workspace file.");
+    }
+    upsertClawWorkspaceFile({
+      schemaVersion: CLAW_WORKSPACE_FILE_RECORD_SCHEMA_VERSION,
+      agentId: "worker",
+      workspace: plan.agent.workspace,
+      path: "SOUL.md",
+      sourcePath: "SOUL.md",
+      contentDigest: file.digest,
+      status: "complete",
+      createdAtMs: 1,
+      updatedAtMs: 1,
+    });
+    const config = await readSourceConfigBestEffort();
+    const removePlan = await buildClawRemovePlan("worker", { config });
+    expect(removePlan.blockers).toEqual([]);
+    let authorized = true;
+    __setFsSafeTestHooksForTest({
+      beforeRootReadFinalFence: async () => {
+        await Promise.resolve();
+        authorized = false;
+      },
+    });
+
+    await expect(
+      applyClawRemovePlan(removePlan, {
+        config,
+        consentPlanIntegrity: removePlan.planIntegrity,
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("Request revoked.");
+          }
+        },
+      }),
+    ).rejects.toThrow("Request revoked.");
+
+    expect(authorized).toBe(false);
+    expect(readClawInstallRecord("worker")).toEqual(installed);
+    expect(readClawWorkspaceFiles("worker")).toHaveLength(1);
+    expect(readAgentDeletionJournal("worker")).toBeUndefined();
+  });
+
+  it("rejects expired request authority before claiming removal", async () => {
+    const current = await fixture(true);
+    const installed = readClawInstallRecord("worker");
+    const quiesce = vi.fn();
+    const trashPath = vi.fn(current.trashPath);
+
+    await expect(
+      current.remove({
+        beforePersistentApply: () => {
+          throw new Error("Browser request is no longer current.");
+        },
+        monitorGateway: { ...quiescentClawMonitorGateway, quiesce },
+        trashPath,
+      }),
+    ).rejects.toThrow("Browser request is no longer current.");
+
+    expect(quiesce).not.toHaveBeenCalled();
+    expect(trashPath).not.toHaveBeenCalled();
+    expect(readAgentDeletionJournal("worker")).toBeUndefined();
+    expect(readClawInstallRecord("worker")).toEqual(installed);
+  });
+
+  it.each(["quiesce", "sessions"] as const)(
+    "retains managed files when request authority expires during %s",
+    async (phase) => {
+      const current = await fixture(true);
+      const installed = readClawInstallRecord("worker");
+      let authorized = true;
+      const trashPath = vi.fn(current.trashPath);
+      const purgeSessions = vi.fn(async () => {
+        await Promise.resolve();
+        authorized = false;
+      });
+      const result = await current.remove({
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("Browser request is no longer current.");
+          }
+        },
+        monitorGateway: {
+          ...quiescentClawMonitorGateway,
+          quiesce: async (...args) => {
+            await quiescentClawMonitorGateway.quiesce(...args);
+            authorized = phase !== "quiesce";
+          },
+        },
+        purgeSessions,
+        trashPath,
+      });
+
+      expect(result).toMatchObject({
+        status: "partial",
+        agentRemoved: phase === "sessions",
+        error: { message: "Browser request is no longer current." },
+      });
+      expect(purgeSessions).toHaveBeenCalledTimes(phase === "sessions" ? 1 : 0);
+      expect(trashPath).not.toHaveBeenCalled();
+      expect(readClawInstallRecord("worker")).toEqual(installed);
+      expect(readAgentDeletionJournal("worker")?.cleanupCompleted).toBe(false);
+      await expect(fs.readFile(path.join(current.workspace, "SOUL.md"), "utf8")).resolves.toBe(
+        "managed\n",
+      );
+    },
+  );
+
   it("preserves operator files when a tracked directory disappears during child enumeration", async () => {
     const current = await fixture(true);
     const trackedDirectory = path.join(current.workspace, "a");
@@ -128,7 +260,7 @@ describe("Claw removal operation ownership", () => {
       expect(result).toMatchObject({ status: "complete", agentRemoved: true });
       expect(result.workspaceFiles).toContainEqual({ path: "a/tracked.md", action: "deleted" });
       await expect(fs.readFile(operatorFile, "utf8")).resolves.toBe("keep me\n");
-      expect(trashPath).not.toHaveBeenCalledWith(current.workspace, expect.anything());
+      expect(trashPath.mock.calls.map(([pathname]) => pathname)).not.toContain(current.workspace);
     } finally {
       readdir?.mockRestore();
     }

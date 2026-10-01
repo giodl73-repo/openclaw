@@ -81,6 +81,72 @@ function manifest(): ClawManifest {
 }
 
 describe("applyClawCronUpdate", () => {
+  it.each(["readiness", "add"] as const)(
+    "stops forward cron writes after request revocation during %s and settles known work",
+    async (phase) => {
+      let authorized = true;
+      const beforePersistentApply = () => {
+        if (!authorized) {
+          throw new Error("Request revoked.");
+        }
+      };
+      const add = vi.fn(async () => {
+        await Promise.resolve();
+        authorized = false;
+        return { id: "scheduler-weekly" };
+      });
+      const remove = vi.fn(async () => undefined);
+      const upsertRef = vi.fn();
+      const deleteRef = vi.fn();
+
+      await expect(
+        applyClawCronUpdate(
+          plan([
+            {
+              kind: "cronJob",
+              id: "weekly",
+              action: "add",
+              target: "claw:worker:weekly",
+              blocked: false,
+              reason: "added",
+            },
+          ]),
+          manifest(),
+          {
+            beforePersistentApply,
+            readRefs: () => [],
+            upsertRef,
+            deleteRef,
+            cronGateway: {
+              get: vi.fn(),
+              add,
+              remove,
+              waitUntilAgentAvailable: async () => {
+                await Promise.resolve();
+                authorized = phase !== "readiness";
+              },
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ message: "Request revoked.", partial: false });
+
+      expect(upsertRef).not.toHaveBeenCalledWith(
+        expect.objectContaining({ status: "complete" }),
+        expect.anything(),
+      );
+      if (phase === "readiness") {
+        expect(upsertRef).not.toHaveBeenCalled();
+        expect(add).not.toHaveBeenCalled();
+        expect(remove).not.toHaveBeenCalled();
+        expect(deleteRef).not.toHaveBeenCalled();
+      } else {
+        expect(add).toHaveBeenCalledOnce();
+        expect(remove).toHaveBeenCalledWith("scheduler-weekly");
+        expect(deleteRef).toHaveBeenCalledWith("worker", "weekly", expect.anything());
+      }
+    },
+  );
+
   it.each(["add", "change"] as const)(
     "preserves ownership before a failed readiness wait and permits %s retry",
     async (action) => {

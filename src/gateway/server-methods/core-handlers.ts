@@ -12,6 +12,7 @@ import type { GatewayRequestHandlers } from "./types.js";
 type CoreGatewayHandlerModuleLoader = () => Promise<GatewayRequestHandlers>;
 
 const CORE_GATEWAY_HANDLER_MODULES = {
+  claws: () => import("./claws.js").then((module) => module.clawsHandlers),
   agent: () => import("./agent.js").then((module) => module.agentHandlers),
   "agent-identity": () =>
     import("./agent-identity.js").then((module) => module.agentIdentityHandlers),

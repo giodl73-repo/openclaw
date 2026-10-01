@@ -45,6 +45,25 @@ import {
 const fixture = useClawMonitorFixture();
 
 describe("Claw serving monitor cleanup", () => {
+  it("keeps serving monitor inspection inside an artifact-preserving read scope", async () => {
+    const current = await fixture(false);
+    const read = stateReader.withExistingOpenClawStateDatabaseReadOnly;
+    let attachedReads = 0;
+    const reader = vi
+      .spyOn(stateReader, "withExistingOpenClawStateDatabaseReadOnly")
+      .mockImplementation((...args) => {
+        expect(stateReader.isArtifactPreservingStateRead()).toBe(true);
+        attachedReads++;
+        return read(...args);
+      });
+    try {
+      expect(await current.gateway.inspect("worker")).toHaveLength(2);
+      expect(attachedReads).toBeGreaterThan(0);
+    } finally {
+      reader.mockRestore();
+    }
+  });
+
   it.each(["quiesce", "drain"])(
     "retains a configured agent without a Claw install during %s",
     async (phase) => {

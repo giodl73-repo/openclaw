@@ -83,7 +83,7 @@ function liveCronExecutionDigest(job: CronJob): string {
   });
 }
 
-function collectInstallFindings(
+export function collectInstallFindings(
   record: ClawStatusRecord,
   cronInventory: CronInventorySnapshot,
 ): HealthFinding[] {

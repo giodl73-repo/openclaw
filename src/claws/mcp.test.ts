@@ -64,6 +64,39 @@ function listedMcpServers(mcpServers: Record<string, Record<string, unknown>> = 
 }
 
 describe("installClawMcpServers", () => {
+  it("passes live authority into the config owner and retains uncertain provenance", async () => {
+    const current = await fixture();
+    let authorized = true;
+    const setMcpServer = vi.fn<
+      NonNullable<NonNullable<Parameters<typeof installClawMcpServers>[1]>["setMcpServer"]>
+    >(async (params) => {
+      await Promise.resolve();
+      authorized = false;
+      params.assertCurrent?.();
+      return { ok: true, path: "config", config: {}, mcpServers: {} };
+    });
+    await expect(
+      installClawMcpServers(current.plan, {
+        env: current.env,
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("browser authority revoked");
+          }
+        },
+        listMcpServers: async () => listedMcpServers(),
+        setMcpServer,
+      }),
+    ).rejects.toMatchObject({
+      code: "mcp_install_uncertain",
+      message: "browser authority revoked",
+      mcpServers: [expect.objectContaining({ name: "docs", status: "pending" })],
+    });
+    expect(setMcpServer).toHaveBeenCalledOnce();
+    expect(readClawMcpServerRefs(current.plan.agent.finalId, { env: current.env })).toMatchObject([
+      { name: "docs", status: "pending" },
+    ]);
+  });
+
   it("uses create-only config writes and stores digest-only ownership", async () => {
     const current = await fixture();
     const setMcpServer = vi

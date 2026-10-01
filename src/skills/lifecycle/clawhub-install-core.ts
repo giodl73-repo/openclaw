@@ -52,6 +52,7 @@ export type Logger = {
 };
 
 export type ClawHubInstallParams = ClawHubSkillRef & {
+  beforePersistentApply?: () => void;
   workspaceDir: string;
   version?: string;
   expectedIntegrity?: string;
@@ -302,6 +303,7 @@ async function installDownloadedResolution(
         mode: params.force ? "update" : "install",
         logger: params.logger,
         expectedClawHubState: params.expectedClawHubState,
+        beforePersistentApply: params.beforePersistentApply,
         policy: {
           config: params.config,
           onInstallPolicyWarning: params.onInstallPolicyWarning,
@@ -397,6 +399,7 @@ export async function performClawHubSkillInstall(
   params: ClawHubInstallParams,
 ): Promise<InstallClawHubSkillResult> {
   try {
+    params.beforePersistentApply?.();
     normalizeExpectedArtifactIntegrity(params.expectedIntegrity);
     const files = resolveWorkspaceClawHubSkills(params.workspaceDir);
     const registry = resolveClawHubBaseUrl(params.baseUrl);
@@ -500,6 +503,7 @@ export async function performClawHubSkillInstall(
     }
 
     try {
+      params.beforePersistentApply?.();
       assertDownloadedArtifactIntegrity(archive, params.expectedIntegrity);
       const github = resolution?.installKind === "github" ? resolution.github : undefined;
       const install = await installDownloadedResolution({
@@ -523,6 +527,7 @@ export async function performClawHubSkillInstall(
             : {}),
         };
       }
+      params.beforePersistentApply?.();
 
       const installedAt = Date.now();
       const artifact = {
@@ -558,6 +563,7 @@ export async function performClawHubSkillInstall(
         ...(skillFile ? { skillFile } : {}),
         fileTreeSha256,
       };
+      params.beforePersistentApply?.();
       await (files?.recordClawHubSkillInstall ?? recordClawHubSkillInstall)({
         workspaceDir: params.workspaceDir,
         skillDir: install.targetDir,
@@ -569,7 +575,9 @@ export async function performClawHubSkillInstall(
           installedVersion: version,
         },
         verification,
+        beforePersistentApply: params.beforePersistentApply,
       });
+      params.beforePersistentApply?.();
       if (!params.clawManaged) {
         markClawPackageIndependentlyOwned({
           kind: "skill",
@@ -587,6 +595,7 @@ export async function performClawHubSkillInstall(
         ...(params.requestedReference ? { requestedReference: params.requestedReference } : {}),
         ...(params.trustState ? { trustState: params.trustState } : {}),
       }).catch(() => undefined);
+      params.beforePersistentApply?.();
       return {
         ok: true,
         slug: params.slug,

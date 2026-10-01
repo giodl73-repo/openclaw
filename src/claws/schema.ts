@@ -461,7 +461,7 @@ const remoteMcpServerSchema = z
 
 const mcpServerSchema = z.union([stdioMcpServerSchema, remoteMcpServerSchema]);
 
-const cronJobSchema = z
+export const cronJobSchema = z
   .object({
     id: agentId,
     name: optionalString,

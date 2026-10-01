@@ -1,7 +1,9 @@
 // Persists the root ownership record for one Claw-created agent and workspace.
 
 import type { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { stableStringify } from "@openclaw/normalization-core";
+import { z } from "zod";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 import { coerceRequiredSqliteNumber as sqliteNumber } from "../infra/sqlite-number.js";
 import type { DB } from "../state/openclaw-state-db.generated.js";
@@ -56,12 +58,12 @@ type ClawProvenanceDatabase = Pick<
 
 type ClawInstallRow = {
   schema_version: string;
-  source_kind: "package" | "development";
+  source_kind: string;
   claw_name: string;
   claw_version: string;
   package_root: string;
   manifest_path: string;
-  integrity_kind: "artifact" | "development-snapshot";
+  integrity_kind: string;
   integrity: string;
   source_byte_length: number | bigint;
   manifest_schema_version: number | bigint;
@@ -72,22 +74,22 @@ type ClawInstallRow = {
   agent_owned_paths_json: string;
   bootstrap_source_path: string | null;
   bootstrap_content_digest: string | null;
-  status: ClawInstallStatus;
+  status: string;
   added_at_ms: number | bigint;
   updated_at_ms: number | bigint;
 };
 
-function rowToRecord(row: ClawInstallRow): PersistedClawInstall {
+export function rowToRecord(row: ClawInstallRow): PersistedClawInstall {
   const ownership = decodeClawAgentOwnership(row.agent_owned_paths_json, row.schema_version);
   return {
     schemaVersion: installRecordSchema.parseClawInstallRecordSchemaVersion(row.schema_version),
     claw: {
-      kind: row.source_kind,
+      kind: z.enum(["package", "development"]).parse(row.source_kind),
       name: row.claw_name,
       version: row.claw_version,
       packageRoot: row.package_root,
       manifestPath: row.manifest_path,
-      integrityKind: row.integrity_kind,
+      integrityKind: z.enum(["artifact", "development-snapshot"]).parse(row.integrity_kind),
       integrity: row.integrity,
       byteLength: sqliteNumber(row.source_byte_length),
     },
@@ -101,7 +103,9 @@ function rowToRecord(row: ClawInstallRow): PersistedClawInstall {
     agentOrigin: ownership.origin,
     agentOwnedPaths: ownership.paths,
     ...clawBootstrapProvenanceFromRow(row),
-    status: row.status,
+    status: z
+      .enum(["pending", "workspace_ready", "config_committed", "complete", "partial"])
+      .parse(row.status),
     addedAtMs: sqliteNumber(row.added_at_ms),
     updatedAtMs: sqliteNumber(row.updated_at_ms),
   };
@@ -298,15 +302,34 @@ export function persistClawInstallRecord(
   return persistedRecord;
 }
 
+function assertExpectedClawInstallRecord(
+  db: DatabaseSync,
+  agentId: string,
+  expectedRecord: PersistedClawInstall | undefined,
+): void {
+  if (
+    expectedRecord &&
+    !isDeepStrictEqual(readClawInstallRecordFromDatabase(db, agentId), expectedRecord)
+  ) {
+    throw new Error(
+      `Claw install record for agent ${JSON.stringify(agentId)} changed before settlement.`,
+    );
+  }
+}
+
 export function updateClawInstallRecordStatus(
   agentId: string,
   status: ClawInstallStatus,
   options: OpenClawStateDatabaseOptions & {
     nowMs?: number;
     expectedStatuses?: ClawInstallStatus[];
+    expectedRecord?: PersistedClawInstall;
+    beforePersistentApply?: () => void;
   } = {},
 ): void {
   runOpenClawStateWriteTransaction(({ db }) => {
+    options.beforePersistentApply?.();
+    assertExpectedClawInstallRecord(db, agentId, options.expectedRecord);
     const expectedStatuses = options.expectedStatuses ?? [];
     let query = getNodeSqliteKysely<ClawProvenanceDatabase>(db)
       .updateTable("claw_installs")
@@ -325,9 +348,15 @@ export function updateClawInstallRecordStatus(
 
 export function deleteClawInstallRecord(
   agentId: string,
-  options: OpenClawStateDatabaseOptions & { expectedStatuses?: ClawInstallStatus[] } = {},
+  options: OpenClawStateDatabaseOptions & {
+    expectedStatuses?: ClawInstallStatus[];
+    expectedRecord?: PersistedClawInstall;
+    beforePersistentApply?: () => void;
+  } = {},
 ): void {
   runOpenClawStateWriteTransaction(({ db }) => {
+    options.beforePersistentApply?.();
+    assertExpectedClawInstallRecord(db, agentId, options.expectedRecord);
     const expectedStatuses = options.expectedStatuses ?? [];
     let query = getNodeSqliteKysely<ClawProvenanceDatabase>(db)
       .deleteFrom("claw_installs")

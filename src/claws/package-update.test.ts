@@ -118,6 +118,69 @@ const addPlan: ClawAddPlan = {
 };
 
 describe("applyClawPackageUpdate", () => {
+  it.each(["persist", "complete"] as const)(
+    "guards the installer's %s callback after awaited work and restores the claimed edge",
+    async (phase) => {
+      const previous = ref("skill", "triage", "1.0.0");
+      let owned = previous;
+      let authorized = true;
+      const replaceExpected = vi.fn(
+        (
+          expected: PersistedClawPackageRef | undefined,
+          next: PersistedClawPackageRef | undefined,
+        ) => {
+          expect(owned).toEqual(expected);
+          if (!next) {
+            throw new Error("Expected an owned edge.");
+          }
+          owned = next;
+        },
+      );
+
+      await expect(
+        applyClawPackageUpdate(
+          plan([
+            {
+              kind: "package",
+              id: "skill:triage",
+              action: "change",
+              target: "clawhub:triage@2.0.0",
+              blocked: false,
+              reason: "changed",
+            },
+          ]),
+          addPlan,
+          {
+            readRefs: () => [owned],
+            replaceExpected,
+            beforePersistentApply: () => {
+              if (!authorized) {
+                throw new Error("Request revoked.");
+              }
+            },
+            installPackages: async (current, options) => {
+              await Promise.resolve();
+              authorized = false;
+              if (phase === "persist") {
+                options!.deps!.persistPackageRef!(
+                  current,
+                  current.actions[0]!.details as ResolvedClawPackage,
+                  { status: "complete" },
+                );
+              } else {
+                options!.deps!.completePackageRef!(owned, "complete", options);
+              }
+              return [owned];
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ message: "Request revoked.", partial: false });
+
+      expect(owned).toEqual(previous);
+      expect(replaceExpected).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it("hashes only persisted package provenance from enriched status records", () => {
     const persisted = ref("plugin", "audit", "1.0.0");
     expect(

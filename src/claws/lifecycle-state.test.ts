@@ -737,7 +737,9 @@ describe("Claw status and remove", () => {
     });
     expect(result.workspaceFiles).toEqual([{ path: "SOUL.md", action: "retainedModified" }]);
     await expect(readFile(target, "utf8")).resolves.toBe("operator edit\n");
-    expect(trashPath).not.toHaveBeenCalledWith(current.plan.agent.workspace, expect.anything());
+    expect(trashPath.mock.calls.map(([pathname]) => pathname)).not.toContain(
+      current.plan.agent.workspace,
+    );
   });
 
   it("preserves a workspace containing operator-created files", async () => {
@@ -762,7 +764,9 @@ describe("Claw status and remove", () => {
       }),
     ).resolves.toMatchObject({ status: "complete" });
     await expect(readFile(operatorFile, "utf8")).resolves.toBe("keep me\n");
-    expect(trashPath).not.toHaveBeenCalledWith(current.plan.agent.workspace, expect.anything());
+    expect(trashPath.mock.calls.map(([pathname]) => pathname)).not.toContain(
+      current.plan.agent.workspace,
+    );
   });
 
   it("retains a replacement introduced after planning instead of deleting it", async () => {

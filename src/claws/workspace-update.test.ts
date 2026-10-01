@@ -1,21 +1,94 @@
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { __setFsSafeTestHooksForTest } from "@openclaw/fs-safe/test-hooks";
 import { afterEach, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { applyClawAddPlan } from "./add.js";
 import { buildClawAddPlan } from "./lifecycle.js";
+import { createClawUpdatePlanFixture } from "./resource-update.test-helpers.js";
 import { parseClawManifest } from "./schema.js";
 import type { ClawSourceIdentity } from "./types.js";
 import { buildClawUpdatePlan } from "./update-plan.js";
 import { applyClawWorkspaceUpdate } from "./workspace-update.js";
 import { readClawWorkspaceFiles } from "./workspace.js";
 
-afterEach(() => closeOpenClawStateDatabaseForTest());
+afterEach(() => {
+  __setFsSafeTestHooksForTest(undefined);
+  closeOpenClawStateDatabaseForTest();
+});
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 describe("applyClawWorkspaceUpdate", () => {
+  it("does not publish a workspace file when request authority expires during its source read", async () => {
+    const root = tempDirs.make("claw-workspace-authority-");
+    const workspace = join(root, "workspace");
+    await mkdir(workspace);
+    await writeFile(join(root, "NEW.md"), "new\n");
+    const parsed = parseClawManifest({
+      schemaVersion: 1,
+      agent: { id: "worker" },
+      workspace: { files: [{ source: "NEW.md", path: "NEW.md" }] },
+    });
+    if (!parsed.ok) {
+      throw new Error("Invalid fixture manifest.");
+    }
+    const target = await buildClawAddPlan({
+      manifest: parsed.manifest,
+      source: {
+        kind: "package",
+        name: "@synthetic/worker",
+        version: "2.0.0",
+        packageRoot: root,
+        manifestPath: join(root, "CLAW.md"),
+        integrityKind: "artifact",
+        integrity: "sha256:target",
+        byteLength: 1,
+      },
+      context: { workspace },
+    });
+    const targetFile = target.actions.find((action) => action.kind === "workspaceFile");
+    expect(targetFile?.digest).toBeDefined();
+    let authorized = true;
+    __setFsSafeTestHooksForTest({
+      beforeRootReadFinalFence: async () => {
+        await Promise.resolve();
+        authorized = false;
+      },
+    });
+    const env = { OPENCLAW_STATE_DIR: join(root, "state") };
+
+    await expect(
+      applyClawWorkspaceUpdate(
+        createClawUpdatePlanFixture([
+          {
+            kind: "workspaceFile",
+            id: "NEW.md",
+            action: "add",
+            target: join(workspace, "NEW.md"),
+            blocked: false,
+            reason: "added",
+            desiredDigest: targetFile?.digest,
+          },
+        ]),
+        target,
+        {
+          env,
+          beforePersistentApply: () => {
+            if (!authorized) {
+              throw new Error("Request revoked.");
+            }
+          },
+        },
+      ),
+    ).rejects.toThrow("Request revoked.");
+
+    expect(authorized).toBe(false);
+    await expect(access(join(workspace, "NEW.md"))).rejects.toThrow();
+    expect(readClawWorkspaceFiles("worker", { env })).toEqual([]);
+  });
+
   it("applies add/change/remove actions and can roll them back with provenance", async () => {
     const root = tempDirs.make("openclaw-claw-workspace-update-");
     const currentRoot = join(root, "current");

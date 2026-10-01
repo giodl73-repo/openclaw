@@ -134,13 +134,17 @@ import {
 } from "./user-profiles-internal.js";
 
 serveOwnedWorkerTasks(
-  (input): OpenClawStateReadReply => {
+  async (input): Promise<OpenClawStateReadReply> => {
     let sourceAdmitted: true | undefined;
     let nativeCleanupFailure: OpenClawStateReadReply["nativeCleanupFailure"];
     try {
       if (!isReadRequest(input)) {
         throw new Error("Shared-state reader requires a captured state location and read command");
       }
+      const claws =
+        input.command.type === "claws.inventory"
+          ? await import("../claws/inventory-read.kernel.js")
+          : undefined;
       const reply = runWithSqliteWorkerStateContext(input.context, (): OpenClawStateReadReply => {
         if (input.checkFreshAdmission) {
           openClawStateDatabaseCache.assertOpenClawStateDatabaseFreshOpenAllowedAtPath(
@@ -213,6 +217,17 @@ serveOwnedWorkerTasks(
         const result = withOpenClawStateReadOnlyLocation(
           ({ db }): OpenClawStateReadResult => {
             sourceAdmitted = true;
+            if (command.type === "claws.inventory") {
+              if (!claws) {
+                throw new Error("Claw inventory reader was not prepared.");
+              }
+              return {
+                type: command.type,
+                inventory: runSqliteDeferredTransactionSync(db, () =>
+                  claws.readClawInventoryInDatabase(db),
+                ),
+              };
+            }
             if (command.type === "doctor.gatewayOwnerLease.read") {
               return { type: command.type, lease: readGatewayOwnerLeaseFromDatabase(db) };
             }

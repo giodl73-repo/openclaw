@@ -5,6 +5,7 @@ import type { purgeAgentSessionStoreEntries } from "../config/sessions/cleanup-s
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import type { ClawCronGateway } from "./cron.js";
+import type { ClawInventory } from "./inventory-read.kernel.js";
 import type { ClawTrashPath, RemovedWorkspaceFile } from "./lifecycle-delete-support.js";
 import type { ClawMonitorCleanupGateway } from "./monitor-cleanup-contract.js";
 import type { ClawPackageRemovalGateway } from "./package-remove-contract.js";
@@ -67,6 +68,7 @@ export type RemovedMcpServer = {
 };
 
 export type ClawRemovePlanOptions = OpenClawStateDatabaseOptions & {
+  inventory?: ClawInventory;
   config?: OpenClawConfig;
   sourceMcpServers?: Record<string, Record<string, unknown>>;
   listMcpServers?: typeof listConfiguredMcpServers;
@@ -76,6 +78,7 @@ export type ClawRemovePlanOptions = OpenClawStateDatabaseOptions & {
 };
 
 export type ClawRemoveApplyOptions = ClawRemovePlanOptions & {
+  beforePersistentApply?: () => void;
   packageGateway?: ClawPackageRemovalGateway;
   purgeSessions?: (
     ...args: Parameters<typeof purgeAgentSessionStoreEntries>

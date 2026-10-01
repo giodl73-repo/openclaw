@@ -1,4 +1,5 @@
 // Derives method lookup, authorization, startup, and dispatch policy from the canonical table.
+import { isExperimentalClawsEnabled } from "../../claws/experimental.js";
 import type { OperatorScope } from "../operator-scopes.js";
 import { CORE_GATEWAY_METHOD_SPECS, type CoreGatewayMethodSpec } from "./core-descriptors.js";
 import { isCoreGatewayMethodProfileDependent } from "./core-profile-access.js";
@@ -30,9 +31,9 @@ export const STARTUP_UNAVAILABLE_GATEWAY_METHODS = CORE_GATEWAY_METHOD_SPEC_LIST
 
 /** Returns the core methods that should be advertised to external gateway clients. */
 export function listCoreAdvertisedGatewayMethodNames(): string[] {
-  return CORE_GATEWAY_METHOD_SPEC_LIST.filter((spec) => spec.advertise !== false).map(
-    (spec) => spec.name,
-  );
+  return CORE_GATEWAY_METHOD_SPEC_LIST.filter(
+    (spec) => spec.advertise !== false && (spec.family !== "claws" || isExperimentalClawsEnabled()),
+  ).map((spec) => spec.name);
 }
 
 /** Returns all registered core method names, including hidden/internal compatibility methods. */
@@ -104,7 +105,9 @@ export function createCoreGatewayMethodDescriptors(
           ? "required"
           : "independent",
       ...(spec.since ? { since: spec.since } : {}),
-      ...(spec.advertise === false ? { advertise: false } : {}),
+      ...(spec.advertise === false || (spec.family === "claws" && !isExperimentalClawsEnabled())
+        ? { advertise: false }
+        : {}),
       ...(spec.startup === true ? { startup: "unavailable-until-sidecars" } : {}),
       ...(spec.lifetime ? { lifetime: spec.lifetime } : {}),
       ...(spec.controlPlaneWrite === true ? { controlPlaneWrite: true } : {}),

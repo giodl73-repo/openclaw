@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearCronJobActive, markCronJobActive } from "../cron/active-jobs.js";
 import { registerActiveCronTaskRun } from "../cron/service/active-run-cancellation.js";
+import { getAgentDeletionDatabaseCleanup } from "../state/agent-deletion-cleanup.js";
 import {
   readAgentDeletionRecoveryHolds,
   reconstructAgentDeletionJournal,
@@ -49,9 +50,9 @@ async function withAgentDeletion<T>(
   try {
     return await withAgentDeletionRuntime(
       agentId,
-      async (begin) => {
+      async (begin, assertCurrent) => {
         vi.useRealTimers();
-        return await run(begin);
+        return await run(begin, assertCurrent);
       },
       options,
     );
@@ -89,6 +90,43 @@ afterEach(() => {
 });
 
 describe("agent lifecycle registry", () => {
+  it("rejects revoked request authority at cleanup commit while allowing journal rollback", async () => {
+    const options = createOptions();
+    let authorized = true;
+    const commit = vi.fn();
+    await withAgentDeletion(
+      "main",
+      async (begin) => {
+        const deletion = begin(createEntry("main"));
+        const target = {
+          agentId: "main",
+          path: path.join(options.env.OPENCLAW_STATE_DIR, "main.sqlite"),
+        };
+        await expect(
+          deletion.runDatabaseCleanup(target, async () => {
+            const cleanup = getAgentDeletionDatabaseCleanup({ ...options, ...target });
+            expect(cleanup).toBeDefined();
+            await Promise.resolve();
+            authorized = false;
+            expect(() => cleanup!.withCommit(commit)).toThrow("Request revoked.");
+          }),
+        ).rejects.toThrow("Request revoked.");
+        expect(commit).not.toHaveBeenCalled();
+        expect(() => deletion.finish()).toThrow("Request revoked.");
+        deletion.rollback();
+        expect(readAgentDeletionJournal("main", options)).toBeUndefined();
+      },
+      {
+        ...options,
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("Request revoked.");
+          }
+        },
+      },
+    );
+  });
+
   it("revalidates incarnation and deletion through its current transaction and restores authority after rollback", () => {
     const options = createOptions();
     const config = { agents: { entries: { main: {} } } };

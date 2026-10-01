@@ -1,4 +1,7 @@
+import type { Selectable } from "kysely";
+import { z } from "zod";
 import { coerceRequiredSqliteNumber as sqliteNumber } from "../infra/sqlite-number.js";
+import type { DB } from "../state/openclaw-state-db.generated.js";
 import type { ClawAppliedExtension, ClawPackage } from "./types.js";
 
 export const CLAW_PACKAGE_REF_SCHEMA_VERSION = "openclaw.clawPackageRef.v1" as const;
@@ -70,7 +73,9 @@ export function toPackageRefExtensionSqlParams(
   };
 }
 
-function parsePackageRefExtension(row: PackageRefRow): ClawAppliedExtension | undefined {
+type PackageRefReadRow = PackageRefRow | Selectable<DB["claw_package_refs"]>;
+
+function parsePackageRefExtension(row: PackageRefReadRow): ClawAppliedExtension | undefined {
   const values = [
     row.extension_id,
     row.extension_format,
@@ -107,28 +112,30 @@ function parsePackageRefExtension(row: PackageRefRow): ClawAppliedExtension | un
   }
   return {
     id: row.extension_id!,
-    format: row.extension_format!,
-    detectedFormat: row.extension_detected_format!,
+    format: z.enum(["openclaw", "claude", "codex", "cursor"]).parse(row.extension_format),
+    detectedFormat: z
+      .enum(["openclaw", "claude", "codex", "cursor"])
+      .parse(row.extension_detected_format),
     mapped,
     unavailable,
     adapterIdentity: row.extension_adapter_identity!,
   };
 }
 
-export function rowToPackageRef(row: PackageRefRow): PersistedClawPackageRef {
+export function rowToPackageRef(row: PackageRefReadRow): PersistedClawPackageRef {
   const extension = parsePackageRefExtension(row);
   return {
     schemaVersion: CLAW_PACKAGE_REF_SCHEMA_VERSION,
     agentId: row.agent_id,
     clawName: row.claw_name,
-    kind: row.package_kind,
-    source: row.package_source,
+    kind: z.enum(["skill", "plugin"]).parse(row.package_kind),
+    source: z.literal("clawhub").parse(row.package_source),
     ref: row.package_ref,
     version: row.package_version,
     integrity: row.package_integrity,
-    status: row.package_status,
-    relationship: row.relationship,
-    origin: row.origin,
+    status: z.enum(["pending", "complete", "failed", "rolled_back"]).parse(row.package_status),
+    relationship: z.enum(["managed", "referenced"]).parse(row.relationship),
+    origin: z.enum(["claw-introduced", "pre-existing"]).parse(row.origin),
     independentOwner: sqliteNumber(row.independent_owner) === 1,
     ...(extension ? { extension } : {}),
     installedAtMs: sqliteNumber(row.installed_at_ms),

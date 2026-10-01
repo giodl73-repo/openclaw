@@ -276,6 +276,7 @@ export async function installPackageDir<
   const installBaseDir = path.dirname(params.targetDir);
   let initialInstallBaseRealPath: string;
   try {
+    params.beforePersistentApply?.();
     await fs.mkdir(installBaseDir, { recursive: true });
     initialInstallBaseRealPath = await fs.realpath(installBaseDir);
     await assertCanonicalPathWithinBase({
@@ -490,17 +491,19 @@ export async function installPackageDir<
       candidatePath: canonicalTargetDir,
       boundaryLabel: "install directory",
     });
+    params.beforePersistentApply?.();
     stageDir = await fs.mkdtemp(path.join(installBaseRealPath, ".openclaw-install-stage-"));
     if (params.sourceDir !== undefined) {
-      await withInstallActivity(params.logger, "files", () =>
-        fs.cp(params.sourceDir!, stageDir!, {
+      await withInstallActivity(params.logger, "files", () => {
+        params.beforePersistentApply?.();
+        return fs.cp(params.sourceDir!, stageDir!, {
           recursive: true,
           // Keep relative symlinks relative to the staged copy. Node's default
           // rewrites them toward the source tree, which makes valid vendored
           // package links look like install-root escapes during post-copy scans.
           verbatimSymlinks: true,
-        }),
-      );
+        });
+      });
     }
   } catch (err) {
     return await fail(`${params.copyErrorPrefix}: ${String(err)}`, err);
@@ -592,6 +595,7 @@ export async function installPackageDir<
       `${path.basename(canonicalTargetDir)}-${randomUUID()}`,
     );
     try {
+      params.beforePersistentApply?.();
       await fs.mkdir(backupRoot, { recursive: true });
       await assertCanonicalPathWithinBase({
         baseDir: installBaseRealPath,

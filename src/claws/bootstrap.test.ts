@@ -1,11 +1,12 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES } from "../agents/workspace-bootstrap-read.js";
 import { readWorkspaceStateSnapshot } from "../agents/workspace-state-store.js";
 import { withTempHomeConfig } from "../config/test-helpers.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import * as fsSafe from "../infra/fs-safe.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { setTestEnvValue } from "../test-utils/env.js";
 import { applyClawAddPlan } from "./add.js";
@@ -73,6 +74,72 @@ async function bootstrapPlan(options: { content?: string; includeBody?: boolean 
   });
   return { read, workspace, env, plan };
 }
+
+it("seeds a real bootstrap with live authority", async () => {
+  const { plan, env, workspace } = await bootstrapPlan();
+  await expect(
+    seedClawPackageBootstrap(plan, {
+      env,
+      beforePersistentApply: () => {},
+    }),
+  ).resolves.toBe("seeded");
+  expect(await readFile(join(workspace, "BOOTSTRAP.md"), "utf8")).toContain("# First run");
+  expect(
+    (await readWorkspaceStateSnapshot(workspace, { env })).setup.bootstrapSeededAt,
+  ).toBeDefined();
+});
+
+it.each(["before", "after"] as const)(
+  "retains truthful bootstrap state when authority expires %s the file write",
+  async (revokeAt) => {
+    const { plan, env, workspace } = await bootstrapPlan();
+    let authorized = true;
+    const originalRoot = fsSafe.root;
+    const rootSpy = vi.spyOn(fsSafe, "root").mockImplementation(async (...args) => {
+      const owned = await originalRoot(...args);
+      const write = owned.write.bind(owned);
+      owned.write = async (...writeArgs) => {
+        if (revokeAt === "before") {
+          authorized = false;
+        }
+        await write(...writeArgs);
+        authorized = false;
+      };
+      return owned;
+    });
+    try {
+      const commitConfig = vi.fn();
+      const result = await applyClawAddPlan(plan, {
+        env,
+        consentPlanIntegrity: plan.planIntegrity,
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("browser authority revoked");
+          }
+        },
+        commitConfig,
+      });
+      expect(result).toMatchObject({
+        status: "partial",
+        configCommitted: false,
+        installRecord: { status: "workspace_ready" },
+      });
+      expect(commitConfig).not.toHaveBeenCalled();
+      expect(
+        (await readWorkspaceStateSnapshot(workspace, { env })).setup.bootstrapSeededAt,
+      ).toBeUndefined();
+      if (revokeAt === "after") {
+        expect(await readFile(join(workspace, "BOOTSTRAP.md"), "utf8")).toContain("# First run");
+      } else {
+        await expect(readFile(join(workspace, "BOOTSTRAP.md"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    } finally {
+      rootSpy.mockRestore();
+    }
+  },
+);
 
 function removeBootstrap(
   plan: Awaited<ReturnType<typeof buildClawRemovePlan>>,

@@ -14,7 +14,7 @@ import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths
 import { persistClawPackageRef } from "./provenance.js";
 import { parseClawManifest } from "./schema.js";
 import type { ClawPackage } from "./types.js";
-import { buildClawUpdatePlan } from "./update-plan.js";
+import { buildClawUpdatePlan, buildClawUpdatePlanWithTarget } from "./update-plan.js";
 import {
   createUpdatePlanFixture,
   packagePreflight,
@@ -323,17 +323,39 @@ describe("buildClawUpdatePlan", () => {
       throw new Error(JSON.stringify(parsed.diagnostics));
     }
 
-    const plan = await build(current, {
+    const params: Parameters<typeof buildClawUpdatePlan>[0] = {
+      agentId: "worker",
       targetManifest: parsed.manifest,
       targetOpenClawProfile: {
         schemaVersion: 1,
         agent: {
           sandbox: { mode: "all", scope: "agent", workspaceAccess: "rw" },
-          tools: { allow: ["web.fetch"] },
+          tools: { profile: "coding", allow: ["read"] },
         },
       },
       targetSource: targetSource(current.root, "2.0.0", "sha256:target"),
+      config: current.config,
+      sourceMcpServers: current.config.mcp?.servers ?? {},
+      stateOptions: { env: current.env },
+      packagePreflight,
+    };
+    const plan = await buildClawUpdatePlan(params);
+    const withTarget = await buildClawUpdatePlanWithTarget(params);
+
+    expect(withTarget.plan).toStrictEqual(plan);
+    expect(withTarget.plan.planIntegrity).toBe(plan.planIntegrity);
+    expect(withTarget.targetAgent).toMatchObject({
+      id: "worker",
+      workspace: current.addPlan.agent.workspace,
+      tools: { profile: "full", allow: ["read", "skills_read"] },
     });
+    expect(withTarget.targetAgent?.tools).not.toEqual(params.targetOpenClawProfile?.agent.tools);
+    const { planIntegrity, ...authenticatedPlan } = plan;
+    expect(planIntegrity).toBe(
+      `sha256:${createHash("sha256").update(stableStringify(authenticatedPlan)).digest("hex")}`,
+    );
+    expect(JSON.stringify(plan)).not.toContain('"targetAgent"');
+    expect(JSON.stringify(plan)).not.toContain(JSON.stringify(withTarget.targetAgent));
 
     expect(plan.summary).toMatchObject({
       totalActions: 11,
@@ -928,6 +950,17 @@ describe("buildClawUpdatePlan", () => {
       agentId: "missing",
     });
     expect(missing.blockers).toContainEqual(expect.objectContaining({ code: "claw_not_found" }));
+    const missingWithTarget = await buildClawUpdatePlanWithTarget({
+      agentId: "missing",
+      targetManifest: current.manifest,
+      targetSource: current.source,
+      config: current.config,
+      sourceMcpServers: current.config.mcp?.servers ?? {},
+      stateOptions: { env: current.env },
+      packagePreflight,
+    });
+    expect(missingWithTarget.plan).toStrictEqual(missing);
+    expect(missingWithTarget).not.toHaveProperty("targetAgent");
 
     const mismatch = await build(current, {
       targetSource: { ...current.source, name: "@other/worker" },

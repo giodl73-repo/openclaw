@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
@@ -175,6 +176,93 @@ describe("skills-clawhub", () => {
   });
 
   registerRemoteClawHubTests(() => testWorkspaceDir);
+
+  it("guards tracking publication after the origin write and before updating the workspace lock", async () => {
+    const { recordClawHubSkillInstall } = await import("./clawhub-store.js");
+    const skillDir = path.join(testWorkspaceDir, "skills", "agentreceipt");
+    const originPath = path.join(skillDir, ".clawhub", "origin.json");
+    await expect(
+      recordClawHubSkillInstall({
+        workspaceDir: testWorkspaceDir,
+        skillDir,
+        origin: {
+          version: 1,
+          registry: "https://clawhub.ai",
+          slug: "agentreceipt",
+          installedVersion: "1.0.0",
+          installedAt: 1,
+        },
+        beforePersistentApply: () => {
+          if (existsSync(originPath)) {
+            throw new Error("browser authority revoked");
+          }
+        },
+      }),
+    ).rejects.toThrow("browser authority revoked");
+    expect(await readJson(originPath)).toMatchObject({
+      slug: "agentreceipt",
+      installedVersion: "1.0.0",
+    });
+    await expect(
+      fs.access(path.join(testWorkspaceDir, ".clawhub", "lock.json")),
+    ).rejects.toHaveProperty("code", "ENOENT");
+  });
+
+  it("forwards authority to the native skill publication owner after awaited preparation", async () => {
+    let authorized = true;
+    installPackageDirMock.mockImplementationOnce(
+      async (params: { beforePersistentApply?: () => void }) => {
+        await Promise.resolve();
+        authorized = false;
+        params.beforePersistentApply?.();
+        return { ok: true };
+      },
+    );
+    await expect(
+      installTestSkill(testWorkspaceDir, "agentreceipt", {
+        clawManaged: true,
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("browser authority revoked");
+          }
+        },
+      }),
+    ).rejects.toThrow("browser authority revoked");
+    expect(installPackageDirMock).toHaveBeenCalledOnce();
+    expect(archiveCleanupMock).toHaveBeenCalledOnce();
+    await expect(
+      fs.access(path.join(testWorkspaceDir, ".clawhub", "lock.json")),
+    ).rejects.toHaveProperty("code", "ENOENT");
+  });
+
+  it("keeps installed files without claiming completed tracking after verification loses authority", async () => {
+    let authorized = true;
+    mockInstalledSkillFile("# Retained skill\n");
+    fetchClawHubSkillVerificationMock.mockImplementationOnce(async () => {
+      authorized = false;
+      return { schema: "clawhub.skill.verify.v1", ok: true, decision: "pass", reasons: [] };
+    });
+    await expect(
+      installTestSkill(testWorkspaceDir, "agentreceipt", {
+        clawManaged: true,
+        beforePersistentApply: () => {
+          if (!authorized) {
+            throw new Error("browser authority revoked");
+          }
+        },
+      }),
+    ).rejects.toThrow("browser authority revoked");
+    const skillDir = path.join(testWorkspaceDir, "skills", "agentreceipt");
+    expect(await fs.readFile(path.join(skillDir, "SKILL.md"), "utf8")).toBe("# Retained skill\n");
+    await expect(fs.access(path.join(skillDir, ".clawhub", "origin.json"))).rejects.toHaveProperty(
+      "code",
+      "ENOENT",
+    );
+    await expect(
+      fs.access(path.join(testWorkspaceDir, ".clawhub", "lock.json")),
+    ).rejects.toHaveProperty("code", "ENOENT");
+    expect(archiveCleanupMock).toHaveBeenCalledOnce();
+  });
 
   function mockSecurity(overrides: Partial<Parameters<typeof mockSkillSecurityVerdict>[0]>) {
     mockSkillSecurityVerdict({
@@ -722,33 +810,42 @@ describe("skills-clawhub", () => {
     },
   );
 
-  it("preserves tracking added while a skill is downloading", async () => {
-    const workspaceDir = await tempDirs.make("openclaw-skills-install-tracking-");
-    await writeTrackedSkill(workspaceDir, "weather");
-    const lockPath = path.join(workspaceDir, ".clawhub", "lock.json");
-    const existing = await readJson<{ skills: Record<string, unknown> }>(lockPath);
-    const added = { version: "3.0.0", installedAt: 456, verification: { decision: "pass" } };
-    mockInstalledSkillFile("---\nname: agentreceipt\n---\n");
-    downloadClawHubSkillArchiveUrlMock.mockImplementationOnce(async () => {
-      await fs.writeFile(
-        lockPath,
-        JSON.stringify({ ...existing, skills: { ...existing.skills, calendar: added } }),
-      );
-      return {
-        archivePath: "/tmp/agentreceipt.zip",
-        integrity: "sha256-test",
-        sha256Hex: "a".repeat(64),
-        artifact: "archive",
-        cleanup: archiveCleanupMock,
-      };
-    });
+  it.each([false, true])(
+    "preserves tracking added while a skill is downloading (guarded=%s)",
+    async (guarded) => {
+      const workspaceDir = await tempDirs.make("openclaw-skills-install-tracking-");
+      await writeTrackedSkill(workspaceDir, "weather");
+      const lockPath = path.join(workspaceDir, ".clawhub", "lock.json");
+      const existing = await readJson<{ skills: Record<string, unknown> }>(lockPath);
+      const added = { version: "3.0.0", installedAt: 456, verification: { decision: "pass" } };
+      mockInstalledSkillFile("---\nname: agentreceipt\n---\n");
+      downloadClawHubSkillArchiveUrlMock.mockImplementationOnce(async () => {
+        await fs.writeFile(
+          lockPath,
+          JSON.stringify({ ...existing, skills: { ...existing.skills, calendar: added } }),
+        );
+        return {
+          archivePath: "/tmp/agentreceipt.zip",
+          integrity: "sha256-test",
+          sha256Hex: "a".repeat(64),
+          artifact: "archive",
+          cleanup: archiveCleanupMock,
+        };
+      });
 
-    expectInstalledSkill(await installTestSkill(workspaceDir, "agentreceipt"));
-    const installed = await readJson<{ skills: Record<string, unknown> }>(lockPath);
-    expect(installed.skills.weather).toEqual(existing.skills.weather);
-    expect(installed.skills.calendar).toEqual(added);
-    expect(installed.skills.agentreceipt).toMatchObject({ version: "1.0.0" });
-  });
+      const beforePersistentApply = guarded ? vi.fn() : undefined;
+      expectInstalledSkill(
+        await installTestSkill(workspaceDir, "agentreceipt", { beforePersistentApply }),
+      );
+      if (beforePersistentApply) {
+        expect(beforePersistentApply).toHaveBeenCalled();
+      }
+      const installed = await readJson<{ skills: Record<string, unknown> }>(lockPath);
+      expect(installed.skills.weather).toEqual(existing.skills.weather);
+      expect(installed.skills.calendar).toEqual(added);
+      expect(installed.skills.agentreceipt).toMatchObject({ version: "1.0.0" });
+    },
+  );
 
   it.for([".clawhub"])(
     "rejects symlinked %s tracking without changing the link or its target",

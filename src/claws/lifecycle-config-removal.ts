@@ -42,6 +42,7 @@ type ClawAgentConfigRemovalParams = {
   fallbackWorkspace: string;
   config?: OpenClawConfig;
   stateDatabase?: OpenClawStateDatabaseOptions;
+  beforePersistentApply?: () => void;
   onModified: () => Error;
   quiesceMonitors?: (operationId: string) => Promise<void>;
   drainMonitors?: (operationId: string) => Promise<void>;
@@ -159,6 +160,7 @@ export async function withClawAgentConfigRemoval<T>(
   const expectedInstall = structuredClone(params.expectedInstall);
   const stateOptions = {
     ...params.stateDatabase,
+    beforePersistentApply: params.beforePersistentApply,
     path: openOpenClawStateDatabase(params.stateDatabase).path,
   };
   return await withAgentDeletion(
@@ -180,6 +182,7 @@ export async function withClawAgentConfigRemoval<T>(
         );
       // Validate and claim together: a stale install snapshot must never fence a replacement.
       const { existingJournal, deletion } = runOpenClawStateWriteTransaction((database) => {
+        params.beforePersistentApply?.();
         if (!matchesInstall(database)) {
           throw params.onModified();
         }
@@ -210,6 +213,7 @@ export async function withClawAgentConfigRemoval<T>(
         }
       };
       try {
+        assertCurrent();
         // Fence new claims and drain existing owners before any external or local removal effect.
         if (params.quiesceMonitors) {
           // A lost RPC response can hide accepted cancellation. Keep the durable fence
@@ -232,7 +236,6 @@ export async function withClawAgentConfigRemoval<T>(
             stateOptions,
           );
           committed = true;
-          assertCurrent();
           return {
             ...result,
             operationId: deletion.entry.operationId,

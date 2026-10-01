@@ -25,6 +25,7 @@ function contentDigest(content: Uint8Array): string {
 export async function seedClawPackageBootstrap(
   plan: ClawAddPlan,
   options: {
+    beforePersistentApply?: () => void;
     nowMs?: number;
     seedBootstrap?: typeof seedWorkspaceBootstrap;
   } & OpenClawStateDatabaseOptions = {},
@@ -33,6 +34,7 @@ export async function seedClawPackageBootstrap(
   if (actions.length === 0) {
     return undefined;
   }
+  options.beforePersistentApply?.();
   if (actions.length !== 1) {
     throw new ClawBootstrapWriteError(
       "bootstrap_plan_invalid",
@@ -77,10 +79,14 @@ export async function seedClawPackageBootstrap(
     );
   }
 
-  return (options.seedBootstrap ?? seedWorkspaceBootstrap)({
+  options.beforePersistentApply?.();
+  const result = await (options.seedBootstrap ?? seedWorkspaceBootstrap)({
     dir: plan.agent.workspace,
     content: read.buffer,
     ...(options.nowMs !== undefined ? { nowMs: options.nowMs } : {}),
     stateOptions: options,
+    beforePersistentApply: options.beforePersistentApply,
   });
+  options.beforePersistentApply?.();
+  return result;
 }

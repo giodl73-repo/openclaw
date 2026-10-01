@@ -16,6 +16,7 @@ export const runtimeProcessEntrypoints = {
   codeModeNode: runtimeProcessEntrypoint("agents/code-mode-node.worker"),
   cronReadOnly: runtimeProcessEntrypoint("cron/store/read-only.worker"),
   stateRead: runtimeProcessEntrypoint("state/openclaw-state-read.worker"),
+  clawControlUi: runtimeProcessEntrypoint("claws/control-ui.worker"),
   workerNativeLifecycle: runtimeProcessEntrypoint("infra/worker-native-lifecycle.worker"),
   spawnBroker: runtimeProcessEntrypoint("process/spawn-broker/worker"),
   cronStreamMatcher: runtimeProcessEntrypoint("gateway/cron-stream-matcher.worker"),

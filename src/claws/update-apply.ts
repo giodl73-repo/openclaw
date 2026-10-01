@@ -52,7 +52,11 @@ import {
 
 export const CLAW_UPDATE_RESULT_SCHEMA_VERSION = "openclaw.clawUpdateResult.v1" as const;
 
-type ConfigCommit = (transform: (config: OpenClawConfig) => OpenClawConfig) => Promise<void>;
+type ConfigCommit = (
+  transform: (config: OpenClawConfig) => OpenClawConfig,
+  // Custom committers recheck this guard at their durable write boundary.
+  beforePersistentApply?: () => void,
+) => Promise<void>;
 
 export class ClawUpdateMutationError extends Error {
   constructor(
@@ -121,6 +125,7 @@ export async function applyClawUpdatePlan(
     packagePreflight?: ClawAddPlanContext["packagePreflight"];
     runtime?: RuntimeEnv;
     reloadPlugins?: PluginInstallBatchReload;
+    beforePersistentApply?: () => void;
     commitConfig?: ConfigCommit;
     rebuildPlan?: typeof buildClawUpdatePlan;
     buildAddPlan?: typeof buildClawAddPlan;
@@ -147,6 +152,7 @@ export async function applyClawUpdatePlan(
   }
 
   const rebuildPlan = options.rebuildPlan ?? buildClawUpdatePlan;
+  options.beforePersistentApply?.();
   const fresh = await rebuildPlan({
     agentId: plan.agentId,
     targetManifest: params.targetManifest,
@@ -192,6 +198,7 @@ export async function applyClawUpdatePlan(
     errorOptions?: ErrorOptions,
   ): ClawUpdateMutationError => {
     try {
+      options.beforePersistentApply?.();
       updateClawInstallRecordStatus(fresh.agentId, "partial", options);
     } catch {
       // Preserve the owner failure; doctor can still reconcile subordinate pending records.
@@ -319,6 +326,7 @@ export async function applyClawUpdatePlan(
     if (actions.length === 0) {
       return { appliedIds: [], rollback: async () => undefined };
     }
+    options.beforePersistentApply?.();
     return await applyPackage({ ...fresh, actions }, targetAddPlan, {
       ...options,
       runtimeBatch,
@@ -348,6 +356,7 @@ export async function applyClawUpdatePlan(
 
   let requirementExecution: ClawPackageUpdateExecution;
   try {
+    options.beforePersistentApply?.();
     requirementExecution =
       requirementActions.length || resumedRequirements.length
         ? await runClawPluginBatch(
@@ -395,6 +404,7 @@ export async function applyClawUpdatePlan(
   const applyWorkspace = options.applyWorkspace ?? applyClawWorkspaceUpdate;
   let workspaceExecution: ClawWorkspaceUpdateExecution;
   try {
+    options.beforePersistentApply?.();
     workspaceExecution = await applyWorkspace(fresh, targetAddPlan, options);
   } catch (error) {
     if (error instanceof ClawWorkspaceUpdateError && error.partial) {
@@ -407,6 +417,7 @@ export async function applyClawUpdatePlan(
   const applyMcp = options.applyMcp ?? applyClawMcpUpdate;
   let mcpExecution: ClawMcpUpdateExecution;
   try {
+    options.beforePersistentApply?.();
     mcpExecution = await applyMcp(fresh, params.targetManifest, options);
   } catch (error) {
     const partial = error instanceof ClawMcpUpdateError && error.partial;
@@ -443,9 +454,10 @@ export async function applyClawUpdatePlan(
   const agentAction = fresh.actions.find((action) => action.kind === "agent");
   const commit: ConfigCommit =
     options.commitConfig ??
-    (async (transform) => {
+    (async (transform, beforePersistentApply) => {
       await transformConfigFileWithRetry({
         afterWrite: { mode: "auto" },
+        writeOptions: { assertConfigPathForWrite: beforePersistentApply },
         transform: (config) => ({ nextConfig: transform(config) }),
       });
     });
@@ -475,6 +487,7 @@ export async function applyClawUpdatePlan(
     if (!agentChanged) {
       return;
     }
+    // Rollback keeps its compare-write ownership even if the request was revoked.
     await commit((config) => {
       const current = listAgentEntries(config).find((agent) => agent.id === fresh.agentId);
       const targetDigest = adoptedAgentConfigDigest ?? digest(targetAddPlan.agent.config);
@@ -495,7 +508,9 @@ export async function applyClawUpdatePlan(
   };
   if (agentAction?.action === "change") {
     try {
+      options.beforePersistentApply?.();
       await commit((config) => {
+        options.beforePersistentApply?.();
         const current = listAgentEntries(config).find((agent) => agent.id === fresh.agentId);
         previousAgent = current;
         if (agentAction.currentDigest !== undefined) {
@@ -518,7 +533,7 @@ export async function applyClawUpdatePlan(
         nextEntries[fresh.agentId] = targetEntry;
         agentChanged = true;
         return { ...config, agents: { ...config.agents, entries: nextEntries } };
-      });
+      }, options.beforePersistentApply);
     } catch (error) {
       const rollbackFailures = await collectClawRollbackFailures([
         ["agent rollback failed", () => rollbackAgent()],
@@ -538,10 +553,12 @@ export async function applyClawUpdatePlan(
   const applyCron = options.applyCron ?? applyClawCronUpdate;
   let cronExecution: ClawCronUpdateExecution;
   try {
+    options.beforePersistentApply?.();
     cronExecution = await applyCron(fresh, params.targetManifest, options);
   } catch (error) {
     if (error instanceof ClawCronUpdateError && error.partial) {
       try {
+        options.beforePersistentApply?.();
         persistInstall(targetAddPlan, {
           ...installPersistenceOptions,
           expectedClaw: fresh.currentClaw,
@@ -566,6 +583,7 @@ export async function applyClawUpdatePlan(
 
   let installRecord: PersistedClawInstall;
   try {
+    options.beforePersistentApply?.();
     installRecord = persistInstall(targetAddPlan, {
       ...installPersistenceOptions,
       expectedClaw: fresh.currentClaw,

@@ -52,6 +52,7 @@ type ClawHubInstallLogger = {
 };
 
 type ClawHubTrustSubject =
+  | { kind: "claw"; packageName: string }
   | { kind: "plugin"; packageName: string }
   | { kind: "skill"; packageName: string; workspaceDir: string; ownerHandle?: string };
 
@@ -160,7 +161,12 @@ function resolveClawHubSubjectUrl(params: {
   if (params.subject.kind === "skill" && params.subject.ownerHandle) {
     return `${resolveClawHubBaseUrl(params.baseUrl)}/${encodeURIComponent(params.subject.ownerHandle)}/skills/${encodeURIComponent(params.subject.packageName)}`;
   }
-  const pathRoot = params.subject.kind === "skill" ? "skills" : "plugins";
+  const pathRoot =
+    params.subject.kind === "skill"
+      ? "skills"
+      : params.subject.kind === "claw"
+        ? "claws"
+        : "plugins";
   return `${resolveClawHubBaseUrl(params.baseUrl)}/${pathRoot}/${encodeClawHubPackagePath(params.subject.packageName)}`;
 }
 
@@ -455,7 +461,7 @@ async function fetchClawHubSubjectSecurity(params: {
   token?: string;
   timeoutMs?: number;
 }): Promise<ClawHubFetchedSubjectSecurity> {
-  if (params.subject.kind === "plugin") {
+  if (params.subject.kind !== "skill") {
     const security = await fetchClawHubPackageSecurity({
       name: params.subject.packageName,
       version: params.version,

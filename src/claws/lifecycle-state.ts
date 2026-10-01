@@ -10,6 +10,7 @@ import {
 import { getRuntimeConfig } from "../config/config.js";
 import { clawCronGatewayJobMatchesRef, deleteClawCronRef, markClawCronRefRemoved } from "./cron.js";
 import { digestClawValue } from "./digest.js";
+import { readClawInventory } from "./inventory-read.js";
 import {
   applyClawAdoptedRemovePlan,
   buildClawAdoptedRemovePlan,
@@ -63,7 +64,9 @@ export async function buildClawRemovePlan(
   target: string,
   options: ClawRemovePlanOptions = {},
 ): Promise<ClawRemovePlan> {
-  const status = await readClawStatus(target, options);
+  const inventory =
+    options.inventory ?? (options.readOnly ? await readClawInventory(options) : undefined);
+  const status = await readClawStatus(target, { ...options, inventory });
   const blockers: ClawRemovePlan["blockers"] = [];
   if (status.records.length === 0) {
     blockers.push({
@@ -87,7 +90,13 @@ export async function buildClawRemovePlan(
     const mcpCleanup = filterReferencedCleanup(options.referencedCleanup, "mcp");
     const packageDecisions = await planClawPackageRemovals(record.install, record.packages, {
       ...options,
-      deps: options.packageDeps,
+      deps: inventory
+        ? {
+            ...options.packageDeps,
+            readPackageRefs: () => inventory.packages,
+            readInstallRecords: () => inventory.installs,
+          }
+        : options.packageDeps,
       referencedCleanup: packageCleanup,
     });
     const packagePlan = projectClawPackageRemovePlan({
@@ -299,6 +308,7 @@ export async function buildClawRemovePlan(
       const blocked = server.state === "pending";
       const decision = planClawMcpServerRemoval(server, {
         ...options,
+        refs: inventory?.mcpServers,
         referencedCleanup: mcpCleanup,
       });
       unmatchedMcpSelectors.delete(clawMcpRemovalSelector(server));
@@ -403,6 +413,7 @@ export async function applyClawRemovePlan(
   if (plan.blockers.length > 0 || !plan.agentId) {
     throw new ClawRemoveError("remove_blocked", "The Claw remove plan contains blockers.");
   }
+  options.beforePersistentApply?.();
   if (
     plan.actions.some((action) => action.kind === "installRecord" && action.action === "release")
   ) {
@@ -486,6 +497,7 @@ export async function applyClawRemovePlan(
   const monitors = currentPlan.actions
     .filter((action) => action.kind === "scheduledJob" && action.action === "remove")
     .map((action) => clawMonitorSnapshotSchema.parse(action.details));
+  options.beforePersistentApply?.();
   return await withClawAgentConfigRemoval<ClawRemoveResult>(
     {
       agentId,
@@ -496,6 +508,7 @@ export async function applyClawRemovePlan(
       fallbackWorkspace: record.install.workspace,
       config: options.config,
       stateDatabase: options,
+      beforePersistentApply: options.beforePersistentApply,
       onModified: () =>
         new ClawRemoveError("agent_modified", "Agent config changed during remove."),
       quiesceMonitors: (operationId) => monitorGateway.quiesce(agentId, operationId, monitors),
@@ -554,6 +567,7 @@ export async function applyClawRemovePlan(
             assertCurrent();
             markClawCronRefRemoved(agentId, cron.manifestId, options);
           }
+          assertCurrent();
           deleteClawCronRef(agentId, cron.manifestId, options);
           cronJobs.push({
             manifestId: cron.manifestId,
@@ -571,18 +585,20 @@ export async function applyClawRemovePlan(
           return partial("cron_cleanup_failed", message);
         }
       }
+      assertCurrent();
       const configRemoval = await commitRemoval();
       const { cleanupTargets, configBeforeDelete, completeDeletion } = configRemoval;
       result.agentRemoved = configRemoval.agentRemoved;
       try {
         await configRemoval.drainMonitors();
-        configRemoval.assertCurrent();
+        assertCurrent();
       } catch (error) {
         return partial("monitor_cleanup_failed", coerceErrorMessage(error));
       }
       const purgeSessions =
         options.purgeSessions ??
         (await import("../config/sessions/cleanup-service.js")).purgeAgentSessionStoreEntries;
+      assertCurrent();
       const purgeFailed = await purgeSessions(configBeforeDelete, agentId, {
         env: options.env,
         runDatabaseCleanup: configRemoval.runDatabaseCleanup,
@@ -630,7 +646,7 @@ export async function applyClawRemovePlan(
           cleanupTargets.workspaceDir,
           record.workspaceFiles.map((file) => file.path),
         );
-        configRemoval.assertCurrent();
+        assertCurrent();
         cleanupErrors.push(
           ...(await cleanupClawAgentFilesystem({
             agentId,

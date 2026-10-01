@@ -40,7 +40,10 @@ function digest(content: Uint8Array): string {
 export async function applyClawWorkspaceUpdate(
   updatePlan: ClawUpdatePlan,
   targetAddPlan: ClawAddPlan,
-  options: OpenClawStateDatabaseOptions & { nowMs?: number } = {},
+  options: OpenClawStateDatabaseOptions & {
+    nowMs?: number;
+    beforePersistentApply?: () => void;
+  } = {},
 ): Promise<ClawWorkspaceUpdateExecution> {
   const actions = updatePlan.actions.filter(
     (action) => action.kind === "workspaceFile" && action.action !== "unchanged",
@@ -108,6 +111,7 @@ export async function applyClawWorkspaceUpdate(
       }
 
       if (action.action === "remove") {
+        options.beforePersistentApply?.();
         undo.push(async () => {
           if (await workspace.exists(path)) {
             throw new Error(`Workspace file ${JSON.stringify(path)} appeared before rollback.`);
@@ -120,8 +124,9 @@ export async function applyClawWorkspaceUpdate(
           }
         });
         if (existed) {
-          await workspace.remove(path);
+          await workspace.remove(path, { assertBeforeMutation: options.beforePersistentApply });
         }
+        options.beforePersistentApply?.();
         deleteClawWorkspaceFileRecord(updatePlan.agentId, path, options);
         appliedPaths.push(path);
         continue;
@@ -156,6 +161,7 @@ export async function applyClawWorkspaceUpdate(
         createdAtMs: previousRef?.createdAtMs ?? nowMs,
         updatedAtMs: nowMs,
       };
+      options.beforePersistentApply?.();
       undo.push(async () => {
         if (!(await workspace.exists(path))) {
           throw new Error(`Workspace file ${JSON.stringify(path)} disappeared before rollback.`);
@@ -177,7 +183,12 @@ export async function applyClawWorkspaceUpdate(
           deleteClawWorkspaceFileRecord(updatePlan.agentId, path, options);
         }
       });
-      await workspace.write(path, content, { mkdir: true, overwrite: existed });
+      await workspace.write(path, content, {
+        mkdir: true,
+        overwrite: existed,
+        assertBeforeMutation: options.beforePersistentApply,
+      });
+      options.beforePersistentApply?.();
       upsertClawWorkspaceFile(record, options);
       appliedPaths.push(path);
     }

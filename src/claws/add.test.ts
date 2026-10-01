@@ -1,4 +1,4 @@
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
@@ -10,7 +10,11 @@ import {
 import { applyClawAddPlan } from "./add.js";
 import { readClawStatus } from "./lifecycle-state.js";
 import { buildClawAddPlan } from "./lifecycle.js";
-import { persistClawInstallRecord, readClawInstallRecord } from "./provenance.js";
+import {
+  deleteClawInstallRecord,
+  persistClawInstallRecord,
+  readClawInstallRecord,
+} from "./provenance.js";
 import { makeProvenancePlan, stateEnv } from "./provenance.test-helpers.js";
 import type { ClawOpenClawProfile } from "./types.js";
 import { applyClawUpdatePlan } from "./update-apply.js";
@@ -24,6 +28,184 @@ afterEach(() => {
 });
 
 describe("Claw add lifecycle", () => {
+  it("refuses revoked authority before claiming an install", async () => {
+    const root = tempDirs.make("openclaw-claw-add-authority-");
+    const { plan } = await makeProvenancePlan(root, {
+      schemaVersion: 1,
+      agent: { id: "worker" },
+    });
+    const persistRecord = vi.fn();
+    await expect(
+      applyClawAddPlan(plan, {
+        consentPlanIntegrity: plan.planIntegrity,
+        beforePersistentApply: () => {
+          throw new Error("browser authority revoked");
+        },
+        persistRecord,
+      }),
+    ).rejects.toThrow("browser authority revoked");
+    expect(persistRecord).not.toHaveBeenCalled();
+  });
+
+  it("retains committed config facts when authority expires during commit", async () => {
+    const root = tempDirs.make("openclaw-claw-add-authority-commit-");
+    const env = stateEnv(root);
+    const { plan } = await makeProvenancePlan(root, {
+      schemaVersion: 1,
+      agent: { id: "worker" },
+    });
+    let current = true;
+    const beforePersistentApply = () => {
+      if (!current) {
+        throw new Error("browser authority revoked");
+      }
+    };
+    const createWorkspaceFiles = vi.fn();
+    const result = await applyClawAddPlan(plan, {
+      env,
+      consentPlanIntegrity: plan.planIntegrity,
+      beforePersistentApply,
+      commitConfig: async (transform, guard) => {
+        expect(guard).toBe(beforePersistentApply);
+        guard?.();
+        transform({});
+        current = false;
+      },
+      createWorkspaceFiles,
+    });
+    expect(result).toMatchObject({
+      status: "partial",
+      configCommitted: true,
+      workspaceCreated: true,
+      installRecord: { status: "config_committed" },
+      error: { message: "browser authority revoked" },
+    });
+    expect(readClawInstallRecord(plan.agent.finalId, { env })?.status).toBe("config_committed");
+    expect(createWorkspaceFiles).not.toHaveBeenCalled();
+    await expect(access(plan.agent.workspace)).resolves.toBeUndefined();
+  });
+
+  it.each(["record", "database"] as const)(
+    "retains committed config facts without settling a replaced %s owner",
+    async (replacementKind) => {
+      const root = tempDirs.make("openclaw-claw-add-recovery-owner-");
+      const env = stateEnv(root);
+      const { plan } = await makeProvenancePlan(root, {
+        schemaVersion: 1,
+        agent: { id: "worker" },
+      });
+      let current = true;
+      let replacement: ReturnType<typeof readClawInstallRecord>;
+      const result = await applyClawAddPlan(plan, {
+        env,
+        nowMs: 1,
+        consentPlanIntegrity: plan.planIntegrity,
+        beforePersistentApply: () => {
+          if (!current) {
+            throw new Error("browser authority revoked");
+          }
+        },
+        commitConfig: async (transform) => {
+          transform({});
+          if (replacementKind === "database") {
+            closeOpenClawStateDatabaseForTest();
+          } else {
+            deleteClawInstallRecord(plan.agent.finalId, { env });
+          }
+          replacement = persistClawInstallRecord(plan, {
+            env,
+            status: "workspace_ready",
+            nowMs: 2,
+          });
+          current = false;
+        },
+      });
+
+      expect(result).toMatchObject({
+        status: "partial",
+        configCommitted: true,
+        workspaceCreated: true,
+        installRecord: { status: "workspace_ready", addedAtMs: 1, updatedAtMs: 1 },
+        error: { message: expect.stringContaining("recovery could not settle") },
+      });
+      expect(replacement).toBeDefined();
+      expect(readClawInstallRecord(plan.agent.finalId, { env })).toEqual(replacement);
+      await expect(access(plan.agent.workspace)).resolves.toBeUndefined();
+    },
+  );
+
+  it("does not delete a replacement pending record after workspace inspection fails", async () => {
+    const root = tempDirs.make("openclaw-claw-add-recovery-delete-");
+    const env = stateEnv(root);
+    const blockedParent = join(root, "blocked-parent");
+    const { plan } = await makeProvenancePlan(
+      root,
+      { schemaVersion: 1, agent: { id: "worker" } },
+      { workspace: join(blockedParent, "worker") },
+    );
+    await writeFile(blockedParent, "not a directory");
+    let replacement: ReturnType<typeof persistClawInstallRecord> | undefined;
+    const result = await applyClawAddPlan(plan, {
+      env,
+      nowMs: 1,
+      consentPlanIntegrity: plan.planIntegrity,
+      persistRecord: (planned, options) => {
+        const original = persistClawInstallRecord(planned, options);
+        deleteClawInstallRecord(plan.agent.finalId, { env });
+        replacement = persistClawInstallRecord(planned, { ...options, nowMs: 2 });
+        return original;
+      },
+    });
+    expect(result).toMatchObject({
+      status: "partial",
+      configCommitted: false,
+      installRecord: { status: "pending", addedAtMs: 1 },
+      error: { message: expect.stringContaining("changed before settlement") },
+    });
+    expect(replacement).toBeDefined();
+    expect(readClawInstallRecord(plan.agent.finalId, { env })).toEqual(replacement);
+  });
+
+  it.each([false, true])(
+    "retains a replacement workspace after config failure (guarded=%s)",
+    async (guarded) => {
+      const root = tempDirs.make("openclaw-claw-add-recovery-workspace-");
+      const env = stateEnv(root);
+      const { plan } = await makeProvenancePlan(root, {
+        schemaVersion: 1,
+        agent: { id: "worker" },
+      });
+      const originalWorkspace = join(root, "original-workspace");
+      let current = true;
+      const result = await applyClawAddPlan(plan, {
+        env,
+        consentPlanIntegrity: plan.planIntegrity,
+        beforePersistentApply: guarded
+          ? () => {
+              if (!current) {
+                throw new Error("browser authority revoked");
+              }
+            }
+          : undefined,
+        commitConfig: async () => {
+          await rename(plan.agent.workspace, originalWorkspace);
+          await mkdir(plan.agent.workspace);
+          current = false;
+          throw new Error("config failed after workspace replacement");
+        },
+      });
+      expect(result).toMatchObject({
+        status: "partial",
+        configCommitted: false,
+        workspaceCreated: true,
+        installRecord: { status: "workspace_ready" },
+      });
+      await expect(readdir(plan.agent.workspace)).resolves.toEqual([]);
+      await expect(access(originalWorkspace)).resolves.toBeUndefined();
+      expect(readClawInstallRecord(plan.agent.finalId, { env })?.status).toBe("workspace_ready");
+    },
+  );
+
   it("applies, tracks drift, updates, and removes profile model and delegation settings", async () => {
     const root = tempDirs.make("openclaw-claw-update-profile-");
     const env = { OPENCLAW_STATE_DIR: join(root, "state") };
@@ -212,15 +394,12 @@ describe("Claw add lifecycle", () => {
       status: "partial",
       configCommitted: true,
       error: { message: "injected v1 promotion failure" },
+      installRecord: { status: "workspace_ready" },
     });
     expect(config.agents?.entries?.worker).toMatchObject({
       tools: { profile: "full", allow: ["read"] },
     });
-    expect(readClawInstallRecord("worker", { env })).toMatchObject({
-      schemaVersion: "openclaw.clawInstallRecord.v1",
-      planIntegrity: legacyPlan.planIntegrity,
-      status: "workspace_ready",
-    });
+    expect(readClawInstallRecord("worker", { env })).toEqual(legacyRecord);
 
     const second = await applyClawAddPlan(boundedPlan, dependencies);
 
