@@ -1,5 +1,6 @@
 // Gateway readiness checker for channel health and startup sidecar state.
 import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
+import { isPromiseLike } from "@openclaw/normalization-core/promise-like";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ReadinessCondition, CanonicalReadinessResult } from "../../readiness/conditions.js";
@@ -609,16 +610,39 @@ async function evaluateCanonicalGatewayReadiness(params: {
   timeoutMs?: number;
 }): Promise<CanonicalGatewayReadinessResult> {
   let gateway: ReadinessResult | undefined;
+  let gatewayRefreshStarted = false;
+  const timeoutMs = params.timeoutMs ?? DEFAULT_READINESS_EVALUATION_TIMEOUT_MS;
+  const deadlineMs = Date.now() + Math.max(1, timeoutMs);
   try {
     return await withReadinessEvaluationTimeout(
       Promise.resolve().then(async () => {
         gateway = await params.evaluateGateway();
         const runtime = await params.evaluateRuntime();
+        // Runtime providers can outlive an admission transition; compose only current Gateway facts.
+        gatewayRefreshStarted = true;
+        gateway = await params.evaluateGateway();
         return mergeReadinessResults(gateway, runtime, params.identity);
       }),
-      params.timeoutMs,
+      timeoutMs,
     );
   } catch (error) {
+    if (gateway !== undefined && !gatewayRefreshStarted) {
+      try {
+        const refreshed = params.evaluateGateway();
+        if (isPromiseLike(refreshed)) {
+          const remainingMs = deadlineMs - Date.now();
+          if (remainingMs > 0) {
+            gateway = await withReadinessEvaluationTimeout(Promise.resolve(refreshed), remainingMs);
+          } else {
+            void Promise.resolve(refreshed).catch(() => {});
+          }
+        } else {
+          gateway = refreshed;
+        }
+      } catch {
+        // The retained snapshot plus the evaluation failure below remains fail-closed.
+      }
+    }
     return mergeReadinessResults(
       gateway ?? { ready: false, failing: [], uptimeMs: 0 },
       buildReadinessEvaluationFailure(error, params.identity),

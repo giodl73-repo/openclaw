@@ -1,5 +1,6 @@
 // Readiness checker tests cover startup grace, channel health, and stale socket decisions.
 import { describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
 import type { ChannelId } from "../../channels/plugins/index.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
 import { buildRuntimeReadiness, type ReadinessCondition } from "../../readiness/conditions.js";
@@ -854,6 +855,42 @@ describe("canonical configured Gateway readiness", () => {
     }
   });
 
+  it("rechecks Gateway admission after an awaited runtime provider settles", async () => {
+    const runtimeStarted = createDeferred();
+    const releaseRuntime = createDeferred();
+    let draining = false;
+    const evaluateGateway = vi.fn(() =>
+      draining ? failingSnapshot(["gateway-draining"]) : (readySnapshot() as ReadinessResult),
+    );
+
+    const evaluation = evaluateConfiguredGatewayReadiness({
+      config: { gateway: { readiness: {} } },
+      identity: testReadinessIdentity(),
+      evaluateGateway,
+      evaluateRuntime: async () => {
+        runtimeStarted.resolve();
+        await releaseRuntime.promise;
+        return buildRuntimeReadiness({ configLoaded: true, gateway: "responding" });
+      },
+    });
+
+    await runtimeStarted.promise;
+    draining = true;
+    releaseRuntime.resolve();
+
+    const result = await evaluation;
+    expect(evaluateGateway).toHaveBeenCalledTimes(2);
+    expect(result.ready).toBe(false);
+    expect(result.failures).toContain("GatewayDraining");
+    expect(result.conditions).toContainEqual(
+      expect.objectContaining({
+        type: "GatewayAcceptingWork",
+        status: "False",
+        reason: "GatewayDraining",
+      }),
+    );
+  });
+
   it("normalizes core failures and advisories while preserving legacy fields", async () => {
     const gateway = failingSnapshot(["discord"]);
     const runtime = buildRuntimeReadiness({
@@ -886,20 +923,28 @@ describe("canonical configured Gateway readiness", () => {
     ]);
   });
   it("returns a structured required failure when extended evaluation times out", async () => {
-    const gateway = readySnapshot() as ReadinessResult;
+    let draining = false;
+    const evaluateGateway = vi.fn(() =>
+      draining ? failingSnapshot(["gateway-draining"]) : (readySnapshot() as ReadinessResult),
+    );
     const result = await evaluateConfiguredGatewayReadiness({
       config: { gateway: { readiness: {} } },
       identity: testReadinessIdentity(),
-      evaluateGateway: () => gateway,
-      evaluateRuntime: () => new Promise<never>(() => {}),
+      evaluateGateway,
+      evaluateRuntime: () => {
+        draining = true;
+        return new Promise<never>(() => {});
+      },
       timeoutMs: 5,
     });
 
-    expect(result).toMatchObject({
-      ready: false,
-      failing: ["ReadinessEvaluationTimedOut"],
-      failures: ["ReadinessEvaluationTimedOut"],
-    });
+    expect(evaluateGateway).toHaveBeenCalledTimes(2);
+    expect(result.ready).toBe(false);
+    expect(result.failures).toEqual([
+      "ReadinessEvaluationTimedOut",
+      "GatewayDraining",
+      "ChannelRuntimeNotChecked",
+    ]);
     expect(result.conditions).toContainEqual({
       type: "ReadinessEvaluationComplete",
       subjectRef: "openclaw/gateway/current",
@@ -908,7 +953,41 @@ describe("canonical configured Gateway readiness", () => {
       reason: "ReadinessEvaluationTimedOut",
       message: "Readiness evaluation did not complete within its bounded deadline.",
     });
+    expect(result.conditions).toContainEqual(
+      expect.objectContaining({
+        type: "GatewayAcceptingWork",
+        status: "False",
+        reason: "GatewayDraining",
+      }),
+    );
     expect(result.conditions?.[0]?.type).toBe("ReadinessEvaluationComplete");
+  });
+
+  it("keeps an asynchronous failure-path refresh inside the original deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const evaluateGateway = vi
+        .fn<() => ReadinessResult | Promise<ReadinessResult>>()
+        .mockReturnValueOnce(readySnapshot() as ReadinessResult)
+        .mockReturnValueOnce(new Promise<ReadinessResult>(() => {}));
+      const evaluation = evaluateConfiguredGatewayReadiness({
+        config: { gateway: { readiness: {} } },
+        identity: testReadinessIdentity(),
+        evaluateGateway,
+        evaluateRuntime: () => new Promise<never>(() => {}),
+        timeoutMs: 100,
+      });
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      await expect(evaluation).resolves.toMatchObject({
+        ready: false,
+        failures: ["ReadinessEvaluationTimedOut"],
+      });
+      expect(evaluateGateway).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("redacts unexpected extended evaluation failures", async () => {
