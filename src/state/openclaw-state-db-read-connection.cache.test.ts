@@ -22,7 +22,7 @@ import type {
 
 vi.hoisted(() => vi.resetModules());
 const worker = vi.hoisted(() => ({
-  read: vi.fn<(input: OpenClawStateReadRequest) => OpenClawStateReadReply>(),
+  read: vi.fn<(input: OpenClawStateReadRequest) => Promise<OpenClawStateReadReply>>(),
   explicitSqliteCloseReleasesNativeResources: true,
   decided: true,
 }));
@@ -36,7 +36,9 @@ vi.mock("../infra/bun-sqlite-library.js", async (importOriginal) => ({
 }));
 vi.mock("../infra/worker-task-server.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../infra/worker-task-server.js")>()),
-  serveOwnedWorkerTasks(handler: (input: OpenClawStateReadRequest) => OpenClawStateReadReply) {
+  serveOwnedWorkerTasks(
+    handler: (input: OpenClawStateReadRequest) => Promise<OpenClawStateReadReply>,
+  ) {
     worker.read.mockImplementation(handler);
   },
 }));
@@ -95,8 +97,8 @@ function fixture() {
       checkFreshAdmission: false,
       command,
     });
-  const workerValue = () => {
-    const reply = workerRead({ type: "nodeHost.config" });
+  const workerValue = async () => {
+    const reply = await workerRead({ type: "nodeHost.config" });
     if (!reply.ok || reply.type !== "nodeHost.config") {
       throw new Error("Worker read failed");
     }
@@ -105,18 +107,18 @@ function fixture() {
   return { root, pathname, read, value, countOpens, workerValue, workerRead };
 }
 
-it("reuses one reader in registered worker commands, refreshes idle, and reopens after eviction", () => {
+it("reuses one reader in registered worker commands, refreshes idle, and reopens after eviction", async () => {
   const { workerValue: value, countOpens } = fixture();
   for (let index = 0; index < 10; index++) {
-    expect(value()).toBe(1);
+    expect(await value()).toBe(1);
   }
   expect(countOpens()).toBe(1);
   vi.advanceTimersByTime(SQLITE_IDLE_HANDLE_TTL_MS - 1);
-  expect(value()).toBe(1);
+  expect(await value()).toBe(1);
   vi.advanceTimersByTime(SQLITE_IDLE_HANDLE_TTL_MS - 1);
   expect(countOpens()).toBe(1);
   vi.advanceTimersByTime(1);
-  expect(value()).toBe(1);
+  expect(await value()).toBe(1);
   expect(countOpens()).toBe(2);
 });
 
@@ -183,11 +185,11 @@ it("retries idle reader disposal while other databases remain active", () => {
   expect(first.read(({ db }) => db) === reader).toBe(false);
 });
 
-it("keeps missing registry reads noncreating after their cached file disappears", () => {
+it("keeps missing registry reads noncreating after their cached file disappears", async () => {
   const { pathname, read, workerRead } = fixture();
   const reader = read(({ db }) => db);
   fs.rmSync(pathname);
-  expect(workerRead({ type: "agentDatabaseRegistry.read" })).toMatchObject({
+  expect(await workerRead({ type: "agentDatabaseRegistry.read" })).toMatchObject({
     ok: true,
     result: { status: "unavailable" },
   });
@@ -228,7 +230,7 @@ it("reopens a replacement file and leaves private snapshot readers task-scoped",
   fs.rmSync(snapshot);
 });
 
-it("reuses admitted audit schema facts and refreshes them after a peer schema change", () => {
+it("reuses admitted audit schema facts and refreshes them after a peer schema change", async () => {
   const { pathname, read, workerRead, workerValue } = fixture();
   const reader = read(({ db }) => db);
   const schemaQueries = trackSqliteStatementExecutions(reader, ["schema"], (sql) =>
@@ -236,10 +238,10 @@ it("reuses admitted audit schema facts and refreshes them after a peer schema ch
   );
   const inspect = vi.spyOn(executionIdentityContext, "inspectExecutionIdentityRunInDatabase");
   const input = { runId: "missing-audit-run", now: 1_000 };
-  workerValue();
+  await workerValue();
   expect(schemaQueries.counts.schema).toBe(0);
   expect(inspect).not.toHaveBeenCalled();
-  expect(workerRead({ type: "audit.run.inspect", input })).toMatchObject({
+  expect(await workerRead({ type: "audit.run.inspect", input })).toMatchObject({
     ok: true,
     type: "audit.run.inspect",
     result: { status: "inspected" },
@@ -262,7 +264,7 @@ it("reuses admitted audit schema facts and refreshes them after a peer schema ch
     ]) {
       peer.exec(extractSqliteTableSchema(OPENCLAW_STATE_SCHEMA_SQL, table));
     }
-    expect(workerRead({ type: "audit.run.inspect", input })).toMatchObject({
+    expect(await workerRead({ type: "audit.run.inspect", input })).toMatchObject({
       ok: true,
       type: "audit.run.inspect",
       result: { status: "inspected" },
@@ -276,7 +278,7 @@ it("reuses admitted audit schema facts and refreshes them after a peer schema ch
     expect(schemaQueries.counts.schema).toBeGreaterThan(0);
     const refreshedQueries = schemaQueries.counts.schema;
     expect(read(({ db }) => db)).toBe(reader);
-    workerValue();
+    await workerValue();
     expect(schemaQueries.counts.schema).toBe(refreshedQueries);
     expect(reader.isTransaction).toBe(false);
   } finally {
@@ -285,7 +287,7 @@ it("reuses admitted audit schema facts and refreshes them after a peer schema ch
   }
 });
 
-it("pins audit schema facts and inspection to one admission snapshot", () => {
+it("pins audit schema facts and inspection to one admission snapshot", async () => {
   const { pathname, read, workerRead } = fixture();
   const reader = read(({ db }) => db);
   const peer = sqlite.openNodeSqliteDatabase(pathname);
@@ -301,13 +303,13 @@ it("pins audit schema facts and inspection to one admission snapshot", () => {
     });
   const input = { runId: "admitted-before-first-use", now: 1_000 };
   try {
-    expect(workerRead({ type: "audit.run.inspect", input })).toMatchObject({
+    expect(await workerRead({ type: "audit.run.inspect", input })).toMatchObject({
       ok: true,
       type: "audit.run.inspect",
       result: { status: "inspected" },
     });
     expect(reader.isTransaction).toBe(false);
-    expect(workerRead({ type: "audit.run.inspect", input })).toMatchObject({
+    expect(await workerRead({ type: "audit.run.inspect", input })).toMatchObject({
       ok: true,
       type: "audit.run.inspect",
       result: { status: "inspected" },
@@ -323,12 +325,12 @@ it("pins audit schema facts and inspection to one admission snapshot", () => {
   }
 });
 
-it("uses a completed capability on the next retained read without hiding real cleanup failures", () => {
+it("uses a completed capability on the next retained read without hiding real cleanup failures", async () => {
   worker.explicitSqliteCloseReleasesNativeResources = false;
   worker.decided = false;
   const { root, pathname, read, workerRead, countOpens } = fixture();
   expect(sqlite.bunSqliteNativeCleanupPending).toBe(true);
-  expect(workerRead({ type: "nodeHost.config" }).nativeCleanupFailure).toEqual({
+  expect((await workerRead({ type: "nodeHost.config" })).nativeCleanupFailure).toEqual({
     error: undefined,
   });
   const reader = read(({ db }) => db);
@@ -337,11 +339,11 @@ it("uses a completed capability on the next retained read without hiding real cl
 
   worker.explicitSqliteCloseReleasesNativeResources = true;
   worker.decided = true;
-  expect(workerRead({ type: "nodeHost.config" }).nativeCleanupFailure).toBeUndefined();
+  expect((await workerRead({ type: "nodeHost.config" })).nativeCleanupFailure).toBeUndefined();
   expect(countOpens()).toBe(1);
   vi.advanceTimersByTime(SQLITE_IDLE_HANDLE_TTL_MS);
   expect(reader.isOpen).toBe(false);
-  expect(workerRead({ type: "nodeHost.config" }).nativeCleanupFailure).toBeUndefined();
+  expect((await workerRead({ type: "nodeHost.config" })).nativeCleanupFailure).toBeUndefined();
   expect(countOpens()).toBe(2);
   expect(sqlite.bunSqliteNativeCleanupPending).toBe(true);
 
@@ -352,7 +354,7 @@ it("uses a completed capability on the next retained read without hiding real cl
   ).mockImplementationOnce((_pathname, _env, reportCleanupFailure) => {
     reportCleanupFailure?.(new OpenClawQuarantineReadCleanupError([failure]));
   });
-  const reply = worker.read({
+  const reply = await worker.read({
     context: { environment: { OPENCLAW_STATE_DIR: root } },
     databasePath: pathname,
     location: pathname,
@@ -367,20 +369,20 @@ it("uses a completed capability on the next retained read without hiding real cl
 
 it.each([false, true])(
   "retains readers and reports native cleanup by capability (capable=%s)",
-  (capable) => {
+  async (capable) => {
     worker.explicitSqliteCloseReleasesNativeResources = capable;
     const { root, pathname, read, workerRead, countOpens } = fixture();
     if (!capable) {
       expect(sqlite.bunSqliteNativeCleanupPending).toBe(true);
     }
-    expect(workerRead({ type: "nodeHost.config" })).toMatchObject({
+    expect(await workerRead({ type: "nodeHost.config" })).toMatchObject({
       ok: true,
       row: { updated_at_ms: 1 },
     });
     const previous = read(({ db }) => db);
     vi.advanceTimersByTime(SQLITE_IDLE_HANDLE_TTL_MS);
     expect(previous.isOpen).toBe(!capable);
-    expect(workerRead({ type: "nodeHost.config" })).toMatchObject({
+    expect(await workerRead({ type: "nodeHost.config" })).toMatchObject({
       ok: true,
       row: { updated_at_ms: 1 },
     });
@@ -394,7 +396,7 @@ it.each([false, true])(
     replacement.close();
     fs.renameSync(pathname, path.join(root, "previous.sqlite"));
     fs.renameSync(replacementPath, pathname);
-    const reply = workerRead({ type: "nodeHost.config" });
+    const reply = await workerRead({ type: "nodeHost.config" });
     expect(reply).toMatchObject({
       ok: true,
       row: { updated_at_ms: 2 },

@@ -103,7 +103,7 @@ export function createWindowsTaskAutoStartGuard(params: {
 async function maybeSuspendWindowsTaskAutoStartForUpdate(params: {
   serviceEnv: NodeJS.ProcessEnv | undefined;
   assertCurrentService?: () => Promise<void>;
-  assertCurrent?: () => void;
+  assertCurrent?: (phase?: "restore") => void;
   updateRun?: UpdateCommandOptions["run"];
 }): Promise<WindowsTaskAutoStartRecovery | undefined> {
   if (process.platform !== "win32" || !params.serviceEnv) {
@@ -167,7 +167,7 @@ type ManagedServiceStopParams = {
   onStopped?: (state: PreManagedServiceStop) => void;
   /** Doctor restores this same native instance after its offline repair. */
   retainNativeIdentity?: boolean;
-  assertCurrent?: () => void;
+  assertCurrent?: (phase?: "restore") => void;
   timeoutMs?: number;
   warn?: (message: string) => void;
 } & (
@@ -241,8 +241,8 @@ async function stopManagedServiceBeforeMutableUpdate(
     }
     executorFence?.assertCurrent();
   };
-  const assertCurrent = () => {
-    params.assertCurrent?.();
+  const assertCurrent = (phase?: "restore") => {
+    params.assertCurrent?.(phase);
     assertNative?.();
     assertExecutor();
   };
@@ -461,10 +461,10 @@ async function stopManagedServiceBeforeMutableUpdate(
         before: inspected,
         timeoutMs: params.timeoutMs,
       }),
-      assertCurrent: () => {
+      assertCurrent: (phase) => {
         // Recovery can hand off after Doctor migrates canonical state. Retain live
         // executor authority without reopening that state through the old runtime.
-        params.assertCurrent?.();
+        params.assertCurrent?.(phase);
         assertExecutor();
       },
     });
@@ -659,7 +659,7 @@ async function stopManagedServiceBeforeMutableUpdate(
     }
   } catch (err) {
     try {
-      assertCurrent();
+      assertCurrent("restore");
     } catch (cause) {
       const failures = [err, cause];
       try {

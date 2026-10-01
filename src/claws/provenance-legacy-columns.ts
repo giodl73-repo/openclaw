@@ -28,7 +28,10 @@ export function legacySafeColumnProjection(
   db: DatabaseSync,
   table: "claw_installs" | "claw_package_refs",
   columns: readonly string[],
+  options: { aliasMissing?: boolean } = {},
 ): string {
+  const missing = (column: string) =>
+    options.aliasMissing === false ? "NULL" : `NULL AS ${column}`;
   const schema = getAdmittedSqliteSchemaFacts(db);
   if (schema) {
     let tables = columnsBySchema.get(schema);
@@ -44,13 +47,13 @@ export function legacySafeColumnProjection(
       );
       tables.set(table, present);
     }
-    return columns.map((column) => (present.has(column) ? column : `NULL AS ${column}`)).join(", ");
+    return columns.map((column) => (present.has(column) ? column : missing(column))).join(", ");
   }
   const full = columns.join(", ");
   if (canSelect(db, table, full)) {
     return full;
   }
   return columns
-    .map((column) => (canSelect(db, table, column) ? column : `NULL AS ${column}`))
+    .map((column) => (canSelect(db, table, column) ? column : missing(column)))
     .join(", ");
 }

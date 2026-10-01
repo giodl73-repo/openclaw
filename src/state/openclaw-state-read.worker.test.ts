@@ -5,13 +5,13 @@ import type {
 } from "./openclaw-state-read.types.js";
 
 const mock = vi.hoisted(() => ({
-  handler: vi.fn<(input: unknown) => OpenClawStateReadReply>(),
+  handler: vi.fn<(input: unknown) => Promise<OpenClawStateReadReply>>(),
   admit: vi.fn<() => void>(),
   query: vi.fn<() => []>(),
   settle: vi.fn<(operation: (source: { db: object }) => unknown) => unknown>(),
 }));
 vi.mock("../infra/worker-task-server.js", () => ({
-  serveOwnedWorkerTasks: (handler: (input: unknown) => OpenClawStateReadReply) => {
+  serveOwnedWorkerTasks: (handler: (input: unknown) => Promise<OpenClawStateReadReply>) => {
     mock.handler.mockImplementation(handler);
   },
 }));
@@ -58,7 +58,7 @@ beforeEach(() => {
 
 it.each(["success", "query-error", "schema-error"] as const)(
   "reports source admission at the schema-validated callback for %s",
-  (outcome) => {
+  async (outcome) => {
     const failure = new Error("controlled reader failure");
     if (outcome === "schema-error") {
       mock.admit.mockImplementation(() => {
@@ -69,7 +69,7 @@ it.each(["success", "query-error", "schema-error"] as const)(
         throw failure;
       });
     }
-    const reply = mock.handler(request);
+    const reply = await mock.handler(request);
     if (reply.ok) {
       expect(reply).toEqual({ ok: true, type: "fleet.list", sourceAdmitted: true, cells: [] });
     } else {
@@ -83,7 +83,7 @@ it.each(["success", "query-error", "schema-error"] as const)(
 
 it.each(["success", "query-error", "schema-error"] as const)(
   "preserves native admission facts in the registry %s reply",
-  (outcome) => {
+  async (outcome) => {
     const fail = () => {
       throw new Error("read unavailable");
     };
@@ -93,7 +93,9 @@ it.each(["success", "query-error", "schema-error"] as const)(
     if (outcome === "query-error") {
       mock.query.mockImplementation(fail);
     }
-    expect(mock.handler({ ...request, command: { type: "agentDatabaseRegistry.read" } })).toEqual({
+    expect(
+      await mock.handler({ ...request, command: { type: "agentDatabaseRegistry.read" } }),
+    ).toEqual({
       ok: true,
       type: "agentDatabaseRegistry.read",
       sourceAdmitted: outcome === "schema-error" ? undefined : true,
@@ -103,12 +105,12 @@ it.each(["success", "query-error", "schema-error"] as const)(
   },
 );
 
-it("keeps registry native cleanup failure in the worker error protocol", () => {
+it("keeps registry native cleanup failure in the worker error protocol", async () => {
   mock.settle.mockImplementationOnce((operation) => {
     operation({ db: {} });
     throw new Error("native cleanup failed");
   });
-  const reply = mock.handler({ ...request, command: { type: "agentDatabaseRegistry.read" } });
+  const reply = await mock.handler({ ...request, command: { type: "agentDatabaseRegistry.read" } });
   expect(reply).toMatchObject({
     ok: false,
     sourceAdmitted: true,

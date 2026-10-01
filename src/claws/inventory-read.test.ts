@@ -7,6 +7,7 @@ import { buildClawUpdateScheduledJobs } from "./control-ui-scheduled-jobs.js";
 import { CLAW_CRON_REF_SCHEMA_VERSION, upsertClawCronRef } from "./cron.js";
 import { digestClawValue } from "./digest.js";
 import { readClawInventory } from "./inventory-read.js";
+import { persistClawPackageRef } from "./provenance.js";
 import { makeProvenancePlan, stateEnv } from "./provenance.test-helpers.js";
 import { persistClawInstallRecordAsync, withClawMutationGuard } from "./state-write.js";
 
@@ -83,6 +84,33 @@ describe("Claw worker inventory", () => {
       mcpServers: [],
       cronJobs: [],
     });
+  });
+
+  it("preserves populated extension provenance through the inventory worker", async () => {
+    const root = tempDirs.make("claw-inventory-extension-");
+    const env = stateEnv(root);
+    const { plan } = await makeProvenancePlan(root, { schemaVersion: 1, agent: { id: "worker" } });
+    const record = persistClawPackageRef(
+      plan,
+      {
+        kind: "plugin",
+        source: "clawhub",
+        ref: "@owner/tools",
+        version: "1.0.0",
+        integrity: "sha256:fixture",
+        extension: {
+          id: "fixture-tools",
+          format: "claude",
+          detectedFormat: "claude",
+          mapped: ["commands", "skills"],
+          unavailable: ["agents"],
+          adapterIdentity: "openclaw/v1",
+        },
+      },
+      { env, nowMs: 123, origin: "pre-existing", independentOwner: true },
+    );
+
+    expect((await readClawInventory({ env })).packages).toEqual([record]);
   });
 
   it.each(["transaction", "commit"] as const)(

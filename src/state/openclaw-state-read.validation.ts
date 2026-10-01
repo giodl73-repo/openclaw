@@ -85,6 +85,7 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
         (input.command.storePath === undefined || typeof input.command.storePath === "string") &&
         Array.isArray(input.command.jobIds) &&
         input.command.jobIds.every((id) => typeof id === "string")) ||
+      (input.command.type === "cron.quarantine" && typeof input.command.storeKey === "string") ||
       (input.command.type === "cron.currentReceipt" &&
         isRecord(input.command.handle) &&
         typeof input.command.handle.receiptId === "string" &&
@@ -121,6 +122,7 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
         typeof input.command.input.publicKey === "string" &&
         typeof input.command.input.nowMs === "number") ||
       input.command.type === "admit" ||
+      input.command.type === "doctor.gatewayOwnerLease.read" ||
       input.command.type === "subagents.sessionList" ||
       (input.command.type === "subagents.forChildSession" &&
         typeof input.command.childSessionKey === "string") ||

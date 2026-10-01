@@ -15,7 +15,7 @@ type FakeDatabase = {
   close: () => void;
 };
 const mock = vi.hoisted(() => ({
-  handler: vi.fn<(input: unknown) => OpenClawStateReadReply>(),
+  handler: vi.fn<(input: unknown) => Promise<OpenClawStateReadReply>>(),
   open: vi.fn<(location: string) => FakeDatabase>(),
   read: vi.fn<(sql: string) => unknown>(),
   close: vi.fn<() => void>(),
@@ -24,7 +24,7 @@ const mock = vi.hoisted(() => ({
   databases: [] as FakeDatabase[],
 }));
 vi.mock("../infra/worker-task-server.js", () => ({
-  serveOwnedWorkerTasks: (handler: (input: unknown) => OpenClawStateReadReply) => {
+  serveOwnedWorkerTasks: (handler: (input: unknown) => Promise<OpenClawStateReadReply>) => {
     mock.handler.mockImplementation(handler);
   },
 }));
@@ -110,7 +110,7 @@ function knownQuarantine(kind: "state" | "agent") {
 
 it.each([false, true])(
   "refuses a validated quarantine before source admission (reader close fails=%s)",
-  (closeFails) => {
+  async (closeFails) => {
     const input = request();
     const reason = knownQuarantine("state");
     const closeFailure = new Error("quarantine reader close failed after a valid decision");
@@ -120,7 +120,7 @@ it.each([false, true])(
       });
     }
 
-    const reply = mock.handler(input);
+    const reply = await mock.handler(input);
     expect(reply).toMatchObject({ ok: false, message: expect.stringContaining(reason) });
     expect(reply).not.toHaveProperty("sourceAdmitted", true);
     expect(mock.query).not.toHaveBeenCalled();
@@ -204,7 +204,7 @@ it.each([false, true])(
 
 it.each([false, true])(
   "reports unsettled quarantine cleanup without changing the best-effort read result (read also fails=%s)",
-  (readFails) => {
+  async (readFails) => {
     const readFailure = new Error("quarantine metadata read failed");
     const closeFailure = new Error("quarantine native reader close failed");
     if (readFails) {
@@ -215,7 +215,7 @@ it.each([false, true])(
     mock.close.mockImplementationOnce(() => {
       throw closeFailure;
     });
-    const reply = mock.handler(request());
+    const reply = await mock.handler(request());
     expect(reply).toMatchObject({
       ok: true,
       type: "fleet.list",
@@ -235,11 +235,11 @@ it.each([false, true])(
   },
 );
 
-it("keeps ordinary quarantine metadata failures best effort after a successful native close", () => {
+it("keeps ordinary quarantine metadata failures best effort after a successful native close", async () => {
   mock.read.mockImplementationOnce(() => {
     throw new Error("quarantine metadata unavailable");
   });
-  expect(mock.handler(request())).toEqual({
+  expect(await mock.handler(request())).toEqual({
     ok: true,
     type: "fleet.list",
     sourceAdmitted: true,
