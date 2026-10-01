@@ -7,7 +7,6 @@ import {
   type ClawStatusEntry,
   type ClawsCatalogDetailParams,
   type ClawsAddPlanParams,
-  type ClawsAddApplyParams,
   type ClawsUpdatePlanParams,
   type ValidationError,
   type ClawsDoctorResult,
@@ -17,8 +16,6 @@ import {
   validateClawsDoctorParams,
   validateClawsStatusParams,
   validateClawsAddPlanParams,
-  validateClawsAddApplyParams,
-  validateCronAddParams,
   validateClawsUpdatePlanParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { readClawHubClawDetail } from "../../claws/clawhub-source.js";
@@ -220,70 +217,6 @@ export function projectClawsDoctor(findings: readonly HealthFinding[]): ClawsDoc
 }
 
 export const clawsHandlers: GatewayRequestHandlers = {
-  "claws.add.apply": async ({
-    params,
-    respond,
-    context,
-    signal,
-    sessionMutationCommitGuard,
-    hasCurrentClientAuthority,
-  }) => {
-    if (!requireClawsEnabled(respond)) {
-      return;
-    }
-    if (!validateClawsAddApplyParams(params)) {
-      invalidParams("claws.add.apply", validateClawsAddApplyParams.errors, respond);
-      return;
-    }
-    const typed = params as ClawsAddApplyParams;
-    const assertCurrent = () => {
-      signal?.throwIfAborted();
-      sessionMutationCommitGuard?.();
-      if (hasCurrentClientAuthority && !hasCurrentClientAuthority()) {
-        throw new Error("Claw add request authority expired.");
-      }
-      assertExperimentalClawsEnabled();
-    };
-    await respondWithLifecycleResult("claws.add.apply", respond, async () => {
-      const { applyClawAddFromCatalog } = await import("../../claws/control-ui-add.js");
-      const { assertClawMutationCurrent } = await import("../../claws/state-write.js");
-      const assertCronMutationCurrent = () => {
-        assertCurrent();
-        assertClawMutationCurrent();
-      };
-      return applyClawAddFromCatalog({
-        ...typed,
-        signal,
-        assertCurrent,
-        getRuntimeConfig: () => context.getRuntimeConfig(),
-        cronGateway: {
-          list: async () => {
-            assertCurrent();
-            return { jobs: await context.cron.list({ includeDisabled: true }) };
-          },
-          add: async (input) => {
-            const { normalizeCronJobCreate } = await import("../../cron/normalize.js");
-            const { assertValidCronCreateDelivery } =
-              await import("../../cron/delivery-channel-validation.js");
-            const job = normalizeCronJobCreate(input);
-            if (!job || !validateCronAddParams(job)) {
-              throw new Error("Claw cron declaration is invalid.");
-            }
-            await assertValidCronCreateDelivery(context.getRuntimeConfig(), job);
-            assertCronMutationCurrent();
-            const result = await context.cron.add(job, {
-              commitGuard: assertCronMutationCurrent,
-              matchesExisting: () => {
-                // The canonical add owner already reconciled its list. A new match is a race.
-                throw new Error("Claw cron declaration changed during add.");
-              },
-            });
-            return "job" in result ? result.job : result;
-          },
-        },
-      });
-    });
-  },
   "claws.update.plan": async ({ params, respond, context }) => {
     if (!requireClawsEnabled(respond)) {
       return;

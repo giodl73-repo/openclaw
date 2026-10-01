@@ -539,7 +539,6 @@ export async function seedWorkspaceBootstrap(params: {
   content: Buffer;
   nowMs?: number;
   stateOptions?: OpenClawStateDatabaseOptions;
-  assertCurrent?: () => void;
 }): Promise<"seeded" | "already-seeded" | "consumed"> {
   if (params.content.byteLength > MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES) {
     throw new WorkspaceBootstrapSeedConflictError(
@@ -567,7 +566,6 @@ export async function seedWorkspaceBootstrap(params: {
     return "consumed";
   }
 
-  params.assertCurrent?.();
   await fs.mkdir(dir, { recursive: true });
   const workspaceRoot = await fsSafeRoot(dir, {
     hardlinks: "reject",
@@ -577,9 +575,7 @@ export async function seedWorkspaceBootstrap(params: {
   let created = false;
   if (!bootstrapExists) {
     try {
-      params.assertCurrent?.();
       await workspaceRoot.write(DEFAULT_BOOTSTRAP_FILENAME, params.content, {
-        assertBeforeMutation: params.assertCurrent,
         overwrite: false,
       });
       created = true;
@@ -658,7 +654,7 @@ export async function seedWorkspaceBootstrap(params: {
         bootstrapSeededAt: new Date(nowMs).toISOString(),
       },
       nowMs,
-      { ...params.stateOptions, assertCurrent: params.assertCurrent },
+      params.stateOptions,
     );
   }
   return created ? "seeded" : "already-seeded";

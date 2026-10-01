@@ -91,7 +91,6 @@ export async function planClawAddFromCatalog(params: {
 }): Promise<ClawLifecyclePlanResult> {
   const result = await withResolvedClawHubSource({
     coordinate: params.source,
-    mode: "preview",
     run: async (loaded, trust) => {
       const inventory = await readClawInventory();
       const config = params.getRuntimeConfig();
@@ -112,7 +111,6 @@ export async function buildClawControlUiAddPlan(params: {
   config: OpenClawConfig;
   inventory: ClawInventory;
   agentId?: string;
-  physicalSource?: boolean;
 }): Promise<ClawAddPlan> {
   const { loaded, config, inventory } = params;
   const configuredAgentIds = listAgentIds(config);
@@ -137,7 +135,7 @@ export async function buildClawControlUiAddPlan(params: {
       existingMcpServers: normalizeConfiguredMcpServers(config.mcp?.servers),
       packagePreflight: preflightClawPackage,
       // The canonical planner stabilizes only source paths, never arbitrary manifest strings.
-      sourceReferenceRoot: params.physicalSource ? undefined : "$CLAW_SOURCE",
+      sourceReferenceRoot: "$CLAW_SOURCE",
     },
   });
   return addClawControlUiSafetyBlockers(plan, loaded);

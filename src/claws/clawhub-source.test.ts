@@ -83,7 +83,7 @@ beforeEach(() => {
 describe("exact ClawHub source", () => {
   it("binds publisher and trust facts without making check timestamps part of consent", async () => {
     const run = async (_source: unknown, trust: { integrity: string }) => trust.integrity;
-    const request = { coordinate: source, mode: "preview" as const, run };
+    const request = { coordinate: source, run };
     const first = await withResolvedClawHubSource(request);
     mocks.trust.mockResolvedValue({
       ok: true,
@@ -141,9 +141,9 @@ describe("exact ClawHub source", () => {
     const artifact = await mocks.artifact();
     artifact.artifact.version = "9.0.0";
     mocks.artifact.mockResolvedValue(artifact);
-    await expect(
-      withResolvedClawHubSource({ coordinate: source, mode: "preview", run: vi.fn() }),
-    ).rejects.toThrow("immutable");
+    await expect(withResolvedClawHubSource({ coordinate: source, run: vi.fn() })).rejects.toThrow(
+      "immutable",
+    );
     expect(mocks.download).not.toHaveBeenCalled();
   });
 
@@ -163,44 +163,26 @@ describe("exact ClawHub source", () => {
       cleanup: mocks.cleanup,
     });
     const run = vi.fn();
-    await expect(
-      withResolvedClawHubSource({ coordinate: source, mode: "apply", run }),
-    ).rejects.toThrow("digest changed");
+    await expect(withResolvedClawHubSource({ coordinate: source, run })).rejects.toThrow(
+      "digest changed",
+    );
     expect(run).not.toHaveBeenCalled();
     expect(mocks.cleanup).toHaveBeenCalledOnce();
   });
 
-  it("requires explicit risk acknowledgement during apply", async () => {
+  it("discloses review-required trust without exposing a source-persistence callback", async () => {
     mocks.trust.mockResolvedValue({
       ok: true,
       warning: "Review this release.",
       trustInstallRecordFields: { clawhubTrustDisposition: "review-required" },
     });
     const run = vi.fn(async () => "preview");
-    const preview = await withResolvedClawHubSource({ coordinate: source, mode: "preview", run });
+    const preview = await withResolvedClawHubSource({ coordinate: source, run });
     expect(preview.riskAcknowledgementRequired).toBe(true);
-    run.mockClear();
-    await expect(
-      withResolvedClawHubSource({ coordinate: source, mode: "apply", run }),
-    ).rejects.toThrow("acknowledge");
-    expect(run).not.toHaveBeenCalled();
-    await expect(
-      withResolvedClawHubSource({
-        coordinate: source,
-        mode: "apply",
-        acknowledgeClawHubRisk: true,
-        run,
-      }),
-    ).resolves.toMatchObject({ value: "preview" });
-  });
-
-  it("does not allow preview callbacks to persist source content", async () => {
-    await expect(
-      withResolvedClawHubSource({
-        coordinate: source,
-        mode: "preview",
-        run: async (_loaded, _trust, persist) => await persist(),
-      }),
-    ).rejects.toThrow("cannot persist");
+    expect(run).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ source: expect.objectContaining({ name: source.packageName }) }),
+      expect.objectContaining({ riskAcknowledgementRequired: true }),
+    );
+    expect(mocks.cleanup).toHaveBeenCalledOnce();
   });
 });

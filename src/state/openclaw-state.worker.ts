@@ -1,4 +1,3 @@
-import { isClawStateCommand } from "../claws/state-worker-contract.js";
 import {
   loadDeviceIdentityIfPresent,
   loadOrCreateDeviceIdentity,
@@ -38,9 +37,6 @@ const loadAgentCleanup = createLazyRuntimeModule(
   () => import("./openclaw-agent-execution-cleanup.worker.js"),
 );
 let agentCleanup: typeof import("./openclaw-agent-execution-cleanup.worker.js") | undefined;
-
-const loadClawState = createLazyRuntimeModule(() => import("../claws/state.worker.js"));
-let clawState: typeof import("../claws/state.worker.js") | undefined;
 
 const loadPluginState = createLazyRuntimeModule(
   () => import("../plugin-state/plugin-state.worker.js"),
@@ -127,14 +123,6 @@ function createSharedStateWorkerBackend(
   };
   return {
     [SQLITE_WORKER_PREPARE_COMMAND](commandType) {
-      if (isClawStateCommand({ type: commandType })) {
-        if (clawState) {
-          return undefined;
-        }
-        return loadClawState().then((loaded) => {
-          clawState = loaded;
-        });
-      }
       if (commandType.startsWith("capture.")) {
         if (capture) {
           return undefined;
@@ -183,12 +171,6 @@ function createSharedStateWorkerBackend(
     execute(command) {
       if (closed) {
         throw new Error("Shared-state worker is closed");
-      }
-      if (isClawStateCommand(command)) {
-        if (!clawState) {
-          throw new Error("Claw state runtime is not prepared");
-        }
-        return clawState.executeClawStateCommand(command, open());
       }
       if (
         command.type === "capture.upsertSession" ||

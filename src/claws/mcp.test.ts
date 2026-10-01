@@ -1,33 +1,20 @@
 import { join } from "node:path";
-import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import type { setConfiguredMcpServer } from "../agents/mcp-config-mutation.js";
-import * as mcpLease from "../agents/mcp-lifecycle-lease.js";
-import * as workerAdmission from "../infra/sqlite-worker-operation-admission.js";
 import { markClawMcpServerIndependentlyOwned } from "../state/claw-mcp-adoption.js";
-import { OpenClawStateLeaseError } from "../state/openclaw-state-lease-error.js";
-import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
-import { readClawInventory } from "./inventory-read.js";
+import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { buildClawAddPlan } from "./lifecycle.js";
 import {
-  ClawMcpInstallError,
   deleteClawMcpServerRef,
   installClawMcpServers,
   planClawMcpServerRemoval,
   readClawMcpServerRefs,
 } from "./mcp.js";
 import { parseClawManifest } from "./schema.js";
-import { assertClawMutationCurrent, withClawMutationGuard } from "./state-write.js";
 import type { ClawSourceIdentity } from "./types.js";
 
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
-  afterEach(async () => {
-    vi.restoreAllMocks();
-    await closeStateDatabaseForTest();
-    cleanup();
-  }),
-);
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+afterEach(() => closeOpenClawStateDatabaseForTest());
 
 function configuredServers() {
   return {
@@ -77,187 +64,6 @@ function listedMcpServers(mcpServers: Record<string, Record<string, unknown>> = 
 }
 
 describe("installClawMcpServers", () => {
-  it.each(["failed", "complete"] as const)(
-    "reports the confirmed %s outcome when the lease wrapper replaces callback settlement",
-    async (status) => {
-      const current = await fixture();
-      const exitError = new OpenClawStateLeaseError("lease exit retired", {
-        code: "OPENCLAW_STATE_LEASE_LOST",
-      });
-      const originalLease = mcpLease.withClawMcpLifecycleLease;
-      vi.spyOn(mcpLease, "withClawMcpLifecycleLease").mockImplementation((name, options, run) => {
-        // Run the real lease and worker writes, then simulate the owner's settlement override.
-        return originalLease(name, options, run).then(
-          () => {
-            throw exitError;
-          },
-          () => {
-            throw exitError;
-          },
-        );
-      });
-      const setMcpServer = vi.fn(async () =>
-        status === "failed"
-          ? { ok: false as const, path: "config", error: "configuration rejected" }
-          : listedMcpServers(),
-      );
-      const failure = await installClawMcpServers(current.plan, {
-        env: current.env,
-        setMcpServer,
-        listMcpServers: async () => listedMcpServers(),
-      }).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-      const persisted = (await readClawInventory({ env: current.env })).mcpServers;
-      expect(failure).toBeInstanceOf(ClawMcpInstallError);
-      expect(failure).toMatchObject({
-        code: "mcp_install_failed",
-        message: status === "failed" ? "configuration rejected" : "lease exit retired",
-        mcpServers: persisted,
-      });
-      expect(persisted).toMatchObject([{ name: "docs", status }]);
-      expect(setMcpServer).toHaveBeenCalledOnce();
-    },
-  );
-
-  it.each(["failed", "configured"] as const)(
-    "preserves observed refs when %s outcome bookkeeping loses authority at commit",
-    async (outcome) => {
-      const current = await fixture();
-      const configured: Record<string, Record<string, unknown>> = {};
-      let secondEffectSettled = false;
-      let retired = false;
-      const refusedStages: string[] = [];
-      const originalAdmission = workerAdmission.createSqliteWorkerOperationAdmission;
-      vi.spyOn(workerAdmission, "createSqliteWorkerOperationAdmission").mockImplementation(
-        (admit, attachment) =>
-          originalAdmission((request, grant) => {
-            if (secondEffectSettled && !retired && request.stage === "commit") {
-              retired = true;
-              refusedStages.push(request.stage);
-            }
-            admit(request, grant);
-          }, attachment),
-      );
-      const setMcpServer = vi.fn(
-        async ({ name, server, assertCurrent }: Parameters<typeof setConfiguredMcpServer>[0]) => {
-          assertCurrent?.();
-          if (name === "linear") {
-            secondEffectSettled = true;
-            if (outcome === "failed") {
-              return { ok: false as const, path: "config", error: "configuration rejected" };
-            }
-          }
-          const configuredServer = asNullableRecord(server);
-          if (!configuredServer) {
-            throw new Error("Expected MCP server config");
-          }
-          configured[name] = configuredServer;
-          return listedMcpServers(configured);
-        },
-      );
-      const failure = await withClawMutationGuard(
-        () => {
-          if (retired) {
-            throw new Error("MCP owner retired");
-          }
-        },
-        () =>
-          installClawMcpServers(current.plan, {
-            env: current.env,
-            nowMs: 42,
-            setMcpServer,
-            listMcpServers: async () => listedMcpServers(configured),
-          }),
-      ).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-
-      expect(failure).toBeInstanceOf(ClawMcpInstallError);
-      expect(refusedStages).toEqual(["commit"]);
-      const persisted = (await readClawInventory({ env: current.env })).mcpServers;
-      expect(failure).toMatchObject({
-        code: outcome === "failed" ? "mcp_install_failed" : "mcp_provenance_failed",
-        message:
-          outcome === "failed"
-            ? "configuration rejected"
-            : "MCP server was configured, but ownership could not be persisted: MCP owner retired",
-        mcpServers: persisted,
-      });
-      expect(persisted).toMatchObject([
-        { name: "docs", status: "complete", updatedAtMs: 42 },
-        { name: "linear", status: "pending", updatedAtMs: 42 },
-      ]);
-      expect(persisted[1]).not.toHaveProperty("error");
-      expect(Object.keys(configured)).toEqual(outcome === "failed" ? ["docs"] : ["docs", "linear"]);
-      expect(setMcpServer).toHaveBeenCalledTimes(2);
-    },
-  );
-
-  it.each(["lease", "read", "pending"] as const)(
-    "retains earlier confirmed refs when the next %s operation fails",
-    async (stage) => {
-      const current = await fixture();
-      const configured: Record<string, Record<string, unknown>> = {};
-      let retired = false;
-      const originalLease = mcpLease.withClawMcpLifecycleLease;
-      vi.spyOn(mcpLease, "withClawMcpLifecycleLease").mockImplementation(
-        async (name, options, run) => {
-          if (stage === "lease" && name === "linear") {
-            throw new Error("lease unavailable");
-          }
-          return originalLease(name, options, run);
-        },
-      );
-      const setMcpServer = vi.fn(
-        async ({ name, server, assertCurrent }: Parameters<typeof setConfiguredMcpServer>[0]) => {
-          assertCurrent?.();
-          const configuredServer = asNullableRecord(server);
-          if (!configuredServer) {
-            throw new Error("Expected MCP server config");
-          }
-          configured[name] = configuredServer;
-          return listedMcpServers(configured);
-        },
-      );
-      const failure = await withClawMutationGuard(
-        () => {
-          if (retired) {
-            throw new Error("pending authority retired");
-          }
-        },
-        () =>
-          installClawMcpServers(current.plan, {
-            env: current.env,
-            setMcpServer,
-            listMcpServers: async () => {
-              if (configured.docs) {
-                if (stage === "read") {
-                  throw new Error("read unavailable");
-                }
-                retired = stage === "pending";
-              }
-              return listedMcpServers(configured);
-            },
-          }),
-      ).then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-      const persisted = (await readClawInventory({ env: current.env })).mcpServers;
-      expect(failure).toBeInstanceOf(ClawMcpInstallError);
-      expect(failure).toMatchObject({
-        code: "mcp_install_failed",
-        message: stage === "pending" ? "pending authority retired" : `${stage} unavailable`,
-        mcpServers: persisted,
-      });
-      expect(persisted).toMatchObject([{ name: "docs", status: "complete" }]);
-      expect(setMcpServer).toHaveBeenCalledOnce();
-    },
-  );
-
   it("uses create-only config writes and stores digest-only ownership", async () => {
     const current = await fixture();
     const setMcpServer = vi
@@ -280,7 +86,6 @@ describe("installClawMcpServers", () => {
       },
       createOnly: true,
       recordIndependentOwner: false,
-      assertCurrent: assertClawMutationCurrent,
     });
     expect(setMcpServer).toHaveBeenNthCalledWith(2, {
       name: "linear",
@@ -291,7 +96,6 @@ describe("installClawMcpServers", () => {
       },
       createOnly: true,
       recordIndependentOwner: false,
-      assertCurrent: assertClawMutationCurrent,
     });
     expect(refs).toMatchObject([
       {

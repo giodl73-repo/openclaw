@@ -6,7 +6,6 @@ import { DEFAULT_BOOTSTRAP_FILENAME, seedWorkspaceBootstrap } from "../agents/wo
 import { root as fsSafeRoot } from "../infra/fs-safe.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import { clawContainedRelativePath } from "./path-containment.js";
-import { assertClawMutationCurrent } from "./state-write.js";
 import type { ClawAddPlan } from "./types.js";
 
 export class ClawBootstrapWriteError extends Error {
@@ -83,6 +82,5 @@ export async function seedClawPackageBootstrap(
     content: read.buffer,
     ...(options.nowMs !== undefined ? { nowMs: options.nowMs } : {}),
     stateOptions: options,
-    assertCurrent: assertClawMutationCurrent,
   });
 }

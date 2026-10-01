@@ -181,17 +181,10 @@ describe("Claw Gateway add preview", () => {
     const config = { agents: { entries: {} } };
     const getRuntimeConfig = vi.fn(() => config);
     const loaded = { source: {}, manifest: { packages: [] }, diagnostics: [] };
-    mocks.source.mockImplementation(async ({ mode, run }) => {
-      expect(mode).toBe("preview");
+    mocks.source.mockImplementation(async ({ run }) => {
       expect(getRuntimeConfig).not.toHaveBeenCalled();
       return {
-        value: await run(
-          loaded,
-          trust,
-          vi.fn(() => {
-            throw new Error("Preview persisted source");
-          }),
-        ),
+        value: await run(loaded, trust),
       };
     });
     mocks.inventory.mockImplementation(async () => {

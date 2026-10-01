@@ -46,7 +46,6 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["claws.doctor", "claws", "operator.read", "2026.9"],
   ["claws.catalog.detail", "claws", "operator.read", "2026.9"],
   ["claws.add.plan", "claws", "operator.read", "2026.9"],
-  ["claws.add.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["claws.update.plan", "claws", "operator.read", "2026.9"],
   ["health", "health", "operator.read", "<=2026.7"],
   ["diagnostics.stability", "diagnostics", "operator.read", "<=2026.7"],

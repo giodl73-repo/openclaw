@@ -18,55 +18,6 @@ import {
 } from "./workspace-state-identity.js";
 
 export const WORKSPACE_SETUP_STATE_VERSION = 1 as const;
-
-export function mergeWorkspaceSetupStateInDatabase(
-  database: OpenClawStateDatabase,
-  input: {
-    workspaceDir: string;
-    next: Partial<Omit<WorkspaceSetupState, "version">>;
-    nowMs: number;
-  },
-): WorkspaceSetupState {
-  const { workspaceDir, next, nowMs } = input;
-  assertCanonicalIntegerTimestamp(nowMs, "setup update");
-  if (next.bootstrapSeededAt) {
-    assertCanonicalTimestamp(next.bootstrapSeededAt, "bootstrap seeded");
-  }
-  if (next.setupCompletedAt) {
-    assertCanonicalTimestamp(next.setupCompletedAt, "setup completed");
-  }
-  const resolution = resolveWorkspaceIdentityFromDatabase({ workspaceDir, database });
-  const identity = resolution.identity;
-  const snapshot = readWorkspaceStateSnapshotFromDatabase({ identity, database });
-  const bootstrapSeededAt = snapshot.setup.bootstrapSeededAt ?? next.bootstrapSeededAt;
-  const setupCompletedAt = snapshot.setup.setupCompletedAt ?? next.setupCompletedAt;
-  const merged: WorkspaceSetupState = {
-    version: WORKSPACE_SETUP_STATE_VERSION,
-    ...(bootstrapSeededAt ? { bootstrapSeededAt } : {}),
-    ...(setupCompletedAt ? { setupCompletedAt } : {}),
-  };
-  const values = {
-    workspace_path: identity.workspacePath,
-    version: WORKSPACE_SETUP_STATE_VERSION,
-    bootstrap_seeded_at: merged.bootstrapSeededAt ?? null,
-    setup_completed_at: merged.setupCompletedAt ?? null,
-    updated_at: nowMs,
-  };
-  executeSqliteQuerySync(
-    database.db,
-    getNodeSqliteKysely<WorkspaceStateDatabase>(database.db)
-      .insertInto("workspace_setup_state")
-      .values({ workspace_key: identity.workspaceKey, ...values })
-      .onConflict((conflict) => conflict.column("workspace_key").doUpdateSet(values)),
-  );
-  registerWorkspaceStateAliasIdentitiesInTransaction({
-    database,
-    identity,
-    aliases: resolution.aliases,
-    updatedAtMs: nowMs,
-  });
-  return merged;
-}
 export const WORKSPACE_ATTESTATION_RECENT_MS = 24 * 60 * 60 * 1000;
 export const WORKSPACE_LEGACY_STATE_MIGRATION_KIND = "legacy-workspace-setup-files";
 export const WORKSPACE_CONTENT_RELOCATION_MIGRATION_KIND = "workspace-content-relocation";

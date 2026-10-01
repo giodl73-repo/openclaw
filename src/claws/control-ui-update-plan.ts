@@ -123,7 +123,6 @@ export async function planClawUpdateFromCatalog(params: {
   const source = params.source ?? (await readClawHubClawDetail({ packageName: install.claw.name }));
   const result = await withResolvedClawHubSource({
     coordinate: { packageName: source.packageName, version: source.version },
-    mode: "preview",
     run: async (loaded, trust) => {
       const inventory = await readClawInventory();
       const config = params.getRuntimeConfig();

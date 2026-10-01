@@ -225,9 +225,8 @@ describe("Claw Gateway update preview", () => {
       .mockResolvedValueOnce(freshInventory);
     const config = { agents: { entries: {} } };
     const getRuntimeConfig = vi.fn(() => config);
-    mocks.source.mockImplementation(async ({ coordinate, mode, run }) => {
+    mocks.source.mockImplementation(async ({ coordinate, run }) => {
       expect(coordinate).toEqual(source);
-      expect(mode).toBe("preview");
       expect(getRuntimeConfig).not.toHaveBeenCalled();
       return {
         value: await run(
@@ -279,7 +278,7 @@ describe("Claw Gateway update preview", () => {
         heartbeat: { enabled: true, intervalMs: 1_800_000 },
       },
       desired: {
-        tools: { allowed: ["read"] },
+        tools: { allowed: ["read", "skills_read"] },
         sandbox: { mode: "all", scope: "agent", workspaceAccess: "ro", backend: "docker" },
         filesystem: { workspaceOnly: true },
         heartbeat: { enabled: true, intervalMs: 300_000 },
@@ -325,7 +324,7 @@ describe("Claw Gateway update preview", () => {
     );
     expect(result.effectivePermissions?.current).toBeUndefined();
     expect(result.effectivePermissions?.desired).toMatchObject({
-      tools: { allowed: ["read"] },
+      tools: { allowed: ["read", "skills_read"] },
       filesystem: { workspaceOnly: true },
     });
     expect(result.effectivePermissions?.unresolved).toContain("current-agent");

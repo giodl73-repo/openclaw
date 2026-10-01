@@ -15,7 +15,6 @@ const reads = vi.hoisted(() => ({
   detail: vi.fn(),
   addPlan: vi.fn(),
   updatePlan: vi.fn(),
-  addApply: vi.fn(),
 }));
 vi.mock("../../claws/inventory-read.js", () => ({ readClawInventory: reads.inventory }));
 vi.mock("../../claws/lifecycle-status.js", () => ({ readClawStatus: reads.status }));
@@ -25,11 +24,6 @@ vi.mock("../../claws/control-ui-plan.js", () => ({ planClawAddFromCatalog: reads
 vi.mock("../../claws/control-ui-update-plan.js", () => ({
   planClawUpdateFromCatalog: reads.updatePlan,
 }));
-vi.mock("../../claws/control-ui-add.js", () => ({ applyClawAddFromCatalog: reads.addApply }));
-vi.mock("../../cron/delivery-channel-validation.js", () => ({
-  assertValidCronCreateDelivery: async () => {},
-}));
-import { withClawMutationGuard } from "../../claws/state-write.js";
 import {
   listCoreAdvertisedGatewayMethodNames,
   resolveCoreOperatorGatewayMethodScope,
@@ -296,10 +290,10 @@ describe("Claw registered read methods", () => {
     vi.stubEnv("OPENCLAW_EXPERIMENTAL_CLAWS", "1");
     expect(listCoreAdvertisedGatewayMethodNames()).toContain("claws.status");
     expect(listCoreAdvertisedGatewayMethodNames()).not.toContain("claws.catalog.search");
+    expect(listCoreAdvertisedGatewayMethodNames()).not.toContain("claws.add.apply");
+    expect(clawsHandlers).not.toHaveProperty("claws.add.apply");
     for (const method of Object.keys(clawsHandlers)) {
-      expect(resolveCoreOperatorGatewayMethodScope(method)).toBe(
-        method.endsWith(".apply") ? "operator.admin" : "operator.read",
-      );
+      expect(resolveCoreOperatorGatewayMethodScope(method)).toBe("operator.read");
     }
   });
 
@@ -397,87 +391,5 @@ describe("Claw registered read methods", () => {
       getRuntimeConfig: expect.any(Function),
     });
     expect(respond).toHaveBeenCalledWith(true, { planIntegrity: "sha256:update" });
-  });
-
-  it("carries live authority into add apply and rejects forged plans before dispatch", async () => {
-    vi.stubEnv("OPENCLAW_EXPERIMENTAL_CLAWS", "1");
-    let current = true;
-    const authority = vi.fn();
-    const controller = new AbortController();
-    const params = {
-      source: { packageName: "@owner/assistant", version: "1.2.3" },
-      planIntegrity: "sha256:preview",
-    };
-    const request = {
-      req: { type: "req" as const, id: "apply", method: "claws.add.apply" },
-      params,
-      respond: vi.fn(),
-      context: { getRuntimeConfig: () => ({}) } as never,
-      client: null,
-      isWebchatConnect: () => false,
-      signal: controller.signal,
-      sessionMutationCommitGuard: authority,
-      hasCurrentClientAuthority: () => current,
-    };
-    reads.addApply.mockImplementationOnce(async ({ assertCurrent }) => {
-      assertCurrent();
-      current = false;
-      expect(assertCurrent).toThrow("authority expired");
-      current = true;
-      controller.abort();
-      expect(assertCurrent).toThrow();
-      return { status: "partial" };
-    });
-    await clawsHandlers["claws.add.apply"]!(request);
-    expect(authority).toHaveBeenCalled();
-    reads.addApply.mockClear();
-    await clawsHandlers["claws.add.apply"]!({ ...request, params: { ...params, plan: {} } });
-    expect(reads.addApply).not.toHaveBeenCalled();
-  });
-
-  it("rechecks the canonical add lease at the scheduler commit boundary", async () => {
-    vi.stubEnv("OPENCLAW_EXPERIMENTAL_CLAWS", "1");
-    let current = true;
-    const mutate = vi.fn();
-    const cronAdd = vi.fn(async (_job, options) => {
-      current = false;
-      await Promise.resolve();
-      options.commitGuard();
-      mutate();
-    });
-    reads.addApply.mockImplementationOnce(async ({ cronGateway }) =>
-      withClawMutationGuard(
-        () => {
-          if (!current) {
-            throw new Error("lease retired");
-          }
-        },
-        () =>
-          cronGateway.add({
-            name: "Daily report",
-            agentId: "assistant",
-            schedule: { kind: "cron", expr: "0 9 * * *" },
-            sessionTarget: "isolated",
-            wakeMode: "now",
-            payload: { kind: "agentTurn", message: "Prepare the report" },
-            delivery: { mode: "none" },
-          }),
-      ),
-    );
-    const respond = vi.fn();
-    await clawsHandlers["claws.add.apply"]!({
-      req: { type: "req", id: "cron-guard", method: "claws.add.apply" },
-      params: {
-        source: { packageName: "@owner/assistant", version: "1.2.3" },
-        planIntegrity: "sha256:preview",
-      },
-      respond,
-      context: { getRuntimeConfig: () => ({}), cron: { add: cronAdd } } as never,
-      client: null,
-      isWebchatConnect: () => false,
-    });
-    expect(cronAdd).toHaveBeenCalledOnce();
-    expect(mutate).not.toHaveBeenCalled();
-    expect(respond.mock.calls[0]?.[0]).toBe(false);
   });
 });

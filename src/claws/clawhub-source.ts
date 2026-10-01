@@ -1,10 +1,8 @@
 // ClawHub source resolution verifies exact immutable artifacts before lifecycle planning.
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { ClawCatalogDetail } from "../../packages/gateway-protocol/src/index.js";
 import { stripAnsi } from "../../packages/terminal-core/src/ansi.js";
 import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
-import { resolveStateDir } from "../config/paths.js";
 import { downloadClawHubPackageArchive } from "../infra/clawhub-artifacts.js";
 import { checkClawHubPackageTrust } from "../infra/clawhub-install-trust.js";
 import { normalizeClawHubSha256Hex } from "../infra/clawhub-integrity.js";
@@ -18,10 +16,8 @@ import { withExtractedArchiveRoot } from "../infra/install-flow.js";
 import { digestClawValue } from "./digest.js";
 import { readClawManifestFile } from "./reader.js";
 import { isCanonicalClawHubPackageName, isExactSemVer } from "./schema-portability.js";
-import { assertClawMutationCurrent } from "./state-write.js";
 import type { ClawReadResult } from "./types.js";
 
-const CLAW_SOURCE_CACHE_DIR = "claws/sources";
 const CLAWHUB_TIMEOUT_MS = 30_000;
 
 export type ClawHubCoordinate = { packageName: string; version: string };
@@ -89,7 +85,6 @@ export async function readClawHubClawDetail(params: {
   }
   const resolved = await withResolvedClawHubSource({
     coordinate: { packageName: pkg.name, version },
-    mode: "preview",
     run: async ({ manifest, openClawProfile, clawMarkdownBody, packageBootstrap }, trust) => ({
       packageName: pkg.name,
       displayName: pkg.displayName,
@@ -144,35 +139,7 @@ function assertCoordinate(coordinate: { packageName: string; version?: string })
   }
 }
 
-async function persistExtractedSource(params: {
-  rootDir: string;
-  artifactSha256: string;
-  stateDir?: string;
-}): Promise<string> {
-  const cacheRoot = path.join(params.stateDir ?? resolveStateDir(), CLAW_SOURCE_CACHE_DIR);
-  assertClawMutationCurrent();
-  await fs.mkdir(cacheRoot, { recursive: true, mode: 0o700 });
-  // An installed source may already be in use. Never replace a shared digest directory.
-  assertClawMutationCurrent();
-  const destination = await fs.mkdtemp(path.join(cacheRoot, `${params.artifactSha256}-`));
-  try {
-    assertClawMutationCurrent();
-    await fs.cp(params.rootDir, destination, {
-      recursive: true,
-      force: false,
-      errorOnExist: true,
-      preserveTimestamps: false,
-      verbatimSymlinks: true,
-    });
-    return destination;
-  } catch (error) {
-    await fs.rm(destination, { recursive: true, force: true });
-    throw error;
-  }
-}
-
 type ResolvedClawHubSource = Extract<ClawReadResult, { ok: true }>;
-type PersistClawHubSource = () => Promise<ResolvedClawHubSource>;
 
 export type ClawHubSourceTrust = {
   trustWarning?: string;
@@ -214,14 +181,7 @@ async function readVerifiedArtifactSource(params: {
 
 export async function withResolvedClawHubSource<T>(params: {
   coordinate: ClawHubCoordinate;
-  mode: "preview" | "apply";
-  acknowledgeClawHubRisk?: boolean;
-  stateDir?: string;
-  run: (
-    source: ResolvedClawHubSource,
-    trust: ClawHubSourceTrust,
-    persistSource: PersistClawHubSource,
-  ) => Promise<T>;
+  run: (source: ResolvedClawHubSource, trust: ClawHubSourceTrust) => Promise<T>;
 }): Promise<{ value: T; trustWarning?: string; riskAcknowledgementRequired: boolean }> {
   const { packageName, version } = params.coordinate;
   assertCoordinate(params.coordinate);
@@ -267,17 +227,6 @@ export async function withResolvedClawHubSource<T>(params: {
     riskAcknowledgementRequired:
       trust.trustInstallRecordFields.clawhubTrustDisposition === "review-required",
   };
-  if (
-    params.mode === "apply" &&
-    trustProjection.riskAcknowledgementRequired &&
-    !params.acknowledgeClawHubRisk
-  ) {
-    throw new ClawHubSourceError(
-      "clawhub_risk_acknowledgement_required",
-      "Review and acknowledge the ClawHub risk before applying.",
-    );
-  }
-
   const download = await downloadClawHubPackageArchive({
     name: packageName,
     version,
@@ -305,33 +254,9 @@ export async function withResolvedClawHubSource<T>(params: {
           artifactSha256: expectedSha256,
           artifactByteLength,
         });
-        let persistedSource: Promise<ResolvedClawHubSource> | undefined;
-        const persistSource: PersistClawHubSource = async () => {
-          if (params.mode !== "apply") {
-            throw new ClawHubSourceError(
-              "clawhub_preview_persistence_forbidden",
-              "A ClawHub preview cannot persist package content.",
-            );
-          }
-          persistedSource ??= (async () => {
-            const sourceRoot = await persistExtractedSource({
-              rootDir,
-              artifactSha256: expectedSha256,
-              stateDir: params.stateDir,
-            });
-            return await readVerifiedArtifactSource({
-              sourceRoot,
-              packageName,
-              version,
-              artifactSha256: expectedSha256,
-              artifactByteLength,
-            });
-          })();
-          return await persistedSource;
-        };
         return {
           ok: true as const,
-          value: await params.run(artifactSource, trustProjection, persistSource),
+          value: await params.run(artifactSource, trustProjection),
         };
       },
     });

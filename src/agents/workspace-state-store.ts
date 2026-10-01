@@ -30,7 +30,6 @@ import {
 import {
   assertCanonicalIntegerTimestamp,
   assertCanonicalTimestamp,
-  mergeWorkspaceSetupStateInDatabase,
   readWorkspaceStateSnapshotFromDatabase,
   registerWorkspaceStateAliasIdentitiesInTransaction,
   resolveWorkspaceIdentityFromDatabase,
@@ -156,33 +155,49 @@ export async function mergeWorkspaceSetupState(
   if (next.setupCompletedAt) {
     assertCanonicalTimestamp(next.setupCompletedAt, "setup completed");
   }
-  const input = { workspaceDir: path.resolve(resolveUserPath(workspaceDir)), next, nowMs };
-  if (options.database) {
-    return runOpenClawStateWriteTransaction((database) => {
-      options.assertCurrent?.();
-      return mergeWorkspaceSetupStateInDatabase(database, input);
-    }, options);
-  }
-  const context = captureOpenClawStateWorkerContext(options);
-  const { assertCurrent } = options;
-  return runOpenClawStateWorkerOperation(
-    context,
-    (scope) => scope.execute({ type: "workspace.mergeSetup", input }),
-    {
-      assertCurrent,
-      createAdmission: () => ({
-        nativeLocations: [context.admission.databasePath],
-        admission: createSqliteWorkerOperationAdmission((request, grant) => {
-          if (request.stage !== "transaction" && request.stage !== "commit") {
-            throw new Error("Workspace setup merge requires transaction admission");
-          }
-          context.admission.assertCurrent();
-          assertCurrent?.();
-          grant();
-        }),
-      }),
-    },
-  );
+  return runOpenClawStateWriteTransaction((database) => {
+    options.assertCurrent?.();
+    const resolution = resolveWorkspaceIdentityFromDatabase({ workspaceDir, database });
+    const identity = resolution.identity;
+    const snapshot = readWorkspaceStateSnapshotFromDatabase({ identity, database });
+    const bootstrapSeededAt = snapshot.setup.bootstrapSeededAt ?? next.bootstrapSeededAt;
+    const setupCompletedAt = snapshot.setup.setupCompletedAt ?? next.setupCompletedAt;
+    const merged: WorkspaceSetupState = {
+      version: WORKSPACE_SETUP_STATE_VERSION,
+      ...(bootstrapSeededAt ? { bootstrapSeededAt } : {}),
+      ...(setupCompletedAt ? { setupCompletedAt } : {}),
+    };
+    const kysely = getNodeSqliteKysely<WorkspaceStateDatabase>(database.db);
+    executeSqliteQuerySync(
+      database.db,
+      kysely
+        .insertInto("workspace_setup_state")
+        .values({
+          workspace_key: identity.workspaceKey,
+          workspace_path: identity.workspacePath,
+          version: WORKSPACE_SETUP_STATE_VERSION,
+          bootstrap_seeded_at: merged.bootstrapSeededAt ?? null,
+          setup_completed_at: merged.setupCompletedAt ?? null,
+          updated_at: nowMs,
+        })
+        .onConflict((conflict) =>
+          conflict.column("workspace_key").doUpdateSet({
+            workspace_path: identity.workspacePath,
+            version: WORKSPACE_SETUP_STATE_VERSION,
+            bootstrap_seeded_at: merged.bootstrapSeededAt ?? null,
+            setup_completed_at: merged.setupCompletedAt ?? null,
+            updated_at: nowMs,
+          }),
+        ),
+    );
+    registerWorkspaceStateAliasIdentitiesInTransaction({
+      database,
+      identity,
+      aliases: resolution.aliases,
+      updatedAtMs: nowMs,
+    });
+    return merged;
+  }, options);
 }
 
 export async function replaceWorkspaceAttestation(

@@ -68,9 +68,9 @@ defaults such as staggering, delivery routes, and scheduled execution permission
 remain unresolved. An empty declaration list means no package-declared jobs,
 not that the agent has no other scheduled work.
 
-Applying from the Control UI is currently blocked until the preview completely
-discloses effective permissions, including inherited permissions, memory,
-delegation, and scheduled jobs.
+This Gateway surface is read-only; it does not register Claw mutation methods.
+Applying from the Control UI requires effective-permission disclosure and
+consent, including inherited permissions, memory, delegation, and scheduled jobs.
 Publisher identity and an exact-plan digest do not replace that disclosure.
 Plugin-bearing Claws also require the plugin owner's capability-consent flow.
 
@@ -81,10 +81,9 @@ complete bootstrap automatically. **Update** resolves a release and previews
 changes for the selected installed agent. Update application and removal are
 not available through this tab yet; use the CLI's reviewed lifecycle flow.
 
-Reading inventory and previewing changes requires `operator.read`; mutation
-RPCs require `operator.admin`, which does not bypass plan blockers. A reconnect or operator change invalidates
-the preview. When an apply outcome is unconfirmed, check that Gateway's Claw
-status before repeating the operation; the browser does not automatically retry.
+Reading inventory and previewing changes requires `operator.read`.
+A reconnect or operator change invalidates the preview. Use the existing CLI
+for Claw mutations; its add, update, removal, and recovery owners are unchanged.
 
 The registry must independently support Claw packages. `OPENCLAW_CLAWHUB_URL`
 selects the registry used by the Gateway, including for staging. Neither this
@@ -452,14 +451,6 @@ and retries activation. Successfully realized shared requirements remain install
 if a later Claw phase fails. Disabled or metadata-only entries remain unevaluated;
 their source has not been verified by runtime execution. With no local Gateway,
 installation retains the existing restart requirement.
-
-If a later add phase fails, the partial result retains the original phase error
-and observed resource records even when authority loss prevents failure
-bookkeeping or workspace cleanup. `installRecord` reports the last acknowledged
-phase, not a newly persisted `partial` phase or a fresh inventory read. Pending
-MCP or cron provenance does not prove that the external operation made no change.
-No later phase or automatic retry follows the failure. Check `claws status`,
-the affected resource, and `openclaw doctor` before previewing a retry.
 
 ## Inspect installed state
 

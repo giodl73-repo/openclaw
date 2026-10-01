@@ -11,15 +11,15 @@ import {
 } from "../claws/provenance.js";
 import type { ClawAddPlan } from "../claws/types.js";
 import { resolveRuntimeWorkerArgv, resolveRuntimeWorkerUrl } from "../infra/runtime-worker-url.js";
-import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { createNodeEvalArgs, resolveTestNodeExecPath } from "../test-utils/node-process.js";
 import { markClawPackageIndependentlyOwned } from "./claw-package-adoption.js";
 import { acquireClawPackageLifecycleLease } from "./claw-package-lifecycle-lease.js";
 import { stateNativeProcessEntrypoints } from "./native-process-runtime.test-support.js";
+import { closeOpenClawStateDatabaseForTest } from "./openclaw-state-db.js";
 
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
-  afterEach(async () => {
-    await closeStateDatabaseForTest();
+  afterEach(() => {
+    closeOpenClawStateDatabaseForTest();
     cleanup();
   });
 });

@@ -229,7 +229,6 @@ export type WorkspaceSkillLifecycle = {
     skillDir: string;
     origin: ClawHubSkillOrigin;
     verification?: ClawHubSkillVerificationLock;
-    beforePersistentApply?: () => void;
   }) => Promise<void>;
   assertClawHubSkillInstallState: (params: {
     workspaceDir: string;

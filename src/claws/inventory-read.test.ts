@@ -1,19 +1,16 @@
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import * as workerAdmission from "../infra/sqlite-worker-operation-admission.js";
 import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { buildClawUpdateScheduledJobs } from "./control-ui-scheduled-jobs.js";
 import { CLAW_CRON_REF_SCHEMA_VERSION, upsertClawCronRef } from "./cron.js";
 import { digestClawValue } from "./digest.js";
 import { readClawInventory } from "./inventory-read.js";
-import { persistClawPackageRef } from "./provenance.js";
-import { makeProvenancePlan, stateEnv } from "./provenance.test-helpers.js";
 import {
-  persistClawInstallRecordAsync,
-  updateClawInstallRecordAsync,
-  withClawMutationGuard,
-} from "./state-write.js";
+  persistClawInstallRecord,
+  persistClawPackageRef,
+  updateClawInstallRecord,
+} from "./provenance.js";
+import { makeProvenancePlan, stateEnv } from "./provenance.test-helpers.js";
 
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
   afterEach(async () => {
@@ -76,7 +73,7 @@ describe("Claw worker inventory", () => {
   );
 
   it.each(["created", "adopted"] as const)(
-    "preserves %s agent ownership and config digest through worker writes and inventory",
+    "reads canonical %s agent ownership and config digest through worker inventory",
     async (agentOrigin) => {
       const root = tempDirs.make("claw-inventory-worker-");
       const { plan } = await makeProvenancePlan(root, {
@@ -84,7 +81,7 @@ describe("Claw worker inventory", () => {
         agent: { id: "worker" },
       });
       const env = stateEnv(root);
-      const record = await persistClawInstallRecordAsync(plan, { env, nowMs: 123, agentOrigin });
+      const record = persistClawInstallRecord(plan, { env, nowMs: 123, agentOrigin });
       expect(record.agentOrigin).toBe(agentOrigin);
       expect(record.schemaVersion).toBe(
         agentOrigin === "adopted"
@@ -100,7 +97,7 @@ describe("Claw worker inventory", () => {
         cronJobs: [],
       });
       const agentConfigDigest = digestClawValue({ inheritedSetting: "synthetic" });
-      const updated = await updateClawInstallRecordAsync(plan, {
+      const updated = updateClawInstallRecord(plan, {
         env,
         nowMs: 456,
         agentConfigDigest,
@@ -140,51 +137,6 @@ describe("Claw worker inventory", () => {
 
     expect((await readClawInventory({ env })).packages).toEqual([record]);
   });
-
-  it.each(["transaction", "commit"] as const)(
-    "preserves canonical inventory when Claw worker authority retires at %s",
-    async (stage) => {
-      const root = tempDirs.make("claw-worker-authority-");
-      const env = stateEnv(root);
-      const { plan: existingPlan } = await makeProvenancePlan(root, {
-        schemaVersion: 1,
-        agent: { id: "existing" },
-      });
-      await persistClawInstallRecordAsync(existingPlan, { env, nowMs: 123 });
-      const before = await readClawInventory({ env });
-      const { plan } = await makeProvenancePlan(
-        root,
-        { schemaVersion: 1, agent: { id: "rejected" } },
-        { workspace: join(root, "workspace-rejected") },
-      );
-      expect(plan.blockers).toEqual([]);
-      const originalAdmission = workerAdmission.createSqliteWorkerOperationAdmission;
-      const stages: string[] = [];
-      let retired = false;
-      vi.spyOn(workerAdmission, "createSqliteWorkerOperationAdmission").mockImplementation(
-        (admit, attachment) =>
-          originalAdmission((request, grant) => {
-            stages.push(request.stage);
-            retired ||= request.stage === stage;
-            admit(request, grant);
-          }, attachment),
-      );
-      const error = new Error("Claw mutation owner retired");
-
-      await expect(
-        withClawMutationGuard(
-          () => {
-            if (retired) {
-              throw error;
-            }
-          },
-          () => persistClawInstallRecordAsync(plan, { env, nowMs: 456 }),
-        ),
-      ).rejects.toBe(error);
-      expect(stages).toEqual(stage === "transaction" ? ["transaction"] : ["transaction", "commit"]);
-      expect(await readClawInventory({ env })).toEqual(before);
-    },
-  );
 
   it("does not create state during empty inventory reads", async () => {
     const root = tempDirs.make("claw-empty-inventory-");
