@@ -196,6 +196,7 @@ export function buildRuntimeReadiness(input: RuntimeReadinessInput): CanonicalRe
   const identity = reconcileReadinessIdentity({
     base: input.identity ?? createProcessReadinessIdentity(),
     subjects: input.additionalSubjects,
+    // SAFETY: the preceding guard rejects any normalized condition without a subjectRef.
     references: normalizedConditions as Array<ReadinessCondition & { subjectRef: string }>,
   });
   return {

@@ -93,6 +93,7 @@ function mergeOptionalSubjectField<K extends "id" | "generation" | "parentRef">(
   right: string | undefined,
 ): Partial<Pick<ReadinessSubject, K>> {
   const value = left ?? right;
+  // SAFETY: K is restricted to the optional string-valued readiness subject fields.
   return value === undefined ? {} : ({ [field]: value } as Pick<ReadinessSubject, K>);
 }
 
@@ -198,6 +199,7 @@ export function createPluginReadinessSubjectCollection(params: {
           input.parentRef &&
           !input.parentRef.startsWith(prefix) &&
           !Object.values(CORE_READINESS_SUBJECT_REFS).includes(
+            // SAFETY: this assertion only widens includes input; membership remains runtime-checked.
             input.parentRef as (typeof CORE_READINESS_SUBJECT_REFS)[keyof typeof CORE_READINESS_SUBJECT_REFS],
           )
         ) {
@@ -239,6 +241,7 @@ export function createPluginReadinessSubjectCollection(params: {
         (ref) =>
           subjects.has(ref) ||
           Object.values(CORE_READINESS_SUBJECT_REFS).includes(
+            // SAFETY: this assertion only widens includes input; membership remains runtime-checked.
             ref as (typeof CORE_READINESS_SUBJECT_REFS)[keyof typeof CORE_READINESS_SUBJECT_REFS],
           ),
       );
@@ -323,6 +326,7 @@ export function reconcileReadinessIdentity(params: {
   }
   return {
     producerRef: params.base.producerRef,
+    // SAFETY: retained only receives refs already proven present in subjects above.
     subjects: Array.from(retained, (ref) => subjects.get(ref) as ReadinessSubject).toSorted(
       (a, b) => a.ref.localeCompare(b.ref),
     ),
