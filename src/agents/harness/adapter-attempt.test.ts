@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
+import { resolveAgentTimeoutMs } from "../timeout.js";
 import { runAgentHarnessAdapterAttempt, type AgentHarnessTurnAdapter } from "./adapter-attempt.js";
 import {
   createHostFixture,
@@ -181,6 +182,51 @@ describe("runAgentHarnessAdapterAttempt", () => {
     expect(mocks.append).not.toHaveBeenCalled();
     expectReleased(f);
   });
+
+  it.each(["bounded", "unlimited"] as const)(
+    "publishes the %s deadline to the host lane before preparing the adapter",
+    async (kind) => {
+      const f = createFixture();
+      const startedAtMs = Date.now();
+      const onDeadlineChanged = vi.fn();
+      f.input.onAttemptDeadlineChanged = onDeadlineChanged;
+      if (kind === "unlimited") {
+        f.input.timeoutMs = resolveAgentTimeoutMs({ overrideSeconds: 0 });
+      }
+      const deadline =
+        kind === "unlimited" ? { kind } : { kind, deadlineAtMs: startedAtMs + f.input.timeoutMs };
+      const running = createDeferred<void>();
+      const settle = createDeferred<void>();
+      f.prepare.mockImplementation(async () => {
+        return {
+          replayAfterIndex: -1,
+          includeBootstrap: false,
+          run: async (turn) => {
+            turn.markSubmitted();
+            running.resolve();
+            await settle.promise;
+            return outcome;
+          },
+        };
+      });
+      const attempt = f.execute();
+      await awaitGateBeforeSettlement(running.promise, attempt, "adapter did not start");
+      expect(onDeadlineChanged).toHaveBeenCalledExactlyOnceWith(deadline);
+      expect(onDeadlineChanged.mock.invocationCallOrder[0]).toBeLessThan(
+        f.prepare.mock.invocationCallOrder[0]!,
+      );
+      if (kind === "unlimited") {
+        expect(vi.getTimerCount()).toBe(0);
+        await vi.advanceTimersByTimeAsync(f.input.timeoutMs + 1);
+        expect(f.prepare.mock.calls[0]?.[0].signal.aborted).toBe(false);
+        expect(f.callbacks.onAttemptTimeout).not.toHaveBeenCalled();
+      }
+      settle.resolve();
+      expect((await attempt).terminal).toEqual({ kind: "ok" });
+      expect(onDeadlineChanged).toHaveBeenCalledExactlyOnceWith(deadline);
+      expectReleased(f);
+    },
+  );
 
   it.each([true, false])(
     "preserves native cancellation=%s and denial text when usage fails",

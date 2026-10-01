@@ -6,6 +6,7 @@ import type { EmbeddedRunAttemptResult } from "../embedded-agent-runner/run/type
 import { clearActiveEmbeddedRun, setActiveEmbeddedRun } from "../embedded-agent-runner/runs.js";
 import { buildSessionContext, SessionManager } from "../sessions/session-manager.js";
 import type { AgentHarnessAdapterAttemptParams } from "./adapter-attempt.js";
+import { createAgentHarnessAttemptDeadlineController } from "./attempt-deadlines.js";
 import { createAgentHarnessAssistantMessage } from "./projection-messages.js";
 import { resolveAgentHarnessBeforePromptBuildResult } from "./prompt-compaction-hook-helpers.js";
 
@@ -75,22 +76,29 @@ export async function runAgentHarnessAdapterAttempt(
     sourceReplyDeliveryMode: input.sourceReplyDeliveryMode,
   };
   let activeRegistered = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let deadlines: ReturnType<typeof createAgentHarnessAttemptDeadlineController> | undefined;
   assertActive();
   try {
     setActiveEmbeddedRun(input.sessionId, activeRun, sessionKey, input.sessionFile, agentId);
     activeRegistered = true;
     input.replyOperation?.attachBackend(activeRun);
     signal.addEventListener("abort", stopDelivery, { once: true });
-    timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        input.onAttemptTimeout?.(new Error(`${params.label} turn timed out`));
-      } finally {
-        controller.abort();
-      }
-    }, input.timeoutMs);
-    timer.unref();
+    deadlines = createAgentHarnessAttemptDeadlineController({
+      startedAtMs: Date.now(),
+      timeoutMs: input.timeoutMs,
+      // No separate settlement phase here: the adapter owns joining its native work.
+      settlementTimeoutMs: input.timeoutMs,
+      signal,
+      onDeadlineChanged: input.onAttemptDeadlineChanged,
+      onTimeout: () => {
+        timedOut = true;
+        try {
+          input.onAttemptTimeout?.(new Error(`${params.label} turn timed out`));
+        } finally {
+          controller.abort();
+        }
+      },
+    });
     const sessionContext = await SessionManager.openModelContextAsync(transcript, {
       cwd: input.workspaceDir,
       signal,
@@ -265,7 +273,7 @@ export async function runAgentHarnessAdapterAttempt(
   } finally {
     settled = true;
     stopDelivery();
-    clearTimeout(timer);
+    deadlines?.dispose();
     signal.removeEventListener("abort", stopDelivery);
     input.replyOperation?.detachBackend(activeRun);
     if (activeRegistered) {

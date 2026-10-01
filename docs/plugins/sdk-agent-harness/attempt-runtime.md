@@ -23,6 +23,11 @@ abort signal, transcript admission, bootstrap and prompt hooks, guarded output
 delivery, assistant transcript commitment, and attempt-result construction.
 Its implementation loads only when invoked.
 
+The executor reuses `createAgentHarnessAttemptDeadlineController` to report the
+bounded or unlimited execution deadline to the host lane. It does not create a
+second native settlement budget; abort still gates delivery while the adapter
+joins its pending work.
+
 The adapter has two operations:
 
 - `prepare`: acquire the native session, apply its model control under live
