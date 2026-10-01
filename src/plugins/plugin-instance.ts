@@ -25,6 +25,7 @@ import type {
   PluginInstanceLifecycle,
   PluginModuleLoaderRecovery,
 } from "./plugin-instance.types.js";
+import { PluginInterruptibleCalls } from "./plugin-interruptible-calls.js";
 import { mapPluginReturnPromise, resolvePluginReturnPromise } from "./plugin-return-value.js";
 import type { PluginRecord, PluginRegistry } from "./registry-types.js";
 import { withPluginRuntimePluginScope } from "./runtime/gateway-request-scope.js";
@@ -47,6 +48,7 @@ export class PluginInstance {
   private moduleSourceExists?: false | ((source: string) => boolean);
   private accepting = true;
   private replacementReserved = false;
+  private readonly interruptibleCalls = new PluginInterruptibleCalls();
   private readonly retainedWork = new Set<object>();
   private readonly calls = new Map<object, { registry?: PluginRegistry; cleanup: boolean }>();
   private forcedRetirement = false;
@@ -197,6 +199,19 @@ export class PluginInstance {
   /** Detached host consumption retains its completion independently of its admitting caller. */
   runConsumer<T>(consume: () => T): T {
     return this.activeCall() ? this.invoke(consume) : this.run(consume);
+  }
+
+  /** Quiescence revokes admission while physical plugin work remains observable to its owner. */
+  runInterruptible<T>(signal: AbortSignal, run: (signal: AbortSignal) => T): T {
+    if (!this.accepting || this.owner?.revoked) {
+      throw new PluginInstanceUnavailableError(this.pluginId);
+    }
+    return this.interruptibleCalls.run(signal, run, {
+      lifecycleSignal: this.controller.signal,
+      lease: () => this.lease(),
+      retainCustody: () => this.retainConsumer(undefined, undefined, "custody").release,
+      invoke: (operation, lease) => this.invoke(operation, lease),
+    });
   }
 
   get hasRetainedConsumers(): boolean {
@@ -529,6 +544,9 @@ export class PluginInstance {
   quiesce(): boolean {
     const accepting = this.accepting;
     this.accepting = false;
+    if (accepting) {
+      this.interruptibleCalls.quiesce(new PluginInstanceUnavailableError(this.pluginId));
+    }
     return accepting;
   }
 
@@ -775,3 +793,4 @@ export class PluginInstance {
     return terminalFailures.result(failures);
   }
 }
+/* oxlint-disable max-lines -- Lifecycle owner stays cohesive; interruptible machinery is split out. */

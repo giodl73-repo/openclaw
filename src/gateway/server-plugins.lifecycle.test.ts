@@ -1,6 +1,8 @@
 /**
  * Tests gateway plugin lifecycle loading, startup, and shutdown behavior.
  */
+/* oxlint-disable max-lines -- Readiness lifecycle proof shares the production reload harness. */
+import "./server-plugins.lifecycle.readiness.test-utils.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";

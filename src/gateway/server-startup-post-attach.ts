@@ -647,12 +647,14 @@ export async function startGatewayPostAttachRuntime(
     loadStartupPlugins?: () => Awaitable<{
       pluginRegistry: PluginRegistry;
       gatewayMethods: string[];
+      resolvedConfig?: OpenClawConfig;
       retireGatewayRuntimeBindings?: () => void;
     }>;
     onStartupPluginsLoading?: () => void;
     onStartupPluginsLoaded?: (result: {
       pluginRegistry: PluginRegistry;
       gatewayMethods: string[];
+      resolvedConfig?: OpenClawConfig;
       retireGatewayRuntimeBindings?: () => void;
     }) => Awaitable<boolean>;
     pluginRuntimeClaim?: GatewayPluginRuntimeClaim;
@@ -856,7 +858,10 @@ export async function startGatewayPostAttachRuntime(
             }
             params.unlockStartupMethods();
             params.onSidecarsReady?.();
-            logGatewayReady(params, "candidate gateway ready; autonomous sidecars suppressed");
+            await logGatewayReady(
+              params,
+              "candidate gateway ready; autonomous sidecars suppressed",
+            );
             return pluginRegistry;
           }
           const startupOutcomes = createGatewayStartupOutcomeRecorder({
@@ -1015,7 +1020,7 @@ export async function startGatewayPostAttachRuntime(
           if (params.isClosing?.()) {
             return pluginRegistry;
           }
-          logGatewaySidecarsReady({
+          await logGatewaySidecarsReady({
             log: params.log,
             getReadiness: params.getReadiness,
             startupTrace: params.startupTrace,

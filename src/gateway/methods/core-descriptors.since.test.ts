@@ -7,6 +7,7 @@ const TRAIN_2026_7_METHODS = [
   "question.resolve",
   "question.get",
   "question.list",
+  "ready",
   "session.discussion.info",
   "session.discussion.open",
   "session.members.add",
