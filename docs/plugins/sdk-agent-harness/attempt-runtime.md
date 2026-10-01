@@ -10,6 +10,48 @@ sidebarTitle: "Attempt runtime"
 
 The helpers a selected harness calls while an attempt is running and as it finalizes: guarded input injection, tool-result middleware, terminal outcome classification, live token usage, and agent-end side effects. Part of the [Agent harness plugins](/plugins/sdk-agent-harness) reference.
 
+## Ordinary-turn adapter prototype
+
+This fork contains an experimental extraction, not an accepted replacement for
+`AgentHarnessV2`. Existing ACP native harness registrations call
+`runAgentHarnessAdapterAttempt` from the production-private
+`openclaw/plugin-sdk/agent-harness-attempt-runtime` surface. Runtime selection,
+host-capability admission, and the outer harness lifecycle remain unchanged.
+
+The OpenClaw executor owns active-run registration, the attempt deadline and
+abort signal, transcript admission, bootstrap and prompt hooks, guarded output
+delivery, assistant transcript commitment, and attempt-result construction.
+Its implementation loads only when invoked.
+
+The adapter has two operations:
+
+- `prepare`: acquire the native session, apply its model control under live
+  authority, and identify the transcript suffix not already held by that engine.
+- `run`: encode the prepared input, report submission, translate native output,
+  and return the settled outcome and native assistant idempotency key. The host
+  records that outcome before invoking the returned `readUsage` operation, so
+  ancillary usage failure cannot erase native cancellation.
+
+The host awaits `run`; cancellation requests do not substitute for native
+settlement. The adapter must join its pending output and native cleanup before
+returning or throwing. ACP uses the existing `consumeAcpTurnStream` owner for
+this. Stream closure, prompt submission, and the authoritative result remain
+distinct. Session/process lifetime remains with the ACP runtime, not the host's
+per-attempt cleanup.
+
+ACP permission-option translation stays in the plugin and consumes the existing
+host approval capability. Runtime admission still checks native tool policy;
+prompt-hook tool restrictions that this adapter cannot enforce fail before
+prompt submission. No authority is reconstructed from session or request IDs.
+
+This prototype migrates all existing native ACP registrations together. It does
+not add a selectable runtime, change defaults, or migrate the built-in loop,
+Codex, or Copilot SDK. It demonstrates host ownership for one adapter family,
+not cross-engine parity or a reduction in total code yet. Steering, compaction,
+settled-turn finalization, and exact native tool-effect accounting remain outside
+this ordinary-turn contract. A second engine must establish which parts really
+generalize before this becomes a supported SDK contract.
+
 ## Guarded active-run injection
 
 Backends that accept source-bound controls advertise `messageInjectionV2` on
