@@ -6,7 +6,7 @@ import { PluginInstance } from "./plugin-instance.js";
 describe("plugin interruptible calls", () => {
   it("retains module custody until an abort-ignoring callback settles", async () => {
     const instance = new PluginInstance("readiness-custody");
-    const settle = createDeferredCore<void>();
+    const settle = createDeferredCore();
     const events: string[] = [];
     let moduleResourceOpen = true;
     let signal: AbortSignal | undefined;

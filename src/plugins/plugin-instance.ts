@@ -192,13 +192,20 @@ export class PluginInstance {
     return this.interruptibleCalls.run(signal, run, {
       lifecycleSignal: this.controller.signal,
       lease: () => this.lease(),
-      retainCustody: () => this.retainConsumer(undefined, undefined, "custody").release,
+      retainCustody: () => {
+        const consumer = this.retainConsumer(undefined, undefined, "custody");
+        return () => consumer.release();
+      },
       invoke: (operation, lease) => this.invoke(operation, lease),
     });
   }
 
   get hasRetainedConsumers(): boolean {
     return this.consumers.size > 0;
+  }
+
+  get hasRetainedCustody(): boolean {
+    return [...this.consumers.values()].some(({ kind }) => kind === "custody");
   }
 
   /** Track finite host work without granting invocation authority or joining disposal. */

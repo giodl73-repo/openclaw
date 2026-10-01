@@ -17,6 +17,7 @@ export interface PluginInstanceHandle extends PluginInvocationInstance, PluginIn
   readonly acceptingCalls: boolean;
   readonly replacementPending: boolean;
   readonly hasRetainedConsumers: boolean;
+  readonly hasRetainedCustody: boolean;
   readonly owner?: PluginInstanceOwner;
   toolRegistrationComplete: boolean;
   runConsumer<T>(consume: () => T): T;

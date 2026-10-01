@@ -307,10 +307,11 @@ export async function reloadGatewayPlugins(
     await stopOwner(resourceHandoffIds.size > 0, "Plugin service cleanup failed", () =>
       stopPreviousServices(previousServices, resourceHandoffIds.size > 0),
     );
-    // Finish admitted work before legacy stop hooks can close shared connections.
+    // Finite retained work drained above. Do not join custody-only holds here: they
+    // preserve physical cleanup below without keeping logical replacement pending.
     // Removal has no replacement to protect and keeps its bounded, deferred cleanup.
     previousCleanupFailed = stopErrors.some(isBlockingStopError);
-    await drainInstances(previousRegistry, resourceHandoffIds);
+    await drainInstances(previousRegistry, resourceHandoffIds, false);
     rethrowServiceStopTimeout();
     previousHooksStopped = true;
     await stopOwner(resourceHandoffIds.size > 0, "Plugin stop hook failed", () =>

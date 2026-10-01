@@ -9,7 +9,10 @@ import {
   PluginHostCleanupTimeoutError,
   withPluginHostCleanupTimeout,
 } from "../plugins/host-hook-cleanup-timeout.js";
-import type { PluginHostCleanupResult } from "../plugins/host-hook-cleanup.types.js";
+import type {
+  PluginHostCleanupResult,
+  PluginHostRegistryRetirement,
+} from "../plugins/host-hook-cleanup.types.js";
 import { withPluginHttpRouteRegistry } from "../plugins/http-registry.js";
 import { PluginInstanceDrainTimeoutError } from "../plugins/plugin-instance-error.js";
 import { getPluginInstance, type PluginInstanceHandle } from "../plugins/plugin-instance-scope.js";
@@ -58,11 +61,12 @@ export function createPluginReloadCleanup({
   log: ReturnType<typeof createSubsystemLogger>;
   recordCleanup: (result: PluginHostCleanupResult) => void;
   recordWarning: (warning: string) => void;
-  retainRetirement: (retire: () => Promise<PluginHostCleanupResult>) => void;
+  retainRetirement: (retire: PluginHostRegistryRetirement) => void;
 }) {
   let pendingServiceCleanup: ReturnType<typeof getPluginServiceCleanupSettlement>;
   let admittedWorkDeadlineAtMs: number | undefined;
   let retainedWorkQueued = false;
+  const deferredCustodySettlements = new Set<Promise<unknown>>();
   const quiescedInstances: PluginInstanceHandle[] = [];
   const attempt = async (errors: unknown[], run: () => void | Promise<void>) => {
     try {
@@ -159,11 +163,34 @@ export function createPluginReloadCleanup({
       if (!pluginIds.has(record.id)) {
         continue;
       }
+      const instance = getPluginInstance(record);
+      if (
+        instance?.hasRetainedCustody &&
+        instance.ordinaryCallCount === 0 &&
+        instance.retainedWorkCount === 0
+      ) {
+        const disposal = instance.dispose();
+        if (!deferredCustodySettlements.has(disposal)) {
+          deferredCustodySettlements.add(disposal);
+          retainRetirement(async (options) => {
+            if (options?.deferConsumers) {
+              return { cleanupCount: 0, failures: [], deferredPluginIds: [record.id] };
+            }
+            const result = await disposal;
+            const errors = await collectResourceFailures(result.errors);
+            if (errors.length) {
+              throw new AggregateError(errors, `Plugin ${record.id} resource cleanup failed`);
+            }
+            return { cleanupCount: 0, failures: [] };
+          });
+        }
+        continue;
+      }
       await attempt(failures, async () => {
         const errors = await withPluginHostCleanupTimeout(
           `plugin ${record.id} resources`,
           async () => {
-            const result = await getPluginInstance(record)?.dispose();
+            const result = await instance?.dispose();
             return collectResourceFailures(result?.errors ?? []);
           },
         );
