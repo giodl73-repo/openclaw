@@ -62,6 +62,7 @@ import {
 } from "./delivery-payload-normalization.js";
 import { pickSummaryFromOutput, readAutomationFailedReport } from "./helpers.js";
 import { cleanupCronRunSessionAfterRun } from "./session-cleanup.js";
+import { resolveOwnedCanonicalAgentSessionKey } from "./session-key.js";
 import { isLikelyInterimCronMessage } from "./subagent-followup-hints.js";
 
 const deliveryOutboundRuntimeLoader = createLazyImportLoader(
@@ -267,17 +268,32 @@ export async function dispatchCronDelivery(
       deliveryAttempted = true;
       // Custom session targets retain their caller-selected identity.
       const { sessionKey: deliverySessionKey, route: directCronOutboundRoute } =
-        typeof params.job.sessionTarget === "string" &&
-        params.job.sessionTarget.startsWith("session:")
-          ? { sessionKey: params.agentSessionKey, route: null }
-          : await resolveCronDeliveryRouteSessionKey({
-              cfg: params.cfgWithAgentDefaults,
-              job: params.job,
-              agentId: params.agentId,
-              agentSessionKey: params.agentSessionKey,
-              delivery,
-              warningContext: "direct delivery mirror",
-            });
+        await (async () => {
+          if (
+            typeof params.job.sessionTarget === "string" &&
+            params.job.sessionTarget.startsWith("session:")
+          ) {
+            return { sessionKey: params.agentSessionKey, route: null };
+          }
+          const ownedSourceSessionKey =
+            delivery.mode === "implicit"
+              ? resolveOwnedCanonicalAgentSessionKey({
+                  sessionKey: delivery.sourceSessionKey,
+                  agentId: params.agentId,
+                })
+              : undefined;
+          if (ownedSourceSessionKey) {
+            return { sessionKey: ownedSourceSessionKey, route: null };
+          }
+          return await resolveCronDeliveryRouteSessionKey({
+            cfg: params.cfgWithAgentDefaults,
+            job: params.job,
+            agentId: params.agentId,
+            agentSessionKey: params.agentSessionKey,
+            delivery,
+            warningContext: "direct delivery mirror",
+          });
+        })();
       const deliverySession = buildOutboundSessionContext({
         cfg: params.cfgWithAgentDefaults,
         agentId: params.agentId,
