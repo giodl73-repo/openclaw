@@ -10,6 +10,7 @@ import type * as SessionEntryReadRuntime from "../../config/sessions/session-ent
 import * as deliveryQueueSqlite from "../../infra/delivery-queue-sqlite.js";
 import type * as OutboundSession from "../../infra/outbound/outbound-session.js";
 import { summarizeOutboundPayloadForTransport } from "../../infra/outbound/payloads.js";
+import { buildOutboundSessionContext } from "../../infra/outbound/session-context.js";
 
 const directCronCompletionRetention = {
   idPrefix: "cron-direct-delivery:v1:",
@@ -520,6 +521,36 @@ describe("dispatchCronDelivery", () => {
       expect(state.deliveryAttempted).toBe(true);
     },
   );
+
+  it("uses source provenance for implicit last delivery session context", async () => {
+    const sourceSessionKey = "agent:main:dashboard:source";
+    const destinationSessionKey = "agent:main:telegram:direct:123456";
+    const params = makeBaseParams({
+      synthesizedText: "Delivered source-bound report",
+      resolvedDeliveryMode: "implicit",
+    });
+    params.resolvedDelivery = makeResolvedDelivery({
+      mode: "implicit",
+      sourceSessionKey,
+      sessionRoute: {
+        sessionKey: destinationSessionKey,
+        baseSessionKey: destinationSessionKey,
+        peer: { kind: "direct", id: "123456" },
+        chatType: "direct",
+        from: "telegram:123456",
+        to: "123456",
+      },
+    });
+
+    expectDelivered(await dispatchCronDelivery(params));
+
+    expect(buildOutboundSessionContext).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: sourceSessionKey }),
+    );
+    expect(buildOutboundSessionContext).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: destinationSessionKey }),
+    );
+  });
 
   it.each([
     {

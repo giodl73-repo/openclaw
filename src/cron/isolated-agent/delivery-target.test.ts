@@ -597,6 +597,35 @@ describe("resolveDeliveryTarget", () => {
     });
   });
 
+  it("returns source provenance for owned unchanged implicit last delivery", async () => {
+    const sessionKey = "agent:agent-b:dashboard:source";
+    extractDeliveryInfoMock.mockReturnValueOnce({
+      deliveryContext: {
+        channel: "alpha",
+        to: "source-room",
+        accountId: "primary",
+        threadId: "source-thread",
+      },
+      threadId: undefined,
+      sourceSessionKey: sessionKey,
+    });
+
+    const result = await resolveDeliveryTarget(makeCfg(), AGENT_ID, {
+      channel: "last",
+      sessionKey,
+      to: undefined,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      channel: "alpha",
+      to: "source-room",
+      accountId: "primary",
+      threadId: "source-thread",
+      sourceSessionKey: sessionKey,
+    });
+  });
+
   it("scopes unqualified stored delivery lookups to the job agent", async () => {
     extractDeliveryInfoMock.mockImplementation((sessionKey: string) => ({
       deliveryContext: {
@@ -614,6 +643,7 @@ describe("resolveDeliveryTarget", () => {
 
     expect(extractDeliveryInfoMock).toHaveBeenCalledWith("agent:agent-b:main", {
       cfg: expect.any(Object),
+      includeSourceSessionKey: true,
     });
     expect(result).toMatchObject({
       ok: true,

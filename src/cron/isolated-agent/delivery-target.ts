@@ -1,3 +1,4 @@
+import { normalizeOptionalThreadValue } from "@openclaw/normalization-core/string-coerce";
 /** Resolves isolated cron delivery requests into concrete outbound targets. */
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { resolveChannelAllowFrom } from "../../channels/account-resolution.js";
@@ -22,6 +23,7 @@ import {
   type CronDeliveryContextRequest,
   type CronDeliveryTargetContext,
 } from "./delivery-target-context.js";
+import { resolveOwnedCanonicalAgentSessionKey } from "./session-key.js";
 
 /** Result of resolving a cron job delivery request into a sendable outbound channel target. */
 export type DeliveryTargetResolution =
@@ -33,6 +35,8 @@ export type DeliveryTargetResolution =
       threadId?: string | number;
       mode: "explicit" | "implicit";
       sessionRoute?: OutboundSessionRoute;
+      /** Exact session whose stored route supplied an unchanged implicit `last` target. */
+      sourceSessionKey?: string;
     }
   | {
       ok: false;
@@ -196,7 +200,13 @@ export async function resolveDeliveryTarget(
       }
       return result.value;
     })());
-  const { rawSessionKey, usedSharedMainFallback } = sessionContext;
+  const {
+    mainSessionKey,
+    rawSessionKey,
+    threadSessionKey,
+    routeSourceSessionKey,
+    usedSharedMainFallback,
+  } = sessionContext;
   const hasConversationCompletion =
     jobPayload.sessionTarget === "current" || jobPayload.sourceConversation !== undefined;
   // A missing creating conversation cannot inherit another conversation's shared route.
@@ -458,6 +468,24 @@ export async function resolveDeliveryTarget(
     route && route.threadId === threadId
       ? route
       : await resolveRoute({ accountId, target: toCandidate, resolvedTarget, threadId });
+  const ownedSourceSessionKey = resolveOwnedCanonicalAgentSessionKey({
+    sessionKey: rawSessionKey,
+    agentId,
+  });
+  const sourceSessionKey =
+    requestedChannel === "last" &&
+    mode === "implicit" &&
+    !explicitTo &&
+    explicitAccountId === undefined &&
+    explicitThreadId === undefined &&
+    ownedSourceSessionKey === threadSessionKey &&
+    routeSourceSessionKey === threadSessionKey &&
+    resolved.lastChannel === channel &&
+    toCandidate === resolved.lastTo &&
+    normalizeAccountId(accountId) === normalizeAccountId(resolved.lastAccountId) &&
+    normalizeOptionalThreadValue(threadId) === normalizeOptionalThreadValue(resolved.threadId)
+      ? threadSessionKey
+      : undefined;
   return {
     ok: true,
     channel,
@@ -466,5 +494,6 @@ export async function resolveDeliveryTarget(
     threadId,
     mode,
     ...(sessionRoute ? { sessionRoute } : {}),
+    ...(sourceSessionKey ? { sourceSessionKey } : {}),
   };
 }

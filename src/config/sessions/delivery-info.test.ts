@@ -122,6 +122,49 @@ describe("extractDeliveryInfo", () => {
     });
   });
 
+  it("reports exact route provenance only when requested", async () => {
+    const sessionKey = "agent:main:dashboard:example";
+    storeState.store[sessionKey] = buildEntry({
+      channel: "slack",
+      to: "slack:C0123ABC",
+      accountId: "workspace-1",
+    });
+
+    expect(
+      (await extractDeliveryInfoBatch([sessionKey], { includeSourceSessionKey: true }))[0],
+    ).toMatchObject({ sourceSessionKey: sessionKey });
+    expect((await extractDeliveryInfo(sessionKey)).sourceSessionKey).toBeUndefined();
+  });
+
+  it("identifies base-session provenance separately from a requested thread", async () => {
+    const baseKey = "agent:main:slack:channel:c0123abc";
+    const threadKey = `${baseKey}:thread:1234567890.123456`;
+    storeState.store[baseKey] = buildEntry({
+      channel: "slack",
+      to: "slack:c0123abc",
+      accountId: "workspace-1",
+    });
+
+    expect(
+      (await extractDeliveryInfoBatch([threadKey], { includeSourceSessionKey: true }))[0],
+    ).toMatchObject({ sourceSessionKey: baseKey });
+  });
+
+  it("does not report folded-alias provenance as an exact route source", async () => {
+    const queriedKey = "agent:main:telegram:group:MiXeDCase";
+    storeState.store["agent:main:telegram:group:MixedCase"] = buildEntry({
+      channel: "telegram",
+      to: "telegram:fresh-route",
+    });
+
+    const result = (
+      await extractDeliveryInfoBatch([queriedKey], { includeSourceSessionKey: true })
+    )[0];
+
+    expect(result?.deliveryContext?.to).toBe("telegram:fresh-route");
+    expect(result?.sourceSessionKey).toBeUndefined();
+  });
+
   it("continues candidate session keys until it finds the freshest routable entry", async () => {
     const sessionKey = "agent:main:matrix:channel:!MixedCase:Example.Org";
     const canonicalKey = "agent:main:matrix:channel:!mixedcase:example.org";
