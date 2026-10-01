@@ -18,6 +18,7 @@ import {
   type MaintainedClawPackageLifecycleLease,
 } from "../state/claw-package-lifecycle-lease.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
+import { readClawInventory } from "./inventory-read.js";
 import type { ClawPackageRemovalPhaseResult } from "./package-remove-contract.js";
 import {
   readClawPackageRefs,
@@ -231,20 +232,33 @@ export async function planClawPackageRemovals(
     referencedCleanup?: ClawReferencedCleanup;
   } = {},
 ): Promise<ClawPackageRemovalDecision[]> {
+  if (packages.length === 0) {
+    return [];
+  }
   const deps = options.deps ?? {};
   const cleanup = options.referencedCleanup ?? { mode: "retain" };
   const selected = new Set(cleanup.selected ?? []);
-  const allRefs = (deps.readPackageRefs ?? readClawPackageRefs)(options);
+  // Preview reads share one worker snapshot. Explicit handles retain their
+  // caller-owned transaction view; apply still rereads under its package lease.
+  let inventory: ReturnType<typeof readClawInventory> | undefined;
+  const snapshot = () => (inventory ??= readClawInventory(options));
+  const allRefs =
+    deps.readPackageRefs || options.database
+      ? (deps.readPackageRefs ?? readClawPackageRefs)(options)
+      : (await snapshot()).packages;
   let cachedInstalls: PersistedClawInstall[] | undefined;
-  const allInstalls = (): PersistedClawInstall[] =>
-    (cachedInstalls ??= (deps.readInstallRecords ?? readClawInstallRecords)(options));
+  const allInstalls = async (): Promise<PersistedClawInstall[]> =>
+    (cachedInstalls ??=
+      deps.readInstallRecords || options.database
+        ? (deps.readInstallRecords ?? readClawInstallRecords)(options)
+        : (await snapshot()).installs);
   const decisions: ClawPackageRemovalDecision[] = [];
   for (const packageRef of packages) {
     const affectedClawAgentIds = otherClawAgentIds({
       packageRef,
       workspace: install.workspace,
       refs: allRefs,
-      installs: packageRef.kind === "plugin" || !install.workspace ? [] : allInstalls(),
+      installs: packageRef.kind === "plugin" || !install.workspace ? [] : await allInstalls(),
       statuses: new Set(["pending", "complete"]),
     });
     const retain = (reason: string): void => {
