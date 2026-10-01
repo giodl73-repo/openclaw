@@ -74,43 +74,6 @@ type RuntimeReadinessInput = {
   additionalSubjects?: ReadinessSubject[];
 };
 
-export function buildUnobservedGatewayConditions(): ReadinessCondition[] {
-  return [
-    {
-      type: "GatewayStartupComplete",
-      subjectRef: CORE_READINESS_SUBJECT_REFS.gateway,
-      status: "Unknown",
-      requirement: "required",
-      reason: "GatewayStartupNotChecked",
-      message: "This surface did not observe Gateway startup state.",
-    },
-    {
-      type: "GatewayAcceptingWork",
-      subjectRef: CORE_READINESS_SUBJECT_REFS.gateway,
-      status: "Unknown",
-      requirement: "required",
-      reason: "GatewayAdmissionNotChecked",
-      message: "This surface did not observe Gateway drain state.",
-    },
-    {
-      type: "ChannelRuntimeReady",
-      subjectRef: CORE_READINESS_SUBJECT_REFS.gateway,
-      status: "Unknown",
-      requirement: "required",
-      reason: "ChannelRuntimeNotChecked",
-      message: "This surface did not observe Gateway channel runtime state.",
-    },
-    {
-      type: "EventLoopHealthy",
-      subjectRef: CORE_READINESS_SUBJECT_REFS.gateway,
-      status: "Unknown",
-      requirement: "advisory",
-      reason: "EventLoopStatusUnavailable",
-      message: "This surface did not observe Gateway event-loop health.",
-    },
-  ];
-}
-
 function resolvePluginFailures(plugins: PluginReadinessInput): string[] {
   return plugins.errors
     .filter((entry) => entry.activated === true || entry.activationSource !== "disabled")

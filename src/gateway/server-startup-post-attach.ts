@@ -48,6 +48,7 @@ import {
   formatGatewayStartupOutcomes,
   type GatewayStartupOutcomeRecorder,
 } from "./server-startup-outcomes.js";
+import type { GatewayStartupPluginRuntime } from "./server-startup-plugins.js";
 import { logGatewayReady, logGatewaySidecarsReady } from "./server-startup-readiness.js";
 import {
   refreshLatestUpdateRestartSentinelIfPresent,
@@ -644,19 +645,9 @@ export async function startGatewayPostAttachRuntime(
     };
     logChannels: { info: (msg: string) => void; error: (msg: string) => void };
     unlockStartupMethods: () => void;
-    loadStartupPlugins?: () => Awaitable<{
-      pluginRegistry: PluginRegistry;
-      gatewayMethods: string[];
-      resolvedConfig?: OpenClawConfig;
-      retireGatewayRuntimeBindings?: () => void;
-    }>;
+    loadStartupPlugins?: () => Awaitable<GatewayStartupPluginRuntime>;
     onStartupPluginsLoading?: () => void;
-    onStartupPluginsLoaded?: (result: {
-      pluginRegistry: PluginRegistry;
-      gatewayMethods: string[];
-      resolvedConfig?: OpenClawConfig;
-      retireGatewayRuntimeBindings?: () => void;
-    }) => Awaitable<boolean>;
+    onStartupPluginsLoaded?: (result: GatewayStartupPluginRuntime) => Awaitable<boolean>;
     pluginRuntimeClaim?: GatewayPluginRuntimeClaim;
     getCurrentPluginRegistry?: () => PluginRegistry;
     getCurrentPluginServices?: () => PluginServicesHandle | null;

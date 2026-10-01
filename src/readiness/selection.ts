@@ -7,7 +7,7 @@ import {
   type ReadinessRequirement,
 } from "./conditions.js";
 import { createPluginReadinessResolver } from "./plugin-readiness.js";
-import { CORE_READINESS_SUBJECT_REFS } from "./subjects.js";
+import { CORE_READINESS_SUBJECT_REFS, type ReadinessSubject } from "./subjects.js";
 import {
   buildWorkspaceReadinessCondition,
   createWorkspaceReadinessEvidenceResolver,
@@ -58,9 +58,11 @@ function withRequirement(
   };
 }
 
-export function createSelectedReadinessResolver() {
+export function createSelectedReadinessResolver(options?: {
+  coreSubjects?: readonly ReadinessSubject[];
+}) {
   const resolveWorkspace = createWorkspaceReadinessEvidenceResolver();
-  const resolvePlugins = createPluginReadinessResolver();
+  const resolvePlugins = createPluginReadinessResolver({ coreSubjects: options?.coreSubjects });
 
   return async (params: {
     config: OpenClawConfig;

@@ -9,7 +9,7 @@ import {
   PluginInstanceUnavailableError,
 } from "./plugin-instance-error.js";
 import { pluginInstanceInvocation as invocation } from "./plugin-instance-invocation.js";
-import { PluginCallToken } from "./plugin-instance-owned-values.js";
+import { PluginCallToken, visitPluginValueTree } from "./plugin-instance-owned-values.js";
 import {
   pluginInstanceState,
   pluginInvocationContext,
@@ -169,24 +169,7 @@ export class PluginInstance {
 
   /** Associates an identity-sensitive public value without replacing it with a view. */
   adopt<T>(value: T): T {
-    const seen = new Set<object>();
-    const visit = (candidate: unknown) => {
-      if (
-        !candidate ||
-        (typeof candidate !== "object" && typeof candidate !== "function") ||
-        seen.has(candidate)
-      ) {
-        return;
-      }
-      seen.add(candidate);
-      valueInstances.set(candidate, this);
-      for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(candidate))) {
-        if ("value" in descriptor) {
-          visit(descriptor.value);
-        }
-      }
-    };
-    visit(value);
+    visitPluginValueTree(value, (candidate) => valueInstances.set(candidate, this));
     return value;
   }
 
@@ -793,4 +776,3 @@ export class PluginInstance {
     return terminalFailures.result(failures);
   }
 }
-/* oxlint-disable max-lines -- Lifecycle owner stays cohesive; interruptible machinery is split out. */
