@@ -1,7 +1,7 @@
 import { digestClawValue } from "./digest.js";
 import type { ClawDiagnostic, ClawManifest, ClawOpenClawProfile } from "./types.js";
 
-/** Exact-plan integrity cannot substitute for disclosure of effective permissions. */
+/** Admin confirmation uses the canonical plan; plugin consent remains independently required. */
 export function addClawControlUiSafetyBlockers<
   T extends { blockers: ClawDiagnostic[]; planIntegrity: string },
 >(plan: T, loaded: { manifest: ClawManifest; openClawProfile?: ClawOpenClawProfile }): T {
@@ -13,17 +13,11 @@ export function addClawControlUiSafetyBlockers<
       (_, index) => `$.profiles.openclaw.extensions[${index}]`,
     ),
   ];
+  if (paths.length === 0) {
+    return plan;
+  }
   const blockers: ClawDiagnostic[] = [
     ...plan.blockers,
-    {
-      level: "error",
-      phase: "plan",
-      code: "capability_disclosure_unavailable",
-      path: "$.agent",
-      // Even an empty profile inherits permissions that this preview does not yet disclose.
-      message:
-        "Applying Claws is unavailable until the preview discloses effective agent permissions.",
-    },
     ...paths.map((path): ClawDiagnostic => ({
       level: "error",
       phase: "plan",

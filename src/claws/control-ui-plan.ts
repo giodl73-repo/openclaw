@@ -50,9 +50,7 @@ export function projectClawAddPlan(
       message:
         code === "plugin_consent_unavailable"
           ? "Plugin capability consent is not available through the Claws Control UI."
-          : code === "capability_disclosure_unavailable"
-            ? "Applying Claws is unavailable until the preview discloses effective agent permissions."
-            : "Resolve this OpenClaw state conflict before continuing.",
+          : "Resolve this OpenClaw state conflict before continuing.",
     })),
     readiness: {
       ready: plan.readiness.ready,

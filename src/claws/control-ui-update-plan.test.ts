@@ -178,9 +178,7 @@ describe("Claw Gateway update preview", () => {
     expect(second.scheduledJobs).toEqual(first.scheduledJobs);
     expect(second.planIntegrity).not.toBe(first.planIntegrity);
     expect(first.effectivePermissions?.unresolved).toContain("scheduled-jobs");
-    expect(first.blockers).toContainEqual(
-      expect.objectContaining({ code: "capability_disclosure_unavailable" }),
-    );
+    expect(first.blockers).toEqual([]);
     expect(JSON.stringify([first, second])).not.toContain("private");
     const projected = projectClawUpdatePlan(canonical, trust, undefined, first.scheduledJobs);
     expect(projected.planIntegrity).not.toBe(projectClawUpdatePlan(canonical, trust).planIntegrity);
@@ -240,9 +238,7 @@ describe("Claw Gateway update preview", () => {
       source,
       getRuntimeConfig,
     });
-    expect(result.blockers).toContainEqual(
-      expect.objectContaining({ code: "capability_disclosure_unavailable" }),
-    );
+    expect(result.blockers).toEqual([]);
     expect(mocks.detail).not.toHaveBeenCalled();
     expect(mocks.build).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: "assistant", inventory: freshInventory, config }),
@@ -285,9 +281,7 @@ describe("Claw Gateway update preview", () => {
       },
       unresolved: expect.arrayContaining(["memory", "delegation", "scheduled-jobs"]),
     });
-    expect(result.blockers).toContainEqual(
-      expect.objectContaining({ code: "capability_disclosure_unavailable" }),
-    );
+    expect(result.blockers).toEqual([]);
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain("private");
     expect(serialized).not.toContain("canonical-secret-fixture");
@@ -303,7 +297,7 @@ describe("Claw Gateway update preview", () => {
     ).not.toBe(projected.planIntegrity);
   });
 
-  it("retains the blocked desired preview when current consent provenance is uninitialized", async () => {
+  it("retains the desired preview when current consent provenance is uninitialized", async () => {
     const config: OpenClawConfig = {
       agents: { entries: { assistant: { tools: { profile: "full", allow: ["read"] } } } },
     };
@@ -319,9 +313,7 @@ describe("Claw Gateway update preview", () => {
     });
 
     expect(validateClawLifecyclePlanResult(result)).toBe(true);
-    expect(result.blockers).toContainEqual(
-      expect.objectContaining({ code: "capability_disclosure_unavailable" }),
-    );
+    expect(result.blockers).toEqual([]);
     expect(result.effectivePermissions?.current).toBeUndefined();
     expect(result.effectivePermissions?.desired).toMatchObject({
       tools: { allowed: ["read", "skills_read"] },
@@ -370,9 +362,7 @@ describe("Claw Gateway update preview", () => {
         }).planIntegrity,
       ).not.toBe(integrity);
     }
-    expect(result.blockers).toContainEqual(
-      expect.objectContaining({ code: "capability_disclosure_unavailable" }),
-    );
+    expect(result.blockers).toEqual([]);
   });
 
   it("marks target disclosure unresolved when canonical planning has no target agent", async () => {
@@ -385,9 +375,7 @@ describe("Claw Gateway update preview", () => {
     expect(validateClawLifecyclePlanResult(result)).toBe(true);
     expect(result.effectivePermissions?.desired).toBeUndefined();
     expect(result.effectivePermissions?.unresolved).toContain("target-agent");
-    expect(result.blockers).toContainEqual(
-      expect.objectContaining({ code: "capability_disclosure_unavailable" }),
-    );
+    expect(result.blockers).toEqual([]);
   });
 
   it("blocks plugin-bearing updates until the plugin owner can verify consent", async () => {

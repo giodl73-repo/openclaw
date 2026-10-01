@@ -11,7 +11,7 @@ const manifest: ClawManifest = {
   cronJobs: [],
 };
 
-describe("Claw Control UI disclosure gate", () => {
+describe("Claw Control UI admin confirmation", () => {
   it.each<ClawOpenClawProfile | undefined>([
     undefined,
     { schemaVersion: 1, agent: {} },
@@ -19,14 +19,37 @@ describe("Claw Control UI disclosure gate", () => {
       schemaVersion: 1,
       agent: { tools: { allow: ["exec"] }, sandbox: { mode: "off", workspaceAccess: "rw" } },
     },
-  ])("blocks both explicit and inherited permissions without disclosure", (openClawProfile) => {
-    const plan = { planIntegrity: "canonical", blockers: [] as ClawDiagnostic[] };
+  ])("preserves canonical checks for explicit and inherited permissions", (openClawProfile) => {
+    const plan = {
+      planIntegrity: "canonical",
+      blockers: [
+        {
+          level: "error",
+          phase: "plan",
+          code: "workspace_exists",
+          path: "$.workspace",
+          message: "Workspace already exists.",
+        },
+      ] as ClawDiagnostic[],
+    };
     const result = addClawControlUiSafetyBlockers(plan, { manifest, openClawProfile });
-    expect(result.blockers).toContainEqual(
-      expect.objectContaining({ code: "capability_disclosure_unavailable" }),
-    );
+    expect(result).toBe(plan);
+  });
+
+  it("keeps plugin consent required and bound to the reviewed plan", () => {
+    const plan = { planIntegrity: "canonical", blockers: [] as ClawDiagnostic[] };
+    const loaded = {
+      manifest: {
+        ...manifest,
+        packages: [{ kind: "plugin" as const, ref: "@owner/plugin", version: "1.0.0" }],
+      },
+    };
+    const result = addClawControlUiSafetyBlockers(plan, loaded);
+    expect(result.blockers).toEqual([
+      expect.objectContaining({ code: "plugin_consent_unavailable", path: "$.packages[0]" }),
+    ]);
     expect(result.planIntegrity).not.toBe(plan.planIntegrity);
     expect(plan.blockers).toEqual([]);
-    expect(addClawControlUiSafetyBlockers(plan, { manifest, openClawProfile })).toEqual(result);
+    expect(addClawControlUiSafetyBlockers(plan, loaded)).toEqual(result);
   });
 });

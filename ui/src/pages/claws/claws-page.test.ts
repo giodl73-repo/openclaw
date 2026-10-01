@@ -15,7 +15,7 @@ import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { settleLitElement } from "../../test-helpers/lit-settle.ts";
 import { ClawsPage } from "./claws-page.ts";
 import {
-  blockedClawPermissionPlan,
+  blockedClawPluginPlan,
   clawDetail,
   clawDoctor,
   clawMethods,
@@ -130,7 +130,7 @@ describe("Claws Plugins tab", () => {
     expect(page.querySelector("[role=tab][aria-selected=true]")).toBeNull();
   });
   it("previews an exact release before installation then opens native agent chat", async () => {
-    const { click, input, request, navigate, page } = await mount();
+    const { click, input, request, navigate, page } = await mount({ scopes: ["operator.admin"] });
     await click("Add Claw");
     await input("packageName", clawRecord.name);
     await input("agentId", "travel");
@@ -140,6 +140,14 @@ describe("Claws Plugins tab", () => {
       agentId: "travel",
     });
     expect(request.mock.calls.some(([method]) => method.endsWith(".apply"))).toBe(false);
+    expect(page.querySelector('[aria-label="Configured permissions"]')?.textContent).toContain(
+      "Live tool availability and permissions",
+    );
+    expect(
+      [...page.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent?.trim() === "Confirm changes",
+      )?.disabled,
+    ).toBe(false);
     await click("Confirm changes");
     expect(request).toHaveBeenCalledWith("claws.add.apply", {
       source: { packageName: clawRecord.name, version: "0.2.0" },
@@ -164,12 +172,12 @@ describe("Claws Plugins tab", () => {
     expect(request.mock.calls.some(([method]) => method.endsWith(".apply"))).toBe(false);
   });
   it.each(["add", "update"] as const)(
-    "discloses configured permissions for %s without clearing the safety blocker",
+    "discloses configured permissions for %s without clearing plugin consent",
     async (operation) => {
       const { page, click, input, request } = await mount({
         scopes: ["operator.admin"],
         handler: (method) =>
-          method === `claws.${operation}.plan` ? blockedClawPermissionPlan(operation) : undefined,
+          method === `claws.${operation}.plan` ? blockedClawPluginPlan(operation) : undefined,
       });
       if (operation === "add") {
         await click("Add Claw");
@@ -248,7 +256,7 @@ describe("Claws Plugins tab", () => {
         expect(disclosure.textContent).toContain(category);
       }
       expect(page.querySelector('[role="alert"]')?.textContent).toContain(
-        "Applying Claws is unavailable",
+        "Plugin capability consent is not available",
       );
       const apply = [...page.querySelectorAll<HTMLButtonElement>("button")].find(
         (button) => button.textContent?.trim() === "Confirm changes",
@@ -264,7 +272,7 @@ describe("Claws Plugins tab", () => {
       const { page, click, input, request } = await mount({
         scopes: ["operator.admin"],
         handler: (method) =>
-          method === `claws.${operation}.plan` ? blockedClawPermissionPlan(operation) : undefined,
+          method === `claws.${operation}.plan` ? blockedClawPluginPlan(operation) : undefined,
       });
       if (operation === "add") {
         await click("Add Claw");
@@ -322,7 +330,7 @@ describe("Claws Plugins tab", () => {
       }
       expect(schedules.textContent).not.toContain("Enabled");
       expect(page.querySelector('[role="alert"]')?.textContent).toContain(
-        "Applying Claws is unavailable",
+        "Plugin capability consent is not available",
       );
       const apply = [...page.querySelectorAll<HTMLButtonElement>("button")].find(
         (button) => button.textContent?.trim() === "Confirm changes",
@@ -335,7 +343,7 @@ describe("Claws Plugins tab", () => {
   it.each(["empty", "omitted"] as const)(
     "distinguishes %s schedule disclosure from live schedules",
     async (state) => {
-      const plan = blockedClawPermissionPlan();
+      const plan = clawPlan();
       plan.scheduledJobs =
         state === "empty" ? { coverage: "package-declarations", jobs: [] } : undefined;
       const { page, click, input } = await mount({
@@ -360,7 +368,7 @@ describe("Claws Plugins tab", () => {
     },
   );
   it("shows desired permissions when current agent configuration is unresolved", async () => {
-    const plan = blockedClawPermissionPlan("update");
+    const plan = blockedClawPluginPlan("update");
     delete plan.effectivePermissions!.current;
     plan.effectivePermissions!.unresolved.push("current-agent");
     const { page, click, request } = await mount({
@@ -377,7 +385,7 @@ describe("Claws Plugins tab", () => {
     );
     expect(disclosure.textContent).toContain("Current agent configuration");
     expect(page.querySelector('[role="alert"]')?.textContent).toContain(
-      "Applying Claws is unavailable",
+      "Plugin capability consent is not available",
     );
     const apply = [...page.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent?.trim() === "Confirm changes",
@@ -392,7 +400,7 @@ describe("Claws Plugins tab", () => {
   ] as const)(
     "shows $state memory without inventing configuration",
     async ({ state, expected }) => {
-      const plan = blockedClawPermissionPlan();
+      const plan = clawPlan();
       plan.effectivePermissions!.desired!.memorySearch = { state };
       const { page, click, input } = await mount({
         handler: (method) => (method === "claws.add.plan" ? plan : undefined),
@@ -409,7 +417,7 @@ describe("Claws Plugins tab", () => {
     },
   );
   it("keeps empty configured sources and explicit target IDs distinct from unresolved data", async () => {
-    const plan = blockedClawPermissionPlan();
+    const plan = clawPlan();
     plan.effectivePermissions!.desired!.memorySearch = {
       state: "configured",
       rememberAcrossConversations: false,
@@ -457,7 +465,7 @@ describe("Claws Plugins tab", () => {
   ])(
     "distinguishes enabled heartbeat interval $intervalMs from an unscheduled heartbeat",
     async ({ intervalMs, expected }) => {
-      const plan = blockedClawPermissionPlan();
+      const plan = clawPlan();
       plan.effectivePermissions!.desired!.heartbeat = { enabled: true, intervalMs };
       const { page, click, input } = await mount({
         handler: (method) => (method === "claws.add.plan" ? plan : undefined),
@@ -478,7 +486,7 @@ describe("Claws Plugins tab", () => {
       handler: (method) =>
         method === "claws.add.plan"
           ? {
-              ...blockedClawPermissionPlan(),
+              ...clawPlan(),
               effectivePermissions: {
                 coverage: "configuration-only",
                 unresolved: ["target-agent"],
@@ -499,7 +507,7 @@ describe("Claws Plugins tab", () => {
       handler: (method) =>
         method === "claws.add.plan"
           ? {
-              ...blockedClawPermissionPlan(),
+              ...clawPlan(),
               effectivePermissions: undefined,
             }
           : undefined,
@@ -508,9 +516,7 @@ describe("Claws Plugins tab", () => {
     await input("packageName", clawRecord.name);
     await click("Review changes");
     expect(page.querySelector('[aria-label="Configured permissions"]')).toBeNull();
-    expect(page.querySelector('[role="alert"]')?.textContent).toContain(
-      "Applying Claws is unavailable",
-    );
+    expect(page.querySelector('[role="alert"]')).toBeNull();
   });
   it.each(["update", "remove"] as const)(
     "binds %s to the selected installed agent",
@@ -524,6 +530,11 @@ describe("Claws Plugins tab", () => {
         expect(schedules.textContent).toContain("Package-declared job disclosure is unavailable.");
         expect(schedules.textContent).not.toContain("No package-declared jobs in this plan.");
         expect(schedules.querySelector(".claws-permission-snapshot")).toBeNull();
+      }
+      if (operation === "update") {
+        expect(page.querySelector('[aria-label="Configured permissions"]')?.textContent).toContain(
+          "Live tool availability and permissions",
+        );
       }
       await click("Confirm changes");
       expect(request).toHaveBeenCalledWith(

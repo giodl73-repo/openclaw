@@ -196,13 +196,7 @@ describe("Claw Gateway add preview", () => {
       source: { packageName: "@owner/assistant", version: "1.2.3" },
       getRuntimeConfig,
     });
-    expect(result.blockers).toContainEqual(
-      expect.objectContaining({
-        code: "capability_disclosure_unavailable",
-        message:
-          "Applying Claws is unavailable until the preview discloses effective agent permissions.",
-      }),
-    );
+    expect(result.blockers).toEqual([]);
     expect(result.effectivePermissions).toMatchObject({
       coverage: "configuration-only",
       unresolved: expect.arrayContaining(["runtime-tools", "memory", "delegation"]),

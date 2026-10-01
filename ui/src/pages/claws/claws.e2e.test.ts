@@ -9,7 +9,7 @@ import {
   type ControlUiE2eServer,
 } from "../../test-helpers/control-ui-e2e.ts";
 import {
-  blockedClawPermissionPlan,
+  blockedClawPluginPlan,
   clawDetail,
   clawDoctor,
   clawMethods,
@@ -42,7 +42,7 @@ describe("Claws lifecycle in Plugins", () => {
       const context = await browser.newContext({ viewport });
       try {
         const page = await context.newPage();
-        const plan = blockedClawPermissionPlan("update");
+        const plan = blockedClawPluginPlan("update");
         plan.effectivePermissions!.desired!.tools.allowed.push(
           "core_tool_with_a_long_configuration_identifier_for_mobile_wrapping",
         );
@@ -126,7 +126,7 @@ describe("Claws lifecycle in Plugins", () => {
         }
         await confirm.scrollIntoViewIfNeeded();
         expect(await page.getByRole("alert").textContent()).toContain(
-          "Applying Claws is unavailable",
+          "Plugin capability consent is not available",
         );
         expect(await gateway.getRequests("claws.update.apply")).toHaveLength(0);
         await page.screenshot({

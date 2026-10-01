@@ -50,7 +50,7 @@ spawning; requiring an explicit agent ID disables that implicit route. Update
 previews show current and proposed snapshots. These configuration facts do not
 guarantee live tool access, memory availability, delegation admission, or sandbox enforcement; unresolved permissions are
 listed explicitly. A snapshot unavailable because its consent cannot be verified
-is omitted, without hiding the remaining blocked preview. An unavailable memory
+is omitted, without hiding the remaining preview. An unavailable memory
 secret owner marks only memory search unresolved; it is not shown as disabled.
 
 Scheduled-job previews compare **recorded declarations** with **proposed
@@ -69,10 +69,11 @@ remain unresolved. An empty declaration list means no package-declared jobs,
 not that the agent has no other scheduled work.
 
 This Gateway surface is read-only; it does not register Claw mutation methods.
-Applying from the Control UI requires effective-permission disclosure and
-consent, including inherited permissions, memory, delegation, and scheduled jobs.
-Publisher identity and an exact-plan digest do not replace that disclosure.
-Plugin-bearing Claws also require the plugin owner's capability-consent flow.
+The confirmation model uses an administrator's approval of the exact proposed
+changes, as Plugins does. Unresolved runtime permissions are informational, not
+a blanket blocker. Canonical plan blockers and artifact verification still apply.
+Plugin-bearing Claws remain blocked until the plugin owner's capability-consent
+flow is integrated; administrator confirmation does not bypass that flow.
 
 Installed entries show the associated agent, version, setup state, managed and
 referenced resources, and doctor findings. **Continue setup in chat** opens the

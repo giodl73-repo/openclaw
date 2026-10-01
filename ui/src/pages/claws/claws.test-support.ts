@@ -186,17 +186,16 @@ export function clawPlan(operation: "add" | "update" | "remove" = "add"): ClawLi
   };
 }
 
-export function blockedClawPermissionPlan(
+export function blockedClawPluginPlan(
   operation: "add" | "update" = "add",
 ): ClawLifecyclePlanResult {
   return {
     ...clawPlan(operation),
     blockers: [
       {
-        code: "capability_disclosure_unavailable",
-        path: "$.agent",
-        message:
-          "Applying Claws is unavailable until the preview discloses effective agent permissions.",
+        code: "plugin_consent_unavailable",
+        path: "$.packages[0]",
+        message: "Plugin capability consent is not available through the Claws Control UI.",
       },
     ],
   };
