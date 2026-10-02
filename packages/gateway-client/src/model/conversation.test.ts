@@ -1,4 +1,6 @@
+import { validateChatSendParams } from "@openclaw/gateway-protocol";
 import { describe, expect, it, vi } from "vitest";
+import type { ControlModelSendInput } from "./conversation-types.js";
 import {
   activatedConversation,
   createHarness,
@@ -327,18 +329,23 @@ describe("Control Model conversations", () => {
     const { harness, model, conversation } = await activatedConversation();
     const pending = harness.defer("chat.send");
     const controller = new AbortController();
-    const send = conversation.send(
-      { message: "hello", idempotencyKey: "idem-1" },
-      {
-        signal: controller.signal,
-      },
-    );
+    const unsupportedRuntimeInput = {
+      message: "hello",
+      idempotencyKey: "idem-1",
+      expectedRunId: "unsupported-run",
+    } as ControlModelSendInput & { readonly expectedRunId: string };
+    const send = conversation.send(unsupportedRuntimeInput, {
+      signal: controller.signal,
+    });
     expect(conversation.getSnapshot().messages).toHaveLength(1);
     expect(conversation.getSnapshot().messages[0]).toMatchObject({
       pending: true,
       runId: "idem-1",
     });
-    expect(harness.callsFor("chat.send")[0]?.options?.signal).toBe(controller.signal);
+    const sendCall = harness.callsFor("chat.send")[0];
+    expect(sendCall?.options?.signal).toBe(controller.signal);
+    expect(sendCall?.params).not.toHaveProperty("expectedRunId");
+    expect(validateChatSendParams(sendCall?.params)).toBe(true);
     pending.resolve({ runId: "run-1", status: "accepted" });
     await expect(send).resolves.toEqual({
       runId: "run-1",
