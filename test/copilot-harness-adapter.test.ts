@@ -27,9 +27,12 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function createFixture(prompt?: string) {
+async function createFixture(
+  prompt?: string,
+  peerOptions?: Parameters<typeof createCopilotFaultPeer>[0],
+) {
   const host = createHostFixture(prompt);
-  const peer = await createCopilotFaultPeer();
+  const peer = await createCopilotFaultPeer(peerOptions);
   peers.push(peer);
   const adapter = createCopilotOrdinaryTurnAdapterForTest({
     client: peer.client,
@@ -130,6 +133,134 @@ describe("Copilot SDK adapter through the OpenClaw host", () => {
       expectReleased(f);
     },
   );
+
+  it.each(["abort", "timeout"] as const)(
+    "%s reaches the SDK before send acknowledgement without releasing host ownership",
+    async (reason) => {
+      const f = await createFixture(undefined, { holdSend: true });
+      const partial = createDeferred<void>();
+      f.callbacks.onPartialReply.mockImplementation(() => partial.resolve());
+      const attempt = f.execute();
+      try {
+        await awaitGateBeforeSettlement(f.peer.sent, attempt, "SDK submission skipped");
+        f.peer.emit("assistant.message_delta", { messageId: "reply", deltaContent: "partial" });
+        await awaitGateBeforeSettlement(partial.promise, attempt, "partial output skipped");
+        if (reason === "abort") {
+          f.generation.abort();
+        } else {
+          await vi.advanceTimersByTimeAsync(f.input.timeoutMs);
+        }
+        // A round trip behind the abort observes dispatch without waiting on a wall clock.
+        await f.peer.client.ping("abort dispatch barrier");
+        expect(f.peer.methods.filter((method) => method === "session.abort")).toHaveLength(1);
+        expect(mocks.clearActive).not.toHaveBeenCalled();
+        expect(mocks.append).not.toHaveBeenCalled();
+        expect(f.peer.methods).not.toContain("session.detach");
+        f.peer.emit("assistant.message_delta", { messageId: "reply", deltaContent: " late" });
+        finish(f.peer, "partial late");
+        await f.peer.client.ping("native idle barrier");
+        expect(mocks.clearActive).not.toHaveBeenCalled();
+        expect(f.peer.methods).not.toContain("session.detach");
+        f.peer.releaseSend();
+        await awaitGateBeforeSettlement(f.peer.detaching, attempt, "SDK detach skipped");
+        expect(mocks.clearActive).not.toHaveBeenCalled();
+        expect(mocks.append).not.toHaveBeenCalled();
+        f.peer.releaseDetach();
+        const result = await attempt;
+        expect(result.terminal.kind).toBe(reason === "abort" ? "aborted" : "timeout");
+        expect(result.assistantTexts).toEqual(["partial"]);
+        expect(f.callbacks.onPartialReply).toHaveBeenCalledExactlyOnceWith({ text: "partial" });
+        expect(f.recorder.markSentToProvider).toHaveBeenCalledOnce();
+        expect(mocks.append).toHaveBeenCalledOnce();
+        expectReleased(f);
+      } finally {
+        f.peer.releaseSend();
+        finish(f.peer, "partial late");
+        f.peer.releaseDetach();
+        await attempt;
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "defers cancellation until native receipt or acknowledgement (missing user event=%s)",
+    async (skipUserMessage) => {
+      const f = await createFixture(undefined, {
+        holdSend: true,
+        holdSendTrace: true,
+        skipUserMessage,
+      });
+      const attempt = f.execute();
+      try {
+        await awaitGateBeforeSettlement(
+          f.peer.tracingSend,
+          attempt,
+          "SDK trace preparation skipped",
+        );
+        f.generation.abort();
+        await f.peer.client.ping("pre-dispatch barrier");
+        expect(f.peer.methods).not.toContain("session.send");
+        expect(f.peer.methods).not.toContain("session.abort");
+        expect(mocks.clearActive).not.toHaveBeenCalled();
+        f.peer.releaseSendTrace();
+        await awaitGateBeforeSettlement(f.peer.sent, attempt, "SDK submission skipped");
+        if (skipUserMessage) {
+          await f.peer.client.ping("unacknowledged submission barrier");
+          expect(f.peer.methods).not.toContain("session.abort");
+          f.peer.releaseSend();
+        }
+        await awaitGateBeforeSettlement(f.peer.aborting, attempt, "pending abort not forwarded");
+        f.peer.releaseSend();
+        await f.peer.client.ping("abort acknowledgement barrier");
+        expect(f.peer.methods.filter((method) => method === "session.abort")).toHaveLength(1);
+        expect(f.peer.methods).not.toContain("session.detach");
+        expect(mocks.append).not.toHaveBeenCalled();
+        expect(mocks.clearActive).not.toHaveBeenCalled();
+        finish(f.peer, "late");
+        await awaitGateBeforeSettlement(f.peer.detaching, attempt, "SDK detach skipped");
+        f.peer.releaseDetach();
+        const result = await attempt;
+        expect(result.terminal.kind).toBe("aborted");
+        expect(result.assistantTexts).toEqual([]);
+        expect(f.callbacks.onPartialReply).not.toHaveBeenCalled();
+        expect(f.recorder.markSentToProvider).toHaveBeenCalledOnce();
+        expectReleased(f);
+      } finally {
+        f.peer.releaseSendTrace();
+        f.peer.releaseSend();
+        finish(f.peer, "late");
+        f.peer.releaseDetach();
+        await attempt;
+      }
+    },
+  );
+
+  it("retains native idle before send acknowledgement without a user notification", async () => {
+    const f = await createFixture(undefined, { holdSend: true, skipUserMessage: true });
+    const attempt = f.execute();
+    try {
+      await awaitGateBeforeSettlement(f.peer.sent, attempt, "SDK submission skipped");
+      finish(f.peer, "answer");
+      await f.peer.client.ping("native idle barrier");
+      expect(f.peer.methods).not.toContain("session.detach");
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(mocks.clearActive).not.toHaveBeenCalled();
+      f.peer.releaseSend();
+      await awaitGateBeforeSettlement(f.peer.detaching, attempt, "pre-ack idle was lost");
+      expect(mocks.append).not.toHaveBeenCalled();
+      f.peer.releaseDetach();
+      const result = await attempt;
+      expect(result.terminal.kind).toBe("ok");
+      expect(result.assistantTexts).toEqual(["answer"]);
+      expect(mocks.append).toHaveBeenCalledOnce();
+      expectReleased(f);
+    } finally {
+      f.peer.releaseSend();
+      finish(f.peer, "answer");
+      f.peer.releaseDetach();
+      await attempt;
+    }
+  });
 
   it("keeps native errors as failures and awaits detach without committing success", async () => {
     const f = await createFixture();

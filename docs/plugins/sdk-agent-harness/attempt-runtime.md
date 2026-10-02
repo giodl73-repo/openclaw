@@ -71,6 +71,16 @@ session, translates deltas, and joins native idle/error, queued output, abort
 requests and detach before returning. Failed transport operations unwind as
 failures, not evidence that remote work stopped.
 
+For this fresh, single-send session, the root `user.message` event or the send
+acknowledgement enables native abort, whichever arrives first. A pending cancel
+is forwarded at that boundary without waiting for a delayed acknowledgement.
+Native idle may still precede acknowledgement and is retained while submission
+is joined. This assumes idle belongs to the fresh session's single turn; it does
+not correlate arbitrary unrelated idle during preparation. If neither submission
+signal arrives, host output is fenced but submission remains joined; this is not
+bounded transport recovery or final-dispatch fencing inside the SDK. Native
+receipt is not proof that a real engine has stopped work.
+
 The composition suite drives the real SDK against a loopback JSON-RPC peer.
 This checks a second protocol consumer, not the native Copilot engine, inference,
 native role-preserving history, durable session resume, or migration of the

@@ -47,13 +47,13 @@ export function createCopilotOrdinaryTurnAdapterForTest(params: {
           let output = Promise.resolve();
           let abortRequest: Promise<void> | undefined;
           let failure: unknown;
-          let sending = false;
+          let nativeSubmissionObserved = false;
           let closed = false;
           let inputTokens = 0;
           let outputTokens = 0;
           const chunks = new Map<string, string>();
           const requestAbort = () => {
-            if (!sending || abortRequest) {
+            if (!nativeSubmissionObserved || abortRequest) {
               return;
             }
             abortRequest = session.abort().catch((error: unknown) => {
@@ -67,6 +67,12 @@ export function createCopilotOrdinaryTurnAdapterForTest(params: {
           const terminal = new Promise<void>((resolve) => {
             complete = resolve;
           });
+          const observeSubmission = () => {
+            nativeSubmissionObserved = true;
+            if (signal.aborted || failure) {
+              requestAbort();
+            }
+          };
           const emit = (text: string, reasoning = false) => {
             output = output
               .then(async () => {
@@ -86,6 +92,11 @@ export function createCopilotOrdinaryTurnAdapterForTest(params: {
                 return;
               }
               switch (event.type) {
+                case "user.message":
+                  // This fresh session has one send. Native receipt may precede its RPC reply;
+                  // waiting for either avoids an abort overtaking SDK trace/writer preparation.
+                  observeSubmission();
+                  break;
                 case "assistant.message_delta": {
                   const { messageId, deltaContent } = event.data;
                   chunks.set(messageId, (chunks.get(messageId) ?? "") + deltaContent);
@@ -128,10 +139,7 @@ export function createCopilotOrdinaryTurnAdapterForTest(params: {
             // before dispatch so an uncertain send cannot be treated as safe to replay.
             turn.markSubmitted();
             await session.send({ prompt });
-            sending = true;
-            if (signal.aborted || failure) {
-              requestAbort();
-            }
+            observeSubmission();
             await terminal;
             await output;
             if (failure) {
