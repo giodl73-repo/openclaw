@@ -10,6 +10,7 @@ import {
 import type {
   ClawControlUiCommand,
   ClawControlUiHost,
+  ClawControlUiCronMutationParams,
 } from "../../claws/control-ui-worker-contract.js";
 import { assertExperimentalClawsEnabled } from "../../claws/experimental.js";
 import { sleep } from "../../utils/sleep.js";
@@ -57,12 +58,70 @@ async function invokeOwner(
   return result;
 }
 
-function createHost(
+export function createClawControlUiHost(
   options: GatewayRequestHandlerOptions,
   assertCurrent: () => void,
 ): ClawControlUiHost {
+  const cron = options.context.cron;
+  const cronStorePath = options.context.cronStorePath;
+  let compensation:
+    | ReturnType<
+        typeof import("../../claws/control-ui-cron-compensation.js").createClawControlUiCronCompensation
+      >
+    | undefined;
   return async ({ method, params }) => {
+    if (method === "cron.compensate") {
+      if (typeof params.compensationId !== "string" || Object.keys(params).length !== 1) {
+        throw new Error("Invalid Claw cron compensation request.");
+      }
+      if (!compensation) {
+        throw new Error("Claw cron compensation custody is unavailable.");
+      }
+      return await compensation.compensate(params.compensationId);
+    }
     assertCurrent();
+    if (method === "cron.mutate") {
+      // Private worker input, never a public Gateway method or browser-authored inverse.
+      if (
+        !(
+          (params.operation === "add" && isRecord(params.input)) ||
+          (params.operation === "remove" &&
+            typeof params.id === "string" &&
+            isRecord(params.previous))
+        )
+      ) {
+        throw new Error("Invalid Claw cron mutation request.");
+      }
+      if (!compensation) {
+        const { createClawControlUiCronCompensation } =
+          await import("../../claws/control-ui-cron-compensation.js");
+        compensation = createClawControlUiCronCompensation({
+          cron,
+          assertCurrent,
+          assertOwnerCurrent: () => {
+            if (options.context.cron !== cron || options.context.cronStorePath !== cronStorePath) {
+              throw new Error("Claw cron scheduler owner changed.");
+            }
+          },
+          invoke: async (method, input, guard, isCommitted) => {
+            const { cronHandlers } = await import("./cron.js");
+            return await invokeOwner(
+              cronHandlers[method],
+              {
+                ...options,
+                // Only this invocation's scheduler-owned postcommit settlement survives revoke.
+                hasCurrentClientAuthority: () =>
+                  isCommitted() || options.hasCurrentClientAuthority?.() !== false,
+              },
+              method,
+              input,
+              guard,
+            );
+          },
+        });
+      }
+      return await compensation.mutate(params as ClawControlUiCronMutationParams);
+    }
     if (method === "config") {
       return options.context.getRuntimeConfig();
     }
@@ -172,7 +231,7 @@ function lifecycleHandler<T>(
       const { runClawControlUiOperation } = await import("../../claws/control-ui-worker.js");
       const result = await runClawControlUiOperation(command(params), {
         assertCurrent,
-        request: createHost(options, assertCurrent),
+        request: createClawControlUiHost(options, assertCurrent),
       });
       respond(true, result);
     } catch {

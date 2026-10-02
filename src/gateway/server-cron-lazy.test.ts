@@ -87,6 +87,7 @@ describe("createLazyGatewayCronState", () => {
 
     expect(hoisted.buildGatewayCronService).not.toHaveBeenCalled();
     expect(lazy.cron.getJob("demo")).toBeUndefined();
+    expect(lazy.cron.getLoadedJobs()).toBeUndefined();
     expect(lazy.cron.getDefaultAgentId()).toBeUndefined();
 
     try {
@@ -97,6 +98,10 @@ describe("createLazyGatewayCronState", () => {
 
     expect(hoisted.buildGatewayCronService).toHaveBeenCalledTimes(1);
     expect(cron["status"]).toHaveBeenCalledTimes(1);
+    const jobs: CronJob[] = [];
+    vi.mocked(cron.getLoadedJobs).mockReturnValue(jobs);
+    expect(lazy.cron.getLoadedJobs()).toBe(jobs);
+    expect(cron.getLoadedJobs).toHaveBeenCalledOnce();
     expect(observedBroker === broker).toBe(true);
     expect(observedReadOnlyScope).toBe(true);
   });
@@ -531,6 +536,7 @@ function createCronService(): GatewayCronServiceContract {
     enqueueRun: vi.fn(async () => ({ ok: true, ran: false, reason: "invalid-spec" }) as never),
     waitForManualRun: vi.fn(async () => true),
     getJob: vi.fn(() => undefined),
+    getLoadedJobs: vi.fn(() => undefined),
     readJob: vi.fn(async () => undefined),
     readScratch: vi.fn(async () => ({ currentRevision: 0 })),
     writeScratch: vi.fn(async () => ({ ok: true, currentRevision: 1 }) as never),

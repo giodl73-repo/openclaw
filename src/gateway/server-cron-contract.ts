@@ -2,8 +2,11 @@
 // types do not pull scheduler implementation dependencies into their graph.
 import type { CronJobScratchState, CronJobScratchWriteResult } from "../cron/scratch-contract.js";
 import type { CronServiceContract } from "../cron/service-contract.js";
+import type { CronJob } from "../cron/types.js";
 
 export type GatewayCronServiceContract = CronServiceContract & {
+  /** Inspect the serving scheduler's resident jobs without loading or reading SQLite. */
+  getLoadedJobs(): readonly CronJob[] | undefined;
   /** Cancel exact current definitions under the serving scheduler's operation lock. */
   quiesceJobs(
     jobs: readonly { id: string; revision: string }[],

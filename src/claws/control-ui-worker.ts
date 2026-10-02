@@ -3,6 +3,7 @@ import { runtimeProcessEntrypoints } from "../infra/runtime-process-entrypoints.
 import { resolveRuntimeWorkerUrl } from "../infra/runtime-worker-url.js";
 import { createOwnedWorkerTaskPool } from "../infra/worker-task-pool.js";
 import { createClawControlUiAuthority } from "./control-ui-authority.js";
+import { createClawConfigPersistenceHost } from "./control-ui-config-host.js";
 import type {
   ClawControlUiCommand,
   ClawControlUiHost,
@@ -16,6 +17,7 @@ export async function runClawControlUiOperation(
 ): Promise<ClawControlUiWorkerResult> {
   options.assertCurrent();
   const authority = createClawControlUiAuthority(options.assertCurrent);
+  const configPersistence = createClawConfigPersistenceHost(options.assertCurrent);
   try {
     const pool = createOwnedWorkerTaskPool<ClawControlUiWorkerInput, ClawControlUiWorkerResult>({
       workerUrl: resolveRuntimeWorkerUrl(runtimeProcessEntrypoints.clawControlUi),
@@ -24,15 +26,23 @@ export async function runClawControlUiOperation(
     try {
       // Cancellation revokes effect admission, not the worker's obligation to settle cleanup.
       const task = pool.runTask(
-        { ...command, authority: authority.port },
         {
-          transferList: (input) => [input.authority],
+          ...command,
+          authority: authority.port,
+          configPersistence: configPersistence.port,
+          configPersistenceWake: configPersistence.wake,
+        },
+        {
+          transferList: (input) => [input.authority, input.configPersistence],
           onRequest: async (value) => {
             if (!isRecord(value) || typeof value.method !== "string" || !isRecord(value.params)) {
               throw new Error("Invalid Claw worker request.");
             }
             try {
-              options.assertCurrent();
+              // Only the host's exact-operation receipt can authorize compensation.
+              if (value.method !== "cron.compensate") {
+                options.assertCurrent();
+              }
               const result = await options.request({ method: value.method, params: value.params });
               return { input: { ok: true, value: result }, timeoutMs: 30 * 60_000 };
             } catch {
@@ -50,6 +60,10 @@ export async function runClawControlUiOperation(
       await pool.close();
     }
   } finally {
-    authority.close();
+    try {
+      await configPersistence.close();
+    } finally {
+      authority.close();
+    }
   }
 }

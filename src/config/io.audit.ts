@@ -10,12 +10,17 @@ import { normalizeNullableString } from "@openclaw/normalization-core/string-coe
 import { registerSqliteAuditRecordAsync } from "../infra/sqlite-audit-record-store.async.js";
 import { createSqliteAuditRecordStore } from "../infra/sqlite-audit-record-store.js";
 import { redactSecrets } from "../logging/redact.js";
+import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { resolveConfigAuditStoreEnv } from "./config-journal-snapshot.js";
 import type { ConfigHealthFingerprint } from "./io.health-state.types.js";
+import { createConfigPersistenceAdmission } from "./io.persistence-admission.js";
+import { getConfigPersistenceProvider } from "./io.persistence-host.js";
 import type { ConfigWriteAuditOrigin } from "./io.types.js";
 import { resolveStateDir } from "./paths.js";
 import { redactSensitiveArgv } from "./redact-argv.js";
 import { isSensitiveConfigPath } from "./sensitive-paths.js";
+
+export { resolveConfigAuditStoreEnv } from "./config-journal-snapshot.js";
 
 const CONFIG_AUDIT_ARGV_CAP = 8;
 const CONFIG_AUDIT_PATH_CAP = 64;
@@ -385,7 +390,7 @@ export function finalizeConfigWriteAuditRecord(params: {
 
 type ConfigWriteAuditRecord = ReturnType<typeof finalizeConfigWriteAuditRecord>;
 
-type ConfigAuditAppendParams = {
+export type ConfigAuditAppendParams = {
   env: NodeJS.ProcessEnv;
   homedir: () => string;
   record: ConfigAuditRecord;
@@ -549,20 +554,55 @@ export function sanitizeConfigAuditRecord(record: ConfigAuditRecord): ConfigAudi
 export async function appendConfigAuditRecord(
   params: ConfigAuditAppendParams,
   assertCurrent?: () => void,
+  assertAdmissionCurrentAsync?: () => Promise<void>,
 ): Promise<void> {
   assertCurrent?.();
+  const provider = getConfigPersistenceProvider();
+  let admissionFailed = false;
+  const assertAsyncCurrent = async () => {
+    try {
+      await assertAdmissionCurrentAsync?.();
+      assertCurrent?.();
+    } catch (error) {
+      admissionFailed = true;
+      throw error;
+    }
+  };
   try {
+    if (provider) {
+      await provider.appendAudit(params, assertCurrent);
+      return;
+    }
     const record = sanitizeConfigAuditRecord(params.record);
+    const env = resolveConfigAuditStoreEnv(params);
+    if (assertAdmissionCurrentAsync) {
+      await assertAsyncCurrent();
+    }
     await registerSqliteAuditRecordAsync(
       {
         scope: CONFIG_AUDIT_SCOPE,
         maxEntries: CONFIG_AUDIT_MAX_ENTRIES,
-        env: resolveConfigAuditStoreEnv(params),
+        env,
         assertCurrent,
+        ...(assertAdmissionCurrentAsync
+          ? {
+              createAdmission: createConfigPersistenceAdmission(
+                resolveOpenClawStateSqlitePath(env),
+                () => assertCurrent?.(),
+                assertAsyncCurrent,
+              ),
+            }
+          : {}),
       },
       { key: configAuditEntryKey(record), value: record, createdAt: Date.parse(record.ts) },
     );
-  } catch {
+  } catch (error) {
+    if (admissionFailed) {
+      throw error;
+    }
+    if (assertAdmissionCurrentAsync) {
+      await assertAsyncCurrent();
+    }
     assertCurrent?.();
     // best-effort
   }
@@ -570,6 +610,10 @@ export async function appendConfigAuditRecord(
 
 export function appendConfigAuditRecordSync(params: ConfigAuditAppendParams): void {
   try {
+    const provider = getConfigPersistenceProvider();
+    if (provider) {
+      return provider.appendAuditSync(params);
+    }
     const record = sanitizeConfigAuditRecord(params.record);
     openConfigAuditStore(resolveConfigAuditStoreEnv(params)).register(
       configAuditEntryKey(record),

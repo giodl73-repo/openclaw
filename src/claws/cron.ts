@@ -41,6 +41,20 @@ export type ClawCronGateway = {
   list?: (agentId: string) => Promise<unknown>;
   remove: (schedulerJobId: string) => Promise<unknown>;
   waitUntilAgentAvailable?: (agentId: string) => Promise<void>;
+  /** Transport-owned custody for the inverse of this exact completed mutation. */
+  addWithRollback?: (
+    input: Record<string, unknown>,
+    previous?: PersistedClawCronRef,
+  ) => Promise<ClawCronMutation>;
+  removeWithRollback?: (
+    schedulerJobId: string,
+    previous: PersistedClawCronRef,
+  ) => Promise<ClawCronMutation>;
+};
+
+export type ClawCronMutation = {
+  result: unknown;
+  rollback: () => Promise<unknown>;
 };
 
 export class ClawCronInstallError extends Error {

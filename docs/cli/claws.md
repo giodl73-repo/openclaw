@@ -30,15 +30,25 @@ The current CLI reads a local package directory, `CLAW.md`, or grouped JSON mani
 Publishing, searching, and installing whole Claws through ClawHub are a
 separate registry track and are not part of this command surface yet.
 
-## Control UI
+<a id="control-ui" />
 
-The experimental **Plugins > Claws** tab inspects Claws through the Gateway.
+## Gateway lifecycle methods
+
+The experimental Gateway backend exposes Claw inventory, previews, and mutations.
 Set `OPENCLAW_EXPERIMENTAL_CLAWS=1` on the Gateway process and restart it to
-enable the tab and its RPC methods. There is no separate browser flag. A direct
-visit to `/claws` while the experiment is disabled shows an unavailable state.
+enable these RPC methods. Disabled methods are not advertised and reject requests.
+Control UI controls are a separate integration; registering these methods does
+not add a **Plugins > Claws** tab or a `/claws` page.
 
-Choose **Add Claw**, enter a ClawHub package name and optional version and agent
-ID, then review the resolved exact release. The preview includes the publisher,
+| Methods                                                       | Required scope   | Purpose                                  |
+| ------------------------------------------------------------- | ---------------- | ---------------------------------------- |
+| `claws.status`, `claws.doctor`                                | `operator.read`  | Inspect installed state and findings.    |
+| `claws.catalog.detail`                                        | `operator.read`  | Resolve a ClawHub package release.       |
+| `claws.add.plan`, `claws.update.plan`, `claws.remove.plan`    | `operator.read`  | Preview canonical lifecycle changes.     |
+| `claws.add.apply`, `claws.update.apply`, `claws.remove.apply` | `operator.admin` | Apply the exact reviewed lifecycle plan. |
+
+Add and update previews resolve a ClawHub package name and optional version.
+Add also accepts an optional agent ID. The preview includes the publisher,
 proposed changes, requested capabilities, setup requirements, and any trust
 warning or blockers. Configured-permission snapshots include inherited core-tool
 policy, sandbox settings, filesystem restrictions, heartbeat cadence, memory-search
@@ -68,29 +78,27 @@ defaults such as staggering, delivery routes, and scheduled execution permission
 remain unresolved. An empty declaration list means no package-declared jobs,
 not that the agent has no other scheduled work.
 
-This Gateway surface is read-only; it does not register Claw mutation methods.
-The confirmation model uses an administrator's approval of the exact proposed
-changes, as Plugins does. Unresolved runtime permissions are informational, not
+Apply methods reuse the canonical Claws lifecycle owners and require an
+administrator's approval of the exact proposed changes. They recheck the reviewed
+plan and live caller authority before effects. Unresolved runtime permissions are informational, not
 a blanket blocker. Canonical plan blockers and artifact verification still apply.
 Plugin-bearing Claws remain blocked until the plugin owner's capability-consent
 flow is integrated; administrator confirmation does not bypass that flow.
 
-Installed entries show the associated agent, version, setup state, managed and
-referenced resources, and doctor findings. **Continue setup in chat** opens the
-native new conversation screen for that agent; it does not send a message or
-complete bootstrap automatically. **Update** resolves a release and previews
-changes for the selected installed agent. Update application and removal are
-not available through this tab yet; use the CLI's reviewed lifecycle flow.
+Inventory reports the associated agent, version, setup state, managed and
+referenced resources, and doctor findings. Installation does not send a chat
+message or complete native bootstrap automatically. Setup continues through a
+normal conversation with the installed agent.
 
-Reading inventory and previewing changes requires `operator.read`.
-A reconnect or operator change invalidates the preview. Use the existing CLI
-for Claw mutations; its add, update, removal, and recovery owners are unchanged.
+After interrupted or partial operations, refresh inventory and review a new plan
+before retrying. The CLI's reviewed add, update, removal, and recovery flows remain
+available.
 
 The registry must independently support Claw packages. `OPENCLAW_CLAWHUB_URL`
 selects the registry used by the Gateway, including for staging. Neither this
 routing setting nor the OpenClaw experiment flag enables publishing in ClawHub.
-This initial tab accepts package names directly; catalog search and adoption of
-existing agents are outside this UI flow.
+These methods accept package names directly; catalog search and adoption of
+existing agents are outside this Gateway surface.
 
 ## Bundled role Claws
 

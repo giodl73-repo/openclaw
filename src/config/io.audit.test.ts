@@ -145,6 +145,21 @@ describe("config io audit helpers", () => {
     expect(auditPath.startsWith(path.resolve("undefined"))).toBe(false);
   });
 
+  it("does not swallow remote source revocation at native audit commit", async () => {
+    const home = await suiteRootTracker.make("append-remote-revocation");
+    const params = { env: {}, homedir: () => home, record: createRenameAuditRecord(home) };
+    const refusal = new Error("synthetic worker config source closed");
+    let checks = 0;
+    const assertRemote = vi.fn(async () => {
+      if (++checks === 3) {
+        throw refusal;
+      }
+    });
+    await expect(appendConfigAuditRecord(params, undefined, assertRemote)).rejects.toThrow(refusal);
+    expect(assertRemote).toHaveBeenCalledTimes(3);
+    expect(listConfigAuditRecordsForTests(params)).toEqual([]);
+  });
+
   it("appends audit entries off-thread and retains them after canonical close", async () => {
     const home = await suiteRootTracker.make("append");
     const record = createRenameAuditRecord(home);

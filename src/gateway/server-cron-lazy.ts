@@ -279,6 +279,9 @@ export function createLazyGatewayCronState(params: LazyGatewayCronParams): Gatew
     getJob(id) {
       return loaded?.state.cron.getJob(id);
     },
+    getLoadedJobs() {
+      return loaded?.state.cron.getLoadedJobs();
+    },
     readJob: bindCron(({ state }) => state.cron.readJob.bind(state.cron)),
     async readScratch(id, options) {
       options?.assertCurrent?.();

@@ -9,6 +9,7 @@ import {
   readClawCronRefs,
   upsertClawCronRef,
   type ClawCronGateway,
+  type ClawCronMutation,
   type PersistedClawCronRef,
 } from "./cron.js";
 import { digestClawValue as digest } from "./digest.js";
@@ -95,12 +96,21 @@ export async function applyClawCronUpdate(
   const add = async (
     ref: PersistedClawCronRef,
     beforePersistentApply?: () => void,
-  ): Promise<string> => {
+    retainRollback = false,
+    previous?: PersistedClawCronRef,
+  ): Promise<{ id: string; mutation?: ClawCronMutation }> => {
     await waitForAgent();
     beforePersistentApply?.();
     let raw: unknown;
+    let mutation: ClawCronMutation | undefined;
     try {
-      raw = await gateway.add(clawCronGatewayInput(updatePlan.agentId, ref));
+      const input = clawCronGatewayInput(updatePlan.agentId, ref);
+      if (retainRollback && gateway.addWithRollback) {
+        mutation = await gateway.addWithRollback(input, previous);
+        raw = mutation.result;
+      } else {
+        raw = await gateway.add(input);
+      }
     } catch (error) {
       throw new ClawCronUpdateError(coerceErrorMessage(error), true);
     }
@@ -108,7 +118,7 @@ export async function applyClawCronUpdate(
     if (!result) {
       throw new ClawCronUpdateError("cron.add returned no scheduler job id.", true);
     }
-    return result.id;
+    return { id: result.id, mutation };
   };
   const rollback = async () => {
     const failures = await collectClawRollbackFailures(undo.toReversed());
@@ -142,13 +152,24 @@ export async function applyClawCronUpdate(
         }
         options.beforePersistentApply?.();
         upsertRef({ ...previous, status: "pending", updatedAtMs: nowMs }, options);
+        let mutation: ClawCronMutation | undefined;
         try {
-          await gateway.remove(previous.schedulerJobId);
+          if (gateway.removeWithRollback) {
+            mutation = await gateway.removeWithRollback(previous.schedulerJobId, previous);
+          } else {
+            await gateway.remove(previous.schedulerJobId);
+          }
         } catch (error) {
           throw new ClawCronUpdateError(coerceErrorMessage(error), true);
         }
         undo.push(async () => {
-          const restoredId = await add(previous);
+          const restored = mutation
+            ? clawCronSchedulerJobFromResult(await mutation.rollback())
+            : await add(previous);
+          if (!restored) {
+            throw new ClawCronUpdateError("Cron compensation returned no scheduler job id.", true);
+          }
+          const restoredId = restored.id;
           upsertRef({ ...previous, schedulerJobId: restoredId, updatedAtMs: nowMs }, options);
         });
         options.beforePersistentApply?.();
@@ -169,8 +190,11 @@ export async function applyClawCronUpdate(
       const pending = targetRef({ agentId: updatePlan.agentId, job, previous, nowMs });
       upsertRef(pending, options);
       let schedulerJobId: string;
+      let mutation: ClawCronMutation | undefined;
       try {
-        schedulerJobId = await add(pending, options.beforePersistentApply);
+        const added = await add(pending, options.beforePersistentApply, true, previous);
+        schedulerJobId = added.id;
+        mutation = added.mutation;
       } catch (error) {
         if (!(error instanceof ClawCronUpdateError && error.partial)) {
           // No dispatch occurred: release only this attempt's pending declaration.
@@ -185,7 +209,11 @@ export async function applyClawCronUpdate(
       if (action.action === "change") {
         if (!previous?.schedulerJobId || schedulerJobId !== previous.schedulerJobId) {
           try {
-            await gateway.remove(schedulerJobId);
+            if (mutation) {
+              await mutation.rollback();
+            } else {
+              await gateway.remove(schedulerJobId);
+            }
             if (previous) {
               upsertRef(previous, options);
             }
@@ -200,12 +228,22 @@ export async function applyClawCronUpdate(
           );
         }
         undo.push(async () => {
-          const restoredId = await add(previous);
+          const restored = mutation
+            ? clawCronSchedulerJobFromResult(await mutation.rollback())
+            : await add(previous);
+          if (!restored) {
+            throw new ClawCronUpdateError("Cron compensation returned no scheduler job id.", true);
+          }
+          const restoredId = restored.id;
           upsertRef({ ...previous, schedulerJobId: restoredId, updatedAtMs: nowMs }, options);
         });
       } else {
         undo.push(async () => {
-          await gateway.remove(schedulerJobId);
+          if (mutation) {
+            await mutation.rollback();
+          } else {
+            await gateway.remove(schedulerJobId);
+          }
           deleteRef(updatePlan.agentId, action.id, options);
         });
       }

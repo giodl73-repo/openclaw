@@ -5,6 +5,7 @@ import {
   prepareSqliteAuditRecord,
   type SqliteAuditRecordEntry,
 } from "./sqlite-audit-record.kernel.js";
+import type { SqliteWorkerAdmissionFactory } from "./sqlite-worker-operation-admission.js";
 
 /** Serialize the audit record and capture its store before yielding to the shared actor. */
 export async function registerSqliteAuditRecordAsync<T>(
@@ -12,6 +13,7 @@ export async function registerSqliteAuditRecordAsync<T>(
     scope: string;
     maxEntries: number;
     assertCurrent?: () => void;
+    createAdmission?: SqliteWorkerAdmissionFactory;
   },
   record: SqliteAuditRecordEntry<T>,
 ): Promise<void> {
@@ -24,6 +26,6 @@ export async function registerSqliteAuditRecordAsync<T>(
   await runOpenClawStateWorkerOperation(
     context,
     (store) => store.execute({ type: "diagnostic.register", input }),
-    { assertCurrent: options.assertCurrent },
+    { assertCurrent: options.assertCurrent, createAdmission: options.createAdmission },
   );
 }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import * as workerAdmission from "../infra/sqlite-worker-operation-admission.js";
 import {
   closeOpenClawStateDatabaseAsync,
   runOpenClawStateWriteTransaction,
@@ -10,7 +11,9 @@ import * as sharedWorker from "../state/openclaw-state-worker-store.js";
 import {
   captureConfigHealthStateStore,
   readConfigHealthStateFromStore,
+  readConfigHealthStateFromStoreAsync,
   patchConfigHealthEntryToStore,
+  patchConfigHealthEntryToStoreAsync,
 } from "./io.health-state.js";
 import * as healthOwner from "./io.health-state.js";
 import { createConfigIO } from "./io.js";
@@ -39,6 +42,148 @@ function fixture() {
   });
   return { deps, configPath };
 }
+
+it("plain broker reads retain observations and unconditional patches merge only supplied fields", async () => {
+  const { deps, configPath } = fixture();
+  const fingerprint = createConfigHealthFingerprint({ raw: "{}", parsed: {}, stat: null });
+  patchConfigHealthEntryToStore(deps, configPath, { lastPromotedGood: fingerprint });
+  using observation = captureConfigHealthStateStore(deps, configPath);
+  using sibling = captureConfigHealthStateStore(deps, `${configPath}.other`);
+  expect((await readConfigHealthStateFromStoreAsync(deps)).entries?.[configPath]).toMatchObject({
+    lastObservedSuspiciousSignature: "before",
+  });
+  expect(observation.isCurrent()).toBe(true);
+  await patchConfigHealthEntryToStoreAsync(deps, configPath, {
+    lastObservedSuspiciousSignature: undefined,
+  });
+  expect(observation.isCurrent()).toBe(false);
+  expect(sibling.isCurrent()).toBe(true);
+  expect((await readConfigHealthStateFromStoreAsync(deps)).entries?.[configPath]).toMatchObject({
+    lastObservedSuspiciousSignature: null,
+    lastPromotedGood: fingerprint,
+  });
+});
+
+it.each([false, true])(
+  "publishes unconditional patch invalidation only with a commit receipt (committed: %s)",
+  async (committed) => {
+    const { deps, configPath } = fixture();
+    using observation = captureConfigHealthStateStore(deps, configPath);
+    const snapshot = await observation.read();
+    if (!snapshot) {
+      throw new Error("Expected current health snapshot");
+    }
+    const execute = sharedWorker.runOpenClawStateWorkerOperation;
+    const failure = new Error("synthetic persistence delivery failure");
+    let intercepted = false;
+    let currentBeforeReturn: boolean | undefined;
+    const spy = vi.spyOn(sharedWorker, "runOpenClawStateWorkerOperation").mockImplementation(
+      new Proxy(execute, {
+        async apply(target, receiver, args) {
+          if (intercepted) {
+            return Reflect.apply(target, receiver, args);
+          }
+          intercepted = true;
+          if (committed) {
+            await Reflect.apply(target, receiver, args);
+            // A prior observer resumes before the sync producer receives its result.
+            await observation.update({ lastObservedSuspiciousSignature: "stale" }, snapshot);
+          }
+          currentBeforeReturn = observation.isCurrent();
+          throw failure;
+        },
+      }),
+    );
+    try {
+      await patchConfigHealthEntryToStoreAsync(deps, configPath, {
+        lastObservedSuspiciousSignature: "after",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(currentBeforeReturn).toBe(!committed);
+    expect(observation.isCurrent()).toBe(!committed);
+    expect(
+      (await readConfigHealthStateFromStoreAsync(deps)).entries?.[configPath]
+        ?.lastObservedSuspiciousSignature,
+    ).toBe(committed ? "after" : "before");
+  },
+);
+
+it.each(["refuse", "supersede"] as const)(
+  "rechecks the remote source and host observation at native commit (%s)",
+  async (mode) => {
+    const { deps, configPath } = fixture();
+    using before = captureConfigHealthStateStore(deps, configPath);
+    const snapshot = await before.read();
+    if (!snapshot) {
+      throw new Error("Expected current health snapshot");
+    }
+    const refusal = new Error("synthetic worker config lock closed");
+    let checks = 0;
+    const assertRemote = vi.fn(async () => {
+      checks += 1;
+      // Initial dispatch, native BEGIN, then native COMMIT.
+      if (checks === 3) {
+        if (mode === "refuse") {
+          throw refusal;
+        }
+        using newer = captureConfigHealthStateStore(deps, configPath);
+        expect(newer.isCurrent()).toBe(true);
+      }
+    });
+    using observation = captureConfigHealthStateStore(deps, configPath, undefined, assertRemote);
+    const update = observation.update({ lastObservedSuspiciousSignature: "stale" }, snapshot);
+    if (mode === "refuse") {
+      await expect(update).rejects.toThrow(refusal);
+    } else {
+      await update;
+    }
+    expect(assertRemote).toHaveBeenCalledTimes(3);
+    expect(deps.logger.warn).not.toHaveBeenCalled();
+    expect(
+      (await readConfigHealthStateFromStoreAsync(deps)).entries?.[configPath]
+        ?.lastObservedSuspiciousSignature,
+    ).toBe("before");
+  },
+);
+
+it("refuses a plain broker patch when its host closes before native commit", async () => {
+  const { deps, configPath } = fixture();
+  using observation = captureConfigHealthStateStore(deps, configPath);
+  let closed = false;
+  const refusal = new Error("synthetic config persistence host closed");
+  const createAdmission = workerAdmission.createSqliteWorkerOperationAdmission;
+  const spy = vi
+    .spyOn(workerAdmission, "createSqliteWorkerOperationAdmission")
+    .mockImplementation((admit, attachment) =>
+      createAdmission((request, grant) => {
+        if (request.stage === "commit") {
+          closed = true;
+        }
+        admit(request, grant);
+      }, attachment),
+    );
+  try {
+    await expect(
+      patchConfigHealthEntryToStoreAsync(
+        deps,
+        configPath,
+        { lastObservedSuspiciousSignature: "stale" },
+        () => {
+          if (closed) {
+            throw refusal;
+          }
+        },
+      ),
+    ).rejects.toThrow(refusal);
+  } finally {
+    spy.mockRestore();
+  }
+  expect(closed).toBe(true);
+  expect(observation.isCurrent()).toBe(true);
+  expect(deps.logger.warn).not.toHaveBeenCalled();
+});
 
 it.each([false, true])(
   "publishes nested health invalidation only on outer commit (rollback: %s)",

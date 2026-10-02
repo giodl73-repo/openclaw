@@ -11,6 +11,7 @@ import {
 import { withSqlitePostCommitPublications } from "./sqlite-post-commit.js";
 import { runSqliteImmediateTransactionSync } from "./sqlite-transaction.js";
 import {
+  createAsyncSqliteWorkerOperationAdmission,
   createSqliteWorkerOperationAdmission,
   deferSqliteWorkerCommitReceipt,
   requestSqliteWorkerOperationAdmission,
@@ -23,6 +24,204 @@ import {
 
 afterEach(() => vi.restoreAllMocks());
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
+it.each(["grant", "self-fence", "revoke"] as const)(
+  "retains async admission until its %s decision and rechecks database custody",
+  async (outcome) => {
+    const ready = Promise.withResolvers<void>();
+    const revoked = new Error("Synthetic database authority revoked");
+    const context = new AsyncLocalStorage<string>();
+    let requestCurrent = true;
+    let databaseCurrent = true;
+    let completed: Promise<void> | undefined;
+    const assertRequest = vi.fn(() => {
+      if (!requestCurrent) {
+        throw revoked;
+      }
+    });
+    const assertAccess = vi.fn(() => {
+      expect(context.getStore()).toBe("owner");
+      if (!databaseCurrent) {
+        throw revoked;
+      }
+    });
+    const admission = context.run("owner", () =>
+      createAsyncSqliteWorkerOperationAdmission((request, grant) => {
+        expect(request).toEqual({ stage: "commit", facts: "prepared config" });
+        completed = ready.promise.then(() => {
+          expect(context.getStore()).toBe("owner");
+          expect(grant()).toBe(outcome !== "revoke");
+        });
+        return completed;
+      }),
+    );
+    admission.bindDatabaseAuthority({
+      databasePath: path.resolve("synthetic-async-writer.sqlite"),
+      assertRequest,
+      assertAccess,
+      acquireSchema() {
+        throw new Error("Ordinary admission must not acquire schema authority");
+      },
+    });
+    const decision = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+    try {
+      admission.port.postMessage({
+        stage: "commit",
+        facts: "prepared config",
+        decision: decision.buffer,
+      });
+      admission.service();
+      expect(completed).toBeDefined();
+      expect(Atomics.load(decision, 0)).toBe(0);
+      expect(admission.failure).toBeUndefined();
+      requestCurrent = outcome !== "self-fence";
+      databaseCurrent = outcome !== "revoke";
+      ready.resolve();
+      await completed;
+      expect(Atomics.load(decision, 0)).toBe(outcome === "revoke" ? 2 : 1);
+      expect(assertRequest).toHaveBeenCalledOnce();
+      expect(assertAccess).toHaveBeenCalledTimes(2);
+      expect(admission.failure).toBe(outcome === "revoke" ? revoked : undefined);
+      expect(admission.failureSource).toBe(outcome === "revoke" ? "authority" : undefined);
+    } finally {
+      admission.finish();
+      ready.resolve();
+      await completed?.catch(() => {});
+    }
+  },
+);
+
+it.each(["resolve", "reject", "grant-then-reject"] as const)(
+  "settles async admission on %s without allowing a late grant",
+  async (outcome) => {
+    const ready = Promise.withResolvers<void>();
+    const rejected = new Error("Synthetic domain refusal");
+    let grantLater: (() => boolean) | undefined;
+    const admission = createAsyncSqliteWorkerOperationAdmission((_request, grant) => {
+      grantLater = grant;
+      if (outcome === "grant-then-reject") {
+        expect(grant()).toBe(true);
+      }
+      return ready.promise;
+    });
+    const decision = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+    try {
+      admission.port.postMessage({ stage: "transaction", decision: decision.buffer });
+      admission.service();
+      expect(grantLater).toBeDefined();
+      expect(Atomics.load(decision, 0)).toBe(outcome === "grant-then-reject" ? 1 : 0);
+      if (outcome === "resolve") {
+        ready.resolve();
+      } else {
+        ready.reject(rejected);
+      }
+      // Admission registered its settlement handlers before this await continuation.
+      await ready.promise.catch(() => {});
+      expect(grantLater?.()).toBe(false);
+      if (outcome === "grant-then-reject") {
+        expect(Atomics.load(decision, 0)).toBe(1);
+        expect(admission.failure).toBeUndefined();
+        expect(admission.failureSource).toBeUndefined();
+        expect(admission.cleanupFailures).toEqual([rejected]);
+      } else {
+        expect(Atomics.load(decision, 0)).toBe(2);
+        expect(admission.failureSource).toBe("domain");
+        if (outcome === "reject") {
+          expect(admission.failure).toBe(rejected);
+        } else {
+          expect(admission.failure).toMatchObject({
+            message: "SQLite worker admission was not granted",
+          });
+        }
+        expect(admission.cleanupFailures).toEqual([]);
+      }
+    } finally {
+      admission.finish();
+      ready.resolve();
+      await ready.promise.catch(() => {});
+    }
+  },
+);
+
+it("finish refuses every pending async decision and observes rejection after close", async () => {
+  const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+  const grants: Array<() => boolean> = [];
+  const admission = createAsyncSqliteWorkerOperationAdmission((_request, grant) => {
+    const gate = gates[grants.length];
+    grants.push(grant);
+    return gate.promise;
+  });
+  const decisions = gates.map(
+    () => new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)),
+  );
+  try {
+    for (const decision of decisions) {
+      admission.port.postMessage({ stage: "transaction", decision: decision.buffer });
+    }
+    admission.service();
+    expect(grants).toHaveLength(2);
+    expect(decisions.map((decision) => Atomics.load(decision, 0))).toEqual([0, 0]);
+    admission.finish();
+    expect(decisions.map((decision) => Atomics.load(decision, 0))).toEqual([2, 2]);
+    expect(grants.map((grant) => grant())).toEqual([false, false]);
+    gates[0].resolve();
+    gates[1].reject(new Error("Synthetic late rejection"));
+    await Promise.all(gates.map((gate) => gate.promise.catch(() => {})));
+    expect(grants.map((grant) => grant())).toEqual([false, false]);
+    expect(admission.failure).toMatchObject({ message: "SQLite worker admission is closed" });
+    expect(admission.failureSource).toBe("authority");
+    expect(admission.cleanupFailures).toEqual([]);
+  } finally {
+    admission.finish();
+    for (const gate of gates) {
+      gate.resolve();
+    }
+    await Promise.all(gates.map((gate) => gate.promise.catch(() => {})));
+  }
+});
+
+it.each(["sync", "async"] as const)(
+  "refuses %s admission when the callback throws synchronously",
+  (mode) => {
+    const rejected = new Error("Synthetic synchronous refusal");
+    const factory =
+      mode === "sync"
+        ? createSqliteWorkerOperationAdmission
+        : createAsyncSqliteWorkerOperationAdmission;
+    const admission = factory(() => {
+      throw rejected;
+    });
+    const decision = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+    try {
+      admission.port.postMessage({ stage: "open", decision: decision.buffer });
+      admission.service();
+      expect(Atomics.load(decision, 0)).toBe(2);
+      expect(admission.failure).toBe(rejected);
+      expect(admission.failureSource).toBe("domain");
+    } finally {
+      admission.finish();
+    }
+  },
+);
+
+it("refuses a synchronous callback without a grant before service returns", () => {
+  let grantLater: (() => boolean) | undefined;
+  const admission = createSqliteWorkerOperationAdmission((_request, grant) => {
+    grantLater = grant;
+  });
+  const decision = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  try {
+    admission.port.postMessage({ stage: "transaction", decision: decision.buffer });
+    admission.service();
+    expect(Atomics.load(decision, 0)).toBe(2);
+    expect(grantLater).toBeDefined();
+    expect(grantLater?.()).toBe(false);
+    expect(admission.failure).toMatchObject({ message: "SQLite worker admission was not granted" });
+    expect(admission.failureSource).toBe("domain");
+  } finally {
+    admission.finish();
+  }
+});
 
 it.each(["grant", "revoke", "close", "self-fence", "request-revoke", "late-revoke"] as const)(
   "waits for the live owner's %s decision when host scheduling is delayed",

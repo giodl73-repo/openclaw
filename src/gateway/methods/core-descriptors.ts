@@ -42,15 +42,6 @@ const SIDECAR_CONTROL_PLANE_WRITE = { startup: true, controlPlaneWrite: true } a
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
 export const CORE_GATEWAY_METHOD_SPECS = [
-  ["claws.status", "claws", "operator.read", "2026.9"],
-  ["claws.doctor", "claws", "operator.read", "2026.9"],
-  ["claws.catalog.detail", "claws", "operator.read", "2026.9"],
-  ["claws.add.plan", "claws", "operator.read", "2026.9"],
-  ["claws.update.plan", "claws", "operator.read", "2026.9"],
-  ["claws.add.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
-  ["claws.update.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
-  ["claws.remove.plan", "claws", "operator.read", "2026.9"],
-  ["claws.remove.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["health", "health", "operator.read", "<=2026.7"],
   ["diagnostics.stability", "diagnostics", "operator.read", "<=2026.7"],
   ["doctor.memory.status", "doctor", "operator.read", "<=2026.7"],
@@ -119,7 +110,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["openclaw.chat", "system-agent", "operator.admin", "<=2026.7"],
   ["openclaw.chat.history", "system-agent", "operator.admin", "2026.7"],
   ["openclaw.changes.list", "system-changes", "operator.admin", "<=2026.7"],
-  ["openclaw.approval.list", "system-agent", "operator.approvals", "<=2026.7"],
+  ["openclaw.approval.list", "system-agent-approvals", "operator.approvals", "<=2026.7"],
   ["openclaw.setup.detect", "system-agent", "operator.admin", "<=2026.7"],
   // Failed activation candidates are non-mutating probes. Keep this admin-only
   // without the shared three-write budget so the automatic ladder can finish.
@@ -698,4 +689,13 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["backup.status", "backup", "operator.read", "2026.9"],
   ["storage.locations.list", "storage", "operator.read", "2026.9"],
   ["storage.locations.probe", "storage", "operator.read", "2026.9"],
+  ["claws.status", "claws", "operator.read", "2026.9"],
+  ["claws.doctor", "claws", "operator.read", "2026.9"],
+  ["claws.catalog.detail", "claws", "operator.read", "2026.9"],
+  ["claws.add.plan", "claws", "operator.read", "2026.9"],
+  ["claws.update.plan", "claws", "operator.read", "2026.9"],
+  ["claws.add.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
+  ["claws.update.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
+  ["claws.remove.plan", "claws", "operator.read", "2026.9"],
+  ["claws.remove.apply", "claws", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

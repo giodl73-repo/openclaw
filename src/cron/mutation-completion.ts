@@ -13,6 +13,7 @@ type MutationState = {
   method: string;
   open: boolean;
   committed: boolean;
+  onCommitted?: () => void;
   trackAdmission?: ReturnType<typeof captureAsyncWorkTracker>;
 };
 const currentMutation = new AsyncLocalStorage<MutationState>();
@@ -23,7 +24,10 @@ export type CronMutationCompletion = {
 };
 
 /** One in-process invocation may preserve only the effect its actual mutation owner accepted. */
-export function createCronMutationCompletion(method: string): CronMutationCompletion | undefined {
+export function createCronMutationCompletion(
+  method: string,
+  onCommitted?: () => void,
+): CronMutationCompletion | undefined {
   if (!mutationMethods.has(method)) {
     return undefined;
   }
@@ -31,6 +35,7 @@ export function createCronMutationCompletion(method: string): CronMutationComple
     method,
     open: true,
     committed: false,
+    onCommitted,
     // Gateway dispatch installs its own work scope. Keep the originating tool's
     // resource owner on this exact receipt, without capturing authorization.
     ...(method === "cron.run" ? { trackAdmission: captureAsyncWorkTracker() } : {}),
@@ -76,6 +81,7 @@ export function captureCronMutationCommit(method: string): (() => undefined) | u
   return () => {
     if (state.open) {
       state.committed = true;
+      state.onCommitted?.();
     }
     return undefined;
   };

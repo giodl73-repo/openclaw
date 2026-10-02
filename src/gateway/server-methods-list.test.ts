@@ -1,7 +1,7 @@
 /**
  * Tests the registered gateway server method list and exported method names.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createCoreGatewayMethodDescriptors,
   listCoreGatewayMethodNames,
@@ -58,6 +58,34 @@ describe("GATEWAY_EVENTS", () => {
 });
 
 describe("listGatewayMethods", () => {
+  beforeEach(() => {
+    vi.stubEnv("OPENCLAW_EXPERIMENTAL_CLAWS", "0");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const clawsMethods = [
+    "claws.status",
+    "claws.doctor",
+    "claws.catalog.detail",
+    "claws.add.plan",
+    "claws.update.plan",
+    "claws.add.apply",
+    "claws.update.apply",
+    "claws.remove.plan",
+    "claws.remove.apply",
+  ];
+
+  it("appends experimental Claws methods without reordering existing advertised methods", () => {
+    const disabledMethods = listGatewayMethods();
+    for (const method of clawsMethods) {
+      expect(disabledMethods).not.toContain(method);
+    }
+    vi.stubEnv("OPENCLAW_EXPERIMENTAL_CLAWS", "1");
+    expect(listGatewayMethods()).toEqual([...disabledMethods, ...clawsMethods]);
+  });
+
   const expectedMethodsAfterModelProbe = [
     "migrations.memory.plan",
     "migrations.memory.apply",
@@ -533,7 +561,10 @@ describe("listGatewayMethods", () => {
       "storage.locations.list",
       "storage.locations.probe",
     ];
-    expect(coreMethods.slice(-expectedCoreSuffix.length)).toEqual(expectedCoreSuffix);
+    expect(coreMethods.slice(-(expectedCoreSuffix.length + clawsMethods.length))).toEqual([
+      ...expectedCoreSuffix,
+      ...clawsMethods,
+    ]);
     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));
     expect(methods.indexOf("approval.resolve")).toBe(methods.indexOf("approval.get") + 1);
     expect(methods.indexOf("audit.run.inspect")).toBe(methods.indexOf("hooks.status") + 1);

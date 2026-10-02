@@ -8,6 +8,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { withArtifactPreservingStateReads } from "../state/openclaw-state-db-readonly.js";
 import { applyClawAddPlan } from "./add.js";
 import { withResolvedClawHubSource } from "./clawhub-source.js";
+import { createClawControlUiCronGateway } from "./control-ui-cron-gateway.js";
 import { buildClawControlUiAddPlan, projectClawAddPlan } from "./control-ui-plan.js";
 import { withClawControlUiUpdatePlan } from "./control-ui-update-plan.js";
 import type {
@@ -15,7 +16,6 @@ import type {
   ClawControlUiHost,
   ClawControlUiWorkerResult,
 } from "./control-ui-worker-contract.js";
-import type { ClawCronGateway } from "./cron.js";
 import { digestClawValue } from "./digest.js";
 import { readClawInventory } from "./inventory-read.js";
 import type { ClawRemovePlan } from "./lifecycle-remove-contract.js";
@@ -133,15 +133,7 @@ export async function executeClawControlUiOperation(
     }
     return completion(operation, agentId, status);
   };
-  const cronGateway: ClawCronGateway = {
-    add: (params) => request("cron.add", params),
-    get: (id) => request("cron.get", { id }),
-    list: (agentId) => request("cron.list", { agentId, includeDisabled: true }),
-    remove: (id) => request("cron.remove", { id }),
-    waitUntilAgentAvailable: async (agentId) => {
-      await request("agent.ready", { agentId });
-    },
-  };
+  const cronGateway = createClawControlUiCronGateway(host);
   if (command.operation === "add") {
     const params = command.params;
     const result = await withResolvedClawHubSource({

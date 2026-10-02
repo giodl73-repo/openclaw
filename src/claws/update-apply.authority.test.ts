@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { applyClawUpdatePlan } from "./update-apply.js";
 import { addPlan, consent, install, manifest, plan, source } from "./update-apply.test-helpers.js";
+import { isClawRollbackMetadata } from "./update-rollback.js";
 
 describe("Claw update current-request authority", () => {
   it.each(["planning", "workspace", "cron"] as const)(
@@ -99,6 +100,7 @@ describe("Claw update current-request authority", () => {
     const commitConfig = vi.fn<
       NonNullable<Parameters<typeof applyClawUpdatePlan>[2]["commitConfig"]>
     >(async (transform, guard) => {
+      expect(isClawRollbackMetadata()).toBe(!guard);
       guard?.();
       config = transform(config);
       if (guard) {
@@ -130,6 +132,7 @@ describe("Claw update current-request authority", () => {
     expect(commitConfig).toHaveBeenNthCalledWith(1, expect.any(Function), beforePersistentApply);
     expect(commitConfig).toHaveBeenNthCalledWith(2, expect.any(Function));
     expect(config).toEqual(initialConfig);
+    expect(isClawRollbackMetadata()).toBe(false);
     expect(applyCron).not.toHaveBeenCalled();
     expect(persistInstall).not.toHaveBeenCalled();
   });

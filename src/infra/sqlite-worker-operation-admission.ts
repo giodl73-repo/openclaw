@@ -67,6 +67,22 @@ export function createSqliteWorkerOperationAdmission(
   admit: (request: SqliteWorkerAdmissionRequest, grant: () => boolean) => void,
   attachment?: unknown,
 ): SqliteWorkerOperationAdmission {
+  return createOperationAdmission(admit, attachment, false);
+}
+
+/** Await remote custody checks, then call grant while the checked owner is still retained. */
+export function createAsyncSqliteWorkerOperationAdmission(
+  admit: (request: SqliteWorkerAdmissionRequest, grant: () => boolean) => Promise<void>,
+  attachment?: unknown,
+): SqliteWorkerOperationAdmission {
+  return createOperationAdmission(admit, attachment, true);
+}
+
+function createOperationAdmission(
+  admit: (request: SqliteWorkerAdmissionRequest, grant: () => boolean) => void | Promise<void>,
+  attachment: unknown,
+  asyncAdmission: boolean,
+): SqliteWorkerOperationAdmission {
   const { port1, port2 } = new MessageChannel();
   if (attachment !== undefined) {
     try {
@@ -188,6 +204,17 @@ export function createSqliteWorkerOperationAdmission(
       return granted;
     };
     let source: AdmissionFailureSource = "authority";
+    let pending = false;
+    const complete = () => {
+      decisions.delete(decision);
+      if (Atomics.load(decision, 0) === REQUESTED) {
+        refuse(
+          decision,
+          new SqliteWorkerError("SQLite worker admission was not granted", "closed"),
+          "domain",
+        );
+      }
+    };
     try {
       inOwnerContext(() => {
         databaseAuthority?.assertRequest?.();
@@ -217,21 +244,27 @@ export function createSqliteWorkerOperationAdmission(
         });
       } else {
         source = "domain";
-        inOwnerContext(admit, request, grant);
+        const result = inOwnerContext(admit, request, grant);
+        if (asyncAdmission) {
+          pending = true;
+          // Keep pending native waiters owned by finish(), and observe rejection even after close.
+          void Promise.resolve(result).then(complete, (error: unknown) => {
+            refuse(decision, error, "domain");
+            decisions.delete(decision);
+          });
+        }
       }
     } catch (error) {
       refuse(decision, error, source);
       return;
     } finally {
       // Repeated preparation requests must not retain every settled decision.
-      decisions.delete(decision);
+      if (!pending) {
+        decisions.delete(decision);
+      }
     }
-    if (Atomics.load(decision, 0) === REQUESTED) {
-      refuse(
-        decision,
-        new SqliteWorkerError("SQLite worker admission was not granted", "closed"),
-        "domain",
-      );
+    if (!pending) {
+      complete();
     }
   };
   port1.on("message", receive);
