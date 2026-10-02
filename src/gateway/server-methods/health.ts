@@ -5,7 +5,6 @@ import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public
 import { readChildRuntimeViability } from "../../infra/child-runtime-viability.js";
 import { formatErrorMessage as formatError } from "../../infra/errors.js";
 import { readGatewayMaintenanceWork } from "../../infra/gateway-active-work.js";
-import type { CanonicalReadinessResult } from "../../readiness/conditions.js";
 import { getStatusSummary } from "../../status/summary.js";
 import type { GatewayHotReloadStatus } from "../config-reload-status.types.js";
 import { buildContextEngineHealthSummary } from "../health/context-engine.js";
@@ -22,16 +21,6 @@ import { respondUnavailableOnThrow } from "./response.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 const ADMIN_SCOPE = "operator.admin";
-
-async function withLiveReadiness<T extends object>(
-  summary: T,
-  context: Parameters<GatewayRequestHandlers[string]>[0]["context"],
-): Promise<T & { readiness?: CanonicalReadinessResult }> {
-  if (!context.getReadiness) {
-    return summary;
-  }
-  return { ...summary, readiness: await context.getReadiness() };
-}
 
 function cachedLifecycleDiffersFromRuntime(params: {
   cachedAccount: ChannelHealthSummary | undefined;
@@ -168,18 +157,15 @@ export const healthHandlers: GatewayRequestHandlers = {
     ) {
       respond(
         true,
-        await withLiveReadiness(
-          {
-            ...(await mergeCachedHealthRuntimeState({
-              cached,
-              getEventLoopHealth: context.getEventLoopHealth,
-              configReloadHotReloadStatus: context.getConfigReloaderHotReloadStatus?.(),
-            })),
-            // Live check. The cache must not keep a path that disappeared after it was stored.
-            childRuntime: readChildRuntimeViability(),
-          },
-          context,
-        ),
+        {
+          ...(await mergeCachedHealthRuntimeState({
+            cached,
+            getEventLoopHealth: context.getEventLoopHealth,
+            configReloadHotReloadStatus: context.getConfigReloaderHotReloadStatus?.(),
+          })),
+          // Live check. The cache must not keep a path that disappeared after it was stored.
+          childRuntime: readChildRuntimeViability(),
+        },
         undefined,
         { cached: true },
       );
@@ -194,14 +180,11 @@ export const healthHandlers: GatewayRequestHandlers = {
       const snap = await refreshHealthSnapshot({ probe: wantsProbe, includeSensitive });
       respond(
         true,
-        await withLiveReadiness(
-          {
-            ...snap,
-            modelRuntime: getPreparedModelRuntimeStartupStatus(),
-            childRuntime: readChildRuntimeViability(),
-          },
-          context,
-        ),
+        {
+          ...snap,
+          modelRuntime: getPreparedModelRuntimeStartupStatus(),
+          childRuntime: readChildRuntimeViability(),
+        },
         undefined,
       );
     });
@@ -209,16 +192,13 @@ export const healthHandlers: GatewayRequestHandlers = {
   status: async ({ respond, client, params, context }) => {
     const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
     const hostDesktopStatus = await context.hostDesktopService?.status();
-    const status = await withLiveReadiness(
-      await getStatusSummary({
-        includeSensitive: scopes.includes(ADMIN_SCOPE),
-        includeChannelSummary: params.includeChannelSummary !== false,
-        includeCliProjection: params.includeCliProjection === true,
-        sessionRowProjection: getSessionRowProjection(context),
-        ...(hostDesktopStatus ? { hostDesktopStatus } : {}),
-      }),
-      context,
-    );
+    const status = await getStatusSummary({
+      includeSensitive: scopes.includes(ADMIN_SCOPE),
+      includeChannelSummary: params.includeChannelSummary !== false,
+      includeCliProjection: params.includeCliProjection === true,
+      sessionRowProjection: getSessionRowProjection(context),
+      ...(hostDesktopStatus ? { hostDesktopStatus } : {}),
+    });
     const workerPools = await readGatewayWorkerPoolFacts();
     const shutdownBudget = context.hostLifecycle?.getShutdownBudget?.();
     const activeWork = shutdownBudget
