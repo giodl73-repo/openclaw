@@ -642,16 +642,20 @@ export class ControlModelConversation {
     if (!runId) {
       return;
     }
-    this.#projection = reduceSessionProjection(this.#projection, {
-      type: "runDelta",
-      runId,
-      ...(inFlight?.message !== undefined
-        ? { message: inFlight.message }
-        : typeof inFlight?.text === "string"
-          ? { message: { role: "assistant", content: inFlight.text } }
-          : {}),
-      scope: { sessionKey: this.#sessionKey },
-    });
+    const observedRun = observedStreamingRuns.get(runId);
+    const currentRun = this.#projection.runs[runId];
+    if (currentRun === undefined || currentRun === observedRun) {
+      this.#projection = reduceSessionProjection(this.#projection, {
+        type: "runDelta",
+        runId,
+        ...(inFlight?.message !== undefined
+          ? { message: inFlight.message }
+          : typeof inFlight?.text === "string"
+            ? { message: { role: "assistant", content: inFlight.text } }
+            : {}),
+        scope: { sessionKey: this.#sessionKey },
+      });
+    }
     for (const event of Array.isArray(inFlight?.events) ? inFlight.events : []) {
       const payload = record(event);
       if (payload) {
