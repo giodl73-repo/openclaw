@@ -326,7 +326,6 @@ function sendOptions(input: Record<string, unknown>): Record<string, unknown> {
     "toolBindings",
     "timeoutMs",
     "expectedLeafEntryId",
-    "expectedRunId",
     "suppressCommandInterpretation",
   ]) {
     if (input[key] !== undefined) {

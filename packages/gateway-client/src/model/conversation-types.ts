@@ -174,7 +174,6 @@ export type ControlModelSendInput =
       toolBindings?: Readonly<Record<string, unknown>>;
       timeoutMs?: number;
       expectedLeafEntryId?: string | null;
-      expectedRunId?: string;
       suppressCommandInterpretation?: boolean;
     }>;
 export type ControlModelSendResult = Readonly<{
