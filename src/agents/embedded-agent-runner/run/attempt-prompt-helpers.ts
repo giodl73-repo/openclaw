@@ -20,6 +20,7 @@ import { truncateUtf16Safe } from "../../../utils.js";
 import { listActiveProcessSessionReferences } from "../../bash-process-references.js";
 import { resolveProcessToolScopeKey } from "../../bash-process-scope.js";
 import { wrapPluginSystemContextSection } from "../../hook-system-context-boundary.js";
+import { runPromptBuildHookSequence } from "../../prompt-build-hooks.js";
 import { resolveEffectiveToolFsWorkspaceOnly } from "../../tool-fs-policy.js";
 import { deriveContextPromptTokens, type NormalizedUsage } from "../../usage.js";
 import { buildEmbeddedCompactionRuntimeContext } from "../compaction-runtime-context.js";
@@ -104,38 +105,13 @@ export async function resolvePromptBuildHookResult(params: {
             return undefined;
           })
       : undefined;
-  const heartbeatContribution =
-    params.hookCtx.trigger === "heartbeat" &&
-    params.hookRunner?.runHeartbeatPromptContribution &&
-    params.hookRunner.hasHooks("heartbeat_prompt_contribution")
-      ? await params.hookRunner
-          .runHeartbeatPromptContribution(
-            {
-              sessionKey: params.hookCtx.sessionKey,
-              agentId: params.hookCtx.agentId,
-              heartbeatName: "heartbeat",
-            },
-            params.hookCtx,
-          )
-          .catch((hookErr: unknown) => {
-            log.warn(`heartbeat_prompt_contribution hook failed: ${String(hookErr)}`);
-            return undefined;
-          })
-      : undefined;
-  const promptBuildResult = params.hookRunner?.hasHooks("before_prompt_build")
-    ? await params.hookRunner
-        .runBeforePromptBuild(
-          {
-            prompt: params.prompt,
-            messages: params.messages,
-          },
-          params.hookCtx,
-        )
-        .catch((hookErr: unknown) => {
-          log.warn(`before_prompt_build hook failed: ${String(hookErr)}`);
-          return undefined;
-        })
-    : undefined;
+  const { heartbeatResult: heartbeatContribution, promptBuildResult } =
+    await runPromptBuildHookSequence({
+      hookRunner: params.hookRunner,
+      event: { prompt: params.prompt, messages: params.messages },
+      ctx: params.hookCtx,
+      warn: (message) => log.warn(message),
+    });
   const decisionPromptBuildFields = promptBuildResult
     ? Object.fromEntries(
         (

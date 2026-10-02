@@ -23,6 +23,13 @@ abort signal, transcript admission, bootstrap and prompt hooks, guarded output
 delivery, assistant transcript commitment, and attempt-result construction.
 Its implementation loads only when invoked.
 
+The built-in OpenClaw/Pi path and this executor's prompt helper share the
+internal heartbeat-then-prompt-build hook sequence. They retain their existing
+hook-presence timing, prompt assembly, queued-injection and retry ownership,
+and tool-authorized enrichment boundaries. This is shared lifecycle behavior,
+not a replacement for Pi or migration of its loop onto the adapter executor.
+The helper adds no public SDK surface.
+
 The executor reuses `createAgentHarnessAttemptDeadlineController` to report the
 bounded or unlimited execution deadline to the host lane. It does not create a
 second native settlement budget; abort still gates delivery while the adapter
