@@ -1,6 +1,7 @@
 import {
   readSessionMessageSequence,
   reduceSessionProjection,
+  type SessionProjectionRun,
   type SessionProjectionState,
 } from "../browser.js";
 import type {
@@ -28,7 +29,10 @@ type ConversationHistoryControllerOptions = {
   assertEpoch(epoch: number, command: string): void;
   getProjection(): SessionProjectionState;
   setProjection(projection: SessionProjectionState): void;
-  restoreInFlightRun(value: unknown): void;
+  restoreInFlightRun(
+    value: unknown,
+    observedStreamingRuns: ReadonlyMap<string, SessionProjectionRun>,
+  ): void;
   boundProjectionEntries(): void;
   setMessagesTruncated(truncated: boolean): void;
   setStatus(status: ControlModelConversationStatus): void;
@@ -197,6 +201,11 @@ export class ConversationHistoryController {
     this.#error = null;
     this.#options.setStatus("loading");
     this.#options.publish();
+    const observedStreamingRuns = new Map(
+      Object.entries(this.#options.getProjection().runs).filter(
+        ([, run]) => run.status === "streaming",
+      ),
+    );
     try {
       const response = await this.#options.host.gateway.request<Record<string, unknown>>(
         "chat.history",
@@ -229,7 +238,7 @@ export class ConversationHistoryController {
           scope: { sessionKey: this.#options.sessionKey },
         }),
       );
-      this.#options.restoreInFlightRun(response?.inFlightRun);
+      this.#options.restoreInFlightRun(response?.inFlightRun, observedStreamingRuns);
       const projectionOverflow = this.#options.getProjection().entries.length > maxMessages;
       this.#options.boundProjectionEntries();
       const nextOffset = safeInteger(response?.nextOffset);
