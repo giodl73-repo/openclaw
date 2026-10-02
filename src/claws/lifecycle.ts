@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
-import { homedir } from "node:os";
 import { relative, resolve } from "node:path";
 import { assertNoSymlinkParents } from "@openclaw/fs-safe/advanced";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolvePathViaExistingAncestorSync } from "../infra/boundary-path.js";
 import { FsSafeError, root as fsSafeRoot, type Root } from "../infra/fs-safe.js";
+import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import { resolveUserPath } from "../utils.js";
 import {
   clawAddCapabilityChange,
@@ -183,7 +183,7 @@ export async function buildClawAddPlan(params: {
   const context = params.context ?? {};
   const finalId = context.agentId ?? params.manifest.agent.id;
   const workspace = canonicalWorkspacePath(
-    context.workspace ?? resolve(homedir(), ".openclaw", `workspace-${finalId}`),
+    context.workspace ?? resolve(resolveRequiredHomeDir(), ".openclaw", `workspace-${finalId}`),
   );
   const packageRoot = await realpath(params.source.packageRoot).catch(
     () => params.source.packageRoot,

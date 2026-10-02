@@ -51,6 +51,36 @@ function createExistingStateContext() {
   return captureOpenClawStateWorkerContext({ path: databasePath, env: state.env });
 }
 
+function runAdmittedConfigWrite<T>(
+  context: ReturnType<typeof captureOpenClawStateWorkerContext>,
+  operation: () => T,
+): T {
+  const stages: string[] = [];
+  const admission = createSqliteWorkerOperationAdmission((request, grant) => {
+    stages.push(request.stage);
+    context.admission.assertCurrent();
+    grant();
+  });
+  const nativePost = admission.port.postMessage.bind(admission.port);
+  // Service the real grant before the same-thread native backend waits.
+  const dispatch = vi
+    .spyOn(admission.port, "postMessage")
+    .mockImplementation((message, transfers) => {
+      nativePost(message, transfers);
+      admission.service();
+    });
+  try {
+    const result = runWithSqliteWorkerStateContext(context, () =>
+      withSqliteWorkerOperationAdmission({ port: admission.port }, operation),
+    );
+    expect(stages).toEqual(["transaction", "commit"]);
+    return result;
+  } finally {
+    dispatch.mockRestore();
+    admission.finish();
+  }
+}
+
 it("retains the shared native handle until its last actor closes and preserves rows on reopen", async () => {
   const context = captureOpenClawStateWorkerContext();
   const first = runWithSqliteWorkerStateContext(context, () =>
@@ -202,7 +232,7 @@ it.each(["kv", "health"] as const)(
     const database = openOpenClawStateDatabase();
     const configPath = "/synthetic-native-borrow.json";
     expect(
-      runWithSqliteWorkerStateContext(context, () =>
+      runAdmittedConfigWrite(context, () =>
         health.execute({
           type: "config.health.patch",
           input: {
@@ -219,7 +249,7 @@ it.each(["kv", "health"] as const)(
     expect(database.db.isOpen).toBe(true);
     if (firstToClose === "kv") {
       expect(
-        runWithSqliteWorkerStateContext(context, () =>
+        runAdmittedConfigWrite(context, () =>
           health.execute({
             type: "config.health.patch",
             input: {
@@ -304,7 +334,7 @@ it.each(["config.health.patch", "diagnostic.register"] as const)(
 
     const scope = "tests/health-native-borrow";
     const write = (backend: typeof first, key: string) =>
-      runWithSqliteWorkerStateContext(context, () =>
+      runAdmittedConfigWrite(context, () =>
         operation === "config.health.patch"
           ? backend.execute({
               type: operation,

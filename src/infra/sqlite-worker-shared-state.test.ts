@@ -26,6 +26,7 @@ import { closeOpenClawStateDatabaseAsync } from "../state/openclaw-state-db-cach
 import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { claimOpenClawStateOwnership } from "../state/openclaw-state-ownership-operations.js";
 import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
+import type { OpenClawStateWorkerOperations } from "../state/openclaw-state-worker-contract.js";
 import {
   executeOpenClawStateWorker,
   inspectOpenClawStateDatabase,
@@ -41,6 +42,7 @@ import { OpenClawStateOwnershipError } from "./sqlite-lifecycle-errors.js";
 import { SqliteSchemaVersionError } from "./sqlite-user-version.js";
 import { SQLITE_WORKER_MAX_MESSAGE_BYTES } from "./sqlite-worker-contract.js";
 import { registerSharedStateWorkerAdmissionTests } from "./sqlite-worker-shared-state-admission.test-support.js";
+import { createSqliteWorkerWriteAdmission } from "./sqlite-worker-store.js";
 
 const dirs = useAutoCleanupTempDirTracker((cleanup) =>
   afterEach(async () => {
@@ -54,6 +56,29 @@ function context() {
   return captureOpenClawStateWorkerContext({
     env: { OPENCLAW_STATE_DIR: dirs.make("openclaw-worker-cold-") },
   });
+}
+
+async function writeHealthPatch(
+  captured: ReturnType<typeof captureOpenClawStateWorkerContext>,
+  input: OpenClawStateWorkerOperations["config.health.patch"]["input"],
+): Promise<boolean> {
+  const stages: string[] = [];
+  const result = await runOpenClawStateWorkerOperation(
+    captured,
+    (scope) => scope.execute({ type: "config.health.patch", input }),
+    {
+      createAdmission: createSqliteWorkerWriteAdmission(
+        (request) => {
+          captured.admission.assertCurrent();
+          stages.push(request.stage);
+        },
+        [captured.admission.databasePath],
+      ),
+    },
+  );
+  captured.admission.assertCurrent();
+  expect(stages).toEqual(["transaction", "commit"]);
+  return result;
 }
 
 describe("canonical shared-state worker admission", () => {
@@ -417,9 +442,7 @@ describe("canonical shared-state worker admission", () => {
         expected: null,
         updatedAtMs: 100,
       };
-      await expect(
-        executeOpenClawStateWorker(captured, { type: "config.health.patch", input }),
-      ).resolves.toBe(true);
+      await expect(writeHealthPatch(captured, input)).resolves.toBe(true);
       await closeOpenClawStateDatabaseAsync();
       const database = openOpenClawStateDatabase({ path: databasePath, env: seeded.environment });
       const row = database.db
@@ -597,12 +620,7 @@ describe("canonical shared-state worker admission", () => {
           updatedAtMs: 100,
         };
         const write = async (relocated: ReturnType<typeof captureOpenClawStateWorkerContext>) => {
-          expect(
-            await executeOpenClawStateWorker(relocated, {
-              type: "config.health.patch",
-              input,
-            }),
-          ).toBe(true);
+          expect(await writeHealthPatch(relocated, input)).toBe(true);
         };
         const relocatedDuringCallback = await runOpenClawStateWorkerOperation(
           original,

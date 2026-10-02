@@ -35,6 +35,7 @@ vi.mock("../infra/worker-task-pool.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../infra/worker-task-pool.js")>()),
   createOwnedWorkerTaskPool: () => ({
     close: vi.fn(),
+    rotate: vi.fn(async () => {}),
     runTask: (
       _input: unknown,
       options: {

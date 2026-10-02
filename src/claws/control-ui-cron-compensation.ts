@@ -3,8 +3,8 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { resolveCronJobConfigRevision } from "../cron/config-revision.js";
 import { cronJobReadView } from "../cron/job-read-view.js";
 import { createCronMutationCompletion } from "../cron/mutation-completion.js";
-import type { CronService } from "../cron/service.js";
 import type { CronJob } from "../cron/types.js";
+import type { GatewayCronServiceContract } from "../gateway/server-cron-contract.js";
 import { captureOpenClawStateReadContext } from "../state/openclaw-state-worker-context.js";
 import type {
   ClawControlUiCronMutationParams,
@@ -12,7 +12,7 @@ import type {
 } from "./control-ui-worker-contract.js";
 import { clawCronGatewayJobMatchesRef } from "./cron.js";
 
-type CronOwner = Pick<CronService, "list" | "getLoadedJobs" | "add" | "remove">;
+type CronOwner = Pick<GatewayCronServiceContract, "list" | "getLoadedJobs" | "add" | "remove">;
 type JobIdentity = { id: string; configRevision: string; updatedAtMs: number };
 
 function identity(job: CronJob): JobIdentity {

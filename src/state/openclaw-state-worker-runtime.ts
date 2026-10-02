@@ -328,20 +328,33 @@ export function executeSharedStateCommand(
   if (command.type === "config.health.patch") {
     const { configPath, patch, expected, updatedAtMs } = command.input;
     return runOpenClawStateWriteTransaction(({ db }) => {
-      return patchConfigHealthEntryInDatabase(db, configPath, patch, expected, updatedAtMs);
+      requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: configPath });
+      const applied = patchConfigHealthEntryInDatabase(
+        db,
+        configPath,
+        patch,
+        expected,
+        updatedAtMs,
+      );
+      requestSqliteWorkerOperationAdmission({ stage: "commit", facts: configPath });
+      return applied;
     }, writeOptions);
   }
   if (command.type === "config.health.patchUnconditional") {
     const { configPath, patch, updatedAtMs } = command.input;
     return runOpenClawStateWriteTransaction(({ db }) => {
+      requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: configPath });
       writeConfigHealthPatchInDatabase(db, configPath, patch, updatedAtMs);
+      requestSqliteWorkerOperationAdmission({ stage: "commit", facts: configPath });
       deferSqliteWorkerCommitReceipt(db, configPath);
     }, writeOptions);
   }
   if (command.type === "diagnostic.register") {
     const { scope, maxEntries, record } = command.input;
     return runOpenClawStateWriteTransaction(({ db }) => {
+      requestSqliteWorkerOperationAdmission({ stage: "transaction", facts: undefined });
       createSqliteAuditRecordKernel(db, { scope, maxEntries }).register(record);
+      requestSqliteWorkerOperationAdmission({ stage: "commit", facts: undefined });
     }, writeOptions);
   }
   if (command.type === "config.snapshot.upsert") {

@@ -16,6 +16,10 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterEach, expect, it, vi } from "vitest";
 import { SQLITE_WORKER_PREPARE_COMMAND } from "../infra/sqlite-worker-contract.js";
 import * as databaseIdentity from "../infra/sqlite-worker-identity.js";
+import {
+  createSqliteWorkerOperationAdmission,
+  withSqliteWorkerOperationAdmission,
+} from "../infra/sqlite-worker-operation-admission.js";
 import { runWithSqliteWorkerStateContext } from "../infra/sqlite-worker-state-context.js";
 import * as workerStore from "../infra/sqlite-worker-store.js";
 import { createPluginStateKeyedStore } from "../plugin-state/plugin-state-store.js";
@@ -164,19 +168,41 @@ it("permits a lazy native write after healthy peer changes when birthtime falls 
       await withExistingOpenClawStateSchema({ path: pathname }, async () => {
         const current =
           preparedRead?.workerContext() ?? captureOpenClawStateWorkerContext({ env: state.env });
-        expect(
-          runWithSqliteWorkerStateContext(current, () =>
-            backend.execute({
-              type: "config.health.patch",
-              input: {
-                configPath: "/synthetic-ctime.json",
-                patch: { last_observed_suspicious_signature: "healthy-peer" },
-                expected: null,
-                updatedAtMs: 100,
-              },
-            }),
-          ),
-        ).toBe(true);
+        const stages: string[] = [];
+        const admission = createSqliteWorkerOperationAdmission((request, grant) => {
+          current.admission.assertCurrent();
+          expect(grant()).toBe(true);
+          stages.push(request.stage);
+        });
+        const nativePost = admission.port.postMessage.bind(admission.port);
+        // Service the real grant before the same-thread native backend waits.
+        const dispatch = vi
+          .spyOn(admission.port, "postMessage")
+          .mockImplementation((message, transfers) => {
+            nativePost(message, transfers);
+            admission.service();
+          });
+        try {
+          expect(
+            runWithSqliteWorkerStateContext(current, () =>
+              withSqliteWorkerOperationAdmission({ port: admission.port }, () =>
+                backend.execute({
+                  type: "config.health.patch",
+                  input: {
+                    configPath: "/synthetic-ctime.json",
+                    patch: { last_observed_suspicious_signature: "healthy-peer" },
+                    expected: null,
+                    updatedAtMs: 100,
+                  },
+                }),
+              ),
+            ),
+          ).toBe(true);
+          expect(stages).toEqual(["transaction", "commit"]);
+        } finally {
+          dispatch.mockRestore();
+          admission.finish();
+        }
         expect(captured.admission.identity.birthtime).toBe(
           process.platform === "linux" ? "0" : before.ctimeNs.toString(),
         );

@@ -453,15 +453,11 @@ export function captureConfigHealthStateStore(
               }),
             {
               assertCurrent: guard.assertCurrent,
-              ...(assertAdmissionCurrentAsync
-                ? {
-                    createAdmission: createConfigPersistenceAdmission(
-                      databasePath,
-                      guard.assertCurrent,
-                      guard.assertAdmissionCurrentAsync,
-                    ),
-                  }
-                : {}),
+              createAdmission: createConfigPersistenceAdmission(
+                databasePath,
+                guard.assertCurrent,
+                guard.assertAdmissionCurrentAsync,
+              ),
             },
           );
           if (applied && observations.has(observation)) {
