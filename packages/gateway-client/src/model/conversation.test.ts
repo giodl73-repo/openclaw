@@ -489,6 +489,34 @@ describe("Control Model conversations", () => {
     model.dispose();
   });
 
+  it("retires a stale run from authoritative history without clearing newer activity", async () => {
+    const { harness, model, conversation } = await activatedConversation();
+    harness.emit({
+      event: "chat",
+      payload: { sessionKey: "agent:main:one", runId: "run-stale", state: "delta" },
+    });
+    const pendingHistory = harness.defer("chat.history");
+    const refresh = conversation.refreshHistory();
+    await vi.waitFor(() => expect(harness.callsFor("chat.history")).toHaveLength(2));
+
+    harness.emit({
+      event: "chat",
+      payload: { sessionKey: "agent:main:one", runId: "run-new", state: "delta" },
+    });
+    pendingHistory.resolve({ messages: [], completeSnapshot: true });
+    await refresh;
+
+    expect(conversation.getSnapshot().runs).toContainEqual(
+      expect.objectContaining({ runId: "run-stale", status: "completed" }),
+    );
+    expect(conversation.getSnapshot().activeRun).toMatchObject({
+      runId: "run-new",
+      status: "streaming",
+    });
+    expect(conversation.getSnapshot().commandAvailability.abort).toBe(true);
+    model.dispose();
+  });
+
   it("retires epoch-local runs and tools, then restores the authoritative in-flight run", async () => {
     const { harness, model, conversation } = await activatedConversation();
     harness.emit({

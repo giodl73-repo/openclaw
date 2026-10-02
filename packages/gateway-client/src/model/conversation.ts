@@ -6,6 +6,7 @@ import {
   type GatewaySessionMessageSubscription,
   type GatewaySessionMessageSubscriptionCoordinator,
   type SessionProjectionGatewayRunEvent,
+  type SessionProjectionRun,
   type SessionProjectionState,
 } from "../browser.js";
 import { ConversationArtifactStore } from "./conversation-artifacts.js";
@@ -135,7 +136,8 @@ export class ControlModelConversation {
       setProjection: (projection) => {
         this.#projection = projection;
       },
-      restoreInFlightRun: (value) => this.#restoreInFlightRun(value),
+      restoreInFlightRun: (value, observedStreamingRuns) =>
+        this.#restoreInFlightRun(value, observedStreamingRuns),
       boundProjectionEntries: () => this.#boundProjectionEntries(),
       setMessagesTruncated: (truncated) => {
         this.#boundsTruncated.messages = truncated;
@@ -616,9 +618,27 @@ export class ControlModelConversation {
     this.#publish();
   }
 
-  #restoreInFlightRun(value: unknown): void {
+  #restoreInFlightRun(
+    value: unknown,
+    observedStreamingRuns: ReadonlyMap<string, SessionProjectionRun>,
+  ): void {
     const inFlight = record(value);
     const runId = text(inFlight?.runId);
+    for (const [observedRunId, observedRun] of observedStreamingRuns) {
+      const currentRun = this.#projection.runs[observedRunId];
+      if (
+        observedRunId !== runId &&
+        currentRun === observedRun &&
+        currentRun.status === "streaming"
+      ) {
+        this.#projection = reduceSessionProjection(this.#projection, {
+          type: "runTerminal",
+          runId: observedRunId,
+          status: "completed",
+          scope: { sessionKey: this.#sessionKey },
+        });
+      }
+    }
     if (!runId) {
       return;
     }
