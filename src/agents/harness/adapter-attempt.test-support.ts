@@ -57,8 +57,8 @@ export const terminalAnchor: TranscriptEntryAnchor = {
   activeMessagePosition: 2,
 };
 
-export function createHostFixture() {
-  const user = { role: "user" as const, content: "hello", timestamp: 1 };
+export function createHostFixture(prompt = "hello") {
+  const user = { role: "user" as const, content: prompt, timestamp: 1 };
   const entries: SessionEntry[] = [
     {
       type: "message",
@@ -125,7 +125,7 @@ export function createHostFixture() {
     sessionFile: "/test/session.jsonl",
     workspaceDir: "/test/workspace",
     runId: "run-1",
-    prompt: "hello",
+    prompt,
     timeoutMs: 1_000,
     provider: "fixture",
     modelId: "fixture-model",

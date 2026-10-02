@@ -62,6 +62,22 @@ runtime boundary, the host tests check orchestration, and a composition test mus
 join the actual ACP adapter and stream consumer to that executor. Controlled
 native turns do not qualify a real engine, process cleanup, or packaged behavior.
 
+A QA-only Copilot SDK text adapter is available through that plugin's existing
+`test-api.ts`. It consumes the same private `prepare`/`run` interface without ACP
+or changes to the host executor. Preparation acquires no native resources;
+execution creates an isolated, tools-disabled SDK session using the existing
+Copilot restrictions. It replays text history as explicit JSON context in a new
+session, translates deltas, and joins native idle/error, queued output, abort
+requests and detach before returning. Failed transport operations unwind as
+failures, not evidence that remote work stopped.
+
+The composition suite drives the real SDK against a loopback JSON-RPC peer.
+This checks a second protocol consumer, not the native Copilot engine, inference,
+native role-preserving history, durable session resume, or migration of the
+shipping Copilot harness. Tool and non-text history are rejected. No runtime is
+registered, and production selection and packaging remain unchanged. This
+bounded example does not justify promoting the private contract to a public SDK.
+
 A live check must select an existing native ACP runtime, such as `acp-opencode`,
 and verify the recorded runtime identity. The ACP conversation-bind smoke and
 the native `codex` app-server smoke use different execution paths; neither alone

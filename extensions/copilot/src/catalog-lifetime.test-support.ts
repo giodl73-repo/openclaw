@@ -9,9 +9,11 @@ type Request = { id: number; method: string; params: Record<string, unknown> };
 export async function createCopilotFaultPeer() {
   const sent = createDeferred<void>();
   const detaching = createDeferred<void>();
+  const aborting = createDeferred<void>();
   const releaseDetach = createDeferred<void>();
   const replies = new Map<string, ReturnType<typeof createDeferred<Record<string, unknown>>>>();
   const methods: string[] = [];
+  const requests: Request[] = [];
   const sockets = new Set<Socket>();
   let socket: Socket;
   let sessionId: string;
@@ -41,20 +43,25 @@ export async function createCopilotFaultPeer() {
   };
   const handle = async (request: Request) => {
     methods.push(request.method);
+    requests.push(request);
     switch (request.method) {
       case "connect":
         return { protocolVersion: 3 };
       case "session.create":
         sessionId = String(request.params.sessionId);
+        previousEventId = null;
         return { sessionId };
       case "session.send":
         emit("user.message", { content: request.params.prompt });
         sent.resolve();
         return { messageId: "fixture-user" };
+      case "session.options.update":
+        return { success: true };
       case "session.tools.handlePendingToolCall":
         replies.get(String(request.params.requestId))?.resolve(request.params);
         return {};
       case "session.abort":
+        aborting.resolve();
         return {};
       case "session.detach":
         detaching.resolve();
@@ -114,10 +121,13 @@ export async function createCopilotFaultPeer() {
   return {
     client,
     methods,
+    requests,
     sent: sent.promise,
     detaching: detaching.promise,
+    aborting: aborting.promise,
     releaseDetach: () => releaseDetach.resolve(),
     emit,
+    disconnectTransport: () => client.forceStop(),
     requestTool(name: string, args: Record<string, unknown>) {
       const requestId = randomUUID();
       const reply = createDeferred<Record<string, unknown>>();
