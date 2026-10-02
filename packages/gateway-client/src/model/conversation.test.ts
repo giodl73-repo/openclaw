@@ -1,4 +1,6 @@
+import { validateChatSendParams } from "@openclaw/gateway-protocol";
 import { describe, expect, it, vi } from "vitest";
+import type { ControlModelSendInput } from "./conversation-types.js";
 import {
   activatedConversation,
   createHarness,
@@ -327,18 +329,23 @@ describe("Control Model conversations", () => {
     const { harness, model, conversation } = await activatedConversation();
     const pending = harness.defer("chat.send");
     const controller = new AbortController();
-    const send = conversation.send(
-      { message: "hello", idempotencyKey: "idem-1" },
-      {
-        signal: controller.signal,
-      },
-    );
+    const unsupportedRuntimeInput = {
+      message: "hello",
+      idempotencyKey: "idem-1",
+      expectedRunId: "unsupported-run",
+    } as ControlModelSendInput & { readonly expectedRunId: string };
+    const send = conversation.send(unsupportedRuntimeInput, {
+      signal: controller.signal,
+    });
     expect(conversation.getSnapshot().messages).toHaveLength(1);
     expect(conversation.getSnapshot().messages[0]).toMatchObject({
       pending: true,
       runId: "idem-1",
     });
-    expect(harness.callsFor("chat.send")[0]?.options?.signal).toBe(controller.signal);
+    const sendCall = harness.callsFor("chat.send")[0];
+    expect(sendCall?.options?.signal).toBe(controller.signal);
+    expect(sendCall?.params).not.toHaveProperty("expectedRunId");
+    expect(validateChatSendParams(sendCall?.params)).toBe(true);
     pending.resolve({ runId: "run-1", status: "accepted" });
     await expect(send).resolves.toEqual({
       runId: "run-1",
@@ -478,6 +485,73 @@ describe("Control Model conversations", () => {
     expect(conversation.getSnapshot().activeRun).toMatchObject({
       runId: "run-raced",
       status: "streaming",
+    });
+    model.dispose();
+  });
+
+  it("retires a stale run from authoritative history without clearing newer activity", async () => {
+    const { harness, model, conversation } = await activatedConversation();
+    harness.emit({
+      event: "chat",
+      payload: { sessionKey: "agent:main:one", runId: "run-stale", state: "delta" },
+    });
+    const pendingHistory = harness.defer("chat.history");
+    const refresh = conversation.refreshHistory();
+    await vi.waitFor(() => expect(harness.callsFor("chat.history")).toHaveLength(2));
+
+    harness.emit({
+      event: "chat",
+      payload: { sessionKey: "agent:main:one", runId: "run-new", state: "delta" },
+    });
+    pendingHistory.resolve({ messages: [], completeSnapshot: true });
+    await refresh;
+
+    expect(conversation.getSnapshot().runs).toContainEqual(
+      expect.objectContaining({ runId: "run-stale", status: "completed" }),
+    );
+    expect(conversation.getSnapshot().activeRun).toMatchObject({
+      runId: "run-new",
+      status: "streaming",
+    });
+    expect(conversation.getSnapshot().commandAvailability.abort).toBe(true);
+    model.dispose();
+  });
+
+  it("does not roll back newer same-run output with delayed in-flight history", async () => {
+    const { harness, model, conversation } = await activatedConversation();
+    harness.emit({
+      event: "chat",
+      payload: {
+        sessionKey: "agent:main:one",
+        runId: "run-same",
+        state: "delta",
+        message: { role: "assistant", content: "old" },
+      },
+    });
+    const pendingHistory = harness.defer("chat.history");
+    const refresh = conversation.refreshHistory();
+    await vi.waitFor(() => expect(harness.callsFor("chat.history")).toHaveLength(2));
+
+    harness.emit({
+      event: "chat",
+      payload: {
+        sessionKey: "agent:main:one",
+        runId: "run-same",
+        state: "delta",
+        message: { role: "assistant", content: "old + new" },
+      },
+    });
+    pendingHistory.resolve({
+      messages: [],
+      completeSnapshot: true,
+      inFlightRun: { runId: "run-same", text: "old" },
+    });
+    await refresh;
+
+    expect(conversation.getSnapshot().activeRun).toMatchObject({
+      runId: "run-same",
+      status: "streaming",
+      message: { role: "assistant", content: "old + new" },
     });
     model.dispose();
   });

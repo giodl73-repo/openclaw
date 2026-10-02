@@ -6,8 +6,10 @@ import {
   type GatewaySessionMessageSubscription,
   type GatewaySessionMessageSubscriptionCoordinator,
   type SessionProjectionGatewayRunEvent,
+  type SessionProjectionRun,
   type SessionProjectionState,
 } from "../browser.js";
+import { ConversationArtifactStore } from "./conversation-artifacts.js";
 import { ConversationCommandController } from "./conversation-commands.js";
 import { ConversationHistoryController } from "./conversation-history.js";
 import { ConversationInteractionStore } from "./conversation-interactions.js";
@@ -23,11 +25,15 @@ import {
   type ControlModelConversationStatus,
   type ControlModelConversationSubscriber,
   type ControlModelGatewayEventFrame,
+  type ControlModelMaterializedView,
+  type ControlModelMaterializeViewInput,
   type ControlModelSendInput,
   type ControlModelSendResult,
 } from "./conversation-types.js";
 import {
   connectionError,
+  eventAgentId,
+  eventSessionKey,
   localError,
   normalizeGatewayError,
   record,
@@ -53,6 +59,8 @@ export type {
   ControlModelSendInput,
   ControlModelSendResult,
   ControlModelToolStatus,
+  ControlModelMaterializedView,
+  ControlModelMaterializeViewInput,
 } from "./conversation-types.js";
 
 export class ControlModelConversation {
@@ -60,6 +68,7 @@ export class ControlModelConversation {
   readonly #sessionKey: string;
   #canonicalSessionKey: string;
   readonly #subscribers = new Set<ControlModelConversationSubscriber>();
+  readonly #artifacts: ConversationArtifactStore;
   readonly #tools: ConversationToolStore;
   readonly #interactions: ConversationInteractionStore;
   readonly #history: ConversationHistoryController;
@@ -90,6 +99,22 @@ export class ControlModelConversation {
     this.#sessionKey = sessionKey;
     this.#canonicalSessionKey = sessionKey;
     this.#connection = host.getConnectionSnapshot();
+    this.#artifacts = new ConversationArtifactStore({
+      host,
+      sessionKey,
+      assertCommandReady: (command) => this.#assertCommandReady(command),
+      captureEpoch: (command) => this.#captureEpoch(command),
+      assertEpoch: (epoch, command) => this.#assertEpoch(epoch, command),
+      matchesSessionKey: (key) => this.#matchesSessionKey(key),
+      getCurrentArtifacts: () => this.#snapshot.artifacts,
+      normalizeCommandError: (error, command, epoch) => {
+        if (epoch !== null) {
+          this.#assertEpoch(epoch, command);
+        }
+        return normalizeGatewayError(error, command);
+      },
+      publish: () => this.#publish(),
+    });
     this.#tools = new ConversationToolStore(host.bounds);
     this.#interactions = new ConversationInteractionStore({
       host,
@@ -111,7 +136,8 @@ export class ControlModelConversation {
       setProjection: (projection) => {
         this.#projection = projection;
       },
-      restoreInFlightRun: (value) => this.#restoreInFlightRun(value),
+      restoreInFlightRun: (value, observedStreamingRuns) =>
+        this.#restoreInFlightRun(value, observedStreamingRuns),
       boundProjectionEntries: () => this.#boundProjectionEntries(),
       setMessagesTruncated: (truncated) => {
         this.#boundsTruncated.messages = truncated;
@@ -151,6 +177,7 @@ export class ControlModelConversation {
   get hasActiveOperations(): boolean {
     return (
       this.#commands.hasActiveOperations ||
+      this.#artifacts.hasActiveOperations ||
       this.#activation !== null ||
       this.#history.hasActiveOperation
     );
@@ -209,6 +236,7 @@ export class ControlModelConversation {
     this.#activationGeneration += 1;
     const generation = this.#activationGeneration;
     this.#activationEpoch = connection.epoch;
+    this.#artifacts.beginEpoch(this.#projection.entries);
     this.#projection = { ...this.#projection, runs: {} };
     this.#tools.clear();
     this.#status = this.#projection.entries.length > 0 ? "stale" : "loading";
@@ -334,6 +362,8 @@ export class ControlModelConversation {
         ) {
           break;
         }
+        this.#artifacts.reset();
+        this.#history.invalidatePending();
         this.#applyProjection({ type: "sessionReset", scope: { sessionKey: this.#sessionKey } });
         this.#partialReasons.add("session-reset-awaiting-history");
         this.#status = "partial";
@@ -365,6 +395,7 @@ export class ControlModelConversation {
     this.#activationEpoch = null;
     this.#activation = null;
     this.#releaseLeases();
+    this.#artifacts.retireMaterializedViews();
     this.#status = "stale";
     this.#partialReasons.add("disconnected");
     this.#publish();
@@ -414,6 +445,13 @@ export class ControlModelConversation {
     options?: ControlModelRequestOptions,
   ): Promise<Readonly<Record<string, unknown>>> {
     return this.#commands.cancelQuestion(id, options);
+  }
+
+  materializeView(
+    input: ControlModelMaterializeViewInput,
+    options?: ControlModelRequestOptions,
+  ): Promise<ControlModelMaterializedView> {
+    return this.#artifacts.materialize(input, options);
   }
 
   async release(): Promise<void> {
@@ -486,33 +524,16 @@ export class ControlModelConversation {
       });
     });
   }
-  #eventSessionKey(payload: Record<string, unknown>): string | null {
-    for (const value of [
-      payload,
-      record(payload.data),
-      record(payload.presentation),
-      record(payload.approval),
-      record(record(payload.approval)?.presentation),
-      record(payload.question),
-      record(payload.message),
-    ]) {
-      const key = text(value?.sessionKey) ?? text(value?.key) ?? text(value?.sourceSessionKey);
-      if (key) {
-        return key;
-      }
-    }
-    return null;
-  }
   #eventMatches(payload: Record<string, unknown>, event?: string): boolean {
-    const eventAgentId = this.#eventAgentId(payload);
+    const payloadAgentId = eventAgentId(payload);
     if (
       this.#host.agentId &&
-      eventAgentId &&
-      eventAgentId.toLowerCase() !== this.#host.agentId.toLowerCase()
+      payloadAgentId &&
+      payloadAgentId.toLowerCase() !== this.#host.agentId.toLowerCase()
     ) {
       return false;
     }
-    const key = this.#eventSessionKey(payload);
+    const key = eventSessionKey(payload);
     if (key) {
       return this.#matchesSessionKey(key);
     }
@@ -557,6 +578,7 @@ export class ControlModelConversation {
 
   #handleAgent(payload: Record<string, unknown>): void {
     if (this.#tools.handle(payload, (runId) => Boolean(this.#projection.runs[runId]))) {
+      this.#artifacts.ingestToolEvent(payload);
       this.#publish();
     }
   }
@@ -596,40 +618,44 @@ export class ControlModelConversation {
     this.#publish();
   }
 
-  #eventAgentId(payload: Record<string, unknown>): string | null {
-    for (const value of [
-      payload,
-      record(payload.data),
-      record(payload.presentation),
-      record(payload.approval),
-      record(record(payload.approval)?.presentation),
-      record(payload.question),
-      record(payload.message),
-    ]) {
-      const agentId = text(value?.agentId);
-      if (agentId) {
-        return agentId;
-      }
-    }
-    return null;
-  }
-
-  #restoreInFlightRun(value: unknown): void {
+  #restoreInFlightRun(
+    value: unknown,
+    observedStreamingRuns: ReadonlyMap<string, SessionProjectionRun>,
+  ): void {
     const inFlight = record(value);
     const runId = text(inFlight?.runId);
+    for (const [observedRunId, observedRun] of observedStreamingRuns) {
+      const currentRun = this.#projection.runs[observedRunId];
+      if (
+        observedRunId !== runId &&
+        currentRun === observedRun &&
+        currentRun.status === "streaming"
+      ) {
+        this.#projection = reduceSessionProjection(this.#projection, {
+          type: "runTerminal",
+          runId: observedRunId,
+          status: "completed",
+          scope: { sessionKey: this.#sessionKey },
+        });
+      }
+    }
     if (!runId) {
       return;
     }
-    this.#projection = reduceSessionProjection(this.#projection, {
-      type: "runDelta",
-      runId,
-      ...(inFlight?.message !== undefined
-        ? { message: inFlight.message }
-        : typeof inFlight?.text === "string"
-          ? { message: { role: "assistant", content: inFlight.text } }
-          : {}),
-      scope: { sessionKey: this.#sessionKey },
-    });
+    const observedRun = observedStreamingRuns.get(runId);
+    const currentRun = this.#projection.runs[runId];
+    if (currentRun === undefined || currentRun === observedRun) {
+      this.#projection = reduceSessionProjection(this.#projection, {
+        type: "runDelta",
+        runId,
+        ...(inFlight?.message !== undefined
+          ? { message: inFlight.message }
+          : typeof inFlight?.text === "string"
+            ? { message: { role: "assistant", content: inFlight.text } }
+            : {}),
+        scope: { sessionKey: this.#sessionKey },
+      });
+    }
     for (const event of Array.isArray(inFlight?.events) ? inFlight.events : []) {
       const payload = record(event);
       if (payload) {
@@ -668,6 +694,8 @@ export class ControlModelConversation {
       maxMessages: this.#host.bounds.maxMessages,
       maxRuns: this.#host.bounds.maxRuns,
       tools: this.#tools,
+      artifacts: this.#artifacts,
+      canMaterializeArtifacts: this.#host.gateway.materializeArtifactView !== undefined,
       interactions: this.#interactions,
       partialReasons: this.#partialReasons,
       truncation: this.#boundsTruncated,
