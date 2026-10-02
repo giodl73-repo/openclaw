@@ -7,6 +7,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import JSON5 from "json5";
 import * as tar from "tar";
 import { describe, expect, it, vi } from "vitest";
+import { readConfigHealthStateFromStoreAsync } from "../config/io.health-state.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
@@ -236,7 +237,7 @@ describe("Claw Control UI worker with a local ClawHub registry", () => {
                   throw new Error("Worker did not publish the fixture agent configuration.");
                 }
                 readyAgents.push(params.agentId);
-                return;
+                return undefined;
               }
               throw new Error(`Unexpected host request in the package-only fixture: ${method}`);
             };
@@ -348,6 +349,16 @@ describe("Claw Control UI worker with a local ClawHub registry", () => {
             expect(readConfig().agents?.entries?.[agentId]?.workspace).toBe(installed.workspace);
             expect(readConfig().agents?.entries?.main).toEqual(initialConfig.agents?.entries?.main);
             expect(readConfig().agents?.defaults).toEqual(initialConfig.agents?.defaults);
+            const health = await readConfigHealthStateFromStoreAsync({
+              env: process.env,
+              homedir: () => state.home,
+              logger: console,
+            });
+            expect(health.entries?.[state.configPath]?.lastKnownGood?.hash).toBe(
+              createHash("sha256")
+                .update(await readFile(state.configPath))
+                .digest("hex"),
+            );
             expect(readyAgents).toEqual([agentId, agentId]);
             expect(assertCurrent).toHaveBeenCalled();
             expect(registry.unexpected).toEqual([]);
