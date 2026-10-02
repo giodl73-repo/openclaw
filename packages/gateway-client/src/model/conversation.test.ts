@@ -517,6 +517,45 @@ describe("Control Model conversations", () => {
     model.dispose();
   });
 
+  it("does not roll back newer same-run output with delayed in-flight history", async () => {
+    const { harness, model, conversation } = await activatedConversation();
+    harness.emit({
+      event: "chat",
+      payload: {
+        sessionKey: "agent:main:one",
+        runId: "run-same",
+        state: "delta",
+        message: { role: "assistant", content: "old" },
+      },
+    });
+    const pendingHistory = harness.defer("chat.history");
+    const refresh = conversation.refreshHistory();
+    await vi.waitFor(() => expect(harness.callsFor("chat.history")).toHaveLength(2));
+
+    harness.emit({
+      event: "chat",
+      payload: {
+        sessionKey: "agent:main:one",
+        runId: "run-same",
+        state: "delta",
+        message: { role: "assistant", content: "old + new" },
+      },
+    });
+    pendingHistory.resolve({
+      messages: [],
+      completeSnapshot: true,
+      inFlightRun: { runId: "run-same", text: "old" },
+    });
+    await refresh;
+
+    expect(conversation.getSnapshot().activeRun).toMatchObject({
+      runId: "run-same",
+      status: "streaming",
+      message: { role: "assistant", content: "old + new" },
+    });
+    model.dispose();
+  });
+
   it("retires epoch-local runs and tools, then restores the authoritative in-flight run", async () => {
     const { harness, model, conversation } = await activatedConversation();
     harness.emit({
