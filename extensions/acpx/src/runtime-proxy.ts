@@ -1,6 +1,7 @@
 import type { AcpxRuntime as UpstreamRuntime } from "acpx/runtime";
 import { createLazyRuntimeMethodBinder } from "openclaw/plugin-sdk/lazy-runtime";
 import type { AcpRuntime, AcpRuntimeTurn, AcpRuntimeTurnInput } from "../runtime-api.js";
+import type { OpenClawRuntimeEnsureInput } from "./runtime.js";
 
 export type CompleteAcpRuntimeTurn = AcpRuntimeTurn &
   Required<Pick<AcpRuntimeTurn, "promptStarted">>;
@@ -14,9 +15,10 @@ export type CompleteAcpRuntimeTurn = AcpRuntimeTurn &
  */
 export type CompleteAcpRuntime = Omit<
   AcpRuntime,
-  "startTurn" | "getStatus" | "prepareFreshSession"
+  "ensureSession" | "startTurn" | "getStatus" | "prepareFreshSession"
 > &
   Required<Pick<AcpRuntime, "getCapabilities" | "setMode" | "setConfigOption" | "doctor">> & {
+    ensureSession(input: OpenClawRuntimeEnsureInput): ReturnType<AcpRuntime["ensureSession"]>;
     startTurn(input: AcpRuntimeTurnInput): CompleteAcpRuntimeTurn;
     getStatus: UpstreamRuntime["getStatus"];
     setModel: UpstreamRuntime["setModel"];

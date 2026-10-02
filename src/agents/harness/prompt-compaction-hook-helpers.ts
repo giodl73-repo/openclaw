@@ -6,6 +6,7 @@ import type { BootstrapContextRunKind } from "../bootstrap-mode.js";
 import type { CurrentInboundPromptContext } from "../embedded-agent-runner/run/params.js";
 import { buildCurrentInboundPrompt } from "../embedded-agent-runner/run/runtime-context-prompt.js";
 import { wrapPluginSystemContextSection } from "../hook-system-context-boundary.js";
+import { runPromptBuildHookSequence } from "../prompt-build-hooks.js";
 import type { AgentMessage } from "../runtime/index.js";
 import { buildAgentHookContext, type AgentHarnessHookContext } from "./hook-context.js";
 
@@ -46,10 +47,7 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
     prompt: params.prompt,
   });
   const hookRunner = getGlobalHookRunner();
-  // heartbeat_prompt_contribution fires only on heartbeat turns. Harness runtimes
-  // (e.g. the Codex app-server) build the prompt through this helper rather than
-  // the embedded runner's resolvePromptBuildHookResult, so the hook must run from
-  // here too — otherwise it never fires on those runtimes.
+  // Capture presence before loading history; heartbeat-only turns do not need it.
   const isHeartbeatTurn = params.ctx.trigger === "heartbeat";
   const hasHeartbeatContribution =
     isHeartbeatTurn && Boolean(hookRunner?.hasHooks("heartbeat_prompt_contribution"));
@@ -90,32 +88,16 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
       : [],
   };
 
-  // Match the embedded runner's lifecycle order: heartbeat contributions are
-  // collected before prompt-build hooks so hook side effects stay deterministic.
-  const heartbeatResult =
-    hasHeartbeatContribution && hookRunner
-      ? await hookRunner
-          .runHeartbeatPromptContribution(
-            {
-              sessionKey: params.ctx.sessionKey,
-              agentId: params.ctx.agentId,
-              heartbeatName: "heartbeat",
-            },
-            hookCtx,
-          )
-          .catch((error: unknown) => {
-            log.warn(`heartbeat_prompt_contribution hook failed: ${String(error)}`);
-            return undefined;
-          })
-      : undefined;
-
-  const promptBuildResult =
-    hookRunner && hasPromptBuildHooks
-      ? await hookRunner.runBeforePromptBuild(promptEvent, hookCtx).catch((error: unknown) => {
-          log.warn(`before_prompt_build hook failed: ${String(error)}`);
-          return undefined;
-        })
-      : undefined;
+  const { heartbeatResult, promptBuildResult } = await runPromptBuildHookSequence({
+    hookRunner,
+    event: promptEvent,
+    ctx: hookCtx,
+    warn: (message) => log.warn(message),
+    presenceSnapshot: {
+      heartbeat: hasHeartbeatContribution,
+      beforePromptBuild: hasPromptBuildHooks,
+    },
+  });
   const developerInstructions = resolveDeveloperInstructions(
     params.developerInstructions,
     promptBuildResult?.toolsAllow,

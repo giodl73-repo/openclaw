@@ -12,6 +12,9 @@ import {
 import { createCopilotAgentHarness, type CopilotSessionBinding } from "./harness.js";
 import { createCopilotClientPool, type CopilotClientPool } from "./src/runtime.js";
 
+export { createCopilotOrdinaryTurnAdapterForTest } from "./src/ordinary-turn-adapter.test-support.js";
+export { createCopilotFaultPeer } from "./src/catalog-lifetime.test-support.js";
+
 export type CopilotSessionBindingForTest = CopilotSessionBinding;
 
 type CopilotSessionConfigProbe = {

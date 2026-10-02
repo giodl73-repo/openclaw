@@ -10,6 +10,101 @@ sidebarTitle: "Attempt runtime"
 
 The helpers a selected harness calls while an attempt is running and as it finalizes: guarded input injection, tool-result middleware, terminal outcome classification, live token usage, and agent-end side effects. Part of the [Agent harness plugins](/plugins/sdk-agent-harness) reference.
 
+## Ordinary-turn adapter prototype
+
+This fork contains an experimental extraction, not an accepted replacement for
+`AgentHarnessV2`. Existing ACP native harness registrations call
+`runAgentHarnessAdapterAttempt` from the production-private
+`openclaw/plugin-sdk/agent-harness-attempt-runtime` surface. Runtime selection,
+host-capability admission, and the outer harness lifecycle remain unchanged.
+
+The OpenClaw executor owns active-run registration, the attempt deadline and
+abort signal, transcript admission, bootstrap and prompt hooks, guarded output
+delivery, assistant transcript commitment, and attempt-result construction.
+Its implementation loads only when invoked.
+
+The built-in OpenClaw/Pi path and this executor's prompt helper share the
+internal heartbeat-then-prompt-build hook sequence. They retain their existing
+hook-presence timing, prompt assembly, queued-injection and retry ownership,
+and tool-authorized enrichment boundaries. This is shared lifecycle behavior,
+not a replacement for Pi or migration of its loop onto the adapter executor.
+The helper adds no public SDK surface.
+
+The executor reuses `createAgentHarnessAttemptDeadlineController` to report the
+bounded or unlimited execution deadline to the host lane. It does not create a
+second native settlement budget; abort still gates delivery while the adapter
+joins its pending work.
+
+The adapter has two operations:
+
+- `prepare`: acquire the native session, apply its model control under live
+  authority, and identify the transcript suffix not already held by that engine.
+- `run`: encode the prepared input, report submission, translate native output,
+  and return the settled outcome and native assistant idempotency key. The host
+  records that outcome before invoking the returned `readUsage` operation, so
+  ancillary usage failure cannot erase native cancellation.
+
+The host awaits `run`; cancellation requests do not substitute for native
+settlement. The adapter must join its pending output and native cleanup before
+returning or throwing. ACP uses the existing `consumeAcpTurnStream` owner for
+this. Stream closure, prompt submission, and the authoritative result remain
+distinct. Session/process lifetime remains with the ACP runtime, not the host's
+per-attempt cleanup.
+
+ACP permission-option translation stays in the plugin and consumes the existing
+host approval capability. Runtime admission still checks native tool policy;
+prompt-hook tool restrictions that this adapter cannot enforce fail before
+prompt submission. No authority is reconstructed from session or request IDs.
+
+This prototype migrates all existing native ACP registrations together. It does
+not add a selectable runtime, change defaults, or migrate the built-in loop,
+Codex, or Copilot SDK. It demonstrates host ownership for one adapter family,
+not cross-engine parity or a reduction in total code yet. Steering, compaction,
+settled-turn finalization, and exact native tool-effect accounting remain outside
+this ordinary-turn contract. A second engine must establish which parts really
+generalize before this becomes a supported SDK contract.
+
+Qualification has three distinct layers: the reusable ACP turn suite checks the
+runtime boundary, the host tests check orchestration, and a composition test must
+join the actual ACP adapter and stream consumer to that executor. Controlled
+native turns do not qualify a real engine, process cleanup, or packaged behavior.
+
+A QA-only Copilot SDK text adapter is available through that plugin's existing
+`test-api.ts`. It consumes the same private `prepare`/`run` interface without ACP
+or changes to the host executor. Preparation acquires no native resources;
+execution creates an isolated, tools-disabled SDK session using the existing
+Copilot restrictions. It replays text history as explicit JSON context in a new
+session, translates deltas, and joins native idle/error, queued output, abort
+requests and detach before returning. Failed transport operations unwind as
+failures, not evidence that remote work stopped.
+
+If disconnect also fails after a turn failure, the adapter preserves the original
+error and reports the disconnect error separately. Disconnect failure after an
+otherwise successful turn still fails the attempt before assistant commitment.
+
+For this fresh, single-send session, the root `user.message` event or the send
+acknowledgement enables native abort, whichever arrives first. A pending cancel
+is forwarded at that boundary without waiting for a delayed acknowledgement.
+Native idle may still precede acknowledgement and is retained while submission
+is joined. This assumes idle belongs to the fresh session's single turn; it does
+not correlate arbitrary unrelated idle during preparation. If neither submission
+signal arrives, host output is fenced but submission remains joined; this is not
+bounded transport recovery or final-dispatch fencing inside the SDK. Native
+receipt is not proof that a real engine has stopped work.
+
+The composition suite drives the real SDK against a loopback JSON-RPC peer.
+This checks a second protocol consumer, not the native Copilot engine, inference,
+native role-preserving history, durable session resume, or migration of the
+shipping Copilot harness. Tool and non-text history are rejected. No runtime is
+registered, and production selection and packaging remain unchanged. This
+bounded example does not justify promoting the private contract to a public SDK.
+
+A live check must select an existing native ACP runtime, such as `acp-opencode`,
+and verify the recorded runtime identity. The ACP conversation-bind smoke and
+the native `codex` app-server smoke use different execution paths; neither alone
+proves this extraction. Use an isolated session to check streaming, follow-up
+continuity, approval denial, cancellation, and recovery after a native failure.
+
 ## Guarded active-run injection
 
 Backends that accept source-bound controls advertise `messageInjectionV2` on

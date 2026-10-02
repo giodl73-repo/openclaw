@@ -6,16 +6,30 @@ import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 type Request = { id: number; method: string; params: Record<string, unknown> };
 
 /** A loopback CLI protocol peer; the client, session, and tool dispatch are the real SDK. */
-export async function createCopilotFaultPeer() {
+export async function createCopilotFaultPeer(
+  options: {
+    holdSend?: boolean;
+    holdSendTrace?: boolean;
+    skipUserMessage?: boolean;
+    sendError?: string;
+    detachError?: string;
+  } = {},
+) {
   const sent = createDeferred<void>();
   const detaching = createDeferred<void>();
+  const aborting = createDeferred<void>();
   const releaseDetach = createDeferred<void>();
+  const releaseSend = createDeferred<void>();
+  const tracingSend = createDeferred<void>();
+  const releaseSendTrace = createDeferred<void>();
   const replies = new Map<string, ReturnType<typeof createDeferred<Record<string, unknown>>>>();
   const methods: string[] = [];
+  const requests: Request[] = [];
   const sockets = new Set<Socket>();
   let socket: Socket;
   let sessionId: string;
   let previousEventId: string | null = null;
+  let detachError = options.detachError;
   const send = (value: unknown) => {
     const bytes = Buffer.from(JSON.stringify(value));
     socket.write(`Content-Length: ${bytes.length}\r\n\r\n`);
@@ -41,24 +55,45 @@ export async function createCopilotFaultPeer() {
   };
   const handle = async (request: Request) => {
     methods.push(request.method);
+    requests.push(request);
     switch (request.method) {
       case "connect":
         return { protocolVersion: 3 };
       case "session.create":
         sessionId = String(request.params.sessionId);
+        previousEventId = null;
         return { sessionId };
       case "session.send":
-        emit("user.message", { content: request.params.prompt });
+        if (!options.skipUserMessage) {
+          emit("user.message", { content: request.params.prompt, messageId: "fixture-user" });
+        }
         sent.resolve();
+        if (options.holdSend) {
+          await releaseSend.promise;
+        }
+        if (options.sendError) {
+          throw new Error(options.sendError);
+        }
         return { messageId: "fixture-user" };
+      case "ping":
+        return { message: request.params.message, timestamp: Date.now() };
+      case "session.options.update":
+        return { success: true };
       case "session.tools.handlePendingToolCall":
         replies.get(String(request.params.requestId))?.resolve(request.params);
         return {};
       case "session.abort":
+        aborting.resolve();
         return {};
       case "session.detach":
         detaching.resolve();
         await releaseDetach.promise;
+        if (detachError) {
+          const error = new Error(detachError);
+          // Fail the turn's detach once; client.stop still owns final fixture cleanup.
+          detachError = undefined;
+          throw error;
+        }
         return { success: true };
       default:
         throw new Error(`Unexpected Copilot fixture RPC: ${request.method}`);
@@ -110,14 +145,29 @@ export async function createCopilotFaultPeer() {
   }
   const client = new CopilotClient({
     connection: RuntimeConnection.forUri(`127.0.0.1:${address.port}`),
+    onGetTraceContext: options.holdSendTrace
+      ? async () => {
+          if (methods.includes("session.options.update")) {
+            tracingSend.resolve();
+            await releaseSendTrace.promise;
+          }
+          return {};
+        }
+      : undefined,
   });
   return {
     client,
     methods,
+    requests,
     sent: sent.promise,
     detaching: detaching.promise,
+    aborting: aborting.promise,
     releaseDetach: () => releaseDetach.resolve(),
+    releaseSend: () => releaseSend.resolve(),
+    tracingSend: tracingSend.promise,
+    releaseSendTrace: () => releaseSendTrace.resolve(),
     emit,
+    disconnectTransport: () => client.forceStop(),
     requestTool(name: string, args: Record<string, unknown>) {
       const requestId = randomUUID();
       const reply = createDeferred<Record<string, unknown>>();
@@ -131,6 +181,8 @@ export async function createCopilotFaultPeer() {
       return reply.promise;
     },
     async close() {
+      releaseSendTrace.resolve();
+      releaseSend.resolve();
       releaseDetach.resolve();
       await client.stop();
       for (const connected of sockets) {
