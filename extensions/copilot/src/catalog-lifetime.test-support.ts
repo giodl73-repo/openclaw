@@ -7,7 +7,13 @@ type Request = { id: number; method: string; params: Record<string, unknown> };
 
 /** A loopback CLI protocol peer; the client, session, and tool dispatch are the real SDK. */
 export async function createCopilotFaultPeer(
-  options: { holdSend?: boolean; holdSendTrace?: boolean; skipUserMessage?: boolean } = {},
+  options: {
+    holdSend?: boolean;
+    holdSendTrace?: boolean;
+    skipUserMessage?: boolean;
+    sendError?: string;
+    detachError?: string;
+  } = {},
 ) {
   const sent = createDeferred<void>();
   const detaching = createDeferred<void>();
@@ -23,6 +29,7 @@ export async function createCopilotFaultPeer(
   let socket: Socket;
   let sessionId: string;
   let previousEventId: string | null = null;
+  let detachError = options.detachError;
   const send = (value: unknown) => {
     const bytes = Buffer.from(JSON.stringify(value));
     socket.write(`Content-Length: ${bytes.length}\r\n\r\n`);
@@ -64,6 +71,9 @@ export async function createCopilotFaultPeer(
         if (options.holdSend) {
           await releaseSend.promise;
         }
+        if (options.sendError) {
+          throw new Error(options.sendError);
+        }
         return { messageId: "fixture-user" };
       case "ping":
         return { message: request.params.message, timestamp: Date.now() };
@@ -78,6 +88,12 @@ export async function createCopilotFaultPeer(
       case "session.detach":
         detaching.resolve();
         await releaseDetach.promise;
+        if (detachError) {
+          const error = new Error(detachError);
+          // Fail the turn's detach once; client.stop still owns final fixture cleanup.
+          detachError = undefined;
+          throw error;
+        }
         return { success: true };
       default:
         throw new Error(`Unexpected Copilot fixture RPC: ${request.method}`);

@@ -71,6 +71,10 @@ session, translates deltas, and joins native idle/error, queued output, abort
 requests and detach before returning. Failed transport operations unwind as
 failures, not evidence that remote work stopped.
 
+If disconnect also fails after a turn failure, the adapter preserves the original
+error and reports the disconnect error separately. Disconnect failure after an
+otherwise successful turn still fails the attempt before assistant commitment.
+
 For this fresh, single-send session, the root `user.message` event or the send
 acknowledgement enables native abort, whichever arrives first. A pending cancel
 is forwarded at that boundary without waiting for a delayed acknowledgement.

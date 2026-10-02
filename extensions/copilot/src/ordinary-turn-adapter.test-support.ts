@@ -47,6 +47,7 @@ export function createCopilotOrdinaryTurnAdapterForTest(params: {
           let output = Promise.resolve();
           let abortRequest: Promise<void> | undefined;
           let failure: unknown;
+          let turnFailed = false;
           let nativeSubmissionObserved = false;
           let closed = false;
           let inputTokens = 0;
@@ -145,16 +146,9 @@ export function createCopilotOrdinaryTurnAdapterForTest(params: {
             if (failure) {
               throw failure;
             }
-            return {
-              cancelled: signal.aborted,
-              permissionDenied: false,
-              assistantIdempotencyKey: `copilot-text:${session.sessionId}:${turn.admissionEntryId}`,
-              readUsage: async () => ({
-                input: inputTokens,
-                output: outputTokens,
-                total: inputTokens + outputTokens,
-              }),
-            };
+          } catch (error: unknown) {
+            turnFailed = true;
+            failure = error;
           } finally {
             closed = true;
             signal.removeEventListener("abort", requestAbort);
@@ -162,8 +156,30 @@ export function createCopilotOrdinaryTurnAdapterForTest(params: {
             await output;
             await abortRequest;
             // Detach acknowledgement is part of this adapter's settlement, not host cleanup.
-            await session.disconnect();
+            try {
+              await session.disconnect();
+            } catch (error: unknown) {
+              if (turnFailed) {
+                console.warn("[copilot-text-adapter] disconnect failed after primary error", error);
+              } else {
+                turnFailed = true;
+                failure = error;
+              }
+            }
           }
+          if (turnFailed) {
+            throw failure;
+          }
+          return {
+            cancelled: signal.aborted,
+            permissionDenied: false,
+            assistantIdempotencyKey: `copilot-text:${session.sessionId}:${turn.admissionEntryId}`,
+            readUsage: async () => ({
+              input: inputTokens,
+              output: outputTokens,
+              total: inputTokens + outputTokens,
+            }),
+          };
         },
       };
     },

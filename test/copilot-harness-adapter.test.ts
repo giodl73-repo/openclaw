@@ -278,6 +278,78 @@ describe("Copilot SDK adapter through the OpenClaw host", () => {
     expectReleased(f);
   });
 
+  it.each(["provider", "send", "output"] as const)(
+    "preserves the %s failure when detach also fails",
+    async (source) => {
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const message = `${source} failed`;
+      const f = await createFixture(undefined, {
+        sendError: source === "send" ? message : undefined,
+        detachError: "detach failed",
+      });
+      const outputError = new Error(message);
+      if (source === "output") {
+        f.callbacks.onPartialReply.mockRejectedValue(outputError);
+      }
+      const attempt = f.execute();
+      try {
+        await awaitGateBeforeSettlement(f.peer.sent, attempt, "SDK submission skipped");
+        if (source === "provider") {
+          f.peer.emit("session.error", { errorType: "provider", message });
+        } else if (source === "output") {
+          f.peer.emit("assistant.message_delta", { messageId: "reply", deltaContent: "partial" });
+          await awaitGateBeforeSettlement(f.peer.aborting, attempt, "SDK abort skipped");
+          finish(f.peer, "partial");
+        }
+        await awaitGateBeforeSettlement(f.peer.detaching, attempt, "SDK detach skipped");
+        expect(mocks.clearActive).not.toHaveBeenCalled();
+        expect(mocks.append).not.toHaveBeenCalled();
+        f.peer.releaseDetach();
+        const result = await attempt;
+        expect(result.terminal).toMatchObject({
+          kind: "failed",
+          error: expect.objectContaining({ message }),
+        });
+        if (source === "output" && result.terminal.kind === "failed") {
+          expect(result.terminal.error).toBe(outputError);
+        }
+        expect(warning).toHaveBeenCalledExactlyOnceWith(
+          "[copilot-text-adapter] disconnect failed after primary error",
+          expect.objectContaining({ message: "detach failed" }),
+        );
+        expect(mocks.append).not.toHaveBeenCalled();
+        expectReleased(f);
+      } finally {
+        finish(f.peer, "partial");
+        f.peer.releaseDetach();
+        await attempt;
+        warning.mockRestore();
+      }
+    },
+  );
+
+  it("fails without committing an otherwise successful turn when detach fails", async () => {
+    const f = await createFixture(undefined, { detachError: "detach failed" });
+    const attempt = f.execute();
+    try {
+      await awaitGateBeforeSettlement(f.peer.sent, attempt, "SDK submission skipped");
+      finish(f.peer, "answer");
+      await awaitGateBeforeSettlement(f.peer.detaching, attempt, "SDK detach skipped");
+      expect(mocks.clearActive).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      f.peer.releaseDetach();
+      expect((await attempt).terminal).toMatchObject({
+        kind: "failed",
+        error: expect.objectContaining({ message: "detach failed" }),
+      });
+      expect(mocks.append).not.toHaveBeenCalled();
+      expectReleased(f);
+    } finally {
+      f.peer.releaseDetach();
+      await attempt;
+    }
+  });
+
   it("unwinds a stopped SDK transport on cancellation without waiting forever for native idle", async () => {
     const f = await createFixture();
     const partial = createDeferred<void>();
