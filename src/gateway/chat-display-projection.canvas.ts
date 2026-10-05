@@ -13,6 +13,7 @@ import {
 import { truncateChatHistoryText } from "./chat-display-projection.helpers.js";
 
 const MAX_PROJECTED_UI_ARTIFACTS = 100;
+
 function isBrowserRouteIdentifier(value: unknown, maxChars: number): value is string {
   return (
     typeof value === "string" &&
@@ -43,6 +44,7 @@ function projectUiArtifact(value: unknown) {
   });
   return failure.ok ? failure.value : undefined;
 }
+
 function projectUiArtifacts(
   values: unknown[],
   maxBytes: number,

@@ -66,6 +66,10 @@ describe("session event refresh coordinator", () => {
       .mockResolvedValue(undefined);
     const coordinator = createSessionEventRefreshCoordinator({
       active: true,
+      debounceMs: 200,
+      maxWaitMs: 1_000,
+      minCooldownMs: 1_000,
+      jitterRatio: 0,
       refresh,
     });
 
