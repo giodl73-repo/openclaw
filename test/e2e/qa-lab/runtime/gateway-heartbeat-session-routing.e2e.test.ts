@@ -200,7 +200,7 @@ async function readSessionTranscript(sessionKey: string): Promise<unknown[]> {
   );
 }
 
-describe("Gateway heartbeat session routing", () => {
+describe("Gateway heartbeat and cron session routing", () => {
   let fixtureSettlement: Promise<void> | undefined;
   beforeEach(resetGatewayState);
   afterEach(async () => {
@@ -212,7 +212,7 @@ describe("Gateway heartbeat session routing", () => {
   });
 
   it(
-    "routes monitor wakes through heartbeat.session while preserving explicit wake sessions",
+    "routes monitor wakes and current cron delivery through their bound sessions",
     { timeout: 90_000 },
     async ({ signal }) => {
       const envSnapshot = captureEnv([...ISOLATED_GATEWAY_ENV_KEYS]);
@@ -262,6 +262,10 @@ describe("Gateway heartbeat session routing", () => {
       const configuredSessionId = nextId("configured-heartbeat-session");
       const configuredEvent = nextId("configured-heartbeat-event");
       const configuredReply = nextId("configured-heartbeat-reply");
+      const cronSourceKey = "agent:main:dashboard:cron-delivery-source";
+      const cronSourceSessionId = nextId("cron-source-session");
+      const cronPrompt = nextId("cron-source-prompt");
+      const cronReply = nextId("cron-source-reply");
       const explicitSessionKey = "agent:main:user-session";
       const explicitSessionId = nextId("explicit-heartbeat-session");
       const explicitQueuedEvent = nextId("explicit-queued-event");
@@ -288,11 +292,13 @@ describe("Gateway heartbeat session routing", () => {
           const serialized = JSON.stringify(body);
           writeAssistantResponse(
             response,
-            serialized.includes(configuredEvent)
-              ? configuredReply
-              : serialized.includes(explicitQueuedEvent) || serialized.includes(explicitWakeText)
-                ? explicitReply
-                : nextId("unexpected-heartbeat-reply"),
+            serialized.includes(cronPrompt)
+              ? cronReply
+              : serialized.includes(configuredEvent)
+                ? configuredReply
+                : serialized.includes(explicitQueuedEvent) || serialized.includes(explicitWakeText)
+                  ? explicitReply
+                  : nextId("unexpected-heartbeat-reply"),
           );
         })().catch((error: unknown) => {
           response.writeHead(500).end(error instanceof Error ? error.message : String(error));
@@ -401,6 +407,11 @@ describe("Gateway heartbeat session routing", () => {
           sessionId: configuredSessionId,
           sessionKey: configuredSessionKey,
           to: "configured-destination",
+        });
+        await seedSession({
+          sessionId: cronSourceSessionId,
+          sessionKey: cronSourceKey,
+          to: "cron-source-destination",
         });
         await seedSession({
           sessionId: explicitSessionId,
@@ -521,6 +532,77 @@ describe("Gateway heartbeat session routing", () => {
           configuredReply,
         );
 
+        const cronJob = await client.request<{
+          id: string;
+          sessionKey?: string;
+          sessionTarget: string;
+        }>("cron.add", {
+          agentId: "main",
+          name: "Dashboard current-session delivery proof",
+          enabled: false,
+          schedule: { kind: "every", everyMs: 86_400_000 },
+          sessionTarget: "current",
+          sessionKey: cronSourceKey,
+          wakeMode: "next-heartbeat",
+          payload: { kind: "agentTurn", message: cronPrompt, toolsAllow: [] },
+          delivery: { mode: "announce", channel: "last" },
+        });
+        expect(cronJob).toMatchObject({
+          sessionKey: cronSourceKey,
+          sessionTarget: "current",
+        });
+        const cronRun = await client.request<{
+          enqueued: boolean;
+          ok: boolean;
+          runId: string;
+        }>("cron.run", { id: cronJob.id, mode: "force" });
+        expect(cronRun).toMatchObject({ ok: true, enqueued: true, runId: expect.any(String) });
+        await expect
+          .poll(
+            async () => {
+              const history = await client.request<{
+                entries: Array<{
+                  deliveryStatus?: string;
+                  runId?: string;
+                  status?: string;
+                }>;
+              }>("cron.runs", { id: cronJob.id, runId: cronRun.runId, limit: 1 });
+              return history.entries.find((entry) => entry.runId === cronRun.runId);
+            },
+            { timeout: 15_000, interval: 50 },
+          )
+          .toMatchObject({
+            runId: cronRun.runId,
+            status: "ok",
+            deliveryStatus: "delivered",
+          });
+        await expect
+          .poll(() => readDeliveryTrace(deliveryTracePath), { timeout: 15_000, interval: 50 })
+          .toHaveLength(2);
+        expect((await readDeliveryTrace(deliveryTracePath))[1]).toEqual({
+          accountId: "default",
+          text: cronReply,
+          threadId: null,
+          to: "cron-source-destination",
+        });
+        await expect
+          .poll(() => readSessionTranscript(cronSourceKey).then(JSON.stringify), {
+            timeout: 15_000,
+            interval: 50,
+          })
+          .toContain(cronReply);
+        expect(
+          loadSessionEntry({
+            agentId: "main",
+            sessionKey: cronSourceKey,
+            readConsistency: "latest",
+          })?.sessionId,
+        ).toBe(cronSourceSessionId);
+        expect(peekSystemEvents(cronSourceKey).join("\n")).toContain(cronReply);
+        expect(JSON.stringify(await readSessionTranscript(mainSessionKey))).not.toContain(
+          cronReply,
+        );
+
         await expect(
           client.request<{ ok: boolean }>("system-event", {
             text: explicitQueuedEvent,
@@ -555,13 +637,19 @@ describe("Gateway heartbeat session routing", () => {
           .toBe(false);
         await expect
           .poll(() => readDeliveryTrace(deliveryTracePath), { timeout: 15_000, interval: 50 })
-          .toHaveLength(2);
+          .toHaveLength(3);
         expect(await readDeliveryTrace(deliveryTracePath)).toEqual([
           {
             accountId: "default",
             text: configuredReply,
             threadId: null,
             to: "configured-destination",
+          },
+          {
+            accountId: "default",
+            text: cronReply,
+            threadId: null,
+            to: "cron-source-destination",
           },
           {
             accountId: "default",
@@ -591,6 +679,7 @@ describe("Gateway heartbeat session routing", () => {
         );
         const mainTranscript = JSON.stringify(await readSessionTranscript(mainSessionKey));
         expect(mainTranscript).not.toContain(configuredReply);
+        expect(mainTranscript).not.toContain(cronReply);
         expect(mainTranscript).not.toContain(explicitReply);
         expect((await readDeliveryTrace(deliveryTracePath)).map((entry) => entry.to)).not.toContain(
           "main-destination",
