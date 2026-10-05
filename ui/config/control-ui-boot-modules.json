@@ -1660,7 +1660,6 @@
   "ui/src/lib/sessions/create.ts",
   "ui/src/lib/sessions/custom-groups.ts",
   "ui/src/lib/sessions/drag.ts",
-  "ui/src/lib/sessions/event-refresh-coordinator.ts",
   "ui/src/lib/sessions/grouping.ts",
   "ui/src/lib/sessions/index.ts",
   "ui/src/lib/sessions/navigation-handoff.ts",
