@@ -597,7 +597,7 @@ describe("conversation completion through the real delivery queue", () => {
     try {
       await enqueueReply.held;
       const [queued] = readQueuedEntries(stateDir);
-      if (!queued) {
+      if (!queued || typeof queued.id !== "string") {
         throw new Error("Committed conversation delivery was not readable from the real queue");
       }
       const queueId = queued.id;
