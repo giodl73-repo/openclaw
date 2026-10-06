@@ -1949,7 +1949,13 @@ describe("dispatchCronDelivery", () => {
 
     expect(state.disposition).toBeUndefined();
     expect(state.delivered).toBe(true);
-    expect(resolveOutboundSessionRoute).not.toHaveBeenCalled();
+    expect(resolveOutboundSessionRoute).toHaveBeenCalledTimes(1);
+    expect(buildOutboundSessionContext).toHaveBeenCalledWith({
+      cfg: params.cfgWithAgentDefaults,
+      agentId: "main",
+      sessionKey: sourceSessionKey,
+      policySessionKey: "agent:main:telegram:direct:123456",
+    });
     expect(appendAssistantMessageToSessionTranscript).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionKey: sourceSessionKey,

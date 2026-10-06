@@ -266,26 +266,15 @@ export async function dispatchCronDelivery(
         }),
       );
       deliveryAttempted = true;
-      // Custom session targets retain their caller-selected identity.
-      const { sessionKey: deliverySessionKey, route: directCronOutboundRoute } =
-        await (async () => {
-          if (
-            typeof params.job.sessionTarget === "string" &&
-            params.job.sessionTarget.startsWith("session:")
-          ) {
-            return { sessionKey: params.agentSessionKey, route: null };
-          }
-          const ownedSourceSessionKey =
-            delivery.mode === "implicit"
-              ? resolveOwnedCanonicalAgentSessionKey({
-                  sessionKey: delivery.sourceSessionKey,
-                  agentId: params.agentId,
-                })
-              : undefined;
-          if (ownedSourceSessionKey) {
-            return { sessionKey: ownedSourceSessionKey, route: null };
-          }
-          return await resolveCronDeliveryRouteSessionKey({
+      // Custom session targets retain their caller-selected identity. Other
+      // deliveries still resolve the destination route for policy, even when
+      // source provenance owns transcript and awareness attribution.
+      const isCustomSessionTarget =
+        typeof params.job.sessionTarget === "string" &&
+        params.job.sessionTarget.startsWith("session:");
+      const destinationRoute = isCustomSessionTarget
+        ? { sessionKey: params.agentSessionKey, route: null }
+        : await resolveCronDeliveryRouteSessionKey({
             cfg: params.cfgWithAgentDefaults,
             job: params.job,
             agentId: params.agentId,
@@ -293,11 +282,25 @@ export async function dispatchCronDelivery(
             delivery,
             warningContext: "direct delivery mirror",
           });
-        })();
+      const ownedSourceSessionKey =
+        !isCustomSessionTarget && delivery.mode === "implicit"
+          ? resolveOwnedCanonicalAgentSessionKey({
+              sessionKey: delivery.sourceSessionKey,
+              agentId: params.agentId,
+            })
+          : undefined;
+      const deliverySessionKey = ownedSourceSessionKey ?? destinationRoute.sessionKey;
+      const deliveryPolicySessionKey =
+        ownedSourceSessionKey &&
+        !isSameSessionKey(ownedSourceSessionKey, destinationRoute.sessionKey)
+          ? destinationRoute.sessionKey
+          : undefined;
+      const directCronOutboundRoute = destinationRoute.route;
       const deliverySession = buildOutboundSessionContext({
         cfg: params.cfgWithAgentDefaults,
         agentId: params.agentId,
         sessionKey: deliverySessionKey,
+        policySessionKey: deliveryPolicySessionKey,
       });
       const awarenessMainSessionKey = resolveCronAwarenessMainSessionKey({
         cfg: params.cfgWithAgentDefaults,
