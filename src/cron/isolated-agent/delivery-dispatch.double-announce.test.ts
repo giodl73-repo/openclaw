@@ -545,7 +545,10 @@ describe("dispatchCronDelivery", () => {
     expectDelivered(await dispatchCronDelivery(params));
 
     expect(buildOutboundSessionContext).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionKey: sourceSessionKey }),
+      expect.objectContaining({
+        sessionKey: sourceSessionKey,
+        policySessionKey: destinationSessionKey,
+      }),
     );
     expect(buildOutboundSessionContext).not.toHaveBeenCalledWith(
       expect.objectContaining({ sessionKey: destinationSessionKey }),

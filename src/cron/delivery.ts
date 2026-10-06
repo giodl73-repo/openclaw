@@ -41,6 +41,7 @@ type CronAnnounceTarget = {
   threadId?: string | number;
   accountId?: string;
   sessionKey?: string;
+  policySessionKey?: string;
 };
 
 type CronAnnounceResult =
@@ -131,6 +132,7 @@ export async function sendCronAnnouncePayloadStrict(params: {
       jobId: params.jobId,
       sessionKey: params.target.sessionKey,
     }),
+    ...(params.target.policySessionKey ? { policySessionKey: params.target.policySessionKey } : {}),
   });
   const identity = resolveAgentOutboundIdentity(params.cfg, params.agentId);
   let recipientReached = false;
