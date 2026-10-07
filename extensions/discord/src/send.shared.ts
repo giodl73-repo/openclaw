@@ -111,6 +111,13 @@ function normalizeDiscordPollInput(input: PollInput): RESTAPIPoll {
   };
 }
 
+function readDiscordErrorNumber(value: unknown, finiteNumbers = false) {
+  if (typeof value === "number") {
+    return !finiteNumbers || Number.isFinite(value) ? value : undefined;
+  }
+  return typeof value === "string" && /^\d+$/.test(value) ? Number(value) : undefined;
+}
+
 function getDiscordErrorCode(err: unknown) {
   if (!err || typeof err !== "object") {
     return undefined;
@@ -121,13 +128,7 @@ function getDiscordErrorCode(err: unknown) {
       : "rawError" in err && err.rawError && typeof err.rawError === "object"
         ? (err.rawError as { code?: unknown }).code
         : undefined;
-  if (typeof candidate === "number") {
-    return candidate;
-  }
-  if (typeof candidate === "string" && /^\d+$/.test(candidate)) {
-    return Number(candidate);
-  }
-  return undefined;
+  return readDiscordErrorNumber(candidate);
 }
 
 function getDiscordErrorStatus(err: unknown) {
@@ -140,13 +141,7 @@ function getDiscordErrorStatus(err: unknown) {
       : "statusCode" in err && err.statusCode !== undefined
         ? err.statusCode
         : undefined;
-  if (typeof candidate === "number" && Number.isFinite(candidate)) {
-    return candidate;
-  }
-  if (typeof candidate === "string" && /^\d+$/.test(candidate)) {
-    return Number(candidate);
-  }
-  return undefined;
+  return readDiscordErrorNumber(candidate, true);
 }
 
 function isDiscordUploadTooLargeError(err: unknown) {
@@ -393,10 +388,6 @@ async function sendDiscordChunks(
   return { ...primary, platformMessageIds };
 }
 
-async function sendDiscordText(params: DiscordTextSendParams) {
-  return sendDiscordChunks(params);
-}
-
 type DiscordMediaSendParams = DiscordTextSendParams &
   DiscordOutboundMediaOpts & {
     mediaUrl: string;
@@ -423,7 +414,7 @@ async function sendDiscordMedia(params: DiscordMediaSendParams) {
         throw error;
       }
       // The multipart request is all-or-nothing. Attachment-coupled presentation must not accompany text fallback.
-      return sendDiscordText({
+      return sendDiscordChunks({
         ...params,
         text: buildDiscordUploadTooLargeFallbackText(params.text),
         components: undefined,
@@ -452,5 +443,5 @@ export {
   resolveDiscordTargetChannelId,
   resolveDiscordRest,
   sendDiscordMedia,
-  sendDiscordText,
+  sendDiscordChunks as sendDiscordText,
 };

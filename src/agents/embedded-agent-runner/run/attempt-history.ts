@@ -8,9 +8,11 @@ import {
   hasInterSessionUserProvenance,
   INTER_SESSION_PROMPT_PREFIX_BASE,
 } from "../../../sessions/input-provenance.js";
+import { isTextContentBlock } from "../../content-blocks.js";
 import type { AgentRuntimePlan } from "../../runtime-plan/types.js";
 import type { AgentMessage } from "../../runtime/index.js";
-import { resolveTranscriptPolicy, type TranscriptPolicy } from "../../transcript-policy.js";
+import { resolveTranscriptPolicy } from "../../transcript-policy.js";
+import type { TranscriptPolicy } from "../../transcript-policy.types.js";
 import { isRunnerToolCallBlock } from "./attempt-tool-call-block-type.js";
 
 export type UserTranscriptContext = {
@@ -45,22 +47,14 @@ function readFirstUserText(content: unknown): string | undefined {
   if (!Array.isArray(content)) {
     return undefined;
   }
-  return content.find(isUserTextBlock)?.text;
-}
-
-export function isUserTextBlock(value: unknown): value is { type: "text"; text: string } {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const block = value as { type?: unknown; text?: unknown };
-  return block.type === "text" && typeof block.text === "string";
+  return content.find(isTextContentBlock)?.text;
 }
 
 export function hasNonBlankUserText(content: unknown): boolean {
   return typeof content === "string"
     ? Boolean(content.trim())
     : Array.isArray(content) &&
-        content.some((block) => isUserTextBlock(block) && Boolean(block.text.trim()));
+        content.some((block) => isTextContentBlock(block) && Boolean(block.text.trim()));
 }
 
 export function contentMatchesTimestampOverride(
@@ -86,17 +80,14 @@ export function resolveUserTranscriptMessages(
   const unusedContexts = new Set(contexts);
   const byRuntimeMessage = new Map<AgentMessage, UserTranscriptContext[]>();
   for (const context of unusedContexts) {
-    const bucket = byRuntimeMessage.get(context.runtimeMessage);
-    if (bucket) {
-      bucket.push(context);
-    } else {
-      byRuntimeMessage.set(context.runtimeMessage, [context]);
-    }
+    const bucket = byRuntimeMessage.get(context.runtimeMessage) ?? [];
+    bucket.push(context);
+    byRuntimeMessage.set(context.runtimeMessage, bucket);
   }
   // Reserve object-identity matches before structural fallback so duplicate
   // timestamp/text turns cannot consume a later message's exact pairing.
   for (const [index, message] of messages.entries()) {
-    if (message.role !== "user") {
+    if (message.role !== "user" || message.operatorMessage) {
       continue;
     }
     const context = byRuntimeMessage.get(message)?.shift();
@@ -115,16 +106,13 @@ export function resolveUserTranscriptMessages(
     if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
       continue;
     }
-    const bucket = byTimestamp.get(timestamp);
-    if (bucket) {
-      bucket.push(context);
-    } else {
-      byTimestamp.set(timestamp, [context]);
-    }
+    const bucket = byTimestamp.get(timestamp) ?? [];
+    bucket.push(context);
+    byTimestamp.set(timestamp, bucket);
   }
   const activeUserMessageIndex = findActiveUserMessageIndex(messages);
   for (const [index, message] of messages.entries()) {
-    if (message.role !== "user" || resolved[index]) {
+    if (message.role !== "user" || message.operatorMessage || resolved[index]) {
       continue;
     }
     const timestamp = message.timestamp;
@@ -202,10 +190,7 @@ function readPersistedSender(message: AgentMessage): PersistedSender | undefined
     name: normalizePersistedSenderValue(meta["senderName"]),
     username: normalizePersistedSenderValue(meta["senderUsername"]),
   };
-  if (Object.values(sender).every((value) => value === undefined)) {
-    return undefined;
-  }
-  return sender;
+  return Object.values(sender).some((value) => value !== undefined) ? sender : undefined;
 }
 
 function mergeSenderIntoLeadingConversationInfo(
@@ -255,7 +240,7 @@ function prependContextToUserMessage(message: AgentMessage, sender: PersistedSen
     return message;
   }
 
-  const textIndex = content.findIndex(isUserTextBlock);
+  const textIndex = content.findIndex(isTextContentBlock);
   if (textIndex === -1) {
     return {
       ...message,
@@ -274,10 +259,10 @@ function prependContextToUserMessage(message: AgentMessage, sender: PersistedSen
 
 function hasInterSessionPromptPrefix(message: AgentMessage): boolean {
   const text = readFirstUserText((message as { content?: unknown }).content);
-  if (text === undefined) {
-    return false;
-  }
-  return splitLeadingTimestampEnvelope(text).body.startsWith(INTER_SESSION_PROMPT_PREFIX_BASE);
+  return (
+    text !== undefined &&
+    splitLeadingTimestampEnvelope(text).body.startsWith(INTER_SESSION_PROMPT_PREFIX_BASE)
+  );
 }
 
 export function projectPersistedSenderContext(
@@ -286,7 +271,7 @@ export function projectPersistedSenderContext(
 ): AgentMessage[] {
   let changed = false;
   const nextMessages = messages.map((message, index) => {
-    if (message.role !== "user") {
+    if (message.role !== "user" || message.operatorMessage) {
       return message;
     }
     const transcriptMessage = transcriptMessages?.[index] ?? message;
@@ -323,7 +308,7 @@ export function findActiveUserMessageIndex(messages: AgentMessage[]): number {
     if (!message) {
       continue;
     }
-    if (message.role === "user") {
+    if (message.role === "user" && !message.operatorMessage) {
       return index;
     }
     if (
@@ -357,6 +342,7 @@ export function resolveAttemptTranscriptPolicy(params: {
     params.runtimePlan?.transcript.resolvePolicy(params.runtimePlanModelContext) ??
     resolveTranscriptPolicy({
       modelApi: params.runtimePlanModelContext.modelApi,
+      directApiKey: params.runtimePlanModelContext.directApiKey,
       provider: params.provider,
       modelId: params.modelId,
       config: params.config,

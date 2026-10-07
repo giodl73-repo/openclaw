@@ -2,12 +2,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AcpRuntimeEvent } from "@openclaw/acp-core/runtime/types";
-import type { OpenClawPluginService } from "openclaw/plugin-sdk/core";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import {
   createPluginStateKeyedStoreForTests,
   resetPluginStateStoreForTests,
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
-import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
+import {
+  createTestPluginApi,
+  createTestPluginServiceScheduler,
+} from "openclaw/plugin-sdk/plugin-test-api";
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import acpxPlugin from "../../../../extensions/acpx/index.js";
@@ -29,8 +32,11 @@ import { resolveSessionStorePathCore } from "../../../../src/config/sessions/pat
 import { replaceSessionEntrySync } from "../../../../src/config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../../../../src/config/types.openclaw.js";
 import { startGatewayServer } from "../../../../src/gateway/server.js";
-import { getGatewayE2ePortBlock } from "../../../../src/gateway/test-helpers.e2e.js";
 import { snapshotGatewayStartupEnv } from "../../../../src/gateway/test-helpers.env.js";
+import {
+  acquireGatewayE2ePortBlock,
+  startClaimedGateway,
+} from "../../../../src/gateway/test-helpers.listener.js";
 import { resetPluginRuntimeStateForTest } from "../../../../src/plugins/runtime.js";
 import { withEnvAsync } from "../../../../src/test-utils/env.js";
 import { createDeferred, withinTest } from "../../../helpers/promise.js";
@@ -40,11 +46,11 @@ const TOKEN = "native-cancellation-e2e-token";
 const ROUTE_OWNER = "agent:main:native-authority-proof";
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
-afterEach(() => {
+afterEach(async () => {
   clearConfigCache();
   clearRuntimeConfigSnapshot();
   acpManagerTesting.resetAcpSessionManagerForTests();
-  resetSubagentRegistryForTests({ persist: false });
+  await resetSubagentRegistryForTests({ persist: false });
   resetPluginStateStoreForTests();
   resetPluginRuntimeStateForTest();
 });
@@ -144,15 +150,17 @@ describe("native child cancellation authority", () => {
       async () => {
         clearConfigCache();
         clearRuntimeConfigSnapshot();
-        const port = await getGatewayE2ePortBlock();
-        const server = await startGatewayServer(port, {
-          auth: { mode: "token", token: TOKEN },
-          bind: "loopback",
-          controlUiEnabled: false,
-          sidecarStartup: "defer",
-        });
+        const claim = await acquireGatewayE2ePortBlock();
+        const server = await startClaimedGateway(claim, () =>
+          startGatewayServer(claim.port, {
+            auth: { mode: "token", token: TOKEN },
+            bind: "loopback",
+            controlUiEnabled: false,
+            sidecarStartup: "defer",
+          }),
+        );
         await server.startupSettled;
-        const acpxServices: OpenClawPluginService[] = [];
+        const acpxServices: Parameters<OpenClawPluginApi["registerService"]>[0][] = [];
         const acpxRuntime = createPluginRuntimeMock({
           state: {
             openKeyedStore: (options) => createPluginStateKeyedStoreForTests("acpx", options),
@@ -179,7 +187,9 @@ describe("native child cancellation authority", () => {
         if (!acpxService) {
           throw new Error("ACPX plugin did not register its runtime service");
         }
+        const scheduler = createTestPluginServiceScheduler();
         const acpxServiceContext = {
+          scheduler,
           config,
           workspaceDir: root,
           stateDir,
@@ -485,8 +495,13 @@ describe("native child cancellation authority", () => {
             interruptsAfterSuccessor.filter((entry) => entry.turnId === successorTurnStart?.turnId),
           ).toHaveLength(0);
         } finally {
-          await acpxService.stop?.(acpxServiceContext);
-          await server.close();
+          scheduler.beginClose();
+          try {
+            await acpxService.stop?.(acpxServiceContext);
+          } finally {
+            await scheduler.stop();
+            await server.close();
+          }
         }
       },
     );

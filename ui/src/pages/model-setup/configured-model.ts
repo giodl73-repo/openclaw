@@ -105,22 +105,8 @@ function renderModelSetupFailure(status: string, error: string): TemplateResult 
   `;
 }
 
-function modelName(modelRef: string): string {
-  const separator = modelRef.indexOf("/");
-  return separator < 0 ? modelRef : modelRef.slice(separator + 1);
-}
-
-function findConfiguredCandidate(
-  result: SystemAgentSetupDetectResult,
-  modelRef: string,
-): Candidate | undefined {
-  return result.candidates.find(
-    (candidate) => candidate.modelRef === modelRef && !candidate.kind.startsWith("saved-auth:"),
-  );
-}
-
 function configuredModelDetail(candidate: Candidate | undefined, modelRef: string): string {
-  const name = modelName(modelRef);
+  const name = modelRef.slice(modelRef.indexOf("/") + 1);
   const detail = candidate?.detail.trim();
   if (!detail || candidate?.kind === "existing-model") {
     return name;
@@ -128,18 +114,12 @@ function configuredModelDetail(candidate: Candidate | undefined, modelRef: strin
   return detail.toLowerCase().includes(name.toLowerCase()) ? detail : `${name} · ${detail}`;
 }
 
-function verificationButtonLabel(verify: ModelSetupVerifyState): string {
-  switch (verify.phase) {
-    case "checking":
-      return t("modelSetup.verify.checkingButton");
-    case "failed":
-      return t("modelSetup.verify.retry");
-    case "ok":
-      return t("modelSetup.verify.checkAgain");
-    default:
-      return t("modelSetup.verify.button");
-  }
-}
+const VERIFICATION_BUTTON_LABELS = {
+  checking: "modelSetup.verify.checkingButton",
+  failed: "modelSetup.verify.retry",
+  ok: "modelSetup.verify.checkAgain",
+  idle: "modelSetup.verify.button",
+};
 
 export function renderConfiguredModel(props: {
   result: SystemAgentSetupDetectResult;
@@ -155,7 +135,12 @@ export function renderConfiguredModel(props: {
   const displayRef = props.verify.phase === "ok" ? props.verify.modelRef : configuredRef;
   const providerId = providerIdFromModelRef(displayRef);
   const configuredCandidate =
-    displayRef === configuredRef ? findConfiguredCandidate(props.result, configuredRef) : undefined;
+    displayRef === configuredRef
+      ? props.result.candidates.find(
+          (candidate) =>
+            candidate.modelRef === configuredRef && !candidate.kind.startsWith("saved-auth:"),
+        )
+      : undefined;
   const providerLabel = providerId ? providerDisplayLabel(providerId) : displayRef;
   const detail = configuredModelDetail(configuredCandidate, displayRef);
 
@@ -204,7 +189,7 @@ export function renderConfiguredModel(props: {
                   ?disabled=${props.actionsDisabled}
                   @click=${props.onVerify}
                 >
-                  ${verificationButtonLabel(props.verify)}
+                  ${t(VERIFICATION_BUTTON_LABELS[props.verify.phase])}
                 </button>`
               : nothing
           }

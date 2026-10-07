@@ -128,16 +128,11 @@ function installDeployRestLogging(params: {
 async function deployDiscordCommands(params: {
   client: Client;
   runtime: RuntimeEnv;
-  enabled: boolean;
-  accountId?: string;
-  startupStartedAt?: number;
+  accountId: string;
+  startupStartedAt: number;
   shouldLogVerbose: () => boolean;
 }) {
-  if (!params.enabled) {
-    return;
-  }
-  const startupStartedAt = params.startupStartedAt ?? Date.now();
-  const accountId = params.accountId ?? "default";
+  const { accountId, startupStartedAt } = params;
   const restoreDeployRestLogging = installDeployRestLogging({
     rest: params.client.rest,
     runtime: params.runtime,
@@ -147,7 +142,7 @@ async function deployDiscordCommands(params: {
   });
   try {
     try {
-      await params.client.deployCommands({ mode: "reconcile" });
+      await params.client.deployCommands();
     } catch (err) {
       if (isDiscordDeployDailyCreateLimit(err)) {
         params.runtime.log?.(

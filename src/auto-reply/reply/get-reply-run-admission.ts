@@ -12,6 +12,7 @@ import {
   resolveSessionFilePathOptions,
 } from "../../config/sessions/paths.js";
 import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
+import { composeSessionSourceAssertion } from "../../config/sessions/session-source-authority.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import { logVerbose } from "../../globals.js";
 import { isFastTestRuntimeEnv } from "../../infra/env.js";
@@ -38,9 +39,8 @@ import {
 } from "./get-reply-run-helpers.js";
 import {
   REPLY_RUN_STILL_SHUTTING_DOWN_TEXT,
-  resolvePreparedReplyQueueState,
+  waitForPreparedReplyQueue,
 } from "./get-reply-run-queue.js";
-import { buildReplyPromptEnvelope } from "./prompt-prelude.js";
 import { resolveActiveRunQueueAction } from "./queue-policy.js";
 import { resolveQueueSettings } from "./queue/settings-runtime.js";
 import { hasPendingFollowupQueueWork } from "./queue/state.js";
@@ -66,18 +66,10 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
     params,
     traceRunPhase,
     inboundEventKind,
-    sourceReplyDeliveryMode,
     useFastReplyRuntime,
     thinkingRuntime,
     isFirstTurnInSession,
-    baseBodyFinal,
-    hasUserBody,
-    isBareSessionReset,
-    startupAction,
-    startupContextPrelude,
-    softResetTail,
     isMainSession,
-    inboundUserContextPromptJoiner,
     effectiveQueueMode,
     effectiveResetTriggered,
     explicitThinkingLevelOverride,
@@ -170,35 +162,20 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
         // A heartbeat may consume only its prepared generic selection, never
         // dedicated reminders or arrivals that were not part of this turn.
         events: context.isHeartbeat ? (eventContext?.events ?? []) : undefined,
+        deferredEventIds: context.isHeartbeat ? eventContext?.deferredEventIds : undefined,
       });
       if (eventsBlock) {
         drainedSystemEventBlocks.push(eventsBlock);
       }
     }
   };
-  const rebuildPromptBodies = () => {
-    const { activeGoalContext, inboundUserContext } = context.getInboundContext();
-    return buildReplyPromptEnvelope({
-      ctx,
-      sessionCtx,
-      baseBody: baseBodyFinal,
+  const rebuildPromptBodies = () =>
+    context.buildPromptBodies({
       prefixedBody: prefixedBodyCore,
-      hasUserBody,
-      inboundUserContext,
-      activeGoalContext,
-      inboundUserContextPromptJoiner,
-      isBareSessionReset,
-      startupAction,
-      startupContextPrelude,
-      softResetTail,
-      isHeartbeat: context.isHeartbeat,
-      inboundEventKind,
-      sourceReplyDeliveryMode,
       threadContextNote,
       systemEventBlocks: drainedSystemEventBlocks,
       media: opts?.media,
     });
-  };
   const skillResult = isFastTestRuntimeEnv()
     ? {
         sessionEntry,
@@ -216,12 +193,22 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
           sessionId,
           isFirstTurnInSession,
           workspaceDir: context.skillsWorkspaceDir,
-          executionWorkspaceDir:
-            sessionEntry?.worktree?.canonicalWorkspaceDir ?? context.workspaceDir,
+          executionWorkspaceDir: context.workspaceDir,
           cfg,
           execOverrides: params.execOverrides,
           skillFilter: opts?.skillFilter,
           skillOverrides: opts?.skillOverrides,
+          assertCurrent: composeSessionSourceAssertion(
+            [opts?.operatorAuthority?.assertCurrent],
+            (assertOperatorCurrent) => {
+              opts?.abortSignal?.throwIfAborted();
+              opts?.replyOperation?.abortSignal.throwIfAborted();
+              assertOperatorCurrent();
+              if (opts?.replyOperation?.result) {
+                throw new Error("Reply operation ended while preparing skills");
+              }
+            },
+          ),
         });
       });
   sessionEntry = skillResult.sessionEntry;
@@ -238,13 +225,15 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
   }
   const allowedThinkingCatalog = modelState.allowedModelCatalog ?? [];
   let thinkingCatalog = allowedThinkingCatalog.length > 0 ? allowedThinkingCatalog : undefined;
-  let thinkingSelection = resolveThinkingSelectionForModel({
-    provider,
-    model,
-    level: resolvedThinkLevel,
-    catalog: thinkingCatalog,
-    agentRuntime: thinkingRuntime,
-  });
+  const resolveCurrentThinkingSelection = () =>
+    resolveThinkingSelectionForModel({
+      provider,
+      model,
+      level: resolvedThinkLevel,
+      catalog: thinkingCatalog,
+      agentRuntime: thinkingRuntime,
+    });
+  let thinkingSelection = resolveCurrentThinkingSelection();
   const shouldHydrateThinkingCatalog =
     !thinkingSelection.supported ||
     (resolvedThinkLevel !== "off" &&
@@ -257,13 +246,7 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
     thinkingCatalog = await traceRunPhase("reply.resolve_thinking_catalog", () =>
       modelState.resolveThinkingCatalog({ provider, model }),
     );
-    thinkingSelection = resolveThinkingSelectionForModel({
-      provider,
-      model,
-      level: resolvedThinkLevel,
-      catalog: thinkingCatalog,
-      agentRuntime: thinkingRuntime,
-    });
+    thinkingSelection = resolveCurrentThinkingSelection();
   }
   if (!thinkingSelection.supported) {
     const explicitThink =
@@ -337,7 +320,12 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
         : sessionEntry;
     const latestSessionId = latestSessionEntry?.sessionId ?? sessionIdFinal;
     rebindProvidedReplyOperation(latestSessionId);
-    opts?.onSessionPrepared?.({ sessionKey, sessionId: latestSessionId, storePath });
+    opts?.onSessionPrepared?.({
+      sessionKey,
+      sessionId: latestSessionId,
+      lifecycleRevision: latestSessionEntry?.lifecycleRevision,
+      storePath,
+    });
     // Queued admission uses the scoped key too. A legacy marker for the same
     // transcript would make unchanged tool authority fail the steering check.
     const sessionFile =
@@ -584,8 +572,7 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
     resetTriggered: effectiveResetTriggered,
   });
   if (isActive && activeRunQueueAction === "run-now") {
-    const queueState = await resolvePreparedReplyQueueState({
-      activeRunQueueAction,
+    const queueReply = await waitForPreparedReplyQueue({
       activeSessionId: activeSessionId ?? resolveActiveQueueSessionId(),
       queueMode: activeRunQueueMode,
       interruptActiveRun: async () => {
@@ -622,9 +609,9 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
       },
       resolveBusyState: resolveQueueBusyState,
     });
-    if (queueState.kind === "reply") {
+    if (queueReply) {
       typing.cleanup();
-      return { kind: "reply", reply: queueState.reply } as const;
+      return { kind: "reply", reply: queueReply } as const;
     }
   }
   if (activeRunQueueAction !== "drop") {
@@ -632,15 +619,6 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
     promptBodies = await traceRunPhase("reply.build_prompt_bodies", () => rebuildPromptBodies());
   }
 
-  const {
-    prefixedCommandBody,
-    queuedBody,
-    transcriptBody,
-    transcriptCommandBody,
-    media: promptMedia,
-    inboundMediaIndexes,
-    currentInboundContext,
-  } = promptBodies;
   return {
     kind: "ready",
     context,
@@ -648,13 +626,7 @@ export async function prepareReplyRunAdmission(context: PreparedReplyRunContext)
     thinkLevelOverride,
     thinkingCatalog,
     skillsSnapshot,
-    prefixedCommandBody,
-    queuedBody,
-    transcriptBody,
-    transcriptCommandBody,
-    promptMedia,
-    inboundMediaIndexes,
-    currentInboundContext,
+    promptBodies,
     isRoomEvent,
     providedReplyOperation,
     preparedSessionState,

@@ -1,5 +1,6 @@
 import { ButtonStyle, TextInputStyle } from "discord-api-types/v10";
 import {
+  asOptionalRecord,
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
   readNonBlankString,
@@ -27,10 +28,11 @@ const BLOCK_ALIASES = new Map<string, DiscordComponentBlock["type"]>([
 ]);
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  const record = asOptionalRecord(value);
+  if (!record) {
     throw new Error(`${label} must be an object`);
   }
-  return value as Record<string, unknown>;
+  return record;
 }
 
 // Body whitespace carries Markdown; control labels still use trimmed values.
@@ -93,10 +95,10 @@ function readOptionalInteger(
 }
 
 function readOptionalEmoji(value: unknown, label: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  const obj = asOptionalRecord(value);
+  if (!obj) {
     return undefined;
   }
-  const obj = value as { name?: unknown; id?: unknown; animated?: unknown };
   return {
     name: readRequiredString(obj.name, `${label}.name`),
     id: normalizeOptionalString(obj.id),
@@ -124,19 +126,17 @@ export function resolveDiscordComponentAttachmentName(value: string): string {
   return readAttachmentName(value, "Attachment reference");
 }
 
+const buttonStyles = new Map<string, ButtonStyle>([
+  ["secondary", ButtonStyle.Secondary],
+  ["success", ButtonStyle.Success],
+  ["danger", ButtonStyle.Danger],
+  ["link", ButtonStyle.Link],
+]);
+
 export function mapButtonStyle(style?: DiscordComponentButtonStyle): ButtonStyle {
-  switch (normalizeLowercaseStringOrEmpty(style ?? "primary")) {
-    case "secondary":
-      return ButtonStyle.Secondary;
-    case "success":
-      return ButtonStyle.Success;
-    case "danger":
-      return ButtonStyle.Danger;
-    case "link":
-      return ButtonStyle.Link;
-    default:
-      return ButtonStyle.Primary;
-  }
+  return (
+    buttonStyles.get(normalizeLowercaseStringOrEmpty(style ?? "primary")) ?? ButtonStyle.Primary
+  );
 }
 
 export function mapTextInputStyle(style?: DiscordModalFieldSpec["style"]) {
@@ -419,22 +419,16 @@ export function readDiscordComponentSpec(raw: unknown): DiscordComponentMessageS
       fields,
     };
   }
+  const container = asOptionalRecord(obj.container);
   return {
     text: readNonBlankString(obj.text),
     reusable: typeof obj.reusable === "boolean" ? obj.reusable : undefined,
-    container:
-      typeof obj.container === "object" && obj.container && !Array.isArray(obj.container)
-        ? {
-            accentColor: (obj.container as { accentColor?: unknown }).accentColor as
-              | string
-              | number
-              | undefined,
-            spoiler:
-              typeof (obj.container as { spoiler?: unknown }).spoiler === "boolean"
-                ? ((obj.container as { spoiler?: boolean }).spoiler as boolean)
-                : undefined,
-          }
-        : undefined,
+    container: container
+      ? {
+          accentColor: container.accentColor as string | number | undefined,
+          spoiler: typeof container.spoiler === "boolean" ? container.spoiler : undefined,
+        }
+      : undefined,
     blocks,
     modal,
   };

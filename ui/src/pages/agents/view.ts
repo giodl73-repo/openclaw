@@ -183,33 +183,36 @@ export function renderAgents(props: AgentsProps) {
   };
 
   const renderSelectedPanel = (agent: AgentsListResult["agents"][number]) => {
+    const configActions = {
+      configForm: config,
+      configLoading: props.config.configLoading,
+      configSaving: props.config.configSaving,
+      configDirty: props.config.configFormDirty,
+      canUpdateConfig: props.access.canUpdateConfig,
+      onConfigReload: props.onConfigReload,
+      onConfigSave: props.onConfigSave,
+    };
     switch (props.activePanel) {
       case "overview":
         return keyed(
           agent.id,
           renderAgentOverview({
+            ...configActions,
             applicationConfig: props.applicationConfig,
             agent,
             defaultId,
-            configForm: config,
             agentFilesList: props.agentFiles.agentFilesList,
             agentIdentity: props.agentIdentityById[agent.id] ?? null,
             identityDraft: props.identityDraft,
             identityAvatarLoader: props.identityAvatarLoader,
             identitySaving: props.identitySaving,
             identityError: props.identityError,
-            canUpdateConfig: props.access.canUpdateConfig,
             canUpdateIdentity: props.access.canUpdateIdentity,
-            configLoading: props.config.configLoading,
-            configSaving: props.config.configSaving,
-            configDirty: props.config.configFormDirty,
             modelCatalog: props.modelCatalog.models,
             decisionModels: props.modelCatalog.decisionModels ?? [],
             modelSelectionPolicy: props.modelCatalog.modelSelectionPolicy,
             modelCatalogRetired: props.modelCatalog.retired,
             modelCatalogStatus: props.modelCatalogStatus,
-            onConfigReload: props.onConfigReload,
-            onConfigSave: props.onConfigSave,
             onIdentityFieldChange: props.onIdentityFieldChange,
             onIdentityAvatarSelect: props.onIdentityAvatarSelect,
             onIdentitySave: props.onIdentitySave,
@@ -242,11 +245,8 @@ export function renderAgents(props: AgentsProps) {
         });
       case "tools":
         return renderAgentTools({
+          ...configActions,
           agentId: agent.id,
-          configForm: config,
-          configLoading: props.config.configLoading,
-          configSaving: props.config.configSaving,
-          configDirty: props.config.configFormDirty,
           toolsCatalogLoading: props.tools.toolsCatalogLoading,
           toolsCatalogError: props.tools.toolsCatalogError,
           toolsCatalogResult: props.tools.toolsCatalogResult,
@@ -255,35 +255,26 @@ export function renderAgents(props: AgentsProps) {
           toolsEffectiveResult: props.tools.toolsEffectiveResult,
           runtimeSessionKey: props.runtimeSessionKey,
           runtimeSessionMatchesSelectedAgent: props.runtimeSessionMatchesSelectedAgent,
-          canUpdateConfig: props.access.canUpdateConfig,
           githubIdentity: props.githubIdentity,
           onOpenGitHubConnections: props.onOpenGitHubConnections,
           onProfileChange: props.onToolsProfileChange,
           onOverridesChange: props.onToolsOverridesChange,
-          onConfigReload: props.onConfigReload,
-          onConfigSave: props.onConfigSave,
         });
       case "skills":
         return renderAgentSkills({
+          ...configActions,
           agentId: agent.id,
           report: props.agentSkills.agentSkillsReport,
           loading: props.agentSkills.agentSkillsLoading,
           error: props.agentSkills.agentSkillsError,
           activeAgentId: props.agentSkills.agentSkillsAgentId,
-          configForm: config,
-          configLoading: props.config.configLoading,
-          configSaving: props.config.configSaving,
-          configDirty: props.config.configFormDirty,
           filter: props.agentSkills.skillsFilter,
           canPatchConfig: props.access.canPatchConfig,
-          canUpdateConfig: props.access.canUpdateConfig,
           onFilterChange: props.onSkillsFilterChange,
           onRefresh: props.onSkillsRefresh,
           onToggle: props.onAgentSkillToggle,
           onClear: props.onAgentSkillsClear,
           onDisableAll: props.onAgentSkillsDisableAll,
-          onConfigReload: props.onConfigReload,
-          onConfigSave: props.onConfigSave,
         });
       case "channels":
         return renderAgentChannels({
@@ -440,11 +431,24 @@ export function renderAgents(props: AgentsProps) {
                 renderSettingsEmpty(t("agents.selectSubtitle")),
               )
             : html`
-                ${renderAgentTabs(
-                  props.activePanel,
-                  (panel) => props.onSelectPanel(panel),
-                  tabCounts,
-                )}
+                ${renderHubTabs({
+                  id: "agents",
+                  active: props.activePanel,
+                  tabs: (
+                    [
+                      ["overview", "agents.tabs.overview"],
+                      ["files", "agents.tabs.files"],
+                      ["tools", "agents.tabs.tools"],
+                      ["skills", "agents.tabs.skills"],
+                      ["channels", "agents.tabs.channels"],
+                      ["cron", "agents.tabs.cronJobs"],
+                      ["memory", "agents.tabs.memory"],
+                    ] as const
+                  ).map(([value, key]) => ({ value, label: t(key), count: tabCounts[value] })),
+                  ariaLabel: t("tabs.agents"),
+                  panelId: "agent-panel",
+                  onSelect: props.onSelectPanel,
+                })}
                 <div
                   id="agent-panel"
                   class="settings-stack"
@@ -465,32 +469,4 @@ export function renderAgents(props: AgentsProps) {
       </section>
     </div>
   `;
-}
-
-function renderAgentTabs(
-  active: AgentsPanel,
-  onSelect: (panel: AgentsPanel) => void,
-  counts: Record<string, number | null>,
-) {
-  const tabs: Array<{ id: AgentsPanel; label: string }> = [
-    { id: "overview", label: t("agents.tabs.overview") },
-    { id: "files", label: t("agents.tabs.files") },
-    { id: "tools", label: t("agents.tabs.tools") },
-    { id: "skills", label: t("agents.tabs.skills") },
-    { id: "channels", label: t("agents.tabs.channels") },
-    { id: "cron", label: t("agents.tabs.cronJobs") },
-    { id: "memory", label: t("agents.tabs.memory") },
-  ];
-  return renderHubTabs({
-    id: "agents",
-    active,
-    tabs: tabs.map((tab) => ({
-      value: tab.id,
-      label: tab.label,
-      count: counts[tab.id],
-    })),
-    ariaLabel: t("tabs.agents"),
-    panelId: "agent-panel",
-    onSelect,
-  });
 }

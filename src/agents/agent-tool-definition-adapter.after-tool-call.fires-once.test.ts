@@ -9,8 +9,9 @@
 import type { AgentTool } from "openclaw/plugin-sdk/agent-core";
 import { Type } from "typebox";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import "../test-utils/prepare-compiled-subprocesses.js";
 import { createBaseToolHandlerState } from "./agent-tool-handler-state.test-helpers.js";
+import "../test-utils/prepare-compiled-subprocesses.js";
+import { prepareToolResult } from "./embedded-agent-tool-results.js";
 
 const hookMocks = vi.hoisted(() => ({
   runner: {
@@ -181,6 +182,7 @@ describe("after_tool_call fires exactly once in embedded runs", () => {
         isError: params.isError,
         result: params.result,
       } as never,
+      prepareToolResult(params.result),
     );
   }
 
@@ -225,6 +227,7 @@ describe("after_tool_call fires exactly once in embedded runs", () => {
 
     await emitToolExecutionStartEvent({ ctx, toolName: "read", toolCallId, args });
     await def.execute(toolCallId, args, undefined, undefined, extensionContext);
+    expect(beforeToolCallMocks.consumeAdjustedParamsForToolCall).not.toHaveBeenCalled();
     await emitToolExecutionEndEvent({
       ctx,
       toolName: "read",
@@ -233,7 +236,7 @@ describe("after_tool_call fires exactly once in embedded runs", () => {
       result: { content: [{ type: "text", text: "ok" }] },
     });
 
-    expect(beforeToolCallMocks.consumeAdjustedParamsForToolCall).toHaveBeenCalledWith(
+    expect(beforeToolCallMocks.consumeAdjustedParamsForToolCall).toHaveBeenCalledExactlyOnceWith(
       toolCallId,
       "integration-test",
     );

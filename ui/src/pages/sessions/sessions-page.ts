@@ -27,7 +27,7 @@ import { t } from "../../i18n/index.ts";
 import { watchAgentScope } from "../../lib/agents/index.ts";
 import { openEditor } from "../../lib/editor-links.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
+import { canCallGatewayMethod } from "../../lib/gateway-methods.ts";
 import { openExternalUrlSafe } from "../../lib/open-external-url.ts";
 import {
   readSessionMethodAccess,
@@ -80,6 +80,7 @@ import {
   updateSelectedSessions,
   type SessionDeleteRow,
 } from "./selection.ts";
+import { SessionDetailsController } from "./session-details-controller.ts";
 import { renderSessionManagementMenu } from "./session-menu.ts";
 import { renderSessions, type SessionsProps } from "./view.ts";
 
@@ -144,14 +145,17 @@ class SessionsPage extends OpenClawLightDomElement {
   private appliedRouteData?: SessionsRouteData;
   private sessionMutationPending = false;
   private sessionMenuTrigger: HTMLElement | null = null;
-  // Guards the async work fetch: a menu reopened for another session must not
-  // adopt a stale response.
-  private sessionMenuWorkVersion = 0;
   private listBinding?: SessionsPageListBinding;
   private unsubscribeList?: () => void;
   private listRequest?: Promise<void>;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private appliedListResult: SessionsListResult | null | undefined;
+  private readonly details = new SessionDetailsController(this, {
+    captureScope: () => this.captureRequestScope(),
+    isCurrent: (scope) => this.isRequestScopeCurrent(scope),
+    row: () => this.result?.sessions.find((row) => row.key === this.expandedSessionKey),
+    agentId: (row, scope) => row.agentId ?? this.sessionPathAgentId(row.key, scope.context),
+  });
   private readonly inputDialog = new SessionsPageDialog((message) => {
     this.error = message;
   });
@@ -231,6 +235,7 @@ class SessionsPage extends OpenClawLightDomElement {
       this.applyRouteData();
     }
     this.bindSessionList();
+    this.details.synchronize();
   }
 
   override disconnectedCallback() {
@@ -246,6 +251,7 @@ class SessionsPage extends OpenClawLightDomElement {
   }
 
   private retirePageOperations() {
+    this.details.reset();
     this.pluginActionLifetime.abort();
     this.pluginActionLifetime = new AbortController();
     this.pageEpoch += 1;
@@ -630,18 +636,23 @@ class SessionsPage extends OpenClawLightDomElement {
         : "sessionsView.deleteSelectedConfirm",
       { count: String(rows.length) },
     );
-    if (
-      !(await showConfirmDialog({
-        message,
-        confirmLabel: t("common.delete"),
-        danger: true,
-        signal: this.pluginActionLifetime.signal,
-      })) ||
-      !this.isRequestScopeCurrent(scope)
-    ) {
+    if (!(await this.confirmMutation(message)) || !this.isRequestScopeCurrent(scope)) {
       return;
     }
     await this.deleteSessions(rows.filter((row) => this.selectedSessions.get(row.key) === row));
+  }
+
+  private confirmMutation(
+    message: string,
+    options: { confirmLabel?: string; signal?: AbortSignal } = {},
+  ) {
+    return showConfirmDialog({
+      message,
+      confirmLabel: t("common.delete"),
+      danger: true,
+      signal: this.pluginActionLifetime.signal,
+      ...options,
+    });
   }
 
   private async deleteSessions(
@@ -782,14 +793,12 @@ class SessionsPage extends OpenClawLightDomElement {
       return;
     }
     if (
-      !(await showConfirmDialog({
-        message: t("sessionsView.deleteAllArchivedConfirm", {
+      !(await this.confirmMutation(
+        t("sessionsView.deleteAllArchivedConfirm", {
           count: String(archivedRows.length),
         }),
-        confirmLabel: t("common.delete"),
-        danger: true,
-        signal,
-      })) ||
+        { signal },
+      )) ||
       !this.isRequestScopeCurrent(scope)
     ) {
       return;
@@ -802,12 +811,7 @@ class SessionsPage extends OpenClawLightDomElement {
     const scope = this.captureRequestScope();
     if (
       !scope ||
-      !(await showConfirmDialog({
-        message: t("sessionsView.deleteSessionConfirm", { session: label }),
-        confirmLabel: t("common.delete"),
-        danger: true,
-        signal: this.pluginActionLifetime.signal,
-      })) ||
+      !(await this.confirmMutation(t("sessionsView.deleteSessionConfirm", { session: label }))) ||
       !this.isRequestScopeCurrent(scope)
     ) {
       return;
@@ -824,11 +828,8 @@ class SessionsPage extends OpenClawLightDomElement {
     const scope = this.captureRequestScope();
     if (
       !scope ||
-      !(await showConfirmDialog({
-        message: t("sessionsView.stopCloudWorkerConfirm", { session: label }),
+      !(await this.confirmMutation(t("sessionsView.stopCloudWorkerConfirm", { session: label }), {
         confirmLabel: t("sessionsView.stopCloudWorkerConfirmAction"),
-        danger: true,
-        signal: this.pluginActionLifetime.signal,
       })) ||
       !this.isRequestScopeCurrent(scope) ||
       !this.requireMutationAccess(scope, stopAction)
@@ -1150,23 +1151,6 @@ class SessionsPage extends OpenClawLightDomElement {
     }
   }
 
-  private async toggleSessionDetails(sessionKey: string) {
-    const context = this.context;
-    if (!context) {
-      return;
-    }
-    const leavingDeepLink = this.deepLinkSessionKey !== null;
-    this.deepLinkSessionKey = null;
-    if (leavingDeepLink) {
-      void this.refreshSessionList();
-    }
-    if (this.expandedSessionKey === sessionKey) {
-      this.expandedSessionKey = null;
-      return;
-    }
-    this.expandedSessionKey = sessionKey;
-  }
-
   private openSessionMenu(
     row: GatewaySessionRow,
     position: { x: number; y: number },
@@ -1191,12 +1175,12 @@ class SessionsPage extends OpenClawLightDomElement {
     }
     this.sessionMenu = null;
     this.sessionMenuTrigger = null;
-    this.sessionMenuWorkVersion += 1;
     this.sessionMenuWork = null;
   }
 
   private loadSessionMenuWork(row: GatewaySessionRow) {
-    const version = ++this.sessionMenuWorkVersion;
+    // Every opening has its own identity, including reopening the same row.
+    const menu = this.sessionMenu;
     if (!row.worktree) {
       this.sessionMenuWork = null;
       return;
@@ -1214,17 +1198,17 @@ class SessionsPage extends OpenClawLightDomElement {
     );
     void fetchSessionMenuWork({
       client: scope.client,
-      loadPullRequests:
-        isGatewayMethodAdvertised(
-          scope.context.gateway.snapshot,
-          SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
-        ) === true
-          ? () => store.load(this, pullRequestKey)
-          : undefined,
+      loadPullRequests: canCallGatewayMethod(
+        scope.context.gateway.snapshot,
+        SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
+        "operator.read",
+      )
+        ? () => store.load(this, pullRequestKey)
+        : undefined,
       worktreeId: row.worktree.id,
       execNode: row.execNode,
     }).then((work) => {
-      if (version === this.sessionMenuWorkVersion) {
+      if (this.sessionMenu === menu) {
         this.sessionMenuWork = { loading: false, ...work };
       }
     });
@@ -1395,10 +1379,10 @@ class SessionsPage extends OpenClawLightDomElement {
       })}
       ${renderSettingsWorkspace(
         renderSessions({
-          loading: this.loading,
+          loading: this.loading || this.details.loading,
           refreshing: this.refreshing,
           result: this.result,
-          error: this.error,
+          error: this.details.error ?? this.error,
           activeMinutes: this.activeMinutes,
           limit: this.limit,
           includeGlobal: this.includeGlobal,
@@ -1532,7 +1516,13 @@ class SessionsPage extends OpenClawLightDomElement {
           },
           onOpenSessionMenu: (row, position, trigger) =>
             this.openSessionMenu(row, position, trigger),
-          onToggleDetails: (sessionKey) => void this.toggleSessionDetails(sessionKey),
+          onToggleDetails: (key) => {
+            this.expandedSessionKey = this.expandedSessionKey === key ? null : key;
+            if (this.deepLinkSessionKey !== null) {
+              this.deepLinkSessionKey = null;
+              void this.refreshSessionList();
+            }
+          },
         }),
         { id: "sessions-hub-panel" },
       )}

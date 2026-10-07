@@ -10,6 +10,8 @@ import {
   type NativeSubagentAssignment,
 } from "./native-subagent-assignment.js";
 import type {
+  ChildState,
+  KnownChild,
   NativeSubagentMonitorClient,
   NativeTurnEnd,
   NativeTurnState,
@@ -19,24 +21,13 @@ import type {
 import type { JsonObject } from "./protocol.js";
 import { isJsonObject } from "./protocol.js";
 
-type NativeSubagentCurrentAssignmentState = {
-  runId: string | undefined;
-  nativeTurnState: NativeTurnState | undefined;
-};
-
-type NativeSubagentHistoryQueries = {
-  getPendingTurnIds: (childThreadId: string) => readonly string[];
-  getCurrentAssignmentState: (
-    childThreadId: string,
-  ) => NativeSubagentCurrentAssignmentState | undefined;
-};
-
 const THREAD_READ_TIMEOUT_MS = 30_000;
 
 export class CodexNativeSubagentHistoryRecovery {
   constructor(
     private readonly client: Pick<NativeSubagentMonitorClient, "request">,
-    private readonly queries: NativeSubagentHistoryQueries,
+    private readonly knownChildren: ReadonlyMap<string, KnownChild>,
+    private readonly children: ReadonlyMap<string, ChildState>,
   ) {}
 
   private requestThreadRead(childThreadId: string, includeTurns: boolean) {
@@ -49,19 +40,6 @@ export class CodexNativeSubagentHistoryRecovery {
       {
         timeoutMs: THREAD_READ_TIMEOUT_MS,
       },
-    );
-  }
-
-  private requestLatestThreadTurn(childThreadId: string) {
-    return this.client.request(
-      "thread/turns/list",
-      {
-        threadId: childThreadId,
-        limit: 1,
-        sortDirection: "desc",
-        itemsView: "full",
-      },
-      { timeoutMs: THREAD_READ_TIMEOUT_MS },
     );
   }
 
@@ -85,8 +63,9 @@ export class CodexNativeSubagentHistoryRecovery {
     if (!thread || readString(thread, "id")?.trim() !== childThreadId) {
       return { resumable: false, threadState: "unavailable", observedPendingTurns: [] };
     }
+    const rawTurns = Array.isArray(thread.turns) ? thread.turns : [];
     if (options.predecessorNativeTurnId) {
-      const turns = Array.isArray(thread.turns) ? thread.turns.filter(isJsonObject) : [];
+      const turns = rawTurns.filter(isJsonObject);
       const predecessor = turns.findIndex(
         (turn) => readString(turn, "id") === options.predecessorNativeTurnId,
       );
@@ -102,25 +81,14 @@ export class CodexNativeSubagentHistoryRecovery {
     let initialTurnId: string | undefined;
     if (options.initialAssignment && !assignment.nativeTurnId && !recordedCompletion) {
       const forkedFromId = readString(thread, "forkedFromId");
-      if (forkedFromId) {
-        // Codex snapshots inherited history at fork time. A later parent read
-        // reflects rollback, not that immutable prefix; subtraction can label a
-        // copied parent final as child output. Wait for an observed child turn
-        // or native completion receipt instead of inventing its first turn.
-        return {
-          parentThreadId: readThreadParentThreadId(thread),
-          resumable: false,
-          threadState: "unavailable",
-          observedPendingTurns: [],
-        };
-      }
-      for (const turn of Array.isArray(thread.turns) ? thread.turns : []) {
-        const id = readString(turn, "id");
-        if (id) {
-          initialTurnId = id;
-          break;
-        }
-      }
+      // Fork history contains a parent's immutable prefix, not child results.
+      // Only an observed turn or native completion receipt can anchor that child.
+      initialTurnId = forkedFromId
+        ? undefined
+        : readString(
+            rawTurns.find((turn) => readString(turn, "id")),
+            "id",
+          );
       if (!initialTurnId) {
         return {
           parentThreadId: readThreadParentThreadId(thread),
@@ -131,10 +99,12 @@ export class CodexNativeSubagentHistoryRecovery {
       }
     }
     const turnId = assignment.nativeTurnId ?? initialTurnId;
-    const pendingTurnIds = new Set(this.queries.getPendingTurnIds(childThreadId));
+    const pendingTurnIds = new Set(
+      this.knownChildren.get(childThreadId)?.pendingTurns.map((turn) => turn.turnId) ?? [],
+    );
     const unresolvedAssignment = options.resumeInterrupted && !turnId && pendingTurnIds.size > 0;
     const observedPendingTurns: ThreadRecovery["observedPendingTurns"] = [];
-    for (const turn of Array.isArray(thread.turns) ? thread.turns : []) {
+    for (const turn of rawTurns) {
       const pendingTurnId = readString(turn, "id");
       if (pendingTurnId && pendingTurnIds.has(pendingTurnId)) {
         observedPendingTurns.push({ turnId: pendingTurnId, state: readNativeTurnState(turn) });
@@ -159,7 +129,7 @@ export class CodexNativeSubagentHistoryRecovery {
     if (unresolvedAssignment) {
       threadState = "unavailable";
     } else if (turnId) {
-      const turns = Array.isArray(thread.turns) ? thread.turns.filter(isJsonObject) : [];
+      const turns = rawTurns.filter(isJsonObject);
       let index = turns.findIndex((turn) => readString(turn, "id") === turnId);
       // A missed resume notification can leave an unfinished assignment on an
       // interrupted turn. Stop at its first terminal turn, before any later assignment.
@@ -179,17 +149,16 @@ export class CodexNativeSubagentHistoryRecovery {
       resumable = turnStatus === "interrupted";
       threadState = turnStatus === "inprogress" ? "active" : turnStatus ? "other" : "unavailable";
     } else if (threadStatus === "active") {
-      const turn = Array.isArray(thread.turns) ? thread.turns.at(-1) : undefined;
+      const turn = rawTurns.at(-1);
       if (normalizeIdentifier(readString(turn, "status")) === "inprogress") {
         nativeTurnId = readString(turn, "id");
         nativeTurnState = "active";
       }
     } else if (threadStatus !== "systemerror") {
-      const turnRecovery = readThreadTurnRecovery(thread, childThreadId);
-      nativeTurnId = turnRecovery.nativeTurnId;
-      nativeTurnState = turnRecovery.nativeTurnState;
-      completion = turnRecovery.completion;
-      resumable = turnRecovery.resumable;
+      ({ nativeTurnId, nativeTurnState, completion, resumable } = readThreadTurnRecovery(
+        thread,
+        childThreadId,
+      ));
     }
     if (
       !unresolvedAssignment &&
@@ -198,9 +167,13 @@ export class CodexNativeSubagentHistoryRecovery {
     ) {
       // The pinned protocol's paged history distinguishes the failed current
       // turn from earlier persisted results.
-      const turnsResponse = await this.requestLatestThreadTurn(childThreadId).catch(
-        () => undefined,
-      );
+      const turnsResponse = await this.client
+        .request(
+          "thread/turns/list",
+          { threadId: childThreadId, limit: 1, sortDirection: "desc", itemsView: "full" },
+          { timeoutMs: THREAD_READ_TIMEOUT_MS },
+        )
+        .catch(() => undefined);
       const data =
         isJsonObject(turnsResponse) && Array.isArray(turnsResponse.data) ? turnsResponse.data : [];
       const latestTurn = isJsonObject(data[0]) ? data[0] : undefined;
@@ -212,20 +185,18 @@ export class CodexNativeSubagentHistoryRecovery {
       const matchesAssignment = !turnId || readString(latestTurn, "id") === turnId;
       if (latestTurn && matchesAssignment) {
         if (turnId) {
-          const turnRecovery = readThreadTurnRecovery({ turns: [latestTurn] }, childThreadId);
-          nativeTurnId = turnRecovery.nativeTurnId;
-          nativeTurnState = turnRecovery.nativeTurnState;
-          completion = turnRecovery.completion;
-          resumable = turnRecovery.resumable;
+          ({ nativeTurnId, nativeTurnState, completion, resumable } = readThreadTurnRecovery(
+            { turns: [latestTurn] },
+            childThreadId,
+          ));
         } else if (latestTurnStatus === "failed") {
           completion = readTurnCompletion(latestTurn, childThreadId);
         }
       }
-      const current = !latestTurn
-        ? this.queries.getCurrentAssignmentState(childThreadId)
-        : undefined;
+      const current = !latestTurn ? this.knownChildren.get(childThreadId)?.assignment : undefined;
       const unresolvedCurrentAssignment =
-        current?.runId === assignment.runId && current?.nativeTurnState !== "completed";
+        current?.runId === assignment.runId &&
+        this.children.get(current.runId)?.nativeTurnState !== "completed";
       if (latestTurnStatus === "inprogress" && matchesAssignment) {
         nativeTurnId = readString(latestTurn, "id");
         nativeTurnState = "active";
@@ -254,12 +225,9 @@ export class CodexNativeSubagentHistoryRecovery {
       resumable = false;
       threadState = "other";
     }
-    const lineage = {
+    return {
       parentThreadId: readThreadParentThreadId(thread),
       agentPath: normalizeOptionalString(readString(readThreadSpawnSource(thread), "agent_path")),
-    };
-    return {
-      ...lineage,
       nativeTurnId,
       nativeTurnState,
       observedPendingTurns,

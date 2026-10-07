@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { assert, expect, it, vi } from "vitest";
+import { observeHostDataSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
+import {
+  clearRuntimeConfigSnapshot,
+  getRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../config/runtime-snapshot.js";
 import { readDatabasePathIdentitySync } from "../infra/sqlite-worker-identity.js";
 import {
   createSqliteWorkerOperationAdmission,
@@ -12,43 +17,22 @@ import {
   readOpenClawAgentDatabaseRegistryToken,
 } from "./openclaw-agent-db-registry-listing.js";
 import { unregisterOpenClawAgentDatabase } from "./openclaw-agent-db-registry.js";
+import { getOpenClawAgentDatabaseValidationForTransfer } from "./openclaw-agent-db-validation-cache.js";
 import {
   closeOpenClawAgentDatabaseByPathAsync,
   closeOpenClawAgentDatabasesAsync,
   listOpenClawRegisteredAgentDatabases,
   openOpenClawAgentDatabase,
-  resolveOpenClawAgentSqlitePath,
 } from "./openclaw-agent-db.js";
 import type { AgentDatabaseRequestExecutionSource } from "./openclaw-agent-execution-contract.js";
+import {
+  agentCreationWitnessTempDirs as tempDirs,
+  createAgentCreationWitnessFixture as fixture,
+  createAliasedAgentCreationWitnessFixture as aliasedFixture,
+} from "./openclaw-agent-execution.creation-fixture.test-support.js";
 import { captureOpenClawAgentDatabaseExecution } from "./openclaw-agent-execution.js";
 import { createOpenClawDatabaseMaintenanceScope } from "./openclaw-state-db-async-lifecycle.js";
 import { closeOpenClawStateDatabaseAsync, openOpenClawStateDatabase } from "./openclaw-state-db.js";
-
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
-  afterEach(async () => {
-    await closeOpenClawAgentDatabasesAsync();
-    await closeOpenClawStateDatabaseAsync();
-    cleanup();
-  }),
-);
-
-function fixture() {
-  const env = { OPENCLAW_STATE_DIR: fs.realpathSync(tempDirs.make("agent-creation-witness-")) };
-  const options = { agentId: "main", env };
-  return { ...options, path: resolveOpenClawAgentSqlitePath(options) };
-}
-
-function aliasedFixture() {
-  const options = fixture();
-  const alias = path.join(options.env.OPENCLAW_STATE_DIR, "alias");
-  const directory = path.dirname(options.path);
-  fs.mkdirSync(directory, { recursive: true });
-  fs.symlinkSync(directory, alias, process.platform === "win32" ? "junction" : "dir");
-  return {
-    options,
-    aliased: { ...options, path: path.join(alias, path.basename(options.path)) },
-  };
-}
 
 function source(
   beforeGrant: (request: SqliteWorkerAdmissionRequest) => void = () => {},
@@ -69,6 +53,98 @@ function source(
     },
   };
 }
+
+it("exposes a prepared generation only after registration publication and keeps its borrower live", async () => {
+  const options = fixture();
+  readOpenClawAgentDatabaseRegistryToken({ env: options.env });
+  const execution = captureOpenClawAgentDatabaseExecution(options);
+  let observedUnpublishedIdentity = false;
+  const requestSource = source();
+  requestSource.onRegistryChange = () => {
+    // Registration publishes after the native identity is accepted. Neither boundary
+    // alone permits another borrower to skip the remaining preparation.
+    observedUnpublishedIdentity ||= execution.fileIdentity !== undefined;
+    expect(execution.capturePreparedGenerationClaim()).toBeUndefined();
+  };
+  try {
+    expect(execution.capturePreparedGenerationClaim()).toBeUndefined();
+    await execution.prepare(requestSource);
+    expect(observedUnpublishedIdentity).toBe(true);
+    const claim = execution.capturePreparedGenerationClaim();
+    expect(claim).toBeDefined();
+    claim!.assertCurrent();
+    const warmStages: string[] = [];
+    const warmSource = source((request) => warmStages.push(request.stage));
+    const host = observeHostDataSql();
+    try {
+      await Promise.all([execution.prepare(warmSource), execution.prepare(warmSource)]);
+      await execution.prepare(warmSource);
+      expect(warmStages).toEqual([]);
+      expect(host.queries).toEqual([]);
+    } finally {
+      host.restore();
+    }
+    await execution.prepare(warmSource, undefined, { readmitSchema: true });
+    expect(warmStages).toContain("prepare");
+    claim!.assertCurrent();
+    await execution.release();
+    expect(() => execution.capturePreparedGenerationClaim()).toThrow(/released/);
+    expect(() => claim!.assertCurrent()).toThrow(/released/);
+  } finally {
+    await execution.release();
+  }
+});
+
+it("retains both borrowers when config changes after a completed native open", async () => {
+  const options = fixture();
+  const previousConfig = getRuntimeConfigSnapshot();
+  setRuntimeConfigSnapshot({ agents: { entries: { main: {} } } });
+  readOpenClawAgentDatabaseRegistryToken({ env: options.env });
+  const original = captureOpenClawAgentDatabaseExecution(options);
+  let fresh: ReturnType<typeof captureOpenClawAgentDatabaseExecution> | undefined;
+  let preparingFresh: Promise<void> | undefined;
+  let originalIncarnation: string | undefined;
+  let publishedConfig = false;
+  const requestSource = source();
+  requestSource.onRegistryChange = () => {
+    if (publishedConfig || !original.fileIdentity) {
+      return;
+    }
+    publishedConfig = true;
+    originalIncarnation = original.captureGenerationClaim().incarnation;
+    setRuntimeConfigSnapshot({
+      agents: { entries: { main: {} } },
+      session: {
+        store: path.join(options.env.OPENCLAW_STATE_DIR, "relocated", "{agentId}.sqlite"),
+      },
+    });
+    fresh = captureOpenClawAgentDatabaseExecution(options);
+    expect(fresh.capturePreparedGenerationClaim()).toBeUndefined();
+    preparingFresh = fresh.prepare(source());
+    void preparingFresh.catch(() => {});
+  };
+  try {
+    await original.prepare(requestSource);
+    assert(fresh);
+    assert(preparingFresh);
+    assert(originalIncarnation);
+    await preparingFresh;
+    const claim = fresh.capturePreparedGenerationClaim();
+    assert(claim);
+    expect(claim.incarnation).toBe(originalIncarnation);
+    claim.assertCurrent();
+    original.assertCurrent();
+  } finally {
+    await preparingFresh?.catch(() => {});
+    await original.release();
+    await fresh?.release();
+    if (previousConfig) {
+      setRuntimeConfigSnapshot(previousConfig);
+    } else {
+      clearRuntimeConfigSnapshot();
+    }
+  }
+});
 
 it("shares an execution owner across directory aliases, later turns, and cleanup", async () => {
   const { options, aliased } = aliasedFixture();
@@ -121,12 +197,31 @@ it("shares an execution owner across directory aliases, later turns, and cleanup
     } finally {
       await reopened.release();
     }
+    const retainedValidation = getOpenClawAgentDatabaseValidationForTransfer(options);
+    assert(retainedValidation);
+    expect(Atomics.load(new Int32Array(retainedValidation.valid), 0)).toBe(1);
     fs.unlinkSync(options.path);
     const replacement = captureOpenClawAgentDatabaseExecution(options, {
       expectedCreationIdentity: readDatabasePathIdentitySync(options.path),
     });
     try {
-      await replacement.prepare(source());
+      let checkedReplacementProof = false;
+      await replacement.prepare(
+        source((request) => {
+          if (
+            request.stage === "prepare" &&
+            typeof request.facts === "object" &&
+            request.facts !== null &&
+            "kind" in request.facts &&
+            request.facts.kind === "shared-owner"
+          ) {
+            checkedReplacementProof = true;
+            expect(Atomics.load(new Int32Array(retainedValidation.valid), 0)).toBe(0);
+            expect(getOpenClawAgentDatabaseValidationForTransfer(options)).toBeUndefined();
+          }
+        }),
+      );
+      expect(checkedReplacementProof).toBe(true);
       expect(registry.assertCurrent).toThrow("registry changed");
       await expect(
         replacement.runExisting(source(), (scope) => scope.execute(command)),
@@ -139,6 +234,39 @@ it("shares an execution owner across directory aliases, later turns, and cleanup
     }
   } finally {
     await Promise.allSettled([creator.release(), sibling.release()]);
+  }
+});
+
+it("retains every execution alias until the shared maintenance scope closes", async () => {
+  const options = fixture();
+  openOpenClawAgentDatabase(options);
+  const alias = path.join(options.env.OPENCLAW_STATE_DIR, "maintenance-alias");
+  fs.symlinkSync(
+    path.dirname(options.path),
+    alias,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  const parent = createOpenClawDatabaseMaintenanceScope();
+  const child = parent.run(() => createOpenClawDatabaseMaintenanceScope());
+  const captured = child.run(() =>
+    captureOpenClawAgentDatabaseExecution({
+      ...options,
+      path: path.join(alias, path.basename(options.path)),
+    }),
+  );
+  const retained = parent.run(() => captureOpenClawAgentDatabaseExecution(options));
+  try {
+    await child.close();
+    expect(() => retained.assertCurrent()).not.toThrow();
+    await parent.close();
+    expect(() => retained.assertCurrent()).toThrow(/closed/);
+  } finally {
+    await Promise.allSettled([
+      captured.release(),
+      retained.release(),
+      child.close(),
+      parent.close(),
+    ]);
   }
 });
 
@@ -188,6 +316,143 @@ it.each(["child-first", "parent-first"] as const)(
     }
   },
 );
+
+it.each(["missing", "schema-missing"] as const)(
+  "joins concurrent creators of the same originally observed %s store",
+  async (kind) => {
+    const options = fixture();
+    if (kind === "schema-missing") {
+      fs.mkdirSync(path.dirname(options.path), { recursive: true });
+      fs.writeFileSync(options.path, "");
+    }
+    const observations = Array.from({ length: 15 }, () =>
+      readDatabasePathIdentitySync(options.path),
+    );
+    const executions: ReturnType<typeof captureOpenClawAgentDatabaseExecution>[] = [];
+    const create = async (observed: (typeof observations)[number]) => {
+      const execution = captureOpenClawAgentDatabaseExecution(options, {
+        expectedCreationIdentity: observed,
+      });
+      executions.push(execution);
+      await execution.prepare(source());
+      return execution.captureGenerationClaim();
+    };
+    try {
+      const results = await Promise.allSettled(observations.map(create));
+      expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+      const claims = executions.map((execution) => execution.captureGenerationClaim());
+      expect(new Set(claims.map((claim) => claim.incarnation)).size).toBe(1);
+      expect(new Set(claims.map((claim) => claim.identity)).size).toBe(1);
+      const firstObservation = observations[0];
+      const firstClaim = claims[0];
+      assert(firstObservation);
+      assert(firstClaim);
+      const late = await create(firstObservation);
+      expect(late.incarnation).toBe(firstClaim.incarnation);
+      expect(late.identity).toBe(firstClaim.identity);
+      expect(() =>
+        captureOpenClawAgentDatabaseExecution(
+          { ...options, agentId: "other" },
+          { expectedCreationIdentity: firstObservation },
+        ),
+      ).toThrow(/requested agent other/);
+      expect(() =>
+        captureOpenClawAgentDatabaseExecution(
+          { ...options, env: fixture().env },
+          { expectedCreationIdentity: firstObservation },
+        ),
+      ).toThrow(/another shared-state database/);
+      await Promise.all(
+        executions.map(async (execution, index) => {
+          const sessionKey = `agent:main:concurrent-${index}`;
+          const sessionId = `concurrent-session-${index}`;
+          await expect(
+            execution.runExisting(source(), (scope) =>
+              scope.execute({
+                type: "session.transcript.initialize",
+                input: { sessionKey, sessionId },
+              }),
+            ),
+          ).resolves.toEqual({
+            kind: "session-transcript-initialized",
+            sessionKey,
+            placeholder: { sessionId },
+          });
+        }),
+      );
+    } finally {
+      await Promise.allSettled(executions.map((execution) => execution.release()));
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "rejects an absent observation after the winning creator's file is replaced",
+  async () => {
+    const options = fixture();
+    const observed = readDatabasePathIdentitySync(options.path);
+    const creator = captureOpenClawAgentDatabaseExecution(options, {
+      expectedCreationIdentity: observed,
+    });
+    const retainedPath = `${options.path}.retained`;
+    try {
+      await creator.prepare(source());
+      fs.renameSync(options.path, retainedPath);
+      try {
+        fs.writeFileSync(options.path, "replacement target");
+        expect(() =>
+          captureOpenClawAgentDatabaseExecution(options, { expectedCreationIdentity: observed }),
+        ).toThrow(/identity changed/);
+      } finally {
+        fs.unlinkSync(options.path);
+        fs.renameSync(retainedPath, options.path);
+      }
+    } finally {
+      await creator.release();
+    }
+  },
+);
+
+it("keeps the owner's absent target when a later creator observes an unexpected file", async () => {
+  const options = fixture();
+  const creator = captureOpenClawAgentDatabaseExecution(options, {
+    expectedCreationIdentity: readDatabasePathIdentitySync(options.path),
+  });
+  fs.mkdirSync(path.dirname(options.path), { recursive: true });
+  fs.writeFileSync(options.path, "");
+  const later = captureOpenClawAgentDatabaseExecution(options, {
+    expectedCreationIdentity: readDatabasePathIdentitySync(options.path),
+  });
+  try {
+    await expect(later.prepare(source())).rejects.toThrow(/changed before creating open/);
+    expect(fs.readFileSync(options.path)).toHaveLength(0);
+  } finally {
+    await Promise.allSettled([creator.release(), later.release()]);
+  }
+});
+
+it("retains the first creator's file witness on a preexisting execution owner", async () => {
+  const options = fixture();
+  fs.mkdirSync(path.dirname(options.path), { recursive: true });
+  fs.writeFileSync(options.path, "");
+  const ordinary = captureOpenClawAgentDatabaseExecution(options);
+  const creator = captureOpenClawAgentDatabaseExecution(options, {
+    expectedCreationIdentity: readDatabasePathIdentitySync(options.path),
+  });
+  fs.renameSync(options.path, `${options.path}.original`);
+  fs.writeFileSync(options.path, "");
+  const later = captureOpenClawAgentDatabaseExecution(options, {
+    expectedCreationIdentity: readDatabasePathIdentitySync(options.path),
+  });
+  try {
+    await expect(later.prepare(source())).rejects.toThrow(
+      /identity changed|captured creating reference/,
+    );
+    expect(fs.readFileSync(options.path)).toHaveLength(0);
+  } finally {
+    await Promise.allSettled([ordinary.release(), creator.release(), later.release()]);
+  }
+});
 
 it.each(["missing", "schema-missing"] as const)(
   "prepares its originally observed %s store and records native birth without changing identity",
@@ -378,15 +643,20 @@ it.each(["missing", "schema-missing"] as const)(
     const creator = captureOpenClawAgentDatabaseExecution(options, {
       expectedCreationIdentity: observed,
     });
+    const joining = captureOpenClawAgentDatabaseExecution(options, {
+      expectedCreationIdentity: observed,
+    });
     const sibling = captureOpenClawAgentDatabaseExecution(options);
     try {
       await creator.release();
+      await expect(sibling.prepare(source())).rejects.toThrow(/captured creating reference/);
+      await joining.release();
       expect(readDatabasePathIdentitySync(options.path)).toEqual(observed);
       await sibling.prepare(source());
       expect(sibling.fileIdentity).toMatchObject({ kind: "file" });
       await expect(sibling.runExisting(source(), async () => "prepared")).resolves.toBe("prepared");
     } finally {
-      await Promise.allSettled([creator.release(), sibling.release()]);
+      await Promise.allSettled([creator.release(), joining.release(), sibling.release()]);
     }
   },
 );
@@ -469,6 +739,94 @@ it("joins native creating admission before releasing its original reservation", 
     await expect(sibling.runExisting(source(), async () => "retained")).resolves.toBe("retained");
   } finally {
     await Promise.allSettled([preparing, creator.release(), sibling.release()]);
+  }
+});
+
+it("retains a creator that joins while a refused generation closes", async () => {
+  const options = fixture();
+  const observed = readDatabasePathIdentitySync(options.path);
+  const creator = captureOpenClawAgentDatabaseExecution(options, {
+    expectedCreationIdentity: observed,
+  });
+  const executions = [creator];
+  const refusal = new Error("Creation source ended before opening");
+  const revoked = source();
+  revoked.assertCurrent = () => {
+    throw refusal;
+  };
+  try {
+    await expect(creator.prepare(revoked)).rejects.toBe(refusal);
+    const releasing = creator.release();
+    // Release enters native cleanup at its first continuation; borrow before close settles.
+    await Promise.resolve();
+    const joining = captureOpenClawAgentDatabaseExecution(options, {
+      expectedCreationIdentity: observed,
+    });
+    executions.push(joining);
+    await releasing;
+    const later = captureOpenClawAgentDatabaseExecution(options, {
+      expectedCreationIdentity: observed,
+    });
+    executions.push(later);
+    await Promise.all([joining.prepare(source()), later.prepare(source())]);
+    expect(joining.captureGenerationClaim().incarnation).toBe(
+      later.captureGenerationClaim().incarnation,
+    );
+  } finally {
+    await Promise.allSettled(executions.map((execution) => execution.release()));
+  }
+});
+
+it("keeps another captured borrower live after a caller-specific native open refusal", async () => {
+  const options = fixture();
+  openOpenClawAgentDatabase(options);
+  await closeOpenClawAgentDatabaseByPathAsync(options.path, options.agentId);
+  const physical = readDatabasePathIdentitySync(options.path);
+  expect(physical.key).toMatch(/^file:/);
+  const rejected = captureOpenClawAgentDatabaseExecution(options);
+  const retained = captureOpenClawAgentDatabaseExecution(options, {
+    expectedIdentity: {
+      kind: "file",
+      physicalIdentity: physical.key.slice("file:".length),
+      birthtime: physical.birthtime,
+      nativeLocation: physical.canonicalPath,
+    },
+  });
+  const refusal = new Error("Original caller revoked at native open admission");
+  let current = true;
+  let reachedNativeOpen = false;
+  const revoked = source((request) => {
+    if (request.stage === "open") {
+      reachedNativeOpen = true;
+      current = false;
+    }
+  });
+  revoked.assertCurrent = () => {
+    if (!current) {
+      throw refusal;
+    }
+  };
+  try {
+    await expect(rejected.runExisting(revoked, async () => "not admitted")).rejects.toThrow(
+      refusal,
+    );
+    expect(reachedNativeOpen).toBe(true);
+    expect(() => retained.assertCurrent()).not.toThrow();
+    await expect(
+      retained.runExisting(source(), (scope) =>
+        scope.execute({
+          type: "session.transcript.initialize",
+          input: { sessionKey: "agent:main:after-open-refusal", sessionId: "retained-borrower" },
+        }),
+      ),
+    ).resolves.toEqual({
+      kind: "session-transcript-initialized",
+      sessionKey: "agent:main:after-open-refusal",
+      placeholder: { sessionId: "retained-borrower" },
+    });
+    expect(readDatabasePathIdentitySync(options.path)).toEqual(physical);
+  } finally {
+    await Promise.allSettled([rejected.release(), retained.release()]);
   }
 });
 
@@ -638,6 +996,7 @@ it("retains canonical borrowers and rejects the changed alias before caller cont
     fs.symlinkSync(successorDirectory, alias, linkType);
     expect(() => creator.assertCurrent()).toThrow(/identity|observed target/);
     expect(() => creator.fileIdentity).toThrow(/identity|observed target/);
+    expect(() => creator.capturePreparedGenerationClaim()).toThrow(/identity|observed target/);
     await expect(creator.runExisting(source(), operation)).rejects.toThrow(
       /identity|observed target/,
     );

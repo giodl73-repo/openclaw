@@ -24,6 +24,7 @@ export const uiE2ePrivateServerTestFiles = [
   "ui/src/e2e/agent-file-lifecycle.real-gateway.e2e.test.ts",
   "ui/src/e2e/agent-switch-roster.e2e.test.ts",
   "ui/src/e2e/approval-bootstrap.e2e.test.ts",
+  "ui/src/e2e/background-work.real-gateway.e2e.test.ts",
   "ui/src/e2e/boot-module-boundaries.e2e.test.ts",
   "ui/src/e2e/browser-auth-recovery.e2e.test.ts",
   "ui/src/e2e/build-info-unicode.e2e.test.ts",
@@ -69,6 +70,7 @@ export const uiE2ePrivateServerTestFiles = [
   "ui/src/e2e/session-roster-request-rate.real-gateway.e2e.test.ts",
   "ui/src/e2e/settings-loading-skeletons.e2e.test.ts",
   "ui/src/e2e/sidebar-account-footer.e2e.test.ts",
+  "ui/src/e2e/terminal-fonts.e2e.test.ts",
   "ui/src/e2e/terminal-runtime.e2e.test.ts",
 ];
 

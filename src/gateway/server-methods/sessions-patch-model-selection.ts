@@ -135,36 +135,32 @@ export function resolveSessionPatchModelSelection(params: {
     statusDefault !== undefined &&
     ref.provider === statusDefault.provider &&
     ref.model === statusDefault.model;
+  const policy = {
+    cfg: params.cfg,
+    agentId: params.agentId,
+    catalog: params.catalog,
+    defaultProvider: params.defaultProvider,
+    defaultModel: params.subagentModelHint ?? {
+      provider: params.defaultProvider,
+      model: params.defaultModel,
+    },
+  };
   if (params.preparedModelSelection) {
     const ref = params.preparedModelSelection;
     if (modelWithoutProfile !== `${ref.provider}/${ref.model}`) {
       return { ok: false, error: "Resolved spawn model does not match the requested model." };
     }
     const status = getModelRefStatus({
-      cfg: params.cfg,
-      agentId: params.agentId,
-      catalog: params.catalog,
+      ...policy,
       ref,
-      defaultProvider: params.defaultProvider,
-      defaultModel: params.subagentModelHint ?? {
-        provider: params.defaultProvider,
-        model: params.defaultModel,
-      },
     });
     return status.allowed
       ? { ok: true, ...ref, ...(profile ? { profile } : {}), isDefault: isDefault(ref) }
       : { ok: false, error: `model not allowed: ${status.key}` };
   }
   const resolved = resolveAllowedModelRef({
-    cfg: params.cfg,
-    agentId: params.agentId,
-    catalog: params.catalog,
+    ...policy,
     raw: modelWithoutProfile,
-    defaultProvider: params.defaultProvider,
-    defaultModel: params.subagentModelHint ?? {
-      provider: params.defaultProvider,
-      model: params.defaultModel,
-    },
   });
   if ("error" in resolved) {
     return { ok: false, error: resolved.error };
@@ -286,6 +282,7 @@ export async function prepareSessionPatchRuntimeSelection(params: {
   catalog?: readonly ModelCatalogEntry[];
   callerCanConsent?: boolean;
   expectedEntry?: SessionEntry;
+  hydrateThinkingCatalog?: boolean;
   validateModelSelection?: () => ErrorShape | undefined;
 }): Promise<
   { ok: true; validate?: () => ErrorShape | undefined } | { ok: false; error: ErrorShape }
@@ -328,6 +325,7 @@ export async function prepareSessionPatchRuntimeSelection(params: {
         workspaceDir: params.entry.spawnedWorkspaceDir,
         ...model,
         catalog: params.catalog ?? [],
+        hydrateThinkingCatalog: params.hydrateThinkingCatalog,
         rawRuntime:
           typeof params.patch.agentRuntime === "string" ? params.patch.agentRuntime : undefined,
         sessionEntry: {

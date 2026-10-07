@@ -121,7 +121,7 @@ private final class TalkPushToTalkOnceOperation {
 // swiftlint:disable type_body_length file_length
 @MainActor
 @Observable
-final class TalkModeManager: NSObject {
+final class TalkModeManager {
     private static let defaultModelIdFallback = "eleven_v3"
     private static let defaultRealtimeModelIdFallback = "gpt-realtime-2"
     private static let defaultTalkProvider = "elevenlabs"
@@ -154,22 +154,8 @@ final class TalkModeManager: NSObject {
     var playbackLevel: Double?
     private(set) var preferredInputDeviceID: String?
     var gatewayTalkConfigLoaded: Bool = false
-    var gatewayTalkApiKeyConfigured: Bool = false
-    var gatewayTalkDefaultModelId: String?
-    var gatewayTalkDefaultVoiceId: String?
     var gatewayTalkProviderLabel: String = "Not loaded"
     var gatewayTalkTransportLabel: String = "Not loaded"
-    var gatewayTalkUsesRealtime: Bool = false
-    var gatewayTalkRealtimeProviderLabel: String?
-    var gatewayTalkRealtimeModelId: String?
-    var gatewayTalkRealtimeVoiceId: String?
-    var gatewayTalkVoiceModeTitle: String = "Not loaded"
-    var gatewayTalkVoiceModeSubtitle: String?
-    var gatewayTalkVoiceModeAccessibilityValue: String = "Not loaded"
-    var gatewayTalkActiveModeTitle: String = .init(localized: "Not active")
-    var gatewayTalkActiveModeSubtitle: String?
-    var gatewayTalkLastIssueText: String?
-    var gatewayTalkCurrentFallbackIssue: TalkRuntimeIssue?
     var gatewayTalkPermissionState: TalkGatewayPermissionState = .unknown
 
     var isGatewayConnected: Bool {
@@ -268,18 +254,14 @@ final class TalkModeManager: NSObject {
     private var defaultVoiceId: String?
     private var currentVoiceId: String?
     private var defaultModelId: String?
-    private var currentModelId: String?
+    private var modelOverride: String?
     private var configuredProviderModelId: String?
     private var voiceOverrideActive = false
-    private var modelOverrideActive = false
     private var defaultOutputFormat: String?
     private var runtimeRoute: TalkModeRuntimeRoute = .localElevenLabs
     private var realtimeProvider: String?
     private var realtimeModelId: String?
     private var realtimeVoiceId: String?
-    private var configuredVoiceModeDescriptor = TalkVoiceModeDescriptor(
-        title: String(localized: "Not loaded"),
-        subtitle: nil)
     private var pendingRealtimeIssue: TalkRuntimeIssue?
     private var realtimeRelayStartIssue: TalkRuntimeIssue?
     private var apiKey: String?
@@ -310,7 +292,6 @@ final class TalkModeManager: NSObject {
     private var lastAudioActivity: Date?
     private var noiseFloorSamples: [Double] = []
     private var noiseFloor: Double?
-    private var noiseFloorReady: Bool = false
 
     private var incrementalSpeechQueue: [String] = []
     private var incrementalSpeechTask: Task<Void, Never>?
@@ -322,7 +303,6 @@ final class TalkModeManager: NSObject {
         systemVoice: nil)
     private var incrementalSpeechBuffer = IncrementalSpeechBuffer()
     private var incrementalSpeechContext: IncrementalSpeechContext?
-    private var incrementalSpeechDirective: TalkDirective?
     private var incrementalSpeechPrefetch: IncrementalSpeechPrefetchState?
     private var incrementalSpeechPrefetchMonitorTask: Task<Void, Never>?
 
@@ -430,8 +410,6 @@ final class TalkModeManager: NSObject {
         self.isListening = false
         self.isSpeaking = false
         self.isUserSpeechDetected = false
-        self.gatewayTalkActiveModeTitle = String(localized: "Not active")
-        self.gatewayTalkActiveModeSubtitle = nil
         guard shouldRestart else {
             if self.isEnabled {
                 self.setStatus(
@@ -450,11 +428,8 @@ final class TalkModeManager: NSObject {
             activeDuration: activeDuration)
         self.rapidRealtimeRestartCount = attempt
         guard let delay = RealtimeTalkRecovery.restartDelayNanoseconds(attempt: attempt) else {
-            let issue = realtimeIssue(
-                message: "Realtime disconnected repeatedly.",
-                phase: "reconnect")
+            let issue = TalkRuntimeIssue(message: "Realtime disconnected repeatedly.")
             self.pendingRealtimeIssue = issue
-            self.gatewayTalkLastIssueText = issue.diagnosticSummary
             self.bypassRealtimeOnNextStart = true
             self.scheduleRealtimeRestart(after: nil, generation: restartGeneration)
             return
@@ -475,7 +450,6 @@ final class TalkModeManager: NSObject {
         self.audioSessionDeactivationAction = audioSessionDeactivationAction
         self.preferredInputDeviceID = UserDefaults.standard.string(
             forKey: Self.preferredInputDeviceIDKey)
-        super.init()
     }
 
     func selectInputDevice(_ deviceID: String?) {
@@ -532,8 +506,6 @@ final class TalkModeManager: NSObject {
                     self.setStatus(String(localized: "Offline"), phase: .idle)
                 }
             }
-            self.gatewayTalkActiveModeTitle = String(localized: "Not active")
-            self.gatewayTalkActiveModeSubtitle = nil
             self.cancelRealtimePrefetch()
             self.invalidatePrefetchedRealtimeSession()
         }
@@ -541,8 +513,7 @@ final class TalkModeManager: NSObject {
 
     @discardableResult
     func updateMainSessionKey(_ sessionKey: String?) -> Bool {
-        let trimmed = (sessionKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        guard let trimmed = sessionKey?.trimmedNonEmpty else { return false }
         if trimmed == self.mainSessionKey {
             return false
         }
@@ -572,8 +543,7 @@ final class TalkModeManager: NSObject {
     }
 
     func isUsingMainSessionKey(_ sessionKey: String?) -> Bool {
-        let trimmed = (sessionKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed == self.mainSessionKey
+        sessionKey?.trimmedNonEmpty == self.mainSessionKey
     }
 
     func isActivePushToTalkCapture(_ captureId: String) -> Bool {
@@ -593,23 +563,8 @@ final class TalkModeManager: NSObject {
         self.isUserSpeechDetected = false
         self.setStatus(String(localized: "Ready"), phase: .idle)
         self.gatewayTalkConfigLoaded = true
-        self.gatewayTalkApiKeyConfigured = true
-        self.gatewayTalkDefaultModelId = "gpt-realtime-2"
-        self.gatewayTalkDefaultVoiceId = "marin"
         self.gatewayTalkProviderLabel = "OpenAI"
         self.gatewayTalkTransportLabel = String(localized: "Gateway Relay")
-        self.gatewayTalkUsesRealtime = true
-        self.gatewayTalkRealtimeProviderLabel = "OpenAI"
-        self.gatewayTalkRealtimeModelId = "gpt-realtime-2"
-        self.gatewayTalkRealtimeVoiceId = "marin"
-        self.gatewayTalkVoiceModeTitle = String(localized: "Realtime Voice")
-        self.gatewayTalkVoiceModeSubtitle = String(localized: "Gateway relay ready")
-        self.gatewayTalkVoiceModeAccessibilityValue = String(
-            localized: "Realtime Voice, Gateway relay ready")
-        self.gatewayTalkActiveModeTitle = String(localized: "Ready")
-        self.gatewayTalkActiveModeSubtitle = String(localized: "Listening starts from this phone")
-        self.gatewayTalkLastIssueText = nil
-        self.gatewayTalkCurrentFallbackIssue = nil
         self.gatewayTalkPermissionState = .ready
     }
 
@@ -699,7 +654,6 @@ final class TalkModeManager: NSObject {
                 return
             case let .unavailable(issue):
                 self.pendingRealtimeIssue = issue
-                self.gatewayTalkLastIssueText = issue.diagnosticSummary
             }
         }
 
@@ -817,10 +771,6 @@ final class TalkModeManager: NSObject {
         self.captureMode = .idle
         self.setStatus(String(localized: "Off"), phase: .idle)
         self.pendingRealtimeIssue = nil
-        self.gatewayTalkCurrentFallbackIssue = nil
-        self.gatewayTalkActiveModeTitle = String(localized: "Not active")
-        self.gatewayTalkActiveModeSubtitle = nil
-        self.gatewayTalkLastIssueText = nil
         self.lastTranscript = ""
         self.lastHeard = nil
         self.silenceTask?.cancel()
@@ -873,8 +823,6 @@ final class TalkModeManager: NSObject {
             String(localized: "Paused"),
             phase: .idle,
             watchPresentation: .localized("Paused"))
-        self.gatewayTalkActiveModeTitle = String(localized: "Paused")
-        self.gatewayTalkActiveModeSubtitle = nil
         self.lastTranscript = ""
         self.lastHeard = nil
         self.silenceTask?.cancel()
@@ -933,21 +881,22 @@ final class TalkModeManager: NSObject {
         }
         guard transcriptionOnly || self.gatewayConnected else { throw self.pushToTalkOfflineError() }
 
-        let gatewayContext: PushToTalkGatewayContext?
-        if transcriptionOnly {
-            gatewayContext = nil
-        } else if let gateway {
-            let gatewayRoute = await gateway.currentRoute()
-            try Task.checkCancellation()
-            guard canStartCapture(), self.gatewayConnected, self.gateway === gateway else {
-                throw Self.pushToTalkStartCancelledError()
+        var gatewayContext: PushToTalkGatewayContext?
+        if !transcriptionOnly {
+            if let gateway {
+                let gatewayRoute = await gateway.currentRoute()
+                try Task.checkCancellation()
+                guard canStartCapture(), self.gatewayConnected, self.gateway === gateway else {
+                    throw Self.pushToTalkStartCancelledError()
+                }
+                if let gatewayRoute {
+                    gatewayContext = .connected(
+                        gateway: gateway,
+                        route: gatewayRoute,
+                        sessionKey: self.mainSessionKey)
+                }
             }
-            if let gatewayRoute {
-                gatewayContext = .connected(
-                    gateway: gateway,
-                    route: gatewayRoute,
-                    sessionKey: self.mainSessionKey)
-            } else {
+            if gatewayContext == nil {
                 #if DEBUG
                 guard self.allowSimulatorCapture else { throw self.pushToTalkOfflineError() }
                 gatewayContext = .stateTestFixture
@@ -955,13 +904,6 @@ final class TalkModeManager: NSObject {
                 throw self.pushToTalkOfflineError()
                 #endif
             }
-        } else {
-            #if DEBUG
-            guard self.allowSimulatorCapture else { throw self.pushToTalkOfflineError() }
-            gatewayContext = .stateTestFixture
-            #else
-            throw self.pushToTalkOfflineError()
-            #endif
         }
         try Task.checkCancellation()
         guard canStartCapture(), transcriptionOnly || self.gatewayConnected, self.foregroundPushToTalkAllowed else {
@@ -1177,11 +1119,6 @@ final class TalkModeManager: NSObject {
             self.pttOnceOperations.removeValue(forKey: captureId)
             return payload
         }
-    }
-
-    func cancelPushToTalk() -> OpenClawTalkPTTStopPayload {
-        let captureId = self.activePTTCaptureId ?? UUID().uuidString
-        return self.cancelPushToTalk(captureId: captureId)
     }
 
     func cancelPushToTalk(expectedTranscriptionOnly: Bool) -> OpenClawTalkPTTStopPayload {
@@ -1498,7 +1435,7 @@ final class TalkModeManager: NSObject {
         self.micLevel = (self.micLevel * 0.80) + (raw * 0.20)
         self.updateNoiseFloorIfNeeded(raw)
 
-        let threshold: Double = if let floor = noiseFloor, noiseFloorReady {
+        let threshold: Double = if let floor = noiseFloor {
             min(0.35, max(0.12, floor + 0.10))
         } else {
             0.18
@@ -1509,15 +1446,14 @@ final class TalkModeManager: NSObject {
     }
 
     private func updateNoiseFloorIfNeeded(_ raw: Double) {
-        guard self.isListening, !self.isSpeaking, !self.noiseFloorReady else { return }
+        guard self.isListening, !self.isSpeaking, self.noiseFloor == nil else { return }
         self.noiseFloorSamples.append(raw)
         guard self.noiseFloorSamples.count >= 22 else { return }
 
         let sorted = self.noiseFloorSamples.sorted()
-        let slice = sorted.prefix(max(6, sorted.count / 2))
+        let slice = sorted.prefix(sorted.count / 2)
         let average = slice.reduce(0.0, +) / Double(slice.count)
         self.noiseFloor = average
-        self.noiseFloorReady = true
         self.noiseFloorSamples.removeAll(keepingCapacity: true)
         let threshold = min(0.35, max(0.12, average + 0.10))
         GatewayDiagnostics.log(
@@ -1651,7 +1587,6 @@ final class TalkModeManager: NSObject {
         self.lastAudioActivity = nil
         self.noiseFloorSamples.removeAll(keepingCapacity: true)
         self.noiseFloor = nil
-        self.noiseFloorReady = false
         if self.inputTapInstalled {
             self.audioEngine.inputNode.removeTap(onBus: 0)
             self.inputTapInstalled = false
@@ -1719,7 +1654,7 @@ final class TalkModeManager: NSObject {
                 return
             }
             if self.captureMode == .continuous, !self.isSpeechOutputActive {
-                await self.processTranscript(trimmed, restartAfter: true)
+                await self.processContinuousTranscript(trimmed)
             }
         }
     }
@@ -1757,7 +1692,7 @@ final class TalkModeManager: NSObject {
             return
         }
         if self.captureMode == .continuous {
-            await self.processTranscript(transcript, restartAfter: true)
+            await self.processContinuousTranscript(transcript)
         } else if let pttCaptureId {
             _ = self.endPushToTalk(captureId: pttCaptureId)
         } else {
@@ -1792,11 +1727,9 @@ final class TalkModeManager: NSObject {
         self.pttOnceOperations[payload.captureId]?.finish(payload)
     }
 
-    private func processTranscript(_ transcript: String, restartAfter: Bool) async {
+    private func processContinuousTranscript(_ transcript: String) async {
         let generation = self.beginTranscriptProcessing()
-        if restartAfter {
-            self.continuousTranscriptProcessingGeneration = generation
-        }
+        self.continuousTranscriptProcessingGeneration = generation
         defer {
             if self.continuousTranscriptProcessingGeneration == generation {
                 self.continuousTranscriptProcessingGeneration = nil
@@ -1804,7 +1737,7 @@ final class TalkModeManager: NSObject {
         }
         guard let gateway else {
             self.setStatus(String(localized: "Gateway not connected"), phase: .idle)
-            self.scheduleContinuousResume(restartAfter)
+            self.scheduleContinuousResume(true)
             return
         }
         let sessionKey = self.mainSessionKey
@@ -1815,7 +1748,7 @@ final class TalkModeManager: NSObject {
         else { return }
         await self.processTranscript(
             transcript,
-            restartAfter: restartAfter,
+            restartAfter: true,
             gateway: gateway,
             gatewayRoute: gatewayRoute,
             sessionKey: sessionKey,
@@ -2093,7 +2026,7 @@ final class TalkModeManager: NSObject {
         }
         guard let gateway else {
             return .unavailable(
-                realtimeIssue(message: String(localized: "Gateway is not connected"), phase: "start"))
+                TalkRuntimeIssue(message: String(localized: "Gateway is not connected")))
         }
         guard let gatewayRoute = await gateway.currentRoute(), isCurrentStartAttempt(attemptID) else {
             return .ignored
@@ -2135,23 +2068,14 @@ final class TalkModeManager: NSObject {
             guard self.realtimeSession === session, self.isCurrentStartAttempt(attemptID) else {
                 self.finishStaleRealtimeStart(
                     session,
-                    gateway: gateway,
-                    route: gatewayRoute,
-                    sessionKey: sessionKey,
                     voiceSessionGeneration: voiceSessionGeneration)
                 return .ignored
             }
-            guard let voiceSessionId = session.voiceSessionId,
-                  self.adoptRealtimeVoiceSessionId(
-                      voiceSessionId,
-                      gateway: gateway,
-                      route: gatewayRoute,
-                      sessionKey: sessionKey)
+            guard let owner = session.voiceSessionOwner, self.adoptRealtimeVoiceSession(owner)
             else {
                 self.stopRealtimeSession()
-                return .unavailable(realtimeIssue(
-                    message: "Gateway returned a conflicting realtime voice session",
-                    phase: "start"))
+                return .unavailable(TalkRuntimeIssue(
+                    message: "Gateway returned a conflicting realtime voice session"))
             }
             // WebRTC configures the shared session and may force speaker + built-in mic.
             // Apply the user's input last so the explicit microphone selection wins.
@@ -2165,21 +2089,14 @@ final class TalkModeManager: NSObject {
             guard self.realtimeSession === session, self.isCurrentStartAttempt(attemptID) else {
                 self.finishStaleRealtimeStart(
                     session,
-                    gateway: gateway,
-                    route: gatewayRoute,
-                    sessionKey: sessionKey,
                     voiceSessionGeneration: voiceSessionGeneration)
                 return .ignored
             }
-            if let voiceSessionId = session.voiceSessionId {
-                _ = self.adoptRealtimeVoiceSessionId(
-                    voiceSessionId,
-                    gateway: gateway,
-                    route: gatewayRoute,
-                    sessionKey: sessionKey)
+            if let owner = session.voiceSessionOwner {
+                _ = self.adoptRealtimeVoiceSession(owner)
             }
             self.stopRealtimeSession(preserveRuns: voiceChange != nil)
-            let issue = realtimeIssue(from: error, phase: "start")
+            let issue = Self.runtimeIssue(from: error)
             GatewayDiagnostics
                 .log("talk realtime: unavailable; falling back to speech pipeline error=\(error.localizedDescription)")
             GatewayDiagnostics.log(
@@ -2191,54 +2108,36 @@ final class TalkModeManager: NSObject {
 
     private func finishStaleRealtimeStart(
         _ session: TalkRealtimeWebRTCSession,
-        gateway: GatewayNodeSession,
-        route: GatewayNodeSessionRoute,
-        sessionKey: String,
         voiceSessionGeneration: UInt64)
     {
-        if let voiceSessionId = session.voiceSessionId {
+        if let owner = session.voiceSessionOwner {
             if self.activeRealtimeVoiceSessionId == nil,
                self.realtimeSession == nil,
                self.isEnabled,
-               self.mainSessionKey == sessionKey,
+               self.mainSessionKey == owner.sessionKey,
                self.realtimeVoiceSessionGeneration == voiceSessionGeneration
             {
                 // A transport restart keeps the logical voice session alive.
-                self.activeRealtimeVoiceSession = TalkRealtimeVoiceSessionOwner(
-                    gateway: gateway, route: route, sessionKey: sessionKey, voiceSessionId: voiceSessionId)
-            } else if self.activeRealtimeVoiceSession != session.voiceSessionOwner {
-                self.closeOrphanedRealtimeVoiceSession(
-                    gateway: gateway,
-                    route: route,
-                    sessionKey: sessionKey,
-                    voiceSessionId: voiceSessionId)
+                self.activeRealtimeVoiceSession = owner
+            } else if self.activeRealtimeVoiceSession != owner {
+                self.closeRealtimeVoiceSessions([owner])
             }
         }
         session.stop()
     }
 
     @discardableResult
-    private func adoptRealtimeVoiceSessionId(
-        _ voiceSessionId: String,
-        gateway: GatewayNodeSession,
-        route: GatewayNodeSessionRoute,
-        sessionKey: String) -> Bool
-    {
-        if let activeRealtimeVoiceSessionId, activeRealtimeVoiceSessionId != voiceSessionId {
+    private func adoptRealtimeVoiceSession(_ owner: TalkRealtimeVoiceSessionOwner) -> Bool {
+        if let activeRealtimeVoiceSessionId, activeRealtimeVoiceSessionId != owner.voiceSessionId {
             GatewayDiagnostics.log(
                 "talk realtime voice session mismatch active=\(activeRealtimeVoiceSessionId) "
-                    + "returned=\(voiceSessionId)")
-            self.closeOrphanedRealtimeVoiceSession(
-                gateway: gateway,
-                route: route,
-                sessionKey: sessionKey,
-                voiceSessionId: voiceSessionId)
+                    + "returned=\(owner.voiceSessionId)")
+            self.closeRealtimeVoiceSessions([owner])
             return false
         }
         // Logical ownership survives transport restarts and delayed transcript drains.
         // Keep the accepting route so cleanup cannot resolve a replacement account.
-        self.activeRealtimeVoiceSession = TalkRealtimeVoiceSessionOwner(
-            gateway: gateway, route: route, sessionKey: sessionKey, voiceSessionId: voiceSessionId)
+        self.activeRealtimeVoiceSession = owner
         return true
     }
 
@@ -2248,7 +2147,7 @@ final class TalkModeManager: NSObject {
     {
         guard let gateway else {
             return .unavailable(
-                realtimeIssue(message: String(localized: "Gateway is not connected"), phase: "start"))
+                TalkRuntimeIssue(message: String(localized: "Gateway is not connected")))
         }
         guard self.foregroundAudioCaptureAllowed else {
             self.setStatus(
@@ -2261,7 +2160,7 @@ final class TalkModeManager: NSObject {
         guard self.isCurrentStartAttempt(attemptID) else { return .ignored }
         guard let gatewayRoute = await gateway.currentRoute() else {
             return .unavailable(
-                realtimeIssue(message: String(localized: "Gateway is not connected"), phase: "start"))
+                TalkRuntimeIssue(message: String(localized: "Gateway is not connected")))
         }
         guard self.isCurrentStartAttempt(attemptID) else { return .ignored }
         let supportsVoiceSelection = await self.ensureRealtimeVoiceSelection(gateway: gateway, route: gatewayRoute)
@@ -2306,9 +2205,6 @@ final class TalkModeManager: NSObject {
                 let issue = Self.runtimeIssue(from: relayIssue)
                 self.realtimeRelayStartIssue = issue
                 self.pendingRealtimeIssue = issue
-                self.gatewayTalkLastIssueText = issue.diagnosticSummary
-                self.gatewayTalkActiveModeTitle = String(localized: "Realtime unavailable")
-                self.gatewayTalkActiveModeSubtitle = issue.displayMessage
             },
             onTermination: { [weak self] termination in
                 guard let self, self.realtimeRelayGeneration == relayGeneration else { return }
@@ -2371,7 +2267,7 @@ final class TalkModeManager: NSObject {
             }
             self.realtimeRelaySession = nil
             let issue = self.realtimeRelayStartIssue
-                ?? realtimeIssue(from: error, phase: "start")
+                ?? Self.runtimeIssue(from: error)
             self.realtimeRelayStartIssue = nil
             GatewayDiagnostics.log(
                 "talk.timeline realtime relay start failed elapsedMs=\(Self.elapsedMs(since: startedAt)) "
@@ -2454,13 +2350,10 @@ final class TalkModeManager: NSObject {
                 self.resetRealtimeRestartState()
                 try? await self.closeRealtimeVoiceForReplacement(gateway: gateway, route: route, sessionKey: sessionKey)
             },
-            onFailure: { [weak self] error in
+            onFailure: { [weak self] _ in
                 guard let self else { return }
-                self.gatewayTalkLastIssueText = error.localizedDescription
-                self.gatewayTalkActiveModeTitle = String(localized: "Realtime unavailable")
                 self.setStatus(String(localized: "Realtime unavailable"), phase: .idle)
-            },
-            onApplied: { [weak self] voice in self?.gatewayTalkRealtimeVoiceId = voice })
+            })
         self.realtimeVoiceSelection = selection
         self.realtimeVoiceSelectionRoute = route
         let subscription = await gateway.makeServerEventSubscription(
@@ -2572,8 +2465,8 @@ final class TalkModeManager: NSObject {
         for id in ids.sorted() {
             await self.realtimeTranscriptStore.flush(voiceSessionId: id)
             do {
-                try await self.closeRealtimeVoiceSession(
-                    gateway: gateway, route: route, sessionKey: sessionKey, voiceSessionId: id)
+                try await self.closeRealtimeVoiceSession(TalkRealtimeVoiceSessionOwner(
+                    gateway: gateway, route: route, sessionKey: sessionKey, voiceSessionId: id))
                 try await self.realtimeTranscriptStore.flushSuccessfully(voiceSessionId: id)
             } catch { failure = failure ?? error }
             self.realtimeTranscriptStore.remove([id])
@@ -2627,24 +2520,15 @@ final class TalkModeManager: NSObject {
                         NSLocalizedDescriptionKey: "Gateway did not return a realtime voice session",
                     ])
                 }
+                let owner = TalkRealtimeVoiceSessionOwner(
+                    gateway: gateway, route: route, sessionKey: sessionKey, voiceSessionId: voiceSessionId)
                 guard !Task.isCancelled, shouldApply(), self.mainSessionKey == sessionKey else {
-                    let owner = TalkRealtimeVoiceSessionOwner(
-                        gateway: gateway, route: route, sessionKey: sessionKey, voiceSessionId: voiceSessionId)
                     if self.activeRealtimeVoiceSession != owner {
-                        self.closeOrphanedRealtimeVoiceSession(
-                            gateway: gateway,
-                            route: route,
-                            sessionKey: sessionKey,
-                            voiceSessionId: voiceSessionId)
+                        self.closeRealtimeVoiceSessions([owner])
                     }
                     return
                 }
-                guard self.adoptRealtimeVoiceSessionId(
-                    voiceSessionId,
-                    gateway: gateway,
-                    route: route,
-                    sessionKey: sessionKey)
-                else { return }
+                guard self.adoptRealtimeVoiceSession(owner) else { return }
                 self.prefetchedRealtimeSession = session
                 GatewayDiagnostics.log(
                     "talk.timeline realtime prefetch ready elapsedMs=\(Self.elapsedMs(since: startedAt)) "
@@ -2767,11 +2651,7 @@ final class TalkModeManager: NSObject {
             }
             for owner in owners {
                 do {
-                    try await self.closeRealtimeVoiceSession(
-                        gateway: owner.gateway,
-                        route: owner.route,
-                        sessionKey: owner.sessionKey,
-                        voiceSessionId: owner.voiceSessionId)
+                    try await self.closeRealtimeVoiceSession(owner)
                 } catch {
                     GatewayDiagnostics.log(
                         "talk voice session close FAILED voiceSessionId=\(owner.voiceSessionId) "
@@ -2805,55 +2685,26 @@ final class TalkModeManager: NSObject {
         ])
     }
 
-    private func closeRealtimeVoiceSession(
-        gateway: GatewayNodeSession,
-        route: GatewayNodeSessionRoute,
-        sessionKey: String,
-        voiceSessionId: String) async throws
-    {
+    private func closeRealtimeVoiceSession(_ owner: TalkRealtimeVoiceSessionOwner) async throws {
         try await Self.retryRealtimeVoiceSessionClose(
             retryDelaysNanoseconds: Self.realtimeVoiceSessionCloseRetryDelaysNanoseconds)
         {
-            try await self.requestRealtimeVoiceSessionClose(
-                gateway: gateway,
-                route: route,
-                sessionKey: sessionKey,
-                voiceSessionId: voiceSessionId)
+            let params = TalkClientCloseParams(
+                sessionkey: owner.sessionKey,
+                voicesessionid: owner.voiceSessionId)
+            let json = try String(bytes: JSONEncoder().encode(params), encoding: .utf8)!
+            #if DEBUG
+            if let testRealtimeVoiceSessionCloseRequest = self.testRealtimeVoiceSessionCloseRequest {
+                try await testRealtimeVoiceSessionCloseRequest("talk.client.close", json)
+                return
+            }
+            #endif
+            _ = try await owner.gateway.request(
+                method: "talk.client.close",
+                paramsJSON: json,
+                timeoutSeconds: 10,
+                ifCurrentRoute: owner.route)
         }
-    }
-
-    private func requestRealtimeVoiceSessionClose(
-        gateway: GatewayNodeSession,
-        route: GatewayNodeSessionRoute,
-        sessionKey: String,
-        voiceSessionId: String) async throws
-    {
-        let params = TalkClientCloseParams(
-            sessionkey: sessionKey,
-            voicesessionid: voiceSessionId)
-        let json = try String(bytes: JSONEncoder().encode(params), encoding: .utf8)!
-        #if DEBUG
-        if let testRealtimeVoiceSessionCloseRequest {
-            try await testRealtimeVoiceSessionCloseRequest("talk.client.close", json)
-            return
-        }
-        #endif
-        _ = try await gateway.request(
-            method: "talk.client.close",
-            paramsJSON: json,
-            timeoutSeconds: 10,
-            ifCurrentRoute: route)
-    }
-
-    @discardableResult
-    private func closeOrphanedRealtimeVoiceSession(
-        gateway: GatewayNodeSession,
-        route: GatewayNodeSessionRoute,
-        sessionKey: String,
-        voiceSessionId: String) -> Task<Void, Never>
-    {
-        self.closeRealtimeVoiceSessions([TalkRealtimeVoiceSessionOwner(
-            gateway: gateway, route: route, sessionKey: sessionKey, voiceSessionId: voiceSessionId)])
     }
 
     private func buildPrompt(transcript: String) -> String {
@@ -3016,8 +2867,7 @@ final class TalkModeManager: NSObject {
             }
             guard let content = msg["content"] as? [[String: Any]] else { continue }
             let text = content.compactMap { $0["text"] as? String }.joined(separator: "\n")
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
+            if let trimmed = text.trimmedNonEmpty {
                 return trimmed
             }
         }
@@ -3031,8 +2881,7 @@ final class TalkModeManager: NSObject {
     {
         let parsed = TalkDirectiveParser.parse(text)
         let directive = parsed.directive
-        let cleaned = parsed.stripped.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
+        guard let cleaned = parsed.stripped.trimmedNonEmpty else { return }
         self.applyDirective(directive)
         self.speechGeneration += 1
         let speechGeneration = self.speechGeneration
@@ -3045,7 +2894,6 @@ final class TalkModeManager: NSObject {
                 self.stopRecognition()
                 self.isSpeaking = false
                 self.playbackLevel = nil
-                self.restoreConfiguredVoiceModeDescriptor()
             }
         }
 
@@ -3090,14 +2938,7 @@ final class TalkModeManager: NSObject {
 
             if canUseElevenLabs, let voiceId, let apiKey {
                 GatewayDiagnostics.log("talk tts: provider=elevenlabs voiceId=\(voiceId)")
-                let modelId = directive?.modelId ?? self.currentModelId ?? self.defaultModelId
-                applyVoiceModeDescriptor(TalkVoiceModeDescriptorBuilder.build(
-                    providerId: "elevenlabs",
-                    providerLabel: Self.displayName(forProvider: "elevenlabs"),
-                    modelId: modelId,
-                    voiceId: voiceId,
-                    transport: "native",
-                    isRealtime: false))
+                let modelId = directive?.modelId ?? self.modelOverride ?? self.defaultModelId
                 let outputFormat = self.resolvedElevenLabsOutputFormat(directive?.outputFormat)
 
                 if let modelId {
@@ -3165,13 +3006,8 @@ final class TalkModeManager: NSObject {
             ])
         }
 
-        let requestedVoice = directive?.voiceId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let voiceId = requestedVoice?.isEmpty == false
-            ? requestedVoice
-            : (self.currentVoiceId ?? self.defaultVoiceId)
-        let modelId = directive?.modelId ?? (self.modelOverrideActive
-            ? self.currentModelId
-            : self.configuredProviderModelId)
+        let voiceId = directive?.voiceId?.trimmedNonEmpty ?? self.currentVoiceId ?? self.defaultVoiceId
+        let modelId = directive?.modelId ?? self.modelOverride ?? self.configuredProviderModelId
         let outputFormat = directive?.outputFormat ?? self.defaultOutputFormat
         let audio = try await synthesizer.synthesize(TalkGatewaySpeechRequest(
             text: text,
@@ -3184,13 +3020,6 @@ final class TalkModeManager: NSObject {
         }
         guard generation == self.speechGeneration, self.isSpeaking else { return }
 
-        applyVoiceModeDescriptor(TalkVoiceModeDescriptorBuilder.build(
-            providerId: audio.provider,
-            providerLabel: Self.displayName(forProvider: audio.provider),
-            modelId: modelId,
-            voiceId: voiceId,
-            transport: "native",
-            isRealtime: false))
         self.startSpeechInterruptionRecognitionIfNeeded()
         self.setStatus(String(localized: "Speaking…"), phase: .speaking)
         let result: StreamingPlaybackResult
@@ -3227,13 +3056,6 @@ final class TalkModeManager: NSObject {
     }
 
     private func playSystemVoice(text: String, language: String?) async throws {
-        applyVoiceModeDescriptor(TalkVoiceModeDescriptorBuilder.build(
-            providerId: "system",
-            providerLabel: Self.displayName(forProvider: "system"),
-            modelId: nil,
-            voiceId: language,
-            transport: "native",
-            isRealtime: false))
         self.startSpeechInterruptionRecognitionIfNeeded()
         self.setStatus(String(localized: "Speaking (System)…"), phase: .speaking)
         try await TalkSystemSpeechSynthesizer.shared.speak(text: text, language: language)
@@ -3266,9 +3088,7 @@ final class TalkModeManager: NSObject {
     }
 
     private func resolvedElevenLabsAPIKey() -> String? {
-        let configuredKey = self.apiKey?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty == false ? self.apiKey : nil
+        let configuredKey = self.apiKey?.trimmedNonEmpty
         #if DEBUG
         let resolvedKey = configuredKey ?? ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]
         #else
@@ -3280,16 +3100,14 @@ final class TalkModeManager: NSObject {
     private func resolveElevenLabsVoiceAlias(_ voice: String?) -> String? {
         let requestedVoice = voice?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedVoice = TalkVoiceAliases.resolve(requestedVoice, aliases: self.voiceAliases)
-        if requestedVoice?.isEmpty == false, resolvedVoice == nil {
-            self.logger.warning("unknown voice alias \(requestedVoice ?? "?", privacy: .public)")
+        if let requestedVoice, !requestedVoice.isEmpty, resolvedVoice == nil {
+            self.logger.warning("unknown voice alias \(requestedVoice, privacy: .public)")
         }
         return resolvedVoice
     }
 
     private func resolvedElevenLabsOutputFormat(_ directiveFormat: String?) -> String? {
-        let desiredOutputFormat = (directiveFormat ?? self.defaultOutputFormat)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let requestedOutputFormat = (desiredOutputFormat?.isEmpty == false) ? desiredOutputFormat : nil
+        let requestedOutputFormat = (directiveFormat ?? self.defaultOutputFormat)?.trimmedNonEmpty
         let outputFormat = ElevenLabsTTSClient.validatedOutputFormat(
             requestedOutputFormat ?? self.effectiveDefaultOutputFormat)
         if outputFormat == nil, let requestedOutputFormat {
@@ -3299,12 +3117,16 @@ final class TalkModeManager: NSObject {
         return outputFormat
     }
 
-    private func startSpeechInterruptionRecognitionIfNeeded() {
+    private func startSpeechInterruptionRecognitionIfNeeded(context: String = "speak") {
         guard self.interruptOnSpeech else { return }
         do {
             try self.startRecognition()
         } catch {
-            self.logger.warning("startRecognition during speak failed: \(error.localizedDescription, privacy: .public)")
+            self.logger.warning(
+                """
+                startRecognition during \(context, privacy: .public) failed: \
+                \(error.localizedDescription, privacy: .public)
+                """)
         }
     }
 
@@ -3314,9 +3136,7 @@ final class TalkModeManager: NSObject {
 
     private func stopSpeaking(storeInterruption: Bool = true) {
         self.speechGeneration += 1
-        let hasIncremental = self.incrementalSpeechActive ||
-            self.incrementalSpeechTask != nil ||
-            !self.incrementalSpeechQueue.isEmpty
+        guard self.isSpeechOutputActive else { return }
         if self.isSpeaking {
             let streamedInterruptedAt = self.lastPlaybackWasPCM
                 ? self.pcmPlayer.stop()
@@ -3329,8 +3149,6 @@ final class TalkModeManager: NSObject {
             _ = self.lastPlaybackWasPCM
                 ? self.mp3Player.stop()
                 : self.pcmPlayer.stop()
-        } else if !hasIncremental {
-            return
         }
         self.stopRecognition()
         TalkSystemSpeechSynthesizer.shared.stop()
@@ -3338,7 +3156,6 @@ final class TalkModeManager: NSObject {
         self.pcmPlaybackEnvelope.cancel()
         self.isSpeaking = false
         self.playbackLevel = nil
-        restoreConfiguredVoiceModeDescriptor()
     }
 
     private func shouldInterrupt(with transcript: String) -> Bool {
@@ -3374,23 +3191,17 @@ final class TalkModeManager: NSObject {
             self.voiceOverrideActive = true
         }
         if let model = directive?.modelId {
-            self.currentModelId = model
-            self.modelOverrideActive = true
+            self.modelOverride = model
         }
     }
 
     private func resetIncrementalSpeech() {
         self.speechGeneration &+= 1
-        self.incrementalSpeechQueue.removeAll()
-        self.incrementalSpeechTask?.cancel()
-        self.incrementalSpeechTask = nil
-        self.cancelIncrementalPrefetch()
+        self.cancelIncrementalSpeech()
         self.incrementalSpeechActive = true
         self.incrementalSpeechUsed = false
         self.incrementalSpeechLanguages = self.resolvedSpeechLanguages(directiveLanguage: nil)
         self.incrementalSpeechBuffer = IncrementalSpeechBuffer()
-        self.incrementalSpeechContext = nil
-        self.incrementalSpeechDirective = nil
     }
 
     private func cancelIncrementalSpeech() {
@@ -3400,12 +3211,10 @@ final class TalkModeManager: NSObject {
         self.cancelIncrementalPrefetch()
         self.incrementalSpeechActive = false
         self.incrementalSpeechContext = nil
-        self.incrementalSpeechDirective = nil
     }
 
     private func enqueueIncrementalSpeech(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard let trimmed = text.trimmedNonEmpty else { return }
         self.incrementalSpeechQueue.append(trimmed)
         self.incrementalSpeechUsed = true
         if self.incrementalSpeechTask == nil {
@@ -3414,14 +3223,7 @@ final class TalkModeManager: NSObject {
     }
 
     private func startIncrementalSpeechTask() {
-        if self.interruptOnSpeech {
-            do {
-                try self.startRecognition()
-            } catch {
-                self.logger.warning(
-                    "startRecognition during incremental speak failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
+        self.startSpeechInterruptionRecognitionIfNeeded(context: "incremental speak")
 
         let speechGeneration = self.speechGeneration
         let task = Task { @MainActor [weak self] in
@@ -3561,7 +3363,7 @@ final class TalkModeManager: NSObject {
         for segment: String,
         context: IncrementalSpeechContext) async -> IncrementalPrefetchedAudio?
     {
-        guard let prefetch = incrementalSpeechPrefetch else {
+        guard var prefetch = incrementalSpeechPrefetch else {
             return nil
         }
         guard prefetch.context == context else {
@@ -3572,17 +3374,15 @@ final class TalkModeManager: NSObject {
         guard prefetch.segment == segment else {
             return nil
         }
-        if let chunks = prefetch.chunks, !chunks.isEmpty {
-            let prefetched = IncrementalPrefetchedAudio(chunks: chunks, outputFormat: prefetch.outputFormat)
-            self.incrementalSpeechPrefetch = nil
-            return prefetched
+        if prefetch.chunks?.isEmpty ?? true {
+            await prefetch.task.value
+            guard !Task.isCancelled else { return nil }
+            guard let completed = incrementalSpeechPrefetch else { return nil }
+            guard completed.context == context, completed.segment == segment else { return nil }
+            prefetch = completed
         }
-        await prefetch.task.value
-        guard !Task.isCancelled else { return nil }
-        guard let completed = incrementalSpeechPrefetch else { return nil }
-        guard completed.context == context, completed.segment == segment else { return nil }
-        guard let chunks = completed.chunks, !chunks.isEmpty else { return nil }
-        let prefetched = IncrementalPrefetchedAudio(chunks: chunks, outputFormat: completed.outputFormat)
+        guard let chunks = prefetch.chunks, !chunks.isEmpty else { return nil }
+        let prefetched = IncrementalPrefetchedAudio(chunks: chunks, outputFormat: prefetch.outputFormat)
         self.incrementalSpeechPrefetch = nil
         return prefetched
     }
@@ -3672,7 +3472,7 @@ final class TalkModeManager: NSObject {
     private func updateIncrementalContextIfNeeded(speechGeneration: Int) async -> Bool {
         guard self.isCurrentSpeechGeneration(speechGeneration) else { return false }
         let directive = self.incrementalSpeechBuffer.directive
-        if var existing = incrementalSpeechContext, directive == incrementalSpeechDirective {
+        if var existing = incrementalSpeechContext, directive == existing.directive {
             if existing.language != self.incrementalSpeechLanguages.provider {
                 existing.language = self.incrementalSpeechLanguages.provider
                 self.incrementalSpeechContext = existing
@@ -3684,7 +3484,6 @@ final class TalkModeManager: NSObject {
             speechGeneration: speechGeneration)
         guard self.isCurrentSpeechGeneration(speechGeneration) else { return false }
         self.incrementalSpeechContext = context
-        self.incrementalSpeechDirective = directive
         return true
     }
 
@@ -3694,7 +3493,7 @@ final class TalkModeManager: NSObject {
     {
         let resolvedVoice = self.resolveElevenLabsVoiceAlias(directive?.voiceId)
         let preferredVoice = resolvedVoice ?? self.currentVoiceId ?? self.defaultVoiceId
-        let modelId = directive?.modelId ?? self.currentModelId ?? self.defaultModelId
+        let modelId = directive?.modelId ?? self.modelOverride ?? self.defaultModelId
         let outputFormat = self.resolvedElevenLabsOutputFormat(directive?.outputFormat)
 
         let apiKey = self.resolvedElevenLabsAPIKey()
@@ -3783,7 +3582,7 @@ final class TalkModeManager: NSObject {
             modelId: context.modelId,
             outputFormat: context.outputFormat,
             language: context.language)
-        let rawStream: AsyncThrowingStream<Data, Error> = if let prefetchedAudio, !prefetchedAudio.chunks.isEmpty {
+        let rawStream: AsyncThrowingStream<Data, Error> = if let prefetchedAudio {
             Self.makeBufferedAudioStream(chunks: prefetchedAudio.chunks)
         } else {
             client.streamSynthesize(voiceId: voiceId, request: request)
@@ -3881,23 +3680,15 @@ private struct IncrementalSpeechBuffer {
     }
 
     private mutating func updateText(_ newText: String) {
-        if newText.hasPrefix(self.latestText) {
-            self.latestText = newText
-        } else if self.latestText.hasPrefix(newText) {
-            // Stream reset or correction; prefer the newer prefix.
-            self.latestText = newText
-            self.spokenOffset = min(self.spokenOffset, newText.count)
-        } else {
-            // Diverged text means chunks arrived out of order or stream restarted.
-            let commonPrefix = Self.commonPrefixCount(self.latestText, newText)
-            self.latestText = newText
-            if self.spokenOffset > commonPrefix {
-                self.spokenOffset = commonPrefix
-            }
+        if !newText.hasPrefix(self.latestText) {
+            // A correction can only retain the spoken portion shared by both versions.
+            let commonPrefix = self.latestText.hasPrefix(newText)
+                ? newText.count
+                : Self.commonPrefixCount(self.latestText, newText)
+            self.spokenOffset = min(self.spokenOffset, commonPrefix)
         }
-        if self.spokenOffset > self.latestText.count {
-            self.spokenOffset = self.latestText.count
-        }
+        self.latestText = newText
+        self.spokenOffset = min(self.spokenOffset, newText.count)
     }
 
     private static func commonPrefixCount(_ lhs: String, _ rhs: String) -> Int {
@@ -3912,7 +3703,6 @@ private struct IncrementalSpeechBuffer {
         var inCodeBlock = self.inCodeBlock
         var buffer = ""
         var bufferAtBoundary = ""
-        var inCodeBlockAtBoundary = inCodeBlock
 
         while idx < chars.count {
             if idx + 2 < chars.count,
@@ -3931,7 +3721,6 @@ private struct IncrementalSpeechBuffer {
                 if Self.isBoundary(currentChar) || Self.isSoftBoundary(currentChar, bufferedChars: buffer.count) {
                     lastBoundary = idx + 1
                     bufferAtBoundary = buffer
-                    inCodeBlockAtBoundary = inCodeBlock
                 }
             }
 
@@ -3940,7 +3729,7 @@ private struct IncrementalSpeechBuffer {
 
         if let boundary = lastBoundary {
             self.spokenOffset = boundary
-            self.inCodeBlock = inCodeBlockAtBoundary
+            self.inCodeBlock = false
             let trimmed = bufferAtBoundary.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? [] : [trimmed]
         }
@@ -4008,8 +3797,7 @@ extension TalkModeManager {
     }
 
     private static func normalizedTalkApiKey(_ raw: String?) -> String? {
-        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard let trimmed = raw?.trimmedNonEmpty else { return nil }
         guard trimmed != Self.redactedConfigSentinel else { return nil }
         // Config values may be env placeholders (for example `${ELEVENLABS_API_KEY}`).
         if trimmed.hasPrefix("${"), trimmed.hasSuffix("}") {
@@ -4037,21 +3825,8 @@ extension TalkModeManager {
         }
     }
 
-    private func applyVoiceModeDescriptor(_ descriptor: TalkVoiceModeDescriptor, persistAsConfigured: Bool = false) {
-        if persistAsConfigured {
-            self.configuredVoiceModeDescriptor = descriptor
-        }
-        self.gatewayTalkVoiceModeTitle = descriptor.title
-        self.gatewayTalkVoiceModeSubtitle = descriptor.subtitle
-        self.gatewayTalkVoiceModeAccessibilityValue = descriptor.accessibilityValue
-    }
-
     private func markRealtimeActive() {
         self.pendingRealtimeIssue = nil
-        self.gatewayTalkCurrentFallbackIssue = nil
-        self.gatewayTalkLastIssueText = nil
-        self.gatewayTalkActiveModeTitle = self.configuredVoiceModeDescriptor.title
-        self.gatewayTalkActiveModeSubtitle = self.configuredVoiceModeDescriptor.subtitle
         self.setStatus(String(localized: "Listening (Realtime)"), phase: .listening)
     }
 
@@ -4146,83 +3921,32 @@ extension TalkModeManager {
     private func prepareRealtimeRelayStart() {
         self.realtimeRelayStartIssue = nil
         self.pendingRealtimeIssue = nil
-        self.gatewayTalkCurrentFallbackIssue = nil
     }
 
     private func markNativeTalkActive() {
         self.pendingRealtimeIssue = nil
-        self.gatewayTalkCurrentFallbackIssue = nil
-        self.gatewayTalkActiveModeTitle = String(localized: "iOS Speech + TTS")
-        self.gatewayTalkActiveModeSubtitle = nil
         self.setStatus(String(localized: "Listening"), phase: .listening)
     }
 
     private func markNativeFallbackActive(after issue: TalkRuntimeIssue) {
-        self.gatewayTalkActiveModeTitle = String(localized: "iOS Speech fallback")
-        self.gatewayTalkActiveModeSubtitle = issue.displayMessage
-        self.gatewayTalkCurrentFallbackIssue = issue
-        self.gatewayTalkLastIssueText = issue.diagnosticSummary
         self.setStatus(issue.fallbackStatusText, phase: .listening)
-    }
-
-    private func realtimeIssue(message: String, phase: String) -> TalkRuntimeIssue {
-        TalkRuntimeIssue(
-            code: .realtimeUnavailable,
-            message: message,
-            provider: self.realtimeProvider,
-            model: self.realtimeModelId,
-            transport: self.runtimeRoute == .realtimeRelay ? "gateway-relay" : "webrtc",
-            phase: phase)
     }
 
     static func runtimeIssue(from issue: RealtimeTalkRelayIssue) -> TalkRuntimeIssue {
         TalkRuntimeIssue(
             code: TalkRuntimeIssue.Code(rawValue: issue.code) ?? .realtimeUnavailable,
-            message: issue.message,
-            provider: issue.provider,
-            model: issue.model,
-            transport: issue.transport,
-            phase: issue.phase)
+            message: issue.message)
     }
 
-    private func realtimeIssue(from error: Error, phase: String) -> TalkRuntimeIssue {
-        if let gatewayError = error as? GatewayResponseError,
-           let issue = Self.talkRuntimeIssue(
-               from: gatewayError,
-               fallbackProvider: realtimeProvider,
-               fallbackModel: realtimeModelId,
-               fallbackTransport: runtimeRoute == .realtimeRelay ? "gateway-relay" : "webrtc",
-               fallbackPhase: phase)
+    static func runtimeIssue(from error: Error) -> TalkRuntimeIssue {
+        let message: String = if let gatewayError = error as? GatewayResponseError,
+                                 let rawIssue = gatewayError.details["talkIssue"]?.dictionaryValue
         {
-            return issue
+            rawIssue["message"]?.stringValue ?? gatewayError.message
+        } else {
+            error.localizedDescription
         }
-        return self.realtimeIssue(message: error.localizedDescription, phase: phase)
-    }
-
-    private static func talkRuntimeIssue(
-        from gatewayError: GatewayResponseError,
-        fallbackProvider: String?,
-        fallbackModel: String?,
-        fallbackTransport: String?,
-        fallbackPhase: String) -> TalkRuntimeIssue?
-    {
-        guard let rawIssue = gatewayError.details["talkIssue"]?.dictionaryValue else { return nil }
-        let message = rawIssue["message"]?.stringValue ?? gatewayError.message
-        let provider = rawIssue["provider"]?.stringValue ?? fallbackProvider
-        let model = rawIssue["model"]?.stringValue ?? fallbackModel
-        let transport = rawIssue["transport"]?.stringValue ?? fallbackTransport
-        let phase = rawIssue["phase"]?.stringValue ?? fallbackPhase
-        return TalkRuntimeIssue(
-            code: .realtimeUnavailable,
-            message: message,
-            provider: provider,
-            model: model,
-            transport: transport,
-            phase: phase)
-    }
-
-    private func restoreConfiguredVoiceModeDescriptor() {
-        self.applyVoiceModeDescriptor(self.configuredVoiceModeDescriptor)
+        return TalkRuntimeIssue(message: message)
     }
 
     private func ensureTalkConfigLoadedForStart() async {
@@ -4314,13 +4038,10 @@ extension TalkModeManager {
         _ parsed: TalkModeGatewayConfigState,
         redactedFallbackMissingScope: String?)
     {
-        let routing = TalkModeRoutingResolver.resolve(
-            parsed: parsed,
-            defaultProvider: Self.defaultTalkProvider)
         let realtimeVoiceId = parsed.snapshot.realtime.voice
-        self.runtimeRoute = routing.route
-        self.realtimeProvider = routing.realtimeProvider
-        self.realtimeModelId = routing.realtimeModelId
+        self.runtimeRoute = parsed.route
+        self.realtimeProvider = parsed.snapshot.realtime.provider
+        self.realtimeModelId = parsed.realtimeModelId
         self.realtimeVoiceId = realtimeVoiceId
         self.defaultVoiceId = parsed.defaultVoiceId
         self.voiceAliases = parsed.snapshot.voiceAliases
@@ -4329,28 +4050,24 @@ extension TalkModeManager {
         }
         self.defaultModelId = parsed.defaultModelId
         self.configuredProviderModelId = parsed.configuredModelId
-        if !self.modelOverrideActive {
-            self.currentModelId = self.defaultModelId
-        }
         self.defaultOutputFormat = parsed.defaultOutputFormat
 
-        let credentialProvider = routing.route.usesRealtime
-            ? (routing.realtimeProvider ?? routing.activeProvider)
-            : routing.activeProvider
-        self.applyTalkConfigCredentials(
-            parsed: parsed,
-            activeProvider: routing.activeProvider,
-            gatewayOwnsCredentials: routing.route.gatewayOwnsCredentials,
-            credentialProvider: credentialProvider)
-        self.applyTalkModeDescriptor(
-            routing: routing,
-            nativeModelId: routing.route == .localElevenLabs
-                ? self.defaultModelId
-                : self.configuredProviderModelId,
-            realtimeVoiceId: realtimeVoiceId)
+        self.apiKey = parsed.route.gatewayOwnsCredentials ? nil : Self.normalizedTalkApiKey(parsed.rawConfigApiKey)
+        if parsed.route.gatewayOwnsCredentials {
+            let credentialProvider = parsed.route.usesRealtime
+                ? (parsed.snapshot.realtime.provider ?? parsed.snapshot.activeProvider)
+                : parsed.snapshot.activeProvider
+            GatewayDiagnostics.log("talk provider '\(credentialProvider)' uses gateway-owned credentials")
+        }
+        self.gatewayTalkProviderLabel = Self.displayName(forProvider: parsed.snapshot.activeProvider)
+        self.gatewayTalkTransportLabel = switch parsed.route {
+        case .realtimeRelay: String(localized: "Gateway Relay")
+        case .realtimeWebRTC: String(localized: "Native WebRTC")
+        case .localElevenLabs, .gatewayTalkSpeak: String(localized: "Native")
+        }
         self.applyTalkPermissionState(
             redactedFallbackMissingScope: redactedFallbackMissingScope,
-            gatewayOwnedVoiceProvider: routing.route.gatewayOwnsCredentials)
+            gatewayOwnedVoiceProvider: parsed.route.gatewayOwnsCredentials)
 
         if let interrupt = parsed.snapshot.interruptOnSpeech {
             self.interruptOnSpeech = interrupt
@@ -4359,75 +4076,16 @@ extension TalkModeManager {
         self.silenceWindow = TimeInterval(parsed.snapshot.silenceTimeoutMs) / 1000
         if parsed.snapshot.normalizedPayload || parsed.defaultVoiceId != nil || parsed.rawConfigApiKey != nil {
             GatewayDiagnostics.log(
-                "talk config provider=\(routing.activeProvider) silenceTimeoutMs=\(parsed.snapshot.silenceTimeoutMs)")
+                "talk config provider=\(parsed.snapshot.activeProvider) "
+                    + "silenceTimeoutMs=\(parsed.snapshot.silenceTimeoutMs)")
         }
-    }
-
-    private func applyTalkConfigCredentials(
-        parsed: TalkModeGatewayConfigState,
-        activeProvider: String,
-        gatewayOwnsCredentials: Bool,
-        credentialProvider: String)
-    {
-        let rawConfigApiKey = parsed.rawConfigApiKey
-        let configApiKey = Self.normalizedTalkApiKey(rawConfigApiKey)
-        let localApiKey = Self.normalizedTalkApiKey(
-            GatewaySettingsStore.loadTalkProviderApiKey(provider: activeProvider))
-        if rawConfigApiKey == Self.redactedConfigSentinel {
-            self.apiKey = localApiKey
-            GatewayDiagnostics.log("talk config apiKey redacted; using local override if present")
-        } else {
-            self.apiKey = localApiKey ?? configApiKey
-        }
-        if gatewayOwnsCredentials {
-            self.apiKey = nil
-            GatewayDiagnostics.log("talk provider '\(credentialProvider)' uses gateway-owned credentials")
-        }
-    }
-
-    private func applyTalkModeDescriptor(
-        routing: TalkModeResolvedRouting,
-        nativeModelId: String?,
-        realtimeVoiceId: String?)
-    {
-        let usesRealtimeConfig = routing.route.usesRealtime
-        let usesRealtimeRelay = routing.route == .realtimeRelay
-        self.gatewayTalkDefaultVoiceId = usesRealtimeConfig ? realtimeVoiceId : self.defaultVoiceId
-        self.gatewayTalkDefaultModelId = usesRealtimeConfig ? routing.realtimeModelId : nativeModelId
-        let providerLabel = Self.displayName(forProvider: routing.activeProvider)
-        let transport = usesRealtimeConfig ? (usesRealtimeRelay ? "gateway-relay" : "webrtc") : "native"
-        let transportLabel = usesRealtimeRelay
-            ? String(localized: "Gateway Relay")
-            : (usesRealtimeConfig
-                ? String(localized: "Native WebRTC")
-                : String(localized: "Native"))
-        self.gatewayTalkProviderLabel = providerLabel
-        self.gatewayTalkUsesRealtime = usesRealtimeConfig
-        self.gatewayTalkTransportLabel = transportLabel
-        self.gatewayTalkRealtimeProviderLabel = routing.realtimeProvider.map { Self.displayName(forProvider: $0) }
-        self.gatewayTalkRealtimeModelId = routing.realtimeModelId
-        self.gatewayTalkRealtimeVoiceId = self.realtimeVoiceSelection?.selectedVoice ?? realtimeVoiceId
-        let voiceModeProvider = usesRealtimeConfig
-            ? (routing.realtimeProvider ?? "realtime")
-            : routing.activeProvider
-        let voiceModeLabel = usesRealtimeConfig
-            ? Self.displayName(forProvider: voiceModeProvider)
-            : Self.displayName(forProvider: routing.activeProvider)
-        let voiceModeDescriptor = TalkVoiceModeDescriptorBuilder.build(
-            providerId: voiceModeProvider,
-            providerLabel: voiceModeLabel,
-            modelId: usesRealtimeConfig ? routing.realtimeModelId : nativeModelId,
-            voiceId: usesRealtimeConfig ? realtimeVoiceId : self.defaultVoiceId,
-            transport: transport,
-            isRealtime: usesRealtimeConfig)
-        self.applyVoiceModeDescriptor(voiceModeDescriptor, persistAsConfigured: true)
     }
 
     private func applyTalkPermissionState(
         redactedFallbackMissingScope: String?,
         gatewayOwnedVoiceProvider: Bool)
     {
-        self.gatewayTalkApiKeyConfigured = gatewayOwnedVoiceProvider || (self.apiKey?.isEmpty == false)
+        let apiKeyConfigured = gatewayOwnedVoiceProvider || (self.apiKey?.isEmpty == false)
         self.gatewayTalkConfigLoaded = true
         self.talkConfigLoadedAt = Date()
         if let missingScope = redactedFallbackMissingScope,
@@ -4436,7 +4094,7 @@ extension TalkModeManager {
             self.gatewayTalkPermissionState = .missingScope(missingScope)
             GatewayDiagnostics.log("talk config missing gateway scope=\(missingScope)")
         } else {
-            self.gatewayTalkPermissionState = self.gatewayTalkApiKeyConfigured
+            self.gatewayTalkPermissionState = apiKeyConfigured
                 ? .ready
                 : .apiKeyMissing
         }
@@ -4465,20 +4123,7 @@ extension TalkModeManager {
         self.configuredProviderModelId = nil
         self.gatewayTalkProviderLabel = String(localized: "Not loaded")
         self.gatewayTalkTransportLabel = String(localized: "Not loaded")
-        self.gatewayTalkUsesRealtime = false
-        self.gatewayTalkRealtimeProviderLabel = nil
-        self.gatewayTalkRealtimeModelId = nil
-        self.gatewayTalkRealtimeVoiceId = nil
-        self.applyVoiceModeDescriptor(TalkVoiceModeDescriptor(
-            title: String(localized: "Not loaded"),
-            subtitle: nil), persistAsConfigured: true)
         self.defaultModelId = Self.defaultModelIdFallback
-        if !self.modelOverrideActive {
-            self.currentModelId = self.defaultModelId
-        }
-        self.gatewayTalkDefaultVoiceId = nil
-        self.gatewayTalkDefaultModelId = nil
-        self.gatewayTalkApiKeyConfigured = false
     }
 
     func markTalkPermissionUpgradeRequested() {
@@ -4692,8 +4337,7 @@ extension TalkModeManager: TalkRealtimeWebRTCSessionDelegate {
 
     func realtimeSession(_ session: TalkRealtimeWebRTCSession, didReceiveUserTranscript text: String) {
         guard session === self.realtimeSession else { return }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard let trimmed = text.trimmedNonEmpty else { return }
         GatewayDiagnostics.log("talk.timeline realtime user transcript chars=\(trimmed.count)")
         self.lastTranscript = trimmed
         self.lastHeard = Date()
@@ -4701,8 +4345,7 @@ extension TalkModeManager: TalkRealtimeWebRTCSessionDelegate {
 
     func realtimeSession(_ session: TalkRealtimeWebRTCSession, didReceiveAssistantTranscript text: String) {
         guard session === self.realtimeSession else { return }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard let trimmed = text.trimmedNonEmpty else { return }
         GatewayDiagnostics.log("talk.timeline realtime assistant transcript chars=\(trimmed.count)")
         self.lastSpokenText = trimmed
     }
@@ -4733,8 +4376,8 @@ extension TalkModeManager {
         gateway: GatewayNodeSession,
         route: GatewayNodeSessionRoute)
     {
-        guard self.adoptRealtimeVoiceSessionId(
-            voiceSessionId, gateway: gateway, route: route, sessionKey: self.mainSessionKey)
+        guard self.adoptRealtimeVoiceSession(TalkRealtimeVoiceSessionOwner(
+            gateway: gateway, route: route, sessionKey: self.mainSessionKey, voiceSessionId: voiceSessionId))
         else { return }
         self.prefetchedRealtimeSession = TalkRealtimeClientSession(
             provider: "openai",
@@ -4757,8 +4400,8 @@ extension TalkModeManager {
         adoptInManager: Bool = true)
     {
         if adoptInManager {
-            guard self.adoptRealtimeVoiceSessionId(
-                voiceSessionId, gateway: gateway, route: route, sessionKey: self.mainSessionKey)
+            guard self.adoptRealtimeVoiceSession(TalkRealtimeVoiceSessionOwner(
+                gateway: gateway, route: route, sessionKey: self.mainSessionKey, voiceSessionId: voiceSessionId))
             else { return }
         }
         self.prefetchedRealtimeSession = TalkRealtimeClientSession(
@@ -4804,8 +4447,8 @@ extension TalkModeManager {
         route: GatewayNodeSessionRoute,
         voiceSessionId: String) -> Task<Void, Never>
     {
-        self.closeOrphanedRealtimeVoiceSession(
-            gateway: gateway, route: route, sessionKey: self.mainSessionKey, voiceSessionId: voiceSessionId)
+        self.closeRealtimeVoiceSessions([TalkRealtimeVoiceSessionOwner(
+            gateway: gateway, route: route, sessionKey: self.mainSessionKey, voiceSessionId: voiceSessionId)])
     }
 
     func _test_invalidatePrefetchedRealtimeSession() async {
@@ -4987,10 +4630,6 @@ extension TalkModeManager {
         }
     }
 
-    func _test_realtimeProvider() -> String? {
-        self.realtimeProvider
-    }
-
     func _test_realtimeModelId() -> String? {
         self.realtimeModelId
     }
@@ -5001,9 +4640,6 @@ extension TalkModeManager {
 
     func _test_recordRealtimeIssue(_ issue: TalkRuntimeIssue) {
         self.pendingRealtimeIssue = issue
-        self.gatewayTalkLastIssueText = issue.diagnosticSummary
-        self.gatewayTalkActiveModeTitle = String(localized: "Realtime unavailable")
-        self.gatewayTalkActiveModeSubtitle = issue.displayMessage
     }
 
     func _test_handleRealtimeRelayStatus(_ status: String) {
@@ -5064,10 +4700,6 @@ extension TalkModeManager {
 
     func _test_mainSessionKey() -> String {
         self.mainSessionKey
-    }
-
-    func _test_realtimeIssue(from error: Error, phase: String) -> TalkRuntimeIssue {
-        self.realtimeIssue(from: error, phase: phase)
     }
 
     func _test_hasPendingRealtimeIssue() -> Bool {

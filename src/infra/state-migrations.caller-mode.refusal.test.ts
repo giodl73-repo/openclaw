@@ -631,7 +631,7 @@ module.exports = { stateMigrations: [{
     fs.writeFileSync(
       fixture.configPath,
       `${JSON.stringify({
-        agents: { list: [{ id: "legacy", default: true }] },
+        agents: { entries: { legacy: {} } },
         plugins: { entries: { "candidate-plugin": { enabled: true } } },
       })}\n`,
     );
@@ -679,7 +679,7 @@ module.exports = { stateMigrations: [{
     const externalDatabasePath = path.join(fixture.root, "registered", "agent.sqlite");
     fs.mkdirSync(path.dirname(externalDatabasePath), { recursive: true });
     fs.writeFileSync(externalDatabasePath, "external\n");
-    const cfg: OpenClawConfig = { agents: { list: [{ id: "legacy", default: true }] } };
+    const cfg: OpenClawConfig = { agents: { entries: { legacy: {} } } };
     fs.writeFileSync(fixture.configPath, `${JSON.stringify(cfg)}\n`);
     vi.spyOn(sessionTargets, "resolveConfiguredAgentDatabaseTargets").mockReturnValue([
       { agentId: "legacy", path: externalDatabasePath },
@@ -755,8 +755,14 @@ module.exports = { stateMigrations: [{
     "closes receipts before rethrowing automatic $blockerId failure",
     async ({ blockerId, property }) => {
       const fixture = await makeCallerModeFixture();
-      const sourcePath = path.join(fixture.stateDir, "settings", "voicewake.json");
-      const sourceBytes = '{"triggers":["hey fixture"]}\n';
+      const sourcePath = path.join(fixture.stateDir, "logs", "config-health.json");
+      const sourceBytes = `${JSON.stringify({
+        entries: {
+          [path.join(fixture.stateDir, "openclaw.json")]: {
+            lastObservedSuspiciousSignature: "leave-me",
+          },
+        },
+      })}\n`;
       fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
       fs.writeFileSync(sourcePath, sourceBytes);
       if (!property) {

@@ -5,16 +5,14 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
-import { type AcpRuntimeError, toAcpRuntimeErrorText } from "../../../acp/runtime/errors.js";
+import { toAcpRuntimeErrorText } from "../../../acp/runtime/errors.js";
 import { supportsAutomaticThreadBindingSpawn } from "../../../channels/thread-bindings-policy.js";
 import type { AcpSessionRuntimeOptions } from "../../../config/sessions/types.js";
+import { stringifyRouteThreadId } from "../../../plugin-sdk/channel-route.js";
 import { normalizeAgentId } from "../../../routing/session-key.js";
 import { commandReply } from "../command-gates.js";
 import type { CommandHandlerResult, HandleCommandsParams } from "../commands-types.js";
-import {
-  resolveConversationBindingChannelFromMessage,
-  resolveConversationBindingThreadIdFromMessage,
-} from "../conversation-binding-input.js";
+import { resolveConversationBindingChannelFromMessage } from "../conversation-binding-input.js";
 
 export const COMMAND = "/acp";
 const ACP_SPAWN_USAGE =
@@ -53,11 +51,6 @@ type ParsedSpawnInput = {
 type ParsedSteerInput = {
   sessionToken?: string;
   instruction: string;
-};
-
-type ParsedSingleValueCommandInput = {
-  value: string;
-  sessionToken?: string;
 };
 
 type ParsedSetCommandInput = {
@@ -108,24 +101,7 @@ function readOptionValue(params: { tokens: string[]; index: number; flags: reado
 }
 
 function normalizeAcpOptionToken(raw: string): string {
-  const token = raw.trim();
-  if (!token || token.startsWith("--")) {
-    return token;
-  }
-  const dashPrefix = token.match(ACP_UNICODE_DASH_PREFIX_RE)?.[0];
-  if (!dashPrefix) {
-    return token;
-  }
-  return `--${token.slice(dashPrefix.length)}`;
-}
-
-function resolveDefaultSpawnThreadMode(params: HandleCommandsParams): AcpSpawnThreadMode {
-  const channel = resolveConversationBindingChannelFromMessage(params.ctx, params.command.channel);
-  if (!supportsAutomaticThreadBindingSpawn(channel)) {
-    return "off";
-  }
-  const currentThreadId = resolveConversationBindingThreadIdFromMessage(params.ctx);
-  return currentThreadId ? "here" : "auto";
+  return raw.trim().replace(ACP_UNICODE_DASH_PREFIX_RE, "--");
 }
 
 export function parseSpawnInput(
@@ -134,7 +110,11 @@ export function parseSpawnInput(
 ): Result<ParsedSpawnInput, string> {
   const normalizedTokens = tokens.map(normalizeAcpOptionToken);
   let mode: AcpRuntimeSessionMode = "persistent";
-  let thread = resolveDefaultSpawnThreadMode(params);
+  const channel = resolveConversationBindingChannelFromMessage(params.ctx, params.command.channel);
+  let thread: AcpSpawnThreadMode = "off";
+  if (supportsAutomaticThreadBindingSpawn(channel)) {
+    thread = stringifyRouteThreadId(params.ctx.MessageThreadId) ? "here" : "auto";
+  }
   let sawThreadOption = false;
   let bind: AcpSpawnBindMode = "off";
   let cwd: string | undefined;
@@ -289,24 +269,6 @@ export function parseSteerInput(tokens: string[]): Result<ParsedSteerInput, stri
   };
 }
 
-export function parseSingleValueCommandInput(
-  tokens: string[],
-  usage: string,
-): Result<ParsedSingleValueCommandInput, string> {
-  const value = normalizeOptionalString(tokens[0]) ?? "";
-  if (!value || tokens.length > 2) {
-    return { ok: false, error: usage };
-  }
-  const sessionToken = normalizeOptionalString(tokens[1]);
-  return {
-    ok: true,
-    value: {
-      value,
-      sessionToken,
-    },
-  };
-}
-
 export function parseSetCommandInput(tokens: string[]): Result<ParsedSetCommandInput, string> {
   const key = normalizeOptionalString(tokens[0]) ?? "";
   const value = normalizeOptionalString(tokens[1]) ?? "";
@@ -362,7 +324,7 @@ export function resolveAcpHelpText(): string {
     "/acp sessions",
     "",
     "Notes:",
-    "- /acp spawn harness-id is an ACP runtime harness alias (for example codex), not an OpenClaw agents.list id.",
+    "- /acp spawn harness-id is an ACP runtime harness alias (for example codex), not an OpenClaw agents.entries id.",
     "- Use --bind here to pin the current conversation to the ACP session without creating a child thread.",
     "- /session unbind detaches this conversation without closing its ACP session.",
     "- ACP dispatch of normal thread messages is controlled by acp.dispatch.enabled.",
@@ -385,10 +347,7 @@ export function formatRuntimeOptionsText(options: AcpSessionRuntimeOptions): str
     typeof options.timeoutSeconds === "number" ? `timeoutSeconds=${options.timeoutSeconds}` : null,
     extras ? `extras={${extras}}` : null,
   ].filter(Boolean);
-  if (parts.length === 0) {
-    return "(none)";
-  }
-  return parts.join(", ");
+  return parts.join(", ") || "(none)";
 }
 
 export function formatAcpCapabilitiesText(controls: string[]): string {
@@ -404,11 +363,9 @@ export function resolveCommandRequestId(params: HandleCommandsParams): string {
     params.ctx.MessageSid ??
     params.ctx.MessageSidFirst ??
     params.ctx.MessageSidLast;
-  if (typeof value === "string") {
-    const normalizedValue = normalizeOptionalString(value);
-    if (normalizedValue) {
-      return normalizedValue;
-    }
+  const normalizedValue = normalizeOptionalString(value);
+  if (normalizedValue) {
+    return normalizedValue;
   }
   if (typeof value === "number" || typeof value === "bigint") {
     return String(value);
@@ -416,20 +373,17 @@ export function resolveCommandRequestId(params: HandleCommandsParams): string {
   return randomUUID();
 }
 
-export async function withAcpCommandErrorBoundary<T>(params: {
-  run: () => Promise<T>;
-  fallbackCode: AcpRuntimeError["code"];
+export async function withAcpCommandErrorBoundary(params: {
+  run: () => Promise<CommandHandlerResult>;
   fallbackMessage: string;
-  onSuccess: (value: T) => CommandHandlerResult;
 }): Promise<CommandHandlerResult> {
   try {
-    const result = await params.run();
-    return params.onSuccess(result);
+    return await params.run();
   } catch (error) {
     return commandReply(
       toAcpRuntimeErrorText({
         error,
-        fallbackCode: params.fallbackCode,
+        fallbackCode: "ACP_TURN_FAILED",
         fallbackMessage: params.fallbackMessage,
       }),
     );

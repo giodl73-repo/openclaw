@@ -45,6 +45,10 @@ availability, Blacksmith control-plane health, and downstream queue drains.
   named memory-heavy command; see `docs/reference/test/remote-proof.md`.
   That workflow has at most four concurrent leases inside the shared 32-slot
   Testbox pool. All Testbox profiles cap idle time at 15 minutes.
+- Allocate through the current OpenClaw wrapper with workflow ref `main`;
+  the source capsule preserves the checkout being tested. Do not dispatch an
+  old workflow ref to bypass spending limits. Queue age is checked before
+  checkout; an admitted lease keeps its job and idle deadlines.
 - Do not promote an entire workflow family because one command needs more RAM.
   Keep proven high-memory CI rows scoped to their owning planner and evidence;
   remeasure before changing their allocation. A 32-class label is not proof of
@@ -52,6 +56,27 @@ availability, Blacksmith control-plane health, and downstream queue drains.
 
 ## Rejected Experiments
 
+- **Declaration-fixture owner selection (2026-10-02):**
+  `test/scripts/tsdown-declaration-fixture.ts` copies 26 real runtime owners by
+  path, so product PRs that edit one do not select the four declaration suites
+  built on it. [PR #162614](https://github.com/openclaw/openclaw/pull/162614)
+  broke `write-unified-entry-dts` that way; hourly scheduled CI
+  ([run 36979748808](https://github.com/openclaw/openclaw/actions/runs/36979748808))
+  caught it about 35 minutes after merge and `0a188c4f038f0` repaired the
+  fixture within the hour. Declaring the owners as `new URL(..., import.meta.url)`
+  literals reaches the suites only below aggressive selection's 20-importer
+  hub cutoff: the incident owner and seven others are hubs, so the replayed
+  #162614 diff still selected none. Replaying all 92 main commits from the
+  prior 30 days that touched an owner through the canonical PR planner options,
+  URL literals newly covered 12 (+35 rows, +1,689 class-vCPU-minutes). Full
+  coverage, such as a policy watch over the same list, newly selects the suites
+  for 81 and starts `build-artifacts` (median 330s on the 16-class across 12 PR
+  runs) for 69, because the suites are build owners in `ci-build-manifest.mjs`:
+  +242 rows and +11,628 class-vCPU-minutes, a median +161 (+8%) per affected
+  PR. That buys one escaped owner break in seven weeks, so keep the plain
+  paths; hourly scheduled CI, tooling-owner PRs and release validation own this
+  proof. Reconsider with a materially higher escape rate or a selection that
+  does not also start `build-artifacts`.
 - **Boundary asynchronous input preparation (2026-09-26):** Adding the existing
   `CompilerInputSnapshot.prepare()` calls at the three declaration/boundary
   callers increased full cold validation from 464.21s to 544.68s on the same
@@ -246,9 +271,11 @@ These are intentionally guarded by the `ci-workflow-guards`,
   restore-only consumers on eligible self-hosted runners. Exact misses and
   hosted paths, including Mac Node jobs, use the ordinary pnpm-store cache.
 - Trusted canonical hybrid first attempts route `ci-gate` to the Blacksmith
-  4-class and both packed core-lint rows to the 16-class after hosted assignment
-  added 416 seconds to main's critical chain. Admitted qualifications use the
-  same route. The first packed lint row took 621s on the 8-class; retain four
+  4-class after hosted assignment added 416 seconds to main's critical chain.
+  Core lint uses the 16-class on canonical automatic first attempts with an
+  unset, `blacksmith`, or `hybrid` backend, including fork PRs. Admitted
+  qualifications retain their existing routes. The first packed lint row took
+  621s on the 8-class; retain four
   actual CPUs for that row. The second packed row later exceeded its existing
   15-minute limit on the 8-class, so it uses the same 16-class. This adds no
   jobs or registrations and keeps the deadline and complete stripe inventory. The gate has no checkout or dependency setup; retries, ordinary
@@ -274,18 +301,18 @@ These are intentionally guarded by the `ci-workflow-guards`,
   hybrid first attempts use the existing 4-class for the ratchet job, with its
   measured 91-second bound adding at most 6.07 class-vCPU-minutes and no jobs.
   Preserve the existing hosted fallbacks and deadline.
-  The existing `check-plan` prerequisite keeps the 4-class on same-repository
-  hybrid PR first attempts, automatic main runs, and admitted qualification dispatches. Its 165–209s hosted wall delayed narrowed type/lint consumers; use
-  the unchanged 209s as a conservative 13.93-vCPU-minute added-cost bound until
-  native proof measures it. This consumes one non-Node reserve slot and adds no
-  jobs. Exact dependency restoration still requires an actual self-hosted runner
-  and same-repository cache trust. Admitted qualification dispatches retain the
-  automatic first attempt's Blacksmith routes. Keep compiler inventory
-  completeness and the observer's exact count.
-  This measured control-job offload is hybrid-only; RunsOn keeps its existing
-  hosted standalone ratchet and check-plan routes, including qualification dispatches.
-  Fork PRs retain hosted hybrid check planning and standalone ratchets,
-  preserving the existing cache trust restrictions.
+  The existing `check-plan` prerequisite uses the 16-class for shared compiler
+  snapshot memory on canonical automatic first attempts with an unset,
+  `blacksmith`, or `hybrid` backend, including fork PRs. Fork core type stripes
+  with an unset or `blacksmith` backend also use the 16-class on those attempts;
+  hybrid health admission retains its existing placement rules. These routes
+  add paid assignments, not jobs. Preserve logical GitHub stripe coverage,
+  restore-only PR caches, and same-repository cache trust. The GitHub override,
+  retries, ordinary manual and frozen targets, RunsOn planners, and noncanonical
+  contexts retain hosted planning. Admitted qualification dispatches keep their
+  existing routes. Fork standalone ratchets stay hosted. See
+  `docs/ci/runners.md` for the current routing and `docs/ci/routing-costs.md`
+  for measured latency and cost; older 4-class planner estimates no longer apply.
   Optional compiler/check offloads reject observed hosted assignment waits at
   sixty seconds; the former three-minute cutoff exceeded the latency objective.
   API and job deadlines remain unchanged.
@@ -341,7 +368,7 @@ These are intentionally guarded by the `ci-workflow-guards`,
   one worker per project. Any nonzero exit stops admission of the next envelope.
   Frozen targets retain their original separate rows.
 - CI matrix caps: fast/check lanes at 12, Node test shards at 130 only for
-  PR first attempts, including forks, on a non-frozen Blacksmith or hybrid Node plan, and otherwise 96; Windows stays at 5 and Android at 2.
+  PR first attempts, including forks, on a non-frozen Blacksmith or hybrid Node plan, and otherwise 96; Windows stays at 5 and Android at 4 for canonical Blacksmith push/PR first attempts, including forks, otherwise 2.
   Hosted plans, RunsOn, retries, main, and all manual/qualification dispatches
   retain 96. This removes a second admission wave for 97–130-row PRs without
   adding jobs or planned vCPU-minutes. Keep the 130/70 final PR/main row caps and 90 native/96 hosted compact
@@ -392,7 +419,9 @@ These are intentionally guarded by the `ci-workflow-guards`,
   in the Kotlin-lint row when benchmark/build/dependency inputs change or the
   changed-path manifest is unusable. Full manual validation retains all six
   rows and memory-bounded phone/Wear/benchmark builds without duplicate lint.
-  The cap stays at two; frozen task contracts and npm native deferral are unchanged.
+  Canonical Blacksmith push/PR first attempts, including forks, overlap four rows.
+  The GitHub override, retries, manual dispatches, schedules, and noncanonical
+  repositories retain two; frozen task contracts and npm native deferral are unchanged.
 - iOS regular PR/main and PR `release_gate` CI runs one required Debug build
   and Swift lint smoke. Ordinary full-scope manual validation retains Release
   and Debug/native-test phases, both screenshot shards, and the evidence reducer.
@@ -653,7 +682,9 @@ These are intentionally guarded by the `ci-workflow-guards`,
   routes configurable `ci.yml` jobs to their existing GitHub-hosted fallback
   labels. Unset or `blacksmith` preserves the normal Blacksmith-first route.
   Fork first attempts cannot honor an unavailable override; they use Blacksmith
-  Node runners and hosted check stripes. Fork retries use hosted runners.
+  Node runners, check planning, core type stripes, and core lint stripes where
+  the current routing permits. Their logical GitHub profile and cache trust stay
+  unchanged. Fork retries use hosted runners.
 - Vitest transform and Node compile caches are restore-only in CI and use
   immutable Actions caches; the main-push/daily/dispatch warmer is their sole
   writer. Build, QA and test orchestration consume its shared Node compile seed.

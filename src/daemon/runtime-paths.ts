@@ -228,7 +228,7 @@ async function resolveRuntimeInfo(
     });
     const parsed: unknown = JSON.parse(stdout);
     if (!isRecord(parsed)) {
-      throw new Error("Runtime probe returned invalid output");
+      throw new Error("Runtime check returned invalid output");
     }
     const version = parsed[`${runtime}Version`];
     const sqliteVersion = parsed.sqliteVersion;
@@ -252,7 +252,7 @@ async function resolveRuntimeInfo(
       typeof probe.json !== "boolean" ||
       !(probe.error === undefined || typeof probe.error === "string")
     ) {
-      throw new Error("Runtime probe returned invalid version metadata");
+      throw new Error("Runtime check returned invalid version metadata");
     }
     const sqliteProbe: SqliteCapabilities = {
       available: probe.available,
@@ -262,7 +262,12 @@ async function resolveRuntimeInfo(
       json: probe.json,
       ...(probe.error ? { error: probe.error } : {}),
     };
-    const capabilityError = runtime === "node" ? nodeRuntimeFailure(version, sqliteProbe) : null;
+    const capabilityError =
+      runtime === "node"
+        ? typeof parsed.bunVersion === "string"
+          ? "The executable is Bun, not Node."
+          : nodeRuntimeFailure(version, sqliteProbe)
+        : null;
     const note = runtime === "node" ? nodeRuntimeNote(version, sqliteProbe) : null;
     const supportedVersion = runtime === "node" ? !capabilityError : isSupportedBunVersion(version);
     return {
@@ -285,7 +290,7 @@ async function resolveRuntimeInfo(
   } catch (cause) {
     // A failed exec says nothing about runtime support. Preserve its cause and launch context.
     const error = new Error(
-      `${label} runtime probe failed for ${runtimePath} (cwd: ${cwd ?? "unavailable"}): ${String(cause)}. Check executable and working-directory access, then retry.`,
+      `${label} runtime check failed for ${runtimePath} (cwd: ${cwd ?? "unavailable"}): ${String(cause)}. Check executable and working-directory access, then retry.`,
       { cause },
     );
     return { status: "probe-failed", error };
@@ -326,10 +331,7 @@ export async function resolveRecordedDaemonRuntime(
   if (!runtime) {
     return undefined;
   }
-  const info =
-    runtime === "bun"
-      ? await resolveBunRuntimeInfo(runtimePath, undefined, env)
-      : await resolveNodeRuntimeInfo(runtimePath, env);
+  const info = await resolveRuntimeInfo(runtimePath, runtime, execFileAsync, env);
   return { ...info, runtime, path: runtimePath };
 }
 

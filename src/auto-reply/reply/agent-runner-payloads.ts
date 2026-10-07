@@ -1,4 +1,3 @@
-/** Builds final reply payloads after sanitization, media normalization, and dedupe. */
 import {
   hasOutboundReplyContent,
   resolveSendableOutboundReplyParts,
@@ -31,20 +30,8 @@ import { applyReplyThreading, resolveReplyThreadingPayloads } from "./reply-payl
 import { createReplyDeliveryContext } from "./reply-threading.js";
 
 const replyPayloadsDedupeRuntimeLoader = createLazyImportLoader(
-  () => import("./reply-payloads-dedupe.runtime.js"),
+  () => import("./reply-payloads-dedupe.js"),
 );
-
-async function normalizeReplyPayloadMedia(params: {
-  payload: ReplyPayload;
-  normalizeMediaPaths?: (payload: ReplyPayload) => Promise<ReplyPayload>;
-}): Promise<ReplyPayload> {
-  if (!params.normalizeMediaPaths || !resolveSendableOutboundReplyParts(params.payload).hasMedia) {
-    return params.payload;
-  }
-
-  const normalized = await params.normalizeMediaPaths(params.payload);
-  return copyReplyPayloadMetadata(params.payload, normalized);
-}
 
 async function normalizeSentMediaUrlsForDedupe(params: {
   sentMediaUrls: readonly string[];
@@ -140,7 +127,6 @@ function copyPayloadWithSanitizedText(
   return next;
 }
 
-/** Builds final outbound payloads from agent output and message-tool delivery evidence. */
 export async function buildReplyPayloads(params: {
   config?: OpenClawConfig;
   payloads: ReplyPayload[];
@@ -182,7 +168,7 @@ export async function buildReplyPayloads(params: {
       let text = payload.text;
 
       if (payload.isError && text && isBunFetchSocketError(text)) {
-        text = formatBunFetchSocketError(text);
+        text = formatBunFetchSocketError();
       }
 
       if (text?.includes("HEARTBEAT_OK")) {
@@ -232,10 +218,13 @@ export async function buildReplyPayloads(params: {
         parseMode: "always",
         extractMarkdownImages: params.extractMarkdownImages,
       });
-      const mediaNormalizedPayload = await normalizeReplyPayloadMedia({
-        payload: parsed.payload,
-        normalizeMediaPaths: params.normalizeMediaPaths,
-      });
+      const mediaNormalizedPayload =
+        params.normalizeMediaPaths && resolveSendableOutboundReplyParts(parsed.payload).hasMedia
+          ? copyReplyPayloadMetadata(
+              parsed.payload,
+              await params.normalizeMediaPaths(parsed.payload),
+            )
+          : parsed.payload;
       if (parsed.isSilent) {
         mediaNormalizedPayload.text = undefined;
       }

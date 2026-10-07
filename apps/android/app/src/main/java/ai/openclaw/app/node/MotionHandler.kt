@@ -1,6 +1,7 @@
 package ai.openclaw.app.node
 
 import ai.openclaw.app.gateway.GatewaySession
+import ai.openclaw.app.hasPermission
 import android.Manifest
 import android.content.Context
 import android.hardware.Sensor
@@ -8,7 +9,6 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.SystemClock
-import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -50,10 +50,7 @@ internal data class MotionActivityRecord(
 internal data class PedometerRecord(
   val startISO: String,
   val endISO: String,
-  val steps: Int?,
-  val distanceMeters: Double?,
-  val floorsAscended: Int?,
-  val floorsDescended: Int?,
+  val steps: Int,
 )
 
 /** Motion data seam for Android sensors and tests. */
@@ -86,9 +83,7 @@ private object SystemMotionDataSource : MotionDataSource {
     return sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) != null
   }
 
-  override fun hasPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
-      android.content.pm.PackageManager.PERMISSION_GRANTED
+  override fun hasPermission(context: Context): Boolean = context.hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)
 
   override suspend fun activity(
     context: Context,
@@ -148,74 +143,62 @@ private object SystemMotionDataSource : MotionDataSource {
       startISO = Instant.ofEpochMilli(max(0L, bootMs)).toString(),
       endISO = Instant.now().toString(),
       steps = steps,
-      distanceMeters = null,
-      floorsAscended = null,
-      floorsDescended = null,
     )
   }
 
-  @OptIn(InternalCoroutinesApi::class)
   private suspend fun readStepCounter(
     sensorManager: SensorManager,
     sensor: Sensor,
-  ): Int? {
-    val sample =
-      withTimeoutOrNull(1200L) {
-        suspendCancellableCoroutine<Float?> { cont ->
-          val listener =
-            object : SensorEventListener {
-              override fun onSensorChanged(event: SensorEvent?) {
-                val value = event?.values?.firstOrNull()
-                val token = cont.tryResume(value) ?: return
-                cont.completeResume(token)
-                sensorManager.unregisterListener(this)
-              }
+  ): Int? =
+    readSensorSample<Float>(sensorManager, sensor, 1200L, unregisterOnRejection = true) { event, complete ->
+      complete(event?.values?.firstOrNull())
+    }?.toInt()?.takeIf { it >= 0 }
 
-              override fun onAccuracyChanged(
-                sensor: Sensor?,
-                accuracy: Int,
-              ) = Unit
-            }
-          val registered = sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
-          if (!registered) {
-            sensorManager.unregisterListener(listener)
-            cont.resume(null) { _, _, _ -> }
-            return@suspendCancellableCoroutine
-          }
-          cont.invokeOnCancellation { sensorManager.unregisterListener(listener) }
-        }
-      }
-    return sample?.toInt()?.takeIf { it >= 0 }
-  }
-
-  @OptIn(InternalCoroutinesApi::class)
   private suspend fun readAccelerometerSample(
     sensorManager: SensorManager,
     sensor: Sensor,
-  ): Double? =
-    withTimeoutOrNull(ACCELEROMETER_SAMPLE_TIMEOUT_MS) {
-      suspendCancellableCoroutine<Double?> { cont ->
-        var count = 0
-        var sumDelta = 0.0
+  ): Double? {
+    var count = 0
+    var sumDelta = 0.0
+    return readSensorSample(sensorManager, sensor, ACCELEROMETER_SAMPLE_TIMEOUT_MS) { event, complete ->
+      val values = event?.values
+      if (values != null && values.size >= 3) {
+        val magnitude =
+          sqrt(
+            values[0] * values[0] +
+              values[1] * values[1] +
+              values[2] * values[2],
+          ).toDouble()
+        sumDelta += abs(magnitude - SensorManager.GRAVITY_EARTH.toDouble())
+        count += 1
+        if (count >= ACCELEROMETER_SAMPLE_TARGET) {
+          // Average gravity-adjusted magnitude across a short window so
+          // one noisy sensor event cannot decide the activity label.
+          complete(sumDelta / count)
+        }
+      }
+    }
+  }
+
+  @OptIn(InternalCoroutinesApi::class)
+  private suspend fun <T> readSensorSample(
+    sensorManager: SensorManager,
+    sensor: Sensor,
+    timeoutMs: Long,
+    unregisterOnRejection: Boolean = false,
+    sample: (event: SensorEvent?, complete: (T?) -> Unit) -> Unit,
+  ): T? =
+    withTimeoutOrNull(timeoutMs) {
+      suspendCancellableCoroutine<T?> { cont ->
         val listener =
           object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {
-              val values = event?.values ?: return
-              if (values.size < 3) return
-              val magnitude =
-                sqrt(
-                  values[0] * values[0] +
-                    values[1] * values[1] +
-                    values[2] * values[2],
-                ).toDouble()
-              sumDelta += abs(magnitude - SensorManager.GRAVITY_EARTH.toDouble())
-              count += 1
-              if (count >= ACCELEROMETER_SAMPLE_TARGET) {
-                // Average gravity-adjusted magnitude across a short window so
-                // one noisy sensor event cannot decide the activity label.
-                val token = cont.tryResume(sumDelta / count) ?: return
-                cont.completeResume(token)
-                sensorManager.unregisterListener(this)
+              sample(event) { value ->
+                val token = cont.tryResume(value)
+                if (token != null) {
+                  cont.completeResume(token)
+                  sensorManager.unregisterListener(this)
+                }
               }
             }
 
@@ -226,6 +209,7 @@ private object SystemMotionDataSource : MotionDataSource {
           }
         val registered = sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
         if (!registered) {
+          if (unregisterOnRejection) sensorManager.unregisterListener(listener)
           cont.resume(null) { _, _, _ -> }
           return@suspendCancellableCoroutine
         }
@@ -258,10 +242,7 @@ class MotionHandler internal constructor(
       buildJsonObject {
         put("startISO", JsonPrimitive(payload.startISO))
         put("endISO", JsonPrimitive(payload.endISO))
-        payload.steps?.let { put("steps", JsonPrimitive(it)) }
-        payload.distanceMeters?.let { put("distanceMeters", JsonPrimitive(it)) }
-        payload.floorsAscended?.let { put("floorsAscended", JsonPrimitive(it)) }
-        payload.floorsDescended?.let { put("floorsDescended", JsonPrimitive(it)) }
+        put("steps", JsonPrimitive(payload.steps))
       }.toString()
     }
 

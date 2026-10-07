@@ -11,6 +11,7 @@ import {
   placementReader,
   workerPlacement,
 } from "./server.sessions.archive-lifecycle.test-support.js";
+import { disposeSessionReadContexts } from "./session-read-contexts.test-support.js";
 import { embeddedRunMock, writeSessionStore } from "./test-helpers.js";
 import {
   directSessionReq,
@@ -64,6 +65,7 @@ afterEach(async () => {
     await cleanup();
   }
   pendingArchiveCleanups.clear();
+  await disposeSessionReadContexts();
   await closeOpenClawStateDatabaseAsync();
   closeOpenClawStateDatabaseForTest();
 });
@@ -421,8 +423,6 @@ test("sessions.patch archives failed placement without reclaim after its environ
   const archived = await patchPlacement({
     workerEnvironmentService: {
       get: () => ({ state: "destroyed" }),
-      cancelInferenceForSession: vi.fn(() => []),
-      hasInferenceForSession: vi.fn(() => false),
     },
     workerSessionPlacementService: placementReader(() => placement),
     workerPlacementDispatchService: { dispatch: vi.fn(), reclaim },
@@ -445,8 +445,6 @@ test.each([
         ? {
             workerEnvironmentService: {
               get: () => ({ state: "destroyed" }),
-              cancelInferenceForSession: vi.fn(() => []),
-              hasInferenceForSession: vi.fn(() => false),
             },
           }
         : {}),
