@@ -163,10 +163,7 @@ describe("promised thinking recovery through the native HTTP transport", () => {
       if (scenario === "recover") {
         expect(
           await withTestTimeout(
-            Promise.race([
-              repairStarted.promise.then(() => "repair"),
-              result.then(() => "result"),
-            ]),
+            Promise.race([repairStarted.promise.then(() => "repair"), result.then(() => "result")]),
             5000,
             "Recovery did not reach repair",
           ),
@@ -203,7 +200,9 @@ describe("promised thinking recovery through the native HTTP transport", () => {
         messages: expect.arrayContaining([
           expect.objectContaining({
             role: "assistant",
-            content: expect.arrayContaining([expect.objectContaining({ type: "thinking", signature })]),
+            content: expect.arrayContaining([
+              expect.objectContaining({ type: "thinking", signature }),
+            ]),
           }),
         ]),
       };
