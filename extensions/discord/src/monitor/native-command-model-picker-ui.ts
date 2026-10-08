@@ -16,11 +16,10 @@ import {
 import {
   Container,
   TextDisplay,
-  type AutocompleteInteraction,
-  type ButtonInteraction,
+  type BaseComponentInteraction,
   type CommandInteraction,
-  type StringSelectMenuInteraction,
 } from "../internal/discord.js";
+import { splitDiscordModelRef } from "./model-picker-preference-primitives.js";
 import {
   readDiscordModelPickerRecentModels,
   type DiscordModelPickerPreferenceScope,
@@ -37,11 +36,7 @@ import type { SafeDiscordInteractionCall } from "./native-command-ui.types.js";
 import { resolveDiscordNativeInteractionChannelContext } from "./native-interaction-channel-context.js";
 import type { ThreadBindingManager } from "./thread-bindings.js";
 
-type DiscordNativeChoiceInteraction =
-  | AutocompleteInteraction
-  | CommandInteraction
-  | ButtonInteraction
-  | StringSelectMenuInteraction;
+type DiscordNativeChoiceInteraction = CommandInteraction | BaseComponentInteraction;
 
 export function shouldOpenDiscordModelPickerFromCommand(params: {
   command: ChatCommandDefinition;
@@ -65,21 +60,15 @@ export function shouldOpenDiscordModelPickerFromCommand(params: {
 export function buildDiscordModelPickerAllowedModelRefs(
   data: Awaited<ReturnType<typeof loadDiscordModelPickerData>>,
 ): Set<string> {
-  const out = new Set<string>();
-  for (const provider of data.providers) {
-    const models = data.byProvider.get(provider);
-    if (!models) {
-      continue;
-    }
-    for (const model of models) {
-      out.add(`${provider}/${model}`);
-    }
-  }
-  return out;
+  return new Set(
+    data.providers.flatMap((provider) =>
+      [...(data.byProvider.get(provider) ?? [])].map((model) => `${provider}/${model}`),
+    ),
+  );
 }
 
 export function resolveDiscordModelPickerPreferenceScope(params: {
-  interaction: CommandInteraction | ButtonInteraction | StringSelectMenuInteraction;
+  interaction: DiscordNativeChoiceInteraction;
   accountId: string;
   userId: string;
 }): DiscordModelPickerPreferenceScope {
@@ -238,7 +227,7 @@ export function resolveDiscordModelPickerCurrentRuntime(params: {
 }
 
 export async function replyWithDiscordModelPickerProviders(params: {
-  interaction: CommandInteraction | ButtonInteraction | StringSelectMenuInteraction;
+  interaction: DiscordNativeChoiceInteraction;
   cfg: OpenClawConfig;
   command: DiscordModelPickerCommandContext;
   userId: string;
@@ -290,8 +279,6 @@ export async function replyWithDiscordModelPickerProviders(params: {
           model: parsedCurrentRef.model,
         })
       : { page: 1 };
-  const initialPage = initialResolved.page;
-  const initialModelBucket = initialResolved.bucket;
   const initialProviderLocation = findProviderBucketLocation(data, initialProvider);
 
   const rendered = renderDiscordModelPickerModelsView({
@@ -299,10 +286,10 @@ export async function replyWithDiscordModelPickerProviders(params: {
     userId: params.userId,
     data,
     provider: initialProvider,
-    page: initialPage,
+    page: initialResolved.page,
     providerPage: initialProviderLocation?.page ?? 1,
     providerBucket: initialProviderLocation?.bucket,
-    modelBucket: initialModelBucket,
+    modelBucket: initialResolved.bucket,
     currentModel,
     currentRuntime,
     quickModels,
@@ -313,24 +300,6 @@ export async function replyWithDiscordModelPickerProviders(params: {
   };
 
   await params.safeInteractionCall("model picker reply", async () => {
-    if (params.preferFollowUp) {
-      await params.interaction.followUp(payload);
-      return;
-    }
-    await params.interaction.reply(payload);
+    await params.interaction[params.preferFollowUp ? "followUp" : "reply"](payload);
   });
-}
-
-export function splitDiscordModelRef(modelRef: string): { provider: string; model: string } | null {
-  const trimmed = modelRef.trim();
-  const slashIndex = trimmed.indexOf("/");
-  if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) {
-    return null;
-  }
-  const provider = trimmed.slice(0, slashIndex).trim();
-  const model = trimmed.slice(slashIndex + 1).trim();
-  if (!provider || !model) {
-    return null;
-  }
-  return { provider, model };
 }

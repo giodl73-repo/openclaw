@@ -34,18 +34,11 @@ import { canResolveScheduledConfiguredMcpCreatorAuthority } from "./scheduled-co
 import {
   createIsolatedCodexAppServerClient,
   releaseLeasedSharedCodexAppServerClient,
+  type CodexAppServerClientOptions,
 } from "./shared-client.js";
 import { fingerprintJsonObject } from "./thread-fingerprints.js";
-import { resolveCodexAppServerThreadModelSelection } from "./thread-lifecycle.js";
+import { resolveCodexAppServerThreadModelSelection } from "./thread-model-selection.js";
 import { resolveCodexWebSearchPlan, type CodexNativeWebSearchSupport } from "./web-search.js";
-
-function resolveCodexAttemptBundleManifestRegistry(
-  preparedModelRuntime: EmbeddedRunAttemptParams["preparedModelRuntime"],
-) {
-  const metadataSnapshot = preparedModelRuntime?.metadataSnapshot;
-  // Scoped snapshots are partial views and cannot replace complete bundle discovery.
-  return metadataSnapshot?.pluginIds === undefined ? metadataSnapshot?.manifestRegistry : undefined;
-}
 
 export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnection) {
   const {
@@ -80,11 +73,29 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
       : undefined;
   assertScheduledCodexAppAuthorityRuntime(connection, params);
   const attemptAuthProfileStore = preparedAuthBinding?.authProfileStore ?? params.authProfileStore;
-  prewarmCodexAttemptClient({
-    connection,
+  const clientOptions: CodexAppServerClientOptions = {
+    startOptions: appServer.start,
+    pluginConfig,
+    ...(startupPreparedAuth
+      ? { preparedAuth: startupPreparedAuth }
+      : { authProfileId: startupClientAuthProfileId }),
+    authRequirement: connection.startupAuthRequirement,
     authProfileStore: attemptAuthProfileStore,
     authBindingFingerprint: preparedAuthBinding?.fingerprint,
-  });
+    ...(connection.runtimeArtifactRequest
+      ? {
+          runtimeArtifactMode: "capture" as const,
+          ...(connection.runtimeArtifactRequest.expected
+            ? { expectedRuntimeArtifact: connection.runtimeArtifactRequest.expected }
+            : {}),
+        }
+      : {}),
+    agentDir,
+    config: params.config,
+    abandonSignal: runAbortController.signal,
+    timeoutMs: appServer.requestTimeoutMs,
+  };
+  prewarmCodexAttemptClient({ connection, clientOptions });
   const effectiveContextWindowInfo = usesSupervisionConnection
     ? undefined
     : params.contextWindowInfo;
@@ -148,13 +159,6 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
           : {}),
         ...(startupAuthProfileId ? { authProfileId: startupAuthProfileId } : {}),
       };
-  const activeSessionId = params.sessionId;
-  const activeSessionFile = params.sessionFile;
-  const buildActiveRunAttemptParams = (): EmbeddedRunAttemptParams => ({
-    ...runtimeParams,
-    sessionId: activeSessionId,
-    sessionFile: activeSessionFile,
-  });
   const startupAuthAccountCacheKey = usesSupervisionConnection
     ? undefined
     : startupPreparedAuth?.kind === "api-key"
@@ -167,9 +171,8 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
             agentDir,
             config: params.config,
           });
-  const startupEnvApiKeyCacheKey = usesSupervisionConnection
-    ? undefined
-    : startupPreparedAuth || startupAuthProfileId
+  const startupEnvApiKeyCacheKey =
+    usesSupervisionConnection || startupPreparedAuth || startupAuthProfileId
       ? undefined
       : resolveCodexAppServerFallbackApiKeyCacheKey({ startOptions: appServer.start });
   preDynamicStartupStages.mark("auth-cache");
@@ -177,15 +180,16 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     agentId: sessionAgentId,
     toolOverrides: params.toolOverrides,
   });
-  const bundleManifestRegistry = resolveCodexAttemptBundleManifestRegistry(
-    params.preparedModelRuntime,
-  );
+  const metadataSnapshot = params.preparedModelRuntime?.metadataSnapshot;
+  // Scoped snapshots are partial views and cannot replace complete bundle discovery.
+  const bundleManifestRegistry =
+    metadataSnapshot?.pluginIds === undefined ? metadataSnapshot?.manifestRegistry : undefined;
   const bundleMcpThreadConfig = await loadCodexBundleMcpThreadConfig({
     workspaceDir: effectiveWorkspace,
     agentId: sessionAgentId,
     cfg: params.config,
     toolsEnabled: usesSupervisionConnection || supportsModelTools(params.model),
-    disableTools: params.disableTools,
+    disableTools: params.disableTools || params.requireWorkspaceOnly === true,
     toolsAllow: params.toolsAllow,
     manifestRegistry: bundleManifestRegistry,
     toolOverrides: codexMcpToolOverrides,
@@ -245,28 +249,9 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     params.hostCapabilities.retainSourceAuthority
   ) {
     const client = await attemptClientFactory({
+      ...clientOptions,
       assertCurrent: connection.assertCurrent,
-      startOptions: appServer.start,
-      pluginConfig,
-      ...(startupPreparedAuth
-        ? { preparedAuth: startupPreparedAuth }
-        : { authProfileId: startupClientAuthProfileId }),
-      authRequirement: connection.startupAuthRequirement,
-      authProfileStore: attemptAuthProfileStore,
-      authBindingFingerprint: preparedAuthBinding?.fingerprint,
-      ...(connection.runtimeArtifactRequest
-        ? {
-            runtimeArtifactMode: "capture" as const,
-            ...(connection.runtimeArtifactRequest.expected
-              ? { expectedRuntimeArtifact: connection.runtimeArtifactRequest.expected }
-              : {}),
-          }
-        : {}),
       agentId: sessionAgentId,
-      agentDir,
-      config: params.config,
-      abandonSignal: runAbortController.signal,
-      timeoutMs: appServer.requestTimeoutMs,
     });
     try {
       connection.assertCurrent();
@@ -292,11 +277,14 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
       }
     }
   }
-  const configuredMcpSurface = scheduledConfiguredMcpSurface
-    ? "scheduled"
-    : !nativeToolSurfaceEnabled && bundleMcpThreadConfig.staticServerNames.length > 0
-      ? "transient"
-      : undefined;
+  const configuredMcpSurface =
+    params.requireWorkspaceOnly === true
+      ? undefined
+      : scheduledConfiguredMcpSurface
+        ? "scheduled"
+        : !nativeToolSurfaceEnabled && bundleMcpThreadConfig.staticServerNames.length > 0
+          ? "transient"
+          : undefined;
   preDynamicStartupStages.mark("native-tool-surface");
   const webSearchPlan = resolveCodexWebSearchPlan({
     config: params.config,
@@ -361,12 +349,9 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
   preDynamicStartupStages.mark("context-engine-support");
   return {
     connection,
+    clientOptions,
     preparedAuthBinding,
     runtimeParams,
-    activeSessionId,
-    activeSessionFile,
-    buildActiveRunAttemptParams,
-    attemptAuthProfileStore,
     effectiveContextWindowInfo,
     effectiveContextTokenBudget,
     effectiveRuntimeProviderId,

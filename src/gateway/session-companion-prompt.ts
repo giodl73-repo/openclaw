@@ -1,6 +1,9 @@
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { redactToolPayloadText } from "../logging/redact.js";
-import type { SessionCompanionThread } from "./session-companion-state.js";
+import {
+  selectSessionCompanionReferenceItems,
+  type SessionCompanionThread,
+} from "./session-companion-state.js";
 import type { SessionObserverCompanionSnapshot } from "./session-observer-contract.js";
 
 const ANSWER_MAX_CHARS = 1200;
@@ -38,7 +41,7 @@ export function formatObserverDigest(snapshot: SessionObserverCompanionSnapshot)
 
 export function buildReferenceContext(params: {
   thread: SessionCompanionThread;
-  deltaNotes: Array<{ sequence: number; text: string }>;
+  deltaNotes: SessionObserverCompanionSnapshot["notes"];
 }): string {
   const history =
     params.thread.context.messages.length === 0
@@ -71,24 +74,14 @@ export function selectDeltaNotes(
   snapshot: SessionObserverCompanionSnapshot,
   afterSequence: number,
 ): {
-  notes: Array<{ sequence: number; text: string }>;
+  notes: SessionObserverCompanionSnapshot["notes"];
   lastSequence: number;
 } {
   const candidates = snapshot.notes
     .filter((note) => note.sequence > afterSequence)
     .toSorted((left, right) => left.sequence - right.sequence);
-  const selected: Array<{ sequence: number; text: string }> = [];
-  let bytes = 2;
-  for (const note of candidates.toReversed()) {
-    const noteBytes = Buffer.byteLength(JSON.stringify(note), "utf8") + 1;
-    if (bytes + noteBytes > DELTA_MAX_BYTES) {
-      break;
-    }
-    selected.unshift(note);
-    bytes += noteBytes;
-  }
   return {
-    notes: selected,
+    notes: selectSessionCompanionReferenceItems(candidates.toReversed(), DELTA_MAX_BYTES),
     lastSequence: candidates.at(-1)?.sequence ?? afterSequence,
   };
 }
@@ -96,6 +89,7 @@ export function selectDeltaNotes(
 export function composePromptMessages(params: {
   thread: SessionCompanionThread;
   question: string;
+  selectionContext?: string;
   referenceContext: string;
   now: number;
 }): SessionCompanionPromptMessage[] {
@@ -108,19 +102,17 @@ export function composePromptMessages(params: {
   }
   messages.push({
     role: "user",
-    content: params.question,
+    content: params.selectionContext
+      ? `${params.question}\n\n<selected-text-context>\n${escapeReferenceText(params.selectionContext)}\n</selected-text-context>`
+      : params.question,
     ts: params.now,
   });
   return messages;
 }
 
-function isPrivateReferenceEcho(value: string): boolean {
-  return value.includes(PRIVATE_REFERENCE_BEGIN) || value.includes(PRIVATE_REFERENCE_END);
-}
-
 export function sanitizeAnswer(value: string): string {
   const redacted = redactToolPayloadText(value).trim();
-  if (isPrivateReferenceEcho(redacted)) {
+  if (redacted.includes(PRIVATE_REFERENCE_BEGIN) || redacted.includes(PRIVATE_REFERENCE_END)) {
     return "";
   }
   return truncateUtf16Safe(redacted, ANSWER_MAX_CHARS);

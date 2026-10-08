@@ -1,7 +1,3 @@
-/**
- * Settles prompt dispatch, stream cleanup, and result projection.
- * It may assume stream runtime preparation and session state are ready.
- */
 import { sha256Hex } from "@openclaw/normalization-core/node-crypto";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { readMessageIdempotencyKey } from "../../../config/sessions/transcript-message-identity.js";
@@ -43,8 +39,6 @@ import { settleEmbeddedAttemptStream } from "./attempt-stream-settle.js";
 import type { EmbeddedAttemptDeferredLifecycleOwner } from "./deferred-lifecycle-owner.js";
 import { buildPromptImageFailureNotice } from "./images.js";
 import type { EmbeddedAttemptExecutionState, EmbeddedRunAttemptParams } from "./types.js";
-
-/** Runs prompt dispatch, stream settlement, cleanup, and result projection. */
 
 const FAILED_PROMPT_MEDIA_NOTE_TYPE = "openclaw.system-note";
 const FAILED_PROMPT_MEDIA_NOTE_SOURCE = "prompt-image-hydration";
@@ -119,7 +113,7 @@ export async function runEmbeddedAttemptSettledPhase(
     toolResultPromptProjectionState,
     transport: { effectivePromptCacheRetention },
   } = sessionRuntime;
-  const { nestedToolActivities } = toolBase;
+  const { nestedToolActivityState } = toolBase;
   const promptState: EmbeddedAttemptPromptState = {
     contextBudgetStatus: undefined,
     preflightRecovery: undefined,
@@ -152,6 +146,13 @@ export async function runEmbeddedAttemptSettledPhase(
       state.terminal,
       error !== null && error !== undefined ? { error, source: source ?? "prompt" } : null,
     );
+  };
+  const markTimedOutDuringCompaction = () => {
+    state.terminal = mergeAgentRunAttemptTerminal(state.terminal, {
+      kind: "timeout",
+      phase: "compaction",
+      source: "observation",
+    });
   };
 
   try {
@@ -204,7 +205,7 @@ export async function runEmbeddedAttemptSettledPhase(
     let rewoundBeforeAgentFinalizeRevision = false;
     if (beforeAgentFinalizeRevisionReason && beforeAgentFinalizeRevisionEntryId) {
       await input.sessionLock.withOwnedTranscriptWrite(() =>
-        withSessionManagerWrite(sessionManager, () => {
+        withSessionManagerWrite(sessionManager, async () => {
           const rejectedEntry = sessionManager.getEntry(beforeAgentFinalizeRevisionEntryId);
           if (rejectedEntry?.type !== "message" || rejectedEntry.message.role !== "assistant") {
             throw new Error(
@@ -214,7 +215,7 @@ export async function runEmbeddedAttemptSettledPhase(
           }
           // Keep persistence append-only while excluding the rejected draft and
           // every trailing descendant from the hidden retry's active branch.
-          sessionManager.appendLeafControl({
+          await sessionManager.appendLeafControlAsync({
             targetId: rejectedEntry.parentId,
             appendParentId: rejectedEntry.parentId,
           });
@@ -248,27 +249,14 @@ export async function runEmbeddedAttemptSettledPhase(
             input.activeContextEngine && !getBeforeAgentFinalizeRevisionReason(),
           ),
           subscription,
-          readLifecycleState: () => {
-            const terminal = readTerminal();
-            return {
-              aborted: terminal.aborted,
-              timedOut: terminal.timedOut,
-              timedOutDuringCompaction: terminal.timedOutDuringCompaction,
-            };
-          },
-          markTimedOutDuringCompaction: () => {
-            state.terminal = mergeAgentRunAttemptTerminal(state.terminal, {
-              kind: "timeout",
-              phase: "compaction",
-              source: "observation",
-            });
-          },
+          readLifecycleState: readTerminal,
+          markTimedOutDuringCompaction,
           runAbortSignal: input.runAbortController.signal,
           isProbeSession,
           onBlockReplyFlush,
           abortable,
           prePromptMessageCount: sessionRuntimeState.prePromptMessageCount,
-          nestedToolActivities,
+          nestedToolActivityState,
           cache: {
             getObservation: preparedStreamRuntime.cache.getObservation,
             retention: effectivePromptCacheRetention,
@@ -295,11 +283,7 @@ export async function runEmbeddedAttemptSettledPhase(
     // outer teardown still needs the completed stream snapshot and usage state.
     setFailure(settledStream.promptError, settledStream.promptErrorSource);
     if (settledStream.timedOutDuringCompaction) {
-      state.terminal = mergeAgentRunAttemptTerminal(state.terminal, {
-        kind: "timeout",
-        phase: "compaction",
-        source: "observation",
-      });
+      markTimedOutDuringCompaction();
     }
     messagesSnapshot = settledStream.messagesSnapshot;
     sessionIdUsed = settledStream.sessionIdUsed;
@@ -382,9 +366,10 @@ export async function runEmbeddedAttemptSettledPhase(
               await appendAndPublish();
             }
           } else {
-            await withSessionManagerWrite(sessionManager, () => {
+            await withSessionManagerWrite(sessionManager, async () => {
               assertBinding();
-              sessionManager.appendMessage(note);
+              await sessionManager.appendMessageAsync(note);
+              assertBinding();
               activeSession.agent.state.messages = [...activeSession.messages, note];
               messagesSnapshot = [...messagesSnapshot, note];
             });

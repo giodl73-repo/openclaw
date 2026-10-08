@@ -23,7 +23,6 @@ import {
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import * as realtimeTalk from "../chat/talk/session.ts";
 import { ConfigPage, extractQuickSettingsSecurity } from "./config-page.ts";
-import { serverUiPrefProvenanceHint } from "./view-appearance-preferences.ts";
 import type { ConfigViewState } from "./view.ts";
 
 const switchActiveRealtimeTalkCameras =
@@ -123,16 +122,6 @@ describe("ConfigPage synced preference provenance", () => {
     expect(page.serverUiPrefsCanSync()).toBe(localeCanSync);
   });
 
-  it("describes profile-owned appearance without changing gateway or device-local hints", () => {
-    expect(serverUiPrefProvenanceHint("profile")).toBe(
-      "Saved to your profile — follows you on every device.",
-    );
-    expect(serverUiPrefProvenanceHint("synced")).toBe(
-      "Synced across your devices through the gateway.",
-    );
-    expect(serverUiPrefProvenanceHint("device-local")).toBe("Stored in this browser only.");
-  });
-
   it("restores the gateway appearance default while queuing deletion of the profile override", async () => {
     const configObject = { ui: { prefs: { theme: "dash" } } };
     const client = {
@@ -148,7 +137,7 @@ describe("ConfigPage synced preference provenance", () => {
     const page = new ConfigPage() as unknown as {
       context: ApplicationContext;
       settings: ReturnType<typeof loadSettings>;
-      resetSyncedAppearancePref: (key: "theme") => void;
+      resetSyncedPref: (key: "theme") => void;
     };
     page.context = {
       gateway: {
@@ -167,7 +156,7 @@ describe("ConfigPage synced preference provenance", () => {
     const beforeReset = loadSettings();
     page.settings = beforeReset;
 
-    page.resetSyncedAppearancePref("theme");
+    page.resetSyncedPref("theme");
 
     expect(page.settings.theme).toBe("dash");
     expect(changedServerUiPrefs(beforeReset, page.settings)).toEqual({
@@ -224,7 +213,7 @@ describe("ConfigPage synced preference provenance", () => {
       const page = new ConfigPage() as unknown as {
         context: ApplicationContext;
         settings: ReturnType<typeof loadSettings>;
-        resetSyncedAppearancePref: (key: "accent") => void;
+        resetSyncedPref: (key: "accent") => void;
       };
       page.context = {
         gateway: {
@@ -242,7 +231,7 @@ describe("ConfigPage synced preference provenance", () => {
       } as unknown as ApplicationContext;
       const previous = loadSettings();
       page.settings = previous;
-      page.resetSyncedAppearancePref("accent");
+      page.resetSyncedPref("accent");
       expect(page.settings.accent).toBe("#123456");
       expect(changedServerUiPrefs(previous, page.settings)).toBeNull();
 
@@ -391,27 +380,6 @@ describe("ConfigPage synced preference provenance", () => {
     themeSection?.querySelector<HTMLButtonElement>(".settings-theme-card--claw")?.click();
 
     expect(changedServerUiPrefs(beforeReset, state.settings)).toEqual({ theme: null });
-  });
-});
-
-describe("ConfigPage header", () => {
-  it("renders the route subtitle for Communications", () => {
-    const page = new ConfigPage();
-    const state = page as unknown as {
-      context: ApplicationContext;
-      pageId: "communications";
-      renderAdvancedConfig: () => undefined;
-    };
-    state.context = { runtimeConfig: { state: {} } } as unknown as ApplicationContext;
-    state.pageId = "communications";
-    state.renderAdvancedConfig = () => undefined;
-    const container = document.createElement("div");
-
-    render(page.render(), container);
-
-    expect(container.querySelector(".page-subtitle")?.textContent?.trim()).toBe(
-      "Messages, text-to-speech, and meeting capture settings.",
-    );
   });
 });
 

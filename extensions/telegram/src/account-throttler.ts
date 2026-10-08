@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ApiError } from "grammy/types";
 import { expectDefined } from "openclaw/plugin-sdk/expect-runtime";
+import { captureEffectAuthority } from "openclaw/plugin-sdk/fetch-runtime";
 import { resolveGlobalMap } from "openclaw/plugin-sdk/global-singleton";
 import { parseStrictInteger } from "openclaw/plugin-sdk/number-runtime";
 import {
@@ -116,7 +117,7 @@ class TelegramFloodGate {
   }
 }
 
-async function sleepForFloodGate(waitMs: number, signal: TelegramApiSignal): Promise<void> {
+function bridgeTelegramAbortSignal(signal: TelegramApiSignal) {
   // grammY may supply the legacy node-fetch signal; bridge only its abort event.
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -125,10 +126,15 @@ async function sleepForFloodGate(waitMs: number, signal: TelegramApiSignal): Pro
   } else {
     signal?.addEventListener("abort", abort, { once: true });
   }
+  return { controller, detach: () => signal?.removeEventListener("abort", abort) };
+}
+
+async function sleepForFloodGate(waitMs: number, signal: TelegramApiSignal): Promise<void> {
+  const { controller, detach } = bridgeTelegramAbortSignal(signal);
   try {
     await sleepWithAbort(waitMs, controller.signal);
   } finally {
-    signal?.removeEventListener("abort", abort);
+    detach();
   }
 }
 
@@ -220,14 +226,7 @@ class GroupRequestScheduler {
     run: () => Promise<T>,
     signal: Parameters<ApiThrottlerTransformer>[3],
   ): Promise<T> {
-    // grammY may supply the legacy node-fetch signal; bridge only its abort event.
-    const controller = new AbortController();
-    const abort = () => controller.abort();
-    if (signal?.aborted) {
-      abort();
-    } else {
-      signal?.addEventListener("abort", abort, { once: true });
-    }
+    const { controller, detach } = bridgeTelegramAbortSignal(signal);
     const result = this.actionTail.then(async () => {
       controller.signal.throwIfAborted();
       const waitMs = this.nextActionAtMs - Date.now();
@@ -251,7 +250,7 @@ class GroupRequestScheduler {
         throw new DOMException("Chat action canceled", "AbortError");
       }),
     ]).finally(() => {
-      signal?.removeEventListener("abort", abort);
+      detach();
       controller.abort();
     });
   }
@@ -351,10 +350,6 @@ class GroupRequestScheduler {
 
 const TELEGRAM_ACCOUNT_THROTTLERS_KEY = Symbol.for("openclaw.telegram.accountThrottlers");
 
-function getAccountThrottlers(): Map<string, TelegramAccountThrottler> {
-  return resolveGlobalMap(TELEGRAM_ACCOUNT_THROTTLERS_KEY);
-}
-
 function readPayload(payload: unknown): TelegramApiPayload | undefined {
   return payload && typeof payload === "object" ? (payload as TelegramApiPayload) : undefined;
 }
@@ -365,17 +360,15 @@ function resolveGroupChatKey(payload: TelegramApiPayload): string | undefined {
 }
 
 function resolveForumLaneKey(payload: TelegramApiPayload): string {
-  const threadId = parseStrictInteger(payload.message_thread_id);
-  if (threadId !== undefined) {
-    return `topic:${threadId}`;
-  }
-  const directTopicId = parseStrictInteger(payload.direct_messages_topic_id);
-  if (directTopicId !== undefined) {
-    return `direct-topic:${directTopicId}`;
-  }
-  const messageId = parseStrictInteger(payload.message_id);
-  if (messageId !== undefined) {
-    return `message:${messageId}`;
+  for (const [field, prefix] of [
+    ["message_thread_id", "topic"],
+    ["direct_messages_topic_id", "direct-topic"],
+    ["message_id", "message"],
+  ] as const) {
+    const id = parseStrictInteger(payload[field]);
+    if (id !== undefined) {
+      return `${prefix}:${id}`;
+    }
   }
   return "main";
 }
@@ -435,10 +428,11 @@ function createTelegramAccountThrottler(
   const transformer: ApiThrottlerTransformer = (prev, method, payload, signal) => {
     // Classify at the call site: queued work later runs in the drain's async context.
     const callerScope = requestScopes.getStore();
+    const effect = captureEffectAuthority();
     const replaceable = method === "sendChatAction" || callerScope?.replaceable === true;
     const scope = replaceable ? { ...callerScope, replaceable: true as const } : callerScope;
     // Waiting and retry policy runs outside the queues; admission runs at the network edge.
-    const admitted = admitAtNetwork(floodGate, scope, prev);
+    const admitted = admitAtNetwork(floodGate, scope, (...args) => effect.run(() => prev(...args)));
     const send = callThroughFloodGate(
       floodGate,
       scope,
@@ -458,7 +452,9 @@ export function getOrCreateAccountThrottler(
   token: string,
   createThrottler: () => ApiThrottlerTransformer = apiThrottler,
 ): TelegramAccountThrottler {
-  const throttlerByToken = getAccountThrottlers();
+  const throttlerByToken = resolveGlobalMap<string, TelegramAccountThrottler>(
+    TELEGRAM_ACCOUNT_THROTTLERS_KEY,
+  );
   let throttler = throttlerByToken.get(token);
   if (!throttler) {
     throttler = createTelegramAccountThrottler(createThrottler);

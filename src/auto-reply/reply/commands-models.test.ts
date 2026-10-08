@@ -232,6 +232,7 @@ describe("handleModelsCommand", () => {
     expect(allListResult?.reply?.text).toContain("Models (openai) — showing 1-2 of 2 (page 1/1)");
     expect(allListResult?.reply?.text).toContain("- openai/gpt-4.1");
     expect(allListResult?.reply?.text).toContain("- openai/gpt-4.1-mini");
+    expect(allListResult?.reply?.text).toContain("Switch: /model <provider/model>");
   });
 
   it.each([
@@ -248,7 +249,7 @@ describe("handleModelsCommand", () => {
     expect(result?.reply?.text).toContain(recovery);
   });
 
-  it("offers a connection action for an unconfirmed captured CLI login", async () => {
+  it("reports sign-in needed for a logged-out configured CLI runtime", async () => {
     setCredentials([]);
     const params = buildParams("/models anthropic", {
       agents: {
@@ -259,10 +260,11 @@ describe("handleModelsCommand", () => {
       },
     });
     const result = await handleModelsCommand(params, true);
-    expect(result?.reply?.text).toContain("Connection not confirmed");
+    expect(result?.reply?.text).toContain("Sign-in needed");
     expect(result?.reply?.text).toContain(
-      "Connect with /login anthropic, or choose another model.",
+      "If Claude Code is signed out, run claude auth login on the Gateway host, or choose another model.",
     );
+    expect(result?.reply?.text).not.toContain("/login anthropic");
   });
 
   it.each([
