@@ -89,6 +89,63 @@ function createEmptyIndex(stateDir: string): InstalledPluginIndex {
 }
 
 describe("plugin registry inspection", () => {
+  it.each([true, false])(
+    "0098: refresh-produced missing-path diagnostics follow current config (still configured: %s)",
+    async (stillConfigured) => {
+      const stateDir = makeTempDir();
+      const missingPath = path.join(stateDir, "missing-configured-plugin");
+      const env = {
+        ...hermeticEnv(),
+        OPENCLAW_STATE_DIR: stateDir,
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+      };
+      const configured = { plugins: { load: { paths: [missingPath] } } };
+      try {
+        // Let the production refresh owner discover and persist the diagnostic.
+        const produced = await refreshPluginRegistry({
+          config: configured,
+          env,
+          stateDir,
+          reason: "manual",
+        });
+        expect(produced.diagnostics).toContainEqual(
+          expect.objectContaining({
+            source: missingPath,
+            level: "warn",
+            code: "configured-plugin-path-unavailable",
+          }),
+        );
+        expect(
+          produced.diagnostics.find((item) => item.source === missingPath)?.pluginId,
+        ).toBeUndefined();
+
+        const config = stillConfigured ? configured : {};
+        for (let read = 0; read < 2; read++) {
+          // Cold handles and caches are not a claim of a separate process restart.
+          await closeOpenClawStateDatabaseAsync();
+          clearPluginMetadataLifecycleCaches();
+          const inspection = await inspectPluginRegistry({ config, env, stateDir });
+          const sources = inspection.current.diagnostics.map((item) => item.source);
+          if (stillConfigured) {
+            expect(sources).toContain(missingPath);
+          } else {
+            expect.soft(sources).not.toContain(missingPath);
+          }
+        }
+
+        const refreshed = await refreshPluginRegistry({ config, env, stateDir, reason: "manual" });
+        const sources = refreshed.diagnostics.map((item) => item.source);
+        if (stillConfigured) {
+          expect(sources).toContain(missingPath);
+        } else {
+          expect(sources).not.toContain(missingPath);
+        }
+      } finally {
+        await closeOpenClawStateDatabaseAsync();
+      }
+    },
+  );
+
   it("derives without persisted install records when persisted reads are disabled", async () => {
     const stateDir = makeTempDir();
     const pluginDir = makeTempDir();
