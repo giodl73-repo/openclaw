@@ -3,7 +3,7 @@ import { invalidateRegisteredAgentDatabasesMemo } from "../../state/openclaw-age
 import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { writeSessionEntry } from "./session-accessor.sqlite-entry-store.js";
-import { readExpiredCronRunEntriesInWorker } from "./session-entry-read-runtime.js";
+import { readExpiredCronRunEntriesInWorker } from "./session-entry-read-maintenance.js";
 import { maintenanceLane } from "./session-transcript-worker-resources.js";
 
 it("checks the captured registry after cron data cleanup", async () => {
@@ -16,17 +16,21 @@ it("checks the captured registry after cron data cleanup", async () => {
     const rotate = pool.rotate.bind(pool);
     const closeResources = pool.closeResources.bind(pool);
     let cleanupCalled = false;
-    const cleanup = process.versions.bun
-      ? vi.spyOn(pool, "rotate").mockImplementation(async () => {
-          await rotate();
-          cleanupCalled = true;
-          invalidateRegisteredAgentDatabasesMemo({ env });
-        })
-      : vi.spyOn(pool, "closeResources").mockImplementation(async (key) => {
-          await closeResources(key);
-          cleanupCalled = true;
-          invalidateRegisteredAgentDatabasesMemo({ env });
-        });
+    const invalidateAfterCleanup = () => {
+      if (cleanupCalled) {
+        return;
+      }
+      cleanupCalled = true;
+      invalidateRegisteredAgentDatabasesMemo({ env });
+    };
+    const rotateCleanup = vi.spyOn(pool, "rotate").mockImplementation(async () => {
+      await rotate();
+      invalidateAfterCleanup();
+    });
+    const resourceCleanup = vi.spyOn(pool, "closeResources").mockImplementation(async (key) => {
+      await closeResources(key);
+      invalidateAfterCleanup();
+    });
     try {
       const pending = readExpiredCronRunEntriesInWorker({
         agentId: "main",
@@ -37,7 +41,8 @@ it("checks the captured registry after cron data cleanup", async () => {
       await expect(pending).rejects.toThrow("registry changed");
       expect(cleanupCalled).toBe(true);
     } finally {
-      cleanup.mockRestore();
+      rotateCleanup.mockRestore();
+      resourceCleanup.mockRestore();
     }
   });
 });
