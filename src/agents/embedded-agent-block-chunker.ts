@@ -156,6 +156,12 @@ export class EmbeddedBlockChunker {
 
   /** Replace pending source; the snapshot owner can attest that the consumed prefix is unchanged. */
   replace(text: string, sourceOffset = 0, prefixRetained = false): boolean {
+    const readMaxChars = () =>
+      Math.max(
+        1,
+        Math.floor(this.#chunking?.minChars ?? 1),
+        Math.floor(this.#chunking?.maxChars ?? Infinity),
+      );
     const pendingOffset = sourceOffset - this.#consumedLength;
     const next =
       this.#buffer.slice(0, Math.max(0, pendingOffset)) + text.slice(Math.max(0, -pendingOffset));
@@ -168,11 +174,7 @@ export class EmbeddedBlockChunker {
     if (sourceOffset === 0 && text.length < this.#consumedLength) {
       const { spans, state } = scanFenceSpans(text);
       const fence = state.open ? spans.at(-1) : undefined;
-      const maxChars = Math.max(
-        1,
-        Math.floor(this.#chunking?.minChars ?? 1),
-        Math.floor(this.#chunking?.maxChars ?? Infinity),
-      );
+      const maxChars = readMaxChars();
       const reopenLine =
         fence && this.#chunking ? resolveFenceReopenLine(fence, maxChars) : undefined;
       this.#reopenPrefix = reopenLine ? `${reopenLine}\n` : "";
@@ -180,11 +182,7 @@ export class EmbeddedBlockChunker {
     }
     const consumedLength = Math.min(this.#consumedLength, sourceOffset + text.length);
     if (!prefixRetained && sourceOffset === 0 && this.#codeContext && consumedLength > 0) {
-      const maxChars = Math.max(
-        1,
-        Math.floor(this.#chunking?.minChars ?? 1),
-        Math.floor(this.#chunking?.maxChars ?? Infinity),
-      );
+      const maxChars = readMaxChars();
       this.#codeContext = prepareIndentedCode(text, "", true, maxChars).contextAt(consumedLength);
     }
     if (consumedLength === 0) {
@@ -249,16 +247,24 @@ export class EmbeddedBlockChunker {
     if (!this.#buffer || (!params.force && !chunking)) {
       return;
     }
-    if (!chunking) {
-      preparedSourceBreaks.push(sourceStart + this.#buffer.length);
-      emit(this.bufferedText, {
-        sourceText: this.#buffer,
+    const emitChunk = (chunk: string, from: number, to: number, startsAtLineStart: boolean) => {
+      preparedSourceBreaks.push(sourceStart + to);
+      emit(chunk, {
+        sourceText: this.#buffer.slice(from, to),
         sourceGeneration: this.#sourceGeneration,
         reconciledSourceBreak: reconciledSourceBreak || undefined,
-        sourceStart: this.#sourceOffset + this.#consumedLength,
-        sourceEnd: this.#sourceOffset + this.#consumedLength + this.#buffer.length,
-        startsAtLineStart: Boolean(this.#reopenPrefix) || this.#bufferStartsAtLineStart,
+        sourceStart: this.#sourceOffset + this.#consumedLength + from,
+        sourceEnd: this.#sourceOffset + this.#consumedLength + to,
+        startsAtLineStart,
       });
+    };
+    if (!chunking) {
+      emitChunk(
+        this.bufferedText,
+        0,
+        this.#buffer.length,
+        Boolean(this.#reopenPrefix) || this.#bufferStartsAtLineStart,
+      );
       this.#bufferStartsAtLineStart = this.#buffer.endsWith("\n");
       this.#consumedLength += this.#buffer.length;
       this.#buffer = "";
@@ -287,15 +293,7 @@ export class EmbeddedBlockChunker {
 
     if (force && source.length <= maxChars && !this.#reopenPrefix) {
       if (source.trim().length > 0) {
-        preparedSourceBreaks.push(sourceStart + this.#buffer.length);
-        emit(source, {
-          sourceText: this.#buffer,
-          sourceGeneration: this.#sourceGeneration,
-          reconciledSourceBreak: reconciledSourceBreak || undefined,
-          sourceStart: this.#sourceOffset + this.#consumedLength,
-          sourceEnd: this.#sourceOffset + this.#consumedLength + this.#buffer.length,
-          startsAtLineStart,
-        });
+        emitChunk(source, 0, this.#buffer.length, startsAtLineStart);
       }
       this.#bufferStartsAtLineStart = this.#buffer.endsWith("\n");
       this.#codeContext = indentedCode.contextAt(originalSource.length);
@@ -354,19 +352,13 @@ export class EmbeddedBlockChunker {
     let committedStart = 0;
     let reopenFence: FenceSplit | undefined;
     let committedReopenFence: FenceSplit | undefined;
-    const emitSourceChunk = (chunk: string, from: number, to: number, custodyFrom = from) => {
-      preparedSourceBreaks.push(sourceStart + sourceOffset(to));
-      emit(chunk, {
-        sourceText: this.#buffer.slice(sourceOffset(custodyFrom), sourceOffset(to)),
-        sourceGeneration: this.#sourceGeneration,
-        reconciledSourceBreak: reconciledSourceBreak || undefined,
-        sourceStart: this.#sourceOffset + this.#consumedLength + sourceOffset(custodyFrom),
-        sourceEnd: this.#sourceOffset + this.#consumedLength + sourceOffset(to),
-        startsAtLineStart:
-          Boolean(reopenFence) ||
-          (from === 0 ? startsAtLineStart : source.charAt(from - 1) === "\n"),
-      });
-    };
+    const emitSourceChunk = (chunk: string, from: number, to: number, custodyFrom = from) =>
+      emitChunk(
+        chunk,
+        sourceOffset(custodyFrom),
+        sourceOffset(to),
+        Boolean(reopenFence) || (from === 0 ? startsAtLineStart : source.charAt(from - 1) === "\n"),
+      );
     const resumedFence = this.#reopenPrefix ? fenceSpans[0] : undefined;
     if (resumedFence) {
       const closeStart = findFenceCloseLineStart(source, resumedFence);
@@ -489,10 +481,10 @@ export class EmbeddedBlockChunker {
 
       const nextLength =
         (reopenFence ? `${reopenFence.reopenFenceLine}\n`.length : 0) + (source.length - start);
-      if (nextLength < minChars && !force) {
-        break;
-      }
-      if (nextLength < maxChars && !force && !chunking.flushOnParagraph) {
+      if (
+        !force &&
+        (nextLength < minChars || (nextLength < maxChars && !chunking.flushOnParagraph))
+      ) {
         break;
       }
     }
