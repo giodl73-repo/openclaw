@@ -7,6 +7,7 @@ import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execu
 import { requireNodeSqlite } from "../../infra/node-sqlite.js";
 import { hasSqliteWorkerOutcomeUnknown } from "../../infra/sqlite-worker-contract.js";
 import * as admission from "../../infra/sqlite-worker-operation-admission.js";
+import { sqliteWorkerOwnerProbe as probe } from "../../infra/sqlite-worker-owner-probe.test-support.js";
 import { patchSessionEntry } from "../../plugin-sdk/session-store-runtime.js";
 import { onSessionIdentityMutation } from "../../sessions/session-lifecycle-events.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
@@ -37,7 +38,7 @@ import { readTranscriptEventRows } from "./session-accessor.sqlite-read.js";
 import { appendTranscriptEventsInTransaction } from "./session-accessor.sqlite-transcript-store.js";
 import { appendExpectedSessionTranscriptTurn } from "./session-accessor.sqlite-transcript-turn.js";
 import { readSessionTranscriptWatermarkInDatabase } from "./session-accessor.sqlite-transcript-watermark.js";
-import { createSessionEntryPatchFixture as fixture } from "./session-entry-patch.test-support.js";
+import { createSessionCompoundWorkerFixture as fixture } from "./session-compound-worker.test-support.js";
 import { commitSessionEntryPatch } from "./session-entry-patch.worker.js";
 import { readSessionEntryInWorker } from "./session-entry-read-runtime.js";
 import { SqliteSessionMutationConflictError } from "./session-mutation-conflict-error.js";
@@ -502,16 +503,12 @@ it.each(["after updater", "final grant"] as const)(
       const f = fixture();
       let current = true;
       const refusal = new Error("patch authority revoked");
-      const createAdmission = admission.createSqliteWorkerOperationAdmission;
-      vi.spyOn(admission, "createSqliteWorkerOperationAdmission").mockImplementation(
-        (callback, attachment) =>
-          createAdmission((request, grant) => {
-            if (phase === "final grant" && request.stage === "commit") {
-              current = false;
-            }
-            callback(request, grant);
-          }, attachment),
-      );
+      probe.admission(admission, (request, grant, callback) => {
+        if (phase === "final grant" && request.stage === "commit") {
+          current = false;
+        }
+        callback(request, grant);
+      });
       const committed = vi.fn();
       await expect(
         patchSessionEntryCore(
