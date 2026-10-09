@@ -80,13 +80,9 @@ type TelegramAnswerBlockDelivery = {
   buttons: import("./button-types.js").TelegramInlineButtons | undefined;
 };
 
-export type TelegramDispatchTurnConfig = Omit<
-  DispatchTelegramMessageParams,
-  "context" | "telegramDeps"
-> & {
+export type TelegramDispatchTurnConfig = Omit<DispatchTelegramMessageParams, "telegramDeps"> & {
   allowProviderPreview: boolean;
   chunkMode: TextChunkMode;
-  context: TelegramMessageContext;
   dispatchStartedAt: number;
   draftReplyToMessageId?: number;
   isSuperseded: () => boolean;
@@ -147,7 +143,6 @@ export type TelegramDraftStateSlice = {
   activeAnswerBlockAssistantMessageIndex: number | undefined;
   activeAnswerBlockDelivery: TelegramAnswerBlockDelivery | undefined;
   queuedAnswerBlockRotations: TelegramQueuedAnswerBlockRotation[];
-  queuedAnswerBlockAssistantMessageIndex: number | undefined;
   pendingAnswerBlockAssistantMessageIndex: number | undefined;
   rotateAnswerLaneWhenQueuedBlocksSettle: boolean;
   draftEventQueue: Promise<void>;
@@ -185,6 +180,7 @@ export type TelegramDispatchTurn = TelegramDispatchTurnConfig &
   TelegramDeliveryStateSlice &
   TelegramReplyStateSlice & {
     finalDispatchClaimed: boolean;
+    finalDeliveryNotDispatched?: boolean;
     agentRunFailed?: boolean;
     sendPolicyDenied?: boolean;
     noVisibleReplyFallbackEligible: boolean;

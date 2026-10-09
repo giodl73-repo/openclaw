@@ -1,5 +1,6 @@
 import type { ChildProcess, Serializable, SpawnOptions } from "node:child_process";
 import type { Duplex } from "node:stream";
+import { formatChildRuntimeSpawnWarning } from "../../infra/child-runtime-viability.js";
 import { resolveRuntimeWorkerArgv } from "../../infra/runtime-worker-url.js";
 import { resolveLaunchableNodePath } from "../../infra/stable-node-path.js";
 import type { SpawnInitiation } from "../spawn-initiation.js";
@@ -8,6 +9,7 @@ import { createServiceChildCleanup } from "../supervisor/service-child-cleanup.j
 import {
   encodeServiceChildMessage,
   type ServiceChildControlMessage,
+  type ServiceChildControlPayload,
 } from "../supervisor/service-child-protocol.js";
 import { BrokerChild } from "./child.js";
 
@@ -17,8 +19,14 @@ export function createServiceChildControlSender(params: {
   useWindowsJobAnchor: boolean;
   startup: Promise<void>;
   cleanup: Promise<void>;
+  generation: string;
+  nextSequence: () => number;
 }) {
-  return (message: ServiceChildControlMessage, initiate?: SpawnInitiation): Promise<void> => {
+  return (payload: ServiceChildControlPayload, initiate?: SpawnInitiation): Promise<void> => {
+    const message: ServiceChildControlMessage = Object.assign(
+      { type: payload.type, generation: params.generation, sequence: params.nextSequence() },
+      payload,
+    );
     // Failed startup releases launch custody only after confirmed containment cleanup.
     const settlement = initiate ? params.startup.catch(() => params.cleanup) : undefined;
     void settlement?.catch(() => {});
@@ -89,21 +97,21 @@ export function spawnServiceChildRelay(params: {
   cleanup: ReturnType<typeof createServiceChildCleanup>;
   transportReady: Promise<void> | undefined;
 } {
-  const child = spawnProcess(
-    resolveLaunchableNodePath(),
-    resolveRuntimeWorkerArgv(params.workerUrl),
-    {
-      stdio: params.stdio,
-      detached: params.detached,
-      windowsHide: true,
-      env: params.env,
-    },
-  );
+  const executable = resolveLaunchableNodePath();
+  const child = spawnProcess(executable, resolveRuntimeWorkerArgv(params.workerUrl, executable), {
+    stdio: params.stdio,
+    detached: params.detached,
+    windowsHide: true,
+    env: params.env,
+  });
   const cleanup = createServiceChildCleanup();
   params.onSpawnCleanup?.(cleanup.promise);
   let transportReady: Promise<void> | undefined;
   if (child instanceof BrokerChild) {
     transportReady = child.ready().catch((error: unknown) => {
+      if (error instanceof Error) {
+        error.message = formatChildRuntimeSpawnWarning(error) ?? error.message;
+      }
       cleanup.completion.reject(error);
       throw error;
     });
@@ -118,6 +126,7 @@ export function spawnServiceChildRelay(params: {
     }).then(async (error) => {
       await closed;
       cleanup.completion.resolve();
+      error.message = formatChildRuntimeSpawnWarning(error) ?? error.message;
       throw error;
     });
   }

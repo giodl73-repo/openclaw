@@ -167,9 +167,11 @@ export type ChatProps = Omit<
     pullRequestsGateway?: ApplicationGateway;
     pullRequestsSessionId?: string;
     pullRequestsBranch?: ControlUiSessionBranch;
+    pullRequestsBranchDismissed?: boolean;
     pullRequestsStatus?: ControlUiSessionPullRequestSnapshot["status"];
     onOpenSessionDiff?: () => void;
     onDismissPullRequest?: (pullRequest: ControlUiSessionPullRequest) => void;
+    onDismissPullRequestsBranch?: (branch: ControlUiSessionBranch) => void;
     githubPublication?: import("../../lib/sessions/github-publication-controller.ts").GitHubPublicationView;
   };
 
@@ -413,12 +415,13 @@ export function renderChat(props: ChatProps) {
       pullRequests: props.pullRequests ?? [],
       gateway: props.pullRequestsGateway,
       sessionId: props.pullRequestsSessionId,
-      basePath: props.basePath,
       sessionKey: scopedSessionArtifactKey(props.sessionKey, props.currentAgentId ?? undefined),
       presented: props.presented ?? true,
       branch: props.pullRequestsBranch,
+      branchDismissed: props.pullRequestsBranchDismissed,
       status: props.pullRequestsStatus ?? "ready",
       onDismiss: (pullRequest) => props.onDismissPullRequest?.(pullRequest),
+      onDismissBranch: props.onDismissPullRequestsBranch,
       onOpenSessionDiff: props.onOpenSessionDiff,
       publication: props.githubPublication,
     })}

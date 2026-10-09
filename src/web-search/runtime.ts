@@ -4,6 +4,8 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { resolveDefaultAgentDir } from "../agents/agent-scope-config.js";
+import { authProfileRuntimeMode } from "../agents/auth-profiles/runtime-scope.js";
+import { getRuntimeAuthProfileStoreSnapshotCore } from "../agents/auth-profiles/runtime-snapshots.js";
 import { hasAnyAuthProfileStoreSourceAsync } from "../agents/auth-profiles/source-check.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import { hasAuthProfileForProvider } from "../agents/tools/model-config.helpers.js";
@@ -95,7 +97,6 @@ function hasImplicitProviderSelectionSignal(
   return hasEntryCredential(provider, config, agentDir, authStore, resolveAuthProfileStoreSource);
 }
 
-/** Reports whether a web_search provider has usable configured credentials. */
 export function isWebSearchProviderConfigured(params: {
   provider: Pick<
     PluginWebSearchProviderEntry,
@@ -136,7 +137,6 @@ export function listConfiguredWebSearchProviders(params?: {
   });
 }
 
-/** Resolves configured or auto-detected web_search provider id. */
 export function resolveWebSearchProviderId(params: {
   search?: WebSearchConfig;
   config?: OpenClawConfig;
@@ -456,9 +456,19 @@ export function hasConfiguredWebSearchProvider(
 /** Prepare agent-scoped source facts without synchronous store discovery in tool assembly. */
 export async function prepareWebSearchConfiguration(
   options: WebSearchConfigurationParams = {},
+  prepareAuthSource: (agentDir: string) => Promise<boolean> = hasAnyAuthProfileStoreSourceAsync,
 ): Promise<boolean> {
   if (options.authStore || options.resolveAuthProfileStoreSource) {
     return hasConfiguredWebSearchProvider(options);
+  }
+  const agentDir = options.agentDir?.trim() || resolveDefaultAgentDir(options.config ?? {});
+  // Published agent snapshots include inherited credentials, including authoritative
+  // emptiness. Isolated auth scopes must keep their filtered store owner instead.
+  const authStore = authProfileRuntimeMode.getStore()
+    ? undefined
+    : getRuntimeAuthProfileStoreSnapshotCore(agentDir);
+  if (authStore) {
+    return hasConfiguredWebSearchProvider({ ...options, agentDir, authStore });
   }
   let needsAuthSource = false;
   const configured = hasConfiguredWebSearchProvider({
@@ -471,9 +481,7 @@ export async function prepareWebSearchConfiguration(
   if (configured || !needsAuthSource) {
     return configured;
   }
-  const hasSource = await hasAnyAuthProfileStoreSourceAsync(
-    options.agentDir?.trim() || resolveDefaultAgentDir(options.config ?? {}),
-  );
+  const hasSource = await prepareAuthSource(agentDir);
   return hasConfiguredWebSearchProvider({
     ...options,
     resolveAuthProfileStoreSource: () => hasSource,
