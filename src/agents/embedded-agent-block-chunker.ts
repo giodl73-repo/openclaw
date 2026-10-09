@@ -15,7 +15,10 @@ import {
   findSafeSentenceBreakIndex,
   normalizeChunkLimits,
 } from "./embedded-agent-block-chunker.breaks.js";
-import { prepareIndentedCode } from "./embedded-agent-block-chunker.code.js";
+import {
+  prepareIndentedCode,
+  resolveFenceReopenLine,
+} from "./embedded-agent-block-chunker.code.js";
 import {
   findTableBreakIndex,
   findUnsplittableTableSpans,
@@ -92,14 +95,6 @@ function findFenceCloseLineStart(buffer: string, fence: FenceSpan, offset = 0): 
     closingMarker.length >= fence.marker.length
     ? lastNewline + 1
     : -1;
-}
-
-function resolveFenceReopenLine(fence: FenceSpan, maxChars: number): string | undefined {
-  const bareMarker = `${fence.indent}${fence.marker}`;
-  if (bareMarker.length * 2 + 3 > maxChars) {
-    return undefined;
-  }
-  return fence.openLine.length + bareMarker.length + 3 <= maxChars ? fence.openLine : bareMarker;
 }
 
 export class EmbeddedBlockChunker {
