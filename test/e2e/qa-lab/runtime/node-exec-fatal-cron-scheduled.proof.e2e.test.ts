@@ -314,7 +314,6 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
             const finished = await withinTest(terminal.promise, signal);
             expect(finished.jobId).toBe(added.id);
             expect(finished.runAtMs).toBeGreaterThanOrEqual(due);
-            expect(finished).toMatchObject({ status: "error", error: DENIAL, summary: DENIAL });
             expect(
               events.filter((event) => event.jobId === added.id && event.action === "finished"),
             ).toHaveLength(1);
@@ -331,7 +330,9 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
             ]);
             const runInvoke = execInvokes[1];
             assert.ok(runInvoke);
-            expect(dispatch.results.find((result) => result.id === runInvoke.id)).toMatchObject({
+            const runResult = dispatch.results.find((result) => result.id === runInvoke.id);
+            assert.ok(runResult);
+            expect(runResult).toMatchObject({
               nodeId,
               ok: false,
               error: { code: "SYSTEM_RUN_DENIED", message: DENIAL },
@@ -350,6 +351,49 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
               jobId: added.id,
               runAtMs: finished.runAtMs,
               sessionId: finished.sessionId,
+            });
+            expect(entry.sessionId).toEqual(expect.any(String));
+            const jobBefore = await gateway.call("cron.get", { id: added.id });
+            await observer.stopAndWait();
+            observer = undefined;
+            await gateway.restartAfterStateMutation(async () => {});
+            await waitForNode(gateway, nodeId);
+            const after = (await gateway.call("cron.runs", { id: added.id, limit: 10 })) as {
+              entries: CronRunLogEntry[];
+            };
+            expect(after.entries).toEqual(before.entries);
+            expect(await gateway.call("cron.get", { id: added.id })).toEqual(jobBefore);
+            await expect(fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
+
+            // Both versions must reach the native denial and restart before comparison.
+            console.info(
+              "SCHEDULED_NODE_DENIAL_RECEIPT=" +
+                JSON.stringify({
+                  jobId: added.id,
+                  invocationId: runInvoke.id,
+                  nodeId,
+                  nativeDenial: runResult.error,
+                  effectAbsent: true,
+                  historyPreserved: true,
+                  jobPreserved: true,
+                  finished: {
+                    status: finished.status,
+                    error: finished.error,
+                    summary: finished.summary,
+                    runAtMs: finished.runAtMs,
+                    sessionId: finished.sessionId,
+                  },
+                  entry,
+                }),
+            );
+            expect(finished, "scheduled node denial must remain a fatal cron result").toMatchObject(
+              {
+                status: "error",
+                error: DENIAL,
+                summary: DENIAL,
+              },
+            );
+            expect(entry).toMatchObject({
               status: "error",
               error: DENIAL,
               summary: DENIAL,
@@ -364,18 +408,6 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
                 ]),
               },
             });
-            expect(entry.sessionId).toEqual(expect.any(String));
-            const jobBefore = await gateway.call("cron.get", { id: added.id });
-            await observer.stopAndWait();
-            observer = undefined;
-            await gateway.restartAfterStateMutation(async () => {});
-            await waitForNode(gateway, nodeId);
-            const after = (await gateway.call("cron.runs", { id: added.id, limit: 10 })) as {
-              entries: CronRunLogEntry[];
-            };
-            expect(after.entries).toEqual(before.entries);
-            expect(await gateway.call("cron.get", { id: added.id })).toEqual(jobBefore);
-            await expect(fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" });
           },
           async () => {
             const results = await Promise.allSettled(children.map((child) => stopChild(child)));
