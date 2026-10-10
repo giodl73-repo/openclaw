@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { rawDataToString } from "../../../../packages/gateway-client/src/websocket-data.js";
 import { WebSocket, WebSocketServer } from "../../../../packages/gateway-client/src/websocket.js";
 import { reserveTestPortListener } from "../../../../src/test-utils/port-claims.js";
 import { runQaGatewayFixture } from "../../../helpers/qa-gateway-cleanup.js";
@@ -53,7 +54,10 @@ export async function startNodeDispatchGate(params: {
     node.on("message", (bytes, binary) =>
       track(
         (async () => {
-          const frame = JSON.parse(bytes.toString()) as { method?: string; params?: InvokeResult };
+          const frame = JSON.parse(rawDataToString(bytes)) as {
+            method?: string;
+            params?: InvokeResult;
+          };
           if (frame.method === "node.invoke.result" && frame.params) {
             results.push(frame.params);
           }
@@ -65,7 +69,7 @@ export async function startNodeDispatchGate(params: {
     gateway.on("message", (bytes, binary) =>
       track(
         (async () => {
-          const frame = JSON.parse(bytes.toString()) as { event?: string; payload?: Invoke };
+          const frame = JSON.parse(rawDataToString(bytes)) as { event?: string; payload?: Invoke };
           if (frame.event === "node.invoke.request" && frame.payload) {
             invokes.push(frame.payload);
             if (frame.payload.command === "system.run") {
@@ -99,9 +103,9 @@ export async function startNodeDispatchGate(params: {
           for (const socket of sockets) {
             socket.terminate();
           }
-          await new Promise<void>((resolve, reject) =>
-            server.close((error) => (error ? reject(error) : resolve())),
-          );
+          await new Promise<void>((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+          });
           await Promise.all(pending);
         },
         () => owned.releaseListener(),

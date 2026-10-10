@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -230,13 +231,12 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
                 OPENCLAW_SKIP_PROVIDERS: "1",
               },
             });
-            let pairedNodeId: string | undefined;
             let revocations = 0;
             dispatch = await startNodeDispatchGate({
               gatewayUrl: gateway.wsUrl,
               signal,
               beforeRun: async (invoke) => {
-                expect(invoke.nodeId).toBe(pairedNodeId);
+                expect(invoke.nodeId).toBe(nodeId);
                 expect(revocations++).toBe(0);
                 const snapshot = (await gateway.call("exec.approvals.node.get", {
                   nodeId: invoke.nodeId,
@@ -258,7 +258,6 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
             const first = startNodeProcess(port, env);
             children.push(first);
             const nodeId = await approvePairing(gateway, "device");
-            pairedNodeId = nodeId;
             await stopChild(first);
             children.push(startNodeProcess(port, env));
             await approvePairing(gateway, "node", nodeId);
@@ -330,9 +329,9 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
               "system.run.prepare",
               "system.run",
             ]);
-            expect(
-              dispatch.results.find((result) => result.id === execInvokes[1].id),
-            ).toMatchObject({
+            const runInvoke = execInvokes[1];
+            assert.ok(runInvoke);
+            expect(dispatch.results.find((result) => result.id === runInvoke.id)).toMatchObject({
               nodeId,
               ok: false,
               error: { code: "SYSTEM_RUN_DENIED", message: DENIAL },
@@ -346,6 +345,7 @@ describe.runIf(process.env.OPENCLAW_NODE_DENIAL_SCHEDULED_PROOF === "1")(
             };
             expect(before.entries).toHaveLength(1);
             const entry = before.entries[0];
+            assert.ok(entry);
             expect(entry).toMatchObject({
               jobId: added.id,
               runAtMs: finished.runAtMs,
