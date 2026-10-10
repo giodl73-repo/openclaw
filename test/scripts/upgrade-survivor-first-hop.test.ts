@@ -805,6 +805,7 @@ it.each([
   ...[
     { version: "2026.9.4", mode: "manual" },
     { version: "2026.9.6", mode: "auto-auth" },
+    { version: "2026.9.9", mode: "manual" },
   ].map(({ version, mode }) => ({
     name: `${version} ${mode} Cron readback`,
     scenario: "legacy-operator-state",

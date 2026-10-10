@@ -1860,7 +1860,7 @@ function publishedSuccessSummary(artifactRoot, sanitize) {
           ? ["legacy-operator-cron-history-proof.json"]
           : []),
         ...(snapshot.scenario === "legacy-operator-state" &&
-        (snapshot.baseline.version === "2026.9.6" ||
+        (["2026.9.6", "2026.9.9"].includes(snapshot.baseline.version) ||
           (snapshot.updateRestartMode === "manual" &&
             ["2026.9.3", "2026.9.4"].includes(snapshot.baseline.version)))
           ? [

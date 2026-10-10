@@ -31,7 +31,11 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 }
 
-function cli(args, label, { json = false, privateOutput = false, env = process.env } = {}) {
+function cli(
+  args,
+  label,
+  { json = false, privateOutput = false, env = process.env, expectedExitCode = 0 } = {},
+) {
   const result = spawnSync("openclaw", args, {
     encoding: "utf8",
     env,
@@ -45,7 +49,7 @@ function cli(args, label, { json = false, privateOutput = false, env = process.e
   }
   assert.equal(
     result.status,
-    0,
+    expectedExitCode,
     `${label} failed (exit ${result.status}, signal ${result.signal}); see scenario artifacts`,
   );
   if (!json) {
@@ -395,10 +399,13 @@ function unsetSystemAgent() {
 }
 
 function seedCronJob(job) {
-  const seedNativeHistory = process.env.OPENCLAW_UPGRADE_SURVIVOR_BASELINE_VERSION === "2026.9.6";
-  const transcriptMarker = seedNativeHistory
-    ? `OPENCLAW_E2E_LEGACY_OPERATOR_CRON_${job.agentId.toUpperCase()}`
-    : undefined;
+  const baselineVersion = process.env.OPENCLAW_UPGRADE_SURVIVOR_BASELINE_VERSION;
+  const seedNativeHistory = ["2026.9.6", "2026.9.9"].includes(baselineVersion);
+  const failedCommand = baselineVersion === "2026.9.9" && job.agentId === "ops";
+  const transcriptMarker =
+    seedNativeHistory && !failedCommand
+      ? `OPENCLAW_E2E_LEGACY_OPERATOR_CRON_${job.agentId.toUpperCase()}`
+      : undefined;
   const created = cli(
     [
       "cron",
@@ -415,7 +422,10 @@ function seedCronJob(job) {
             "off",
             "--no-deliver",
           ]
-        : ["--command", "printf survivor-cron"]),
+        : [
+            "--command",
+            failedCommand ? "printf survivor-stable-failure >&2; exit 7" : "printf survivor-cron",
+          ]),
       "--disabled",
       ...(job.agentId === "ops" ? ["--agent", "ops"] : []),
       "--json",
@@ -439,28 +449,87 @@ function seedCronJob(job) {
     // before adding ops, while the published Gateway can still resolve its owner.
     const log = artifact("legacy-operator-requests.jsonl");
     const priorBytes = fs.existsSync(log) ? fs.statSync(log).size : 0;
-    cli(["cron", "run", created.id, "--wait"], `legacy-operator-run-${job.name}`, { json: true });
-    assertLegacyOperatorPrompt(transcriptMarker, priorBytes);
+    const completed = cli(
+      ["cron", "run", created.id, "--wait"],
+      `legacy-operator-run-${job.name}`,
+      { json: true, expectedExitCode: failedCommand ? 1 : 0 },
+    );
+    if (failedCommand) {
+      assert.equal(completed.ok, true);
+      assert.equal(completed.enqueued, true);
+      assert.equal(completed.completed, true);
+      assert.equal(completed.status, "error");
+      assert.equal(completed.completionStatus, "failed");
+      assert(completed.runId?.trim(), "published completed run id missing");
+    }
+    if (transcriptMarker) {
+      assertLegacyOperatorPrompt(transcriptMarker, priorBytes);
+    }
     const page = cli(
       ["cron", "runs", "--id", created.id, "--limit", "50"],
       `legacy-operator-history-${job.name}`,
       { json: true },
     );
     assert.equal(page.entries?.length, 1, "published baseline did not retain its Cron run");
-    assert.equal(page.entries[0].status, "ok", "published baseline Cron run did not succeed");
+    assert.equal(page.entries[0].status, failedCommand ? "error" : "ok");
     assert.equal(page.entries[0].jobId, created.id);
     assert.equal(typeof page.entries[0].runId, "string");
-    for (const field of ["sessionId", "sessionKey"]) {
-      assert(page.entries[0][field]?.trim(), `published Cron run omitted ${field}`);
+    if (failedCommand) {
+      // A CLI/process failure is not a settled, published command-history specimen.
+      const entry = page.entries[0];
+      assert.equal(entry.runId, completed.runId);
+      assert.equal(completed.run?.runId, entry.runId);
+      assert.equal(completed.run?.jobId, created.id);
+      assert.equal(completed.run?.completionStatus, "failed");
+      assert.equal(entry.action, "finished");
+      assert.equal(entry.completionStatus, "failed");
+      assert.equal(entry.error, "command exited with code 7");
+      assert(entry.summary?.includes("survivor-stable-failure"));
+      assert(entry.diagnostics?.entries?.length > 0, "published diagnostics missing");
+      assert(
+        entry.diagnostics.entries.some(
+          (diagnostic) =>
+            diagnostic.source === "exec" &&
+            diagnostic.severity === "error" &&
+            diagnostic.exitCode === 7 &&
+            diagnostic.message?.includes("survivor-stable-failure"),
+        ),
+        "published command exit diagnostic missing",
+      );
+      for (const diagnostic of entry.diagnostics.entries) {
+        assert(!Object.hasOwn(diagnostic, "code"), "published diagnostic unexpectedly has code");
+      }
+    } else {
+      for (const field of ["sessionId", "sessionKey"]) {
+        assert(page.entries[0][field]?.trim(), `published Cron run omitted ${field}`);
+      }
+      assert(page.entries[0].summary?.includes(transcriptMarker));
     }
-    assert(page.entries[0].summary?.includes(transcriptMarker));
     history = page.entries;
+  }
+  let settledJob;
+  if (baselineVersion === "2026.9.9") {
+    const listing = cli(
+      ["cron", "list", "--all", "--json"],
+      `legacy-operator-settled-${job.name}`,
+      {
+        json: true,
+      },
+    );
+    const matches = listing.jobs?.filter((entry) => entry.id === created.id);
+    assert.equal(matches?.length, 1, "published settled Cron job missing or duplicated");
+    [settledJob] = matches;
+    assert.equal(settledJob.payload?.kind, failedCommand ? "command" : "agentTurn");
+    assert.equal(settledJob.enabled, false);
+    assert.equal(settledJob.state?.runningAtMs, undefined, "published Cron job still running");
+    assert.equal(settledJob.state?.lastRunStatus, failedCommand ? "error" : "ok");
   }
   return {
     id: created.id,
     name: created.name,
     agentId: created.agentId,
     ...(history ? { history, transcriptMarker } : {}),
+    ...(settledJob ? { settledJob } : {}),
   };
 }
 
@@ -649,11 +718,13 @@ function assertLegacyOperatorCronHistory(stage, baseline) {
   const proofPath = artifact(`legacy-operator-${stage}-cron-history.json`);
   try {
     for (const [index, entry] of expected.entries()) {
-      const transcriptMarker = baseline.jobs.find(
-        (job) => job.id === entry.jobId,
-      )?.transcriptMarker;
+      const job = baseline.jobs.find((job) => job.id === entry.jobId);
+      const transcriptMarker = job?.transcriptMarker;
       if (!migrationProof) {
-        assert(transcriptMarker, "native Cron transcript expectation missing");
+        assert(
+          transcriptMarker || job?.settledJob?.payload?.kind === "command",
+          "native Cron transcript expectation missing",
+        );
       }
       const args = ["cron", "runs", "--id", entry.jobId, "--limit", "1"];
       const page = cli(
@@ -812,6 +883,9 @@ export function assertLegacyOperatorCronOwners(listing, baseline) {
       before.agentId,
       `legacy operator cron explicit owner changed: ${expected.name}`,
     );
+    for (const [key, value] of Object.entries(before.settledJob ?? {})) {
+      assert.deepEqual(after[key], value, `candidate changed settled Cron job ${key}`);
+    }
   }
 }
 
