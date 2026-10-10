@@ -16,6 +16,9 @@ const BASELINE = "2026.9.5";
 const SOURCE_SHA = "a".repeat(40);
 const RUNNER = "scripts/e2e/lib/upgrade-survivor/run.sh";
 const ASSERTIONS = resolve("scripts/e2e/lib/upgrade-survivor/assertions.mjs");
+const PUBLISHED_REGISTRY = resolve(
+  "scripts/e2e/lib/upgrade-survivor/published-plugin-registry.mjs",
+);
 const digest = (file: string, algorithm: "sha256" | "sha512") =>
   createHash(algorithm)
     .update(readFileSync(file))
@@ -44,35 +47,39 @@ async function expectArchive(url: string, archive: string) {
   expect(Buffer.from(await response.arrayBuffer())).toEqual(readFileSync(archive));
 }
 
-it.for([
-  { scenario: "legacy-operator-state", version: BASELINE },
-  { scenario: "legacy-operator-state", version: "2026.9.6" },
-  { scenario: "base", version: BASELINE },
-  { scenario: "base", version: "2026.9.6" },
-])(
-  "preserves installed published registry bytes for $scenario while selecting candidate $version",
-  async ({ scenario, version }, { signal }) => {
+it.for(
+  [
+    { scenario: "legacy-operator-state", version: BASELINE },
+    { scenario: "legacy-operator-state", version: "2026.9.6" },
+    { scenario: "base", version: BASELINE },
+    { scenario: "base", version: "2026.9.6" },
+  ].flatMap((entry) =>
+    [undefined, "http://127.0.0.1:1/"].map((upstream) => ({ ...entry, upstream })),
+  ),
+)(
+  "preserves installed published registry bytes for $scenario while selecting candidate $version via $upstream",
+  async ({ scenario, version, upstream }, { signal }) => {
     const root = tempDirs.make("upgrade-survivor-registry-identity-");
     const artifact = join(root, "artifact");
     const bin = join(root, "bin");
     mkdirSync(artifact);
     mkdirSync(bin);
-    const packages = (scenario === "base" ? ["codex", "discord", "whatsapp"] : ["discord"]).map(
-      (id) => {
-        const name = `@openclaw/${id}`;
-        const published = tarball(root, `${id}-published.tgz`, name, BASELINE, "published bytes");
-        const candidate = tarball(
-          root,
-          `${id}-candidate.tgz`,
-          name,
-          version,
-          "candidate bytes",
-          artifact,
-        );
-        expect(integrity(candidate)).not.toBe(integrity(published));
-        return { id, name, published, candidate };
-      },
-    );
+    const packages = (
+      scenario === "base" ? ["codex", "discord", "whatsapp"] : ["discord", "codex"]
+    ).map((id) => {
+      const name = `@openclaw/${id}`;
+      const published = tarball(root, `${id}-published.tgz`, name, BASELINE, "published bytes");
+      const candidate = tarball(
+        root,
+        `${id}-candidate.tgz`,
+        name,
+        version,
+        "candidate bytes",
+        artifact,
+      );
+      expect(integrity(candidate)).not.toBe(integrity(published));
+      return { id, name, published, candidate };
+    });
     const core = tarball(root, "core.tgz", "openclaw", version, "candidate core");
     const manifest = join(artifact, "prepublish-plugin-registry.json");
     writeFileSync(
@@ -91,6 +98,7 @@ it.for([
       }),
     );
     const npm = join(bin, "npm");
+    writeFileSync(join(root, "npm-calls"), "");
     writeFileSync(
       npm,
       `#!${process.execPath}
@@ -98,7 +106,8 @@ const assert = require("node:assert/strict"), fs = require("node:fs"), path = re
 const [command, spec, ...args] = process.argv.slice(2);
 const published = ${JSON.stringify(Object.fromEntries(packages.map((entry) => [`${entry.name}@${BASELINE}`, entry.published])))};
 assert.ok(published[spec], "Unexpected package: " + spec);
-assert.ok(args.includes("--registry=https://registry.npmjs.org"));
+assert.ok(args.includes(${JSON.stringify(`--registry=${upstream ? new URL(upstream).origin : "https://registry.npmjs.org"}`)}));
+fs.appendFileSync(${JSON.stringify(join(root, "npm-calls"))}, JSON.stringify({ command, spec }) + "\\n");
 if (command === "view") process.stdout.write(JSON.stringify("${BASELINE}"));
 else if (command === "pack") {
   const filename = path.basename(published[spec]);
@@ -121,7 +130,7 @@ else if (command === "pack") {
       OPENCLAW_PREPUBLISH_PLUGIN_REGISTRY_DIR: artifact,
       OPENCLAW_PREPUBLISH_PLUGIN_REGISTRY_MANIFEST_SHA256: digest(manifest, "sha256"),
       OPENCLAW_DOCKER_E2E_SELECTED_SHA: SOURCE_SHA,
-      OPENCLAW_NPM_REGISTRY_UPSTREAM: "http://127.0.0.1:1",
+      OPENCLAW_NPM_REGISTRY_UPSTREAM: upstream,
       OPENCLAW_NPM_REGISTRY_MERGE_UPSTREAM: "0",
       OPENCLAW_NPM_REGISTRY_BIND_HOST: "127.0.0.1",
       OPENCLAW_NPM_REGISTRY_PORT: "0",
@@ -143,6 +152,7 @@ trap - ERR EXIT HUP INT TERM
 trap 'openclaw_e2e_stop_process "\${plugin_registry_pid:-}"' EXIT
 baseline_version="${BASELINE}"
 candidate_version="${version}"
+native_assignment_enabled=1
 if [ "$SCENARIO" = legacy-operator-state ]; then configure_plugin_registry baseline; fi
 printf 'registry-stage baseline %s\\n' "\${NPM_CONFIG_REGISTRY:-upstream}"
 read -r next_stage
@@ -217,23 +227,25 @@ read -r done
         });
         await expectArchive(baselineMetadata.versions[BASELINE].dist.tarball, published);
       }
-      writePluginInstallIndexForE2E(
-        {
-          installRecords: Object.fromEntries(
-            packages.map(({ id, name, published }) => [
-              id,
-              {
-                source: "npm",
-                spec: `${name}@latest`,
-                resolvedName: name,
-                resolvedVersion: BASELINE,
-                integrity: integrity(published),
-              },
-            ]),
-          ),
-        },
-        { stateDir: state },
-      );
+      const writePublishedInstalls = () =>
+        writePluginInstallIndexForE2E(
+          {
+            installRecords: Object.fromEntries(
+              packages.map(({ id, name, published }) => [
+                id,
+                {
+                  source: "npm",
+                  spec: `${name}@latest`,
+                  resolvedName: name,
+                  resolvedVersion: BASELINE,
+                  integrity: integrity(published),
+                },
+              ]),
+            ),
+          },
+          { stateDir: state },
+        );
+      writePublishedInstalls();
       child.stdin.write("candidate\n");
       const candidateUrl = await waitForStage("candidate");
       const publishedPaths = readFileSync(join(root, "published-paths"), "utf8").trim().split("\n");
@@ -274,7 +286,7 @@ read -r done
         const retained =
           version !== BASELINE
             ? ""
-            : scenario === "legacy-operator-state"
+            : scenario === "legacy-operator-state" && id === "discord"
               ? readFileSync(join(root, "published-path"), "utf8")
               : publishedPaths[publishedPaths.indexOf(name) + 2];
         assert(typeof retained === "string", `Missing retained archive for ${name}@${version}`);
@@ -292,6 +304,39 @@ read -r done
         expect(wrongBytes.status).toBe(1);
         expect(wrongBytes.stderr).toContain(`${id} plugin registry artifact integrity changed`);
       }
+      const calls = readFileSync(join(root, "npm-calls"), "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      expect(calls).toHaveLength(
+        (scenario === "legacy-operator-state" ? 3 : 0) +
+          (version === BASELINE ? packages.length : 0),
+      );
+      if (scenario === "legacy-operator-state") {
+        expect(calls).toEqual(
+          expect.arrayContaining([
+            { command: "view", spec: `@openclaw/discord@${BASELINE}` },
+            { command: "pack", spec: `@openclaw/discord@${BASELINE}` },
+            { command: "pack", spec: `@openclaw/codex@${BASELINE}` },
+          ]),
+        );
+      }
+      if (version === BASELINE) {
+        const { name, candidate } = packages[0];
+        const retained = publishedPaths[publishedPaths.indexOf(name) + 2];
+        writePublishedInstalls();
+        writeFileSync(retained, readFileSync(candidate));
+        const wrongPublishedArchive = spawnSync(
+          process.execPath,
+          [PUBLISHED_REGISTRY, artifact, dirname(retained)],
+          { encoding: "utf8", env },
+        );
+        expect(wrongPublishedArchive.status).toBe(1);
+        expect(wrongPublishedArchive.stderr).toContain(
+          "Published plugin archive differs from installed integrity",
+        );
+      }
       child.stdin.end("done\n");
       expect(await withinTest(closed, signal), output).toBe(0);
     } finally {
@@ -300,3 +345,43 @@ read -r done
     }
   },
 );
+
+it.for([
+  "not-a-url",
+  "ftp://registry.example",
+  "https://user:password@registry.example",
+  "https://@registry.example",
+  "https://registry.example/path",
+  "https://registry.example/path/..",
+  "https://registry.example?query=1",
+  "https://registry.example?",
+  "https://registry.example#fragment",
+  "https://registry.example#",
+  "https://registry.example\\path",
+  "https://registry.example\n",
+  "http://127.0.0.1:99999",
+])("rejects malformed published registry origin %j before acquisition", (upstream) => {
+  const env = { ...process.env, OPENCLAW_NPM_REGISTRY_UPSTREAM: upstream, BASH_ENV: "", ENV: "" };
+  const source = readFileSync(RUNNER, "utf8");
+  const configure = source.slice(
+    source.indexOf("configure_plugin_registry() {"),
+    source.indexOf("\nseed_legacy_runtime_deps_symlink() {"),
+  );
+  for (const result of [
+    spawnSync(process.execPath, [PUBLISHED_REGISTRY, "unused-registry", "unused-destination"], {
+      encoding: "utf8",
+      env,
+    }),
+    spawnSync(
+      resolveWorkflowBash(),
+      ["-c", `set -eu\n${configure}\nconfigure_plugin_registry baseline`],
+      {
+        encoding: "utf8",
+        env,
+      },
+    ),
+  ]) {
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("OPENCLAW_NPM_REGISTRY_UPSTREAM must be an HTTP(S) origin");
+  }
+});

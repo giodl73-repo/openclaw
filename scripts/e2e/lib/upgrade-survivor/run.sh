@@ -119,6 +119,7 @@ baseline_spec=""
 baseline_version=""
 baseline_plugin_version=""
 baseline_plugin_tarball=""
+baseline_identity_path=""
 published_plugin_registry_args=()
 baseline_companion_availability=""
 baseline_version_expected="0"
@@ -596,6 +597,12 @@ package_root() {
   printf '%s\n' "$BASELINE_PACKAGE_ROOT"
 }
 
+generic_package_identity_enabled() {
+  [ "$CANDIDATE_KIND" = "tarball" ] && [ -n "${OPENCLAW_DOCKER_E2E_SELECTED_SHA:-}" ] &&
+    { [ "$SCENARIO" = "base" ] || [ "$SCENARIO" = "sqlite-volume" ] ||
+      { [ "$SCENARIO" = "legacy-operator-state" ] && [ "$baseline_version" = "2026.9.9" ]; }; }
+}
+
 legacy_runtime_deps_symlink_plugin() {
   local plugin="${OPENCLAW_UPGRADE_SURVIVOR_LEGACY_RUNTIME_DEPS_SYMLINK:-}"
   if [ -z "$plugin" ]; then
@@ -736,6 +743,8 @@ assert_prepublish_plugin_install() {
 
 configure_plugin_registry() {
   local stage="${1:-candidate}"
+  local published_registry
+  published_registry="$(node scripts/e2e/lib/upgrade-survivor/published-plugin-registry.mjs --upstream)" || return "$?"
   local fixture_root="$ARTIFACT_ROOT/plugin-registry"
   local package_dir="$fixture_root/package"
   local tarball="$fixture_root/openclaw-brave-plugin-${candidate_version}.tgz"
@@ -757,7 +766,7 @@ NODE
       )"
       local lookup_status=0
       openclaw_e2e_maybe_timeout "$COMMAND_TIMEOUT" npm view "@openclaw/$baseline_plugin@$baseline_plugin_version" version \
-        --registry=https://registry.npmjs.org --json >"$fixture_root/baseline/availability.json" \
+        --registry="$published_registry" --json >"$fixture_root/baseline/availability.json" \
         2>"$fixture_root/baseline/availability.err" || lookup_status=$?
       baseline_companion_availability="$(node --input-type=module - \
         "$fixture_root/baseline/availability.json" "$lookup_status" "$baseline_plugin" \
@@ -779,15 +788,15 @@ NODE
       )" || return "$?"
       local baseline_tarball
       if [ "$baseline_companion_availability" = "available" ]; then
-        baseline_tarball="$(npm pack "@openclaw/$baseline_plugin@$baseline_plugin_version" \
-          --registry=https://registry.npmjs.org --pack-destination "$fixture_root/baseline" --silent)"
+        baseline_tarball="$(openclaw_e2e_maybe_timeout "$COMMAND_TIMEOUT" npm pack "@openclaw/$baseline_plugin@$baseline_plugin_version" \
+          --registry="$published_registry" --pack-destination "$fixture_root/baseline" --silent)" || return "$?"
         baseline_plugin_tarball="$fixture_root/baseline/$baseline_tarball"
       fi
       if [ "$native_assignment_enabled" = "1" ]; then
         # Keep the real released Codex writer under a moving selector, so its distinct
         # candidate cohort is installed by the updater through the existing registry.
-        native_assignment_tarball="$fixture_root/baseline/$(npm pack "@openclaw/codex@$baseline_plugin_version" \
-          --registry=https://registry.npmjs.org --pack-destination "$fixture_root/baseline" --ignore-scripts --silent)"
+        native_assignment_tarball="$fixture_root/baseline/$(openclaw_e2e_maybe_timeout "$COMMAND_TIMEOUT" npm pack "@openclaw/codex@$baseline_plugin_version" \
+          --registry="$published_registry" --pack-destination "$fixture_root/baseline" --ignore-scripts --silent)" || return "$?"
       fi
       registry_dist_tags="latest=$baseline_plugin_version,beta=$baseline_plugin_version,alpha=$baseline_plugin_version"
     else
@@ -2240,6 +2249,15 @@ phase validate-update-restart-mode validate_update_restart_mode
 phase validate-worker-cell validate_worker_cell
 phase reset-run-state reset_run_state
 phase install-baseline install_baseline
+if [ "$SCENARIO" = "legacy-operator-state" ] && generic_package_identity_enabled; then
+  baseline_identity_path="$ARTIFACT_ROOT/baseline-package-identity.json"
+  baseline_identity_args=(baseline "$(package_root)")
+  if [ -n "${OPENCLAW_UPGRADE_SURVIVOR_BASELINE_TARBALL+x}" ]; then
+    baseline_identity_args+=("$OPENCLAW_UPGRADE_SURVIVOR_BASELINE_TARBALL")
+  fi
+  phase baseline-package-identity node scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs \
+    "${baseline_identity_args[@]}"
+fi
 phase initialize-state initialize_state
 if [ "$SCENARIO" = "package-publication-recovery" ] || [ "$SCENARIO" = "package-verification-recovery" ] || [ "$SCENARIO" = "package-stranded-first-hop" ]; then
   source scripts/e2e/lib/upgrade-survivor/package-activation-recovery.sh
@@ -2522,10 +2540,9 @@ if [ "$SCENARIO" = "legacy-operator-state" ] && [ "$baseline_version" = "2026.9.
   [ "$UPDATE_RESTART_MODE" = "manual" ] && [ "$CANDIDATE_KIND" = "tarball" ]; then
   phase prepare-native-assignment-proof prepare_native_assignment_proof
 fi
-if [ "$CANDIDATE_KIND" = "tarball" ] && [ -n "${OPENCLAW_DOCKER_E2E_SELECTED_SHA:-}" ] &&
-  { [ "$SCENARIO" = "base" ] || [ "$SCENARIO" = "sqlite-volume" ]; }; then
+if generic_package_identity_enabled; then
   phase candidate-package-identity node scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs \
-    candidate "$(package_root)" "$CANDIDATE_SPEC"
+    candidate "$(package_root)" "$CANDIDATE_SPEC" "$baseline_identity_path"
 fi
 if [ "$SCENARIO" = "missing-configured-plugin-migration" ]; then
   source scripts/e2e/lib/upgrade-survivor/missing-configured-plugin-migration.sh
@@ -2629,8 +2646,7 @@ fi
 if [ "$native_assignment_enabled" = "1" ]; then
   phase assert-native-assignment-first-hop node scripts/e2e/lib/upgrade-survivor/native-assignments.mjs post-update "$candidate_version"
 fi
-if [ "$CANDIDATE_KIND" = "tarball" ] && [ -n "${OPENCLAW_DOCKER_E2E_SELECTED_SHA:-}" ] &&
-  { [ "$SCENARIO" = "base" ] || [ "$SCENARIO" = "sqlite-volume" ]; }; then
+if generic_package_identity_enabled; then
   phase installed-package-identity node scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs \
     installed "$(package_root)" "$CANDIDATE_SPEC"
 fi

@@ -7,6 +7,24 @@ import { inspectNpmPackageTarball } from "../../../prepublish-plugin-registry-ar
 import { readJson } from "../fixtures/common.mjs";
 import { readPluginInstallRecords } from "../plugin-index-sqlite.mjs";
 
+const rawUpstream = process.env.OPENCLAW_NPM_REGISTRY_UPSTREAM || "https://registry.npmjs.org";
+const invalidUpstream = "OPENCLAW_NPM_REGISTRY_UPSTREAM must be an HTTP(S) origin";
+// Check the input too: URL parsing normalizes dot paths and empty query/hash markers.
+assert(
+  rawUpstream === rawUpstream.trim() && /^https?:\/\/[^/?#\\\s@]+\/?$/iu.test(rawUpstream),
+  invalidUpstream,
+);
+let upstream;
+try {
+  upstream = new URL(rawUpstream).origin;
+} catch {
+  throw new Error(invalidUpstream);
+}
+if (process.argv[2] === "--upstream") {
+  process.stdout.write(upstream);
+  process.exit(0);
+}
+
 const [registryDir, destination] = process.argv.slice(2);
 assert(registryDir && destination, "Expected candidate registry and published archive directories");
 const manifest = readJson(path.join(registryDir, "prepublish-plugin-registry.json"));
@@ -34,7 +52,7 @@ for (const record of Object.values(readPluginInstallRecords())) {
         [
           "pack",
           `${candidate.name}@${candidate.version}`,
-          "--registry=https://registry.npmjs.org",
+          `--registry=${upstream}`,
           "--pack-destination",
           destination,
           "--ignore-scripts",

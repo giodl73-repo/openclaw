@@ -17,9 +17,15 @@ type Change =
   | "wrong-source"
   | "published"
   | "missing-baseline";
-type Scenario = "base" | "sqlite-volume" | "projects-doctor" | "workshop-doctor-recovery";
+type Scenario =
+  | "base"
+  | "sqlite-volume"
+  | "projects-doctor"
+  | "workshop-doctor-recovery"
+  | "legacy-operator-state";
 
 function runCandidateFlow(scenario: Scenario, change: Change) {
+  const fixtureVersion = scenario === "legacy-operator-state" ? "2026.9.9" : version;
   const root = tempDirs.make("upgrade-survivor-candidate-identity-");
   const candidate = path.join(root, "candidate", "package");
   const installed = path.join(root, "installed");
@@ -32,12 +38,12 @@ function runCandidateFlow(scenario: Scenario, change: Change) {
   mkdirSync(runtime);
   writeFileSync(
     path.join(candidate, "package.json"),
-    JSON.stringify({ name: "openclaw", version }),
+    JSON.stringify({ name: "openclaw", version: fixtureVersion }),
   );
   writeFileSync(path.join(candidate, "openclaw.mjs"), "export {};\n");
   writeFileSync(
     path.join(candidate, "dist/build-info.json"),
-    JSON.stringify({ version, commit: selectedSha }),
+    JSON.stringify({ version: fixtureVersion, commit: selectedSha }),
   );
   writeFileSync(path.join(candidate, "dist/entry.mjs"), "export const payload = 'candidate';\n");
   cpSync(candidate, installed, { recursive: true });
@@ -47,7 +53,7 @@ function runCandidateFlow(scenario: Scenario, change: Change) {
 
   const source = readFileSync("scripts/e2e/lib/upgrade-survivor/run.sh", "utf8");
   const audited = scenario === "projects-doctor" || scenario === "workshop-doctor-recovery";
-  if (audited && change !== "missing-baseline") {
+  if ((audited || scenario === "legacy-operator-state") && change !== "missing-baseline") {
     writeFileSync(
       path.join(artifacts, "baseline-package-identity.json"),
       JSON.stringify({
@@ -71,7 +77,16 @@ function runCandidateFlow(scenario: Scenario, change: Change) {
   const end = source.indexOf(following, start);
   const helperStart = source.indexOf("prepare_worker_cell_package() {\n");
   const helperEnd = source.indexOf("\nassert_worker_cell_update() {", helperStart);
-  if (start < 0 || end < start || helperStart < 0 || helperEnd < helperStart) {
+  const identityStart = source.indexOf("generic_package_identity_enabled() {\n");
+  const identityEnd = source.indexOf("\nlegacy_runtime_deps_symlink_plugin() {", identityStart);
+  if (
+    start < 0 ||
+    end < start ||
+    helperStart < 0 ||
+    helperEnd < helperStart ||
+    identityStart < 0 ||
+    identityEnd < identityStart
+  ) {
     throw new Error("Survivor candidate flow boundaries are unavailable");
   }
   const flow = source.slice(start, audited ? end : end + following.length);
@@ -87,16 +102,25 @@ CANDIDATE_KIND=tarball
 CANDIDATE_SPEC="$UNIT_ROOT/candidate.tgz"
 ARTIFACT_ROOT="$UNIT_ROOT/artifacts"
 RUNTIME_ROOT="$UNIT_ROOT/runtime"
-candidate_version=2026.9.6
+UPDATE_JSON="$ARTIFACT_ROOT/update.json"
+UPDATE_ERR="$ARTIFACT_ROOT/update.err"
+candidate_version="$UNIT_VERSION"
 candidate_install_mode=updater
-baseline_version=2026.9.6
+baseline_version="$UNIT_VERSION"
+baseline_identity_path=""
+if [ "$SCENARIO" = legacy-operator-state ]; then
+  baseline_identity_path="$ARTIFACT_ROOT/baseline-package-identity.json"
+fi
 native_assignment_enabled=0
+plugin_registry_pid=""
 UPDATE_RESTART_MODE=manual
 export OPENCLAW_UPGRADE_SURVIVOR_ARTIFACT_ROOT="$ARTIFACT_ROOT"
 export OPENCLAW_UPGRADE_SURVIVOR_RUNTIME_ROOT="$RUNTIME_ROOT"
 node() { "$UNIT_NODE" "$@"; }
 ${source.slice(helperStart, helperEnd)}
+${source.slice(identityStart, identityEnd)}
 package_root() { printf '%s\\n' "$UNIT_ROOT/installed"; }
+openclaw_e2e_stop_process() { :; }
 companion_survivor_scenario() { return 1; }
 run_plugin_fixture_phase() { :; }
 run_missing_load_path_fixture() {
@@ -143,6 +167,7 @@ ${flow}
         UNIT_NODE: resolveTestNodeExecPath(),
         UNIT_SCENARIO: scenario,
         UNIT_CHANGE: change,
+        UNIT_VERSION: fixtureVersion,
         OPENCLAW_DOCKER_E2E_SELECTED_SHA: change === "wrong-source" ? "b".repeat(40) : selectedSha,
       },
     },
@@ -157,7 +182,49 @@ ${flow}
 describe.skipIf(process.platform === "win32")(
   "published survivor candidate identity admission",
   () => {
-    it.each(["base", "sqlite-volume"] as const)(
+    it.each([undefined, "/proof/published.tgz", ""])(
+      "preserves absent versus supplied baseline archive (%s)",
+      (archive) => {
+        const source = readFileSync("scripts/e2e/lib/upgrade-survivor/run.sh", "utf8");
+        const start = source.indexOf("phase install-baseline install_baseline\n");
+        const end = source.indexOf("phase initialize-state initialize_state\n", start);
+        expect(start).toBeGreaterThan(0);
+        expect(end).toBeGreaterThan(start);
+        const env = { ...process.env };
+        delete env.OPENCLAW_UPGRADE_SURVIVOR_BASELINE_TARBALL;
+        if (archive !== undefined) env.OPENCLAW_UPGRADE_SURVIVOR_BASELINE_TARBALL = archive;
+        const result = spawnSync(
+          "/bin/bash",
+          [
+            "-c",
+            `set -eu
+SCENARIO=legacy-operator-state
+ARTIFACT_ROOT=/proof/artifacts
+generic_package_identity_enabled() { return 0; }
+package_root() { printf /proof/installed; }
+phase() {
+  if [ "$1" = baseline-package-identity ]; then
+    shift
+    printf '<%s>\\n' "$@"
+  fi
+}
+${source.slice(start, end)}
+`,
+          ],
+          { encoding: "utf8", env },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout.trim().split("\n")).toEqual([
+          "<node>",
+          "<scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs>",
+          "<baseline>",
+          "</proof/installed>",
+          ...(archive === undefined ? [] : [`<${archive}>`]),
+        ]);
+      },
+    );
+
+    it.each(["base", "sqlite-volume", "legacy-operator-state"] as const)(
       "%s accepts the exact tarball payload and rejects stale same-version installed bytes",
       (scenario) => {
         const stale = runCandidateFlow(scenario, "stale");
@@ -176,7 +243,7 @@ describe.skipIf(process.platform === "win32")(
         const installed = JSON.parse(
           readFileSync(path.join(valid.artifacts, "installed-package-identity.json"), "utf8"),
         );
-        expect(installed.version).toBe(version);
+        expect(installed.version).toBe(scenario === "legacy-operator-state" ? "2026.9.9" : version);
         expect(installed.buildInfo.commit).toBe(selectedSha);
       },
     );
@@ -204,7 +271,7 @@ describe.skipIf(process.platform === "win32")(
       );
     });
 
-    it.each(["projects-doctor", "workshop-doctor-recovery"] as const)(
+    it.each(["projects-doctor", "workshop-doctor-recovery", "legacy-operator-state"] as const)(
       "%s requires its audited baseline and refuses published candidate bytes",
       (scenario) => {
         const valid = runCandidateFlow(scenario, "valid");
