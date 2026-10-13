@@ -1,6 +1,5 @@
 import { finiteSecondsToTimerSafeMilliseconds } from "@openclaw/normalization-core/number-coercion";
 import { retireSessionMcpRuntime } from "../agents/agent-bundle-mcp-tools.js";
-import { isAgentDeletionBlocked } from "../agents/agent-lifecycle-registry.js";
 import {
   listAgentIds,
   resolveAgentEntry,
@@ -25,7 +24,6 @@ import { listKnownSessionStoreAgentIdsAsync } from "../config/sessions/targets-r
 import { listConfiguredSessionStoreAgentIds } from "../config/sessions/targets.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { CronAgentDeletionBlockedError } from "../cron/agent-availability.js";
 import { resolveCronJobEffectiveAgentId } from "../cron/agent-id.js";
 import { redactCronCommandSummaryForExternalDelivery } from "../cron/command-output-summary.js";
 import { runCronCommandJob } from "../cron/command-runner.js";
@@ -37,7 +35,6 @@ import { cronScriptFailureMetadata } from "../cron/script-failure.js";
 import { CronService, type CronEvent } from "../cron/service.js";
 import { applyJobPatch } from "../cron/service/jobs.js";
 import { resolveCronSessionTargetSessionKey } from "../cron/session-target.js";
-import { resolveCronJobsStorePathFromConfig } from "../cron/store.js";
 import { cronStreamScheduleKey } from "../cron/stream-schedule.js";
 import { createCronScriptRuntime } from "../cron/trigger-script.js";
 import type { CronJob } from "../cron/types.js";
@@ -106,7 +103,7 @@ import {
   dispatchGatewayCronFinishedNotifications,
   sendGatewayCronWebhook,
   sendGatewayCronFailureAlert,
-  runGatewayCronFailureRepair,
+  createGatewayCronFailureRepair,
 } from "./server-cron-notifications.js";
 import { toPluginCronJob } from "./server-cron-plugin-job.js";
 import {
@@ -150,6 +147,7 @@ function sanitizeCronHeartbeatOverride(
 
 export function buildGatewayCronService(params: {
   scheduler: GatewayScheduler;
+  storePath: string;
   cfg: OpenClawConfig;
   deps: CliDeps;
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
@@ -167,7 +165,7 @@ export function buildGatewayCronService(params: {
     params.resolvePluginRegistry,
   );
   const env = params.env ?? process.env;
-  const storePath = resolveCronJobsStorePathFromConfig(params.cfg, env);
+  const storePath = params.storePath;
   const cronEnabled =
     env.OPENCLAW_SKIP_CRON !== "1" && (params.cfg.cron?.enabled ?? DEFAULT_CRON_ENABLED);
   // Resolve once per cron service snapshot so every webhook route shares the
@@ -190,9 +188,6 @@ export function buildGatewayCronService(params: {
       normalized ? { agentId: normalized } : {},
       defaultAgentId,
     );
-    if (isAgentDeletionBlocked(agentId)) {
-      throw new CronAgentDeletionBlockedError(agentId);
-    }
     assertAgentDatabaseAdmitted(agentId, { env });
     return { agentId, cfg: runtimeConfig };
   };
@@ -518,8 +513,8 @@ export function buildGatewayCronService(params: {
         return listConfiguredSessionStoreAgentIds(cfg);
       }
     },
-    isAgentAvailable: (agentId, database, facts) =>
-      !(facts?.deletionBlocked ?? isAgentDeletionBlocked(agentId, { env }, database)) &&
+    isAgentAvailable: (agentId, facts) =>
+      !facts.deletionBlocked &&
       !readAgentDatabaseAdmissionRefusal(agentId, { env }) &&
       listAgentIds(getRuntimeConfig()).some((id) => normalizeAgentId(id) === agentId),
     resolveSessionStorePath,
@@ -744,8 +739,7 @@ export function buildGatewayCronService(params: {
         webhookToken: params.cfg.cron?.webhookToken,
         ssrfPolicy: webhookSsrfPolicy,
       }),
-    runCronFailureRepair: (request) =>
-      runGatewayCronFailureRepair(request, scheduledGatewayContextResolver),
+    ...createGatewayCronFailureRepair(params.cfg, scheduledGatewayContextResolver),
     log: toPinoLikeLogger(
       getChildLogger({ module: "cron", storeKey: storePath }),
       getResolvedLoggerSettings().level,

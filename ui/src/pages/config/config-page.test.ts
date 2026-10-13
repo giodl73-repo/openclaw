@@ -29,7 +29,7 @@ import { createStorageMock } from "../../test-helpers/storage.ts";
 import * as realtimeTalk from "../chat/talk/session.ts";
 import { mountConfigPage, publishConfigSource } from "./config-page.test-support.ts";
 import { ConfigPageController, extractQuickSettingsSecurity } from "./config-page.ts";
-import type { ConfigViewState } from "./view.tsx";
+import type { ConfigViewState } from "./view-types.ts";
 
 const switchActiveRealtimeTalkCameras =
   vi.fn<typeof realtimeTalk.switchActiveRealtimeTalkCameras>();
@@ -604,7 +604,11 @@ describe("ConfigPage Updates integration", () => {
 
   it("stages policy changes through patchForm and confirms Update now before overlays", async () => {
     const patchForm = vi.fn();
-    const runUpdate = vi.fn();
+    const updateActions = {
+      captureUpdateTarget: () => () => true,
+      runUpdate: vi.fn<ApplicationContext["overlays"]["runUpdate"]>(),
+    } satisfies Pick<ApplicationContext["overlays"], "captureUpdateTarget" | "runUpdate">;
+    const { runUpdate } = updateActions;
     const context = {
       config: {
         current: { assistantIdentity: { name: "OpenClaw" }, serverVersion: "2026.8.1" },
@@ -642,7 +646,7 @@ describe("ConfigPage Updates integration", () => {
           updateStatusBanner: null,
         },
         subscribe: () => () => undefined,
-        runUpdate,
+        ...updateActions,
       },
     } as unknown as ApplicationContext;
     const view = mountConfigPage(context, { pageId: "updates" });

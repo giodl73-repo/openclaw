@@ -8,7 +8,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { createRequireRecord } from "../../test/helpers/record.js";
-import { AgentDeletionCommitUncertainError } from "../agents/agent-lifecycle-registry.js";
+import { AgentDeletionCommitUncertainError } from "../agents/agent-deletion-errors.js";
 import {
   abortAndDrainEmbeddedAgentRun,
   clearActiveEmbeddedRun,
@@ -25,6 +25,7 @@ import type * as deliveryTarget from "../cron/isolated-agent/delivery-target.js"
 import { CronService } from "../cron/service.js";
 import { waitForCronRunQueue } from "../cron/service/run-queue.js";
 import { onTimer as onCronTimer } from "../cron/service/timer.test-support.js";
+import { resolveSelectedCronJobsStorePath } from "../cron/store/paths.js";
 import type { HeartbeatRunResult } from "../infra/heartbeat-wake.js";
 import {
   OutboundDeliveryError,
@@ -39,7 +40,6 @@ import {
   tryBeginGatewaySuspendAdmission,
 } from "../process/gateway-work-admission.js";
 import type { RunExit } from "../process/supervisor/types.js";
-import { writeConfigMachineState } from "../state/config-machine-state-write.js";
 import {
   createGatewaySchedulerClock,
   createTestGatewayScheduler,
@@ -77,7 +77,6 @@ const {
   createCronScriptRuntimeMock,
   cronTriggerEvaluatorMock,
   cronScriptExecutorMock,
-  isAgentDeletionBlockedMock,
 } = vi.hoisted(() => ({
   enqueueSystemEventMock: vi.fn(),
   systemEventReceiptRemoveMock: vi.fn(() => true),
@@ -160,7 +159,6 @@ const {
   createCronScriptRuntimeMock: vi.fn(),
   cronTriggerEvaluatorMock: vi.fn(),
   cronScriptExecutorMock: vi.fn(),
-  isAgentDeletionBlockedMock: vi.fn((_agentId: string) => false),
 }));
 
 function enqueueSystemEvent(text: string, opts?: unknown) {
@@ -257,12 +255,6 @@ vi.mock("../agents/agent-bundle-mcp-tools.js", () => ({
   retireSessionMcpRuntime: retireSessionMcpRuntimeMock,
 }));
 
-vi.mock("../agents/agent-lifecycle-registry.js", () => ({
-  AgentDeletionAuthorityRollbackError: class extends AggregateError {},
-  AgentDeletionCommitUncertainError: class extends Error {},
-  isAgentDeletionBlocked: isAgentDeletionBlockedMock,
-}));
-
 vi.mock("../process/supervisor/index.js", () => ({
   getProcessSupervisor: getProcessSupervisorMock,
 }));
@@ -283,19 +275,26 @@ import type { CronJob, CronJobCreate } from "../cron/types.js";
 import { fireOnExitJob } from "./server-cron-event-dispatch.js";
 import { buildGatewayCronService as buildGatewayCronServiceRuntime } from "./server-cron.js";
 
-function buildGatewayCronService(params: Parameters<typeof buildGatewayCronServiceRuntime>[0]) {
+function buildGatewayCronService(
+  params: Omit<Parameters<typeof buildGatewayCronServiceRuntime>[0], "storePath">,
+) {
   const legacyStore = (params.cfg.cron as { store?: unknown } | undefined)?.store;
-  if (typeof legacyStore !== "string") {
-    return buildGatewayCronServiceRuntime(params);
-  }
-  const env = {
-    ...process.env,
-    OPENCLAW_SKIP_CRON: "0",
-    OPENCLAW_STATE_DIR: path.dirname(legacyStore),
-  };
-  // These fixtures predate the config-to-SQLite move; seed the canonical machine-state owner.
-  writeConfigMachineState("cron.store", legacyStore, { env });
-  return buildGatewayCronServiceRuntime({ ...params, env });
+  const env =
+    typeof legacyStore === "string"
+      ? {
+          ...process.env,
+          OPENCLAW_SKIP_CRON: "0",
+          OPENCLAW_STATE_DIR: path.dirname(legacyStore),
+        }
+      : (params.env ?? process.env);
+  return buildGatewayCronServiceRuntime({
+    ...params,
+    env,
+    storePath: resolveSelectedCronJobsStorePath(
+      typeof legacyStore === "string" ? legacyStore : undefined,
+      env,
+    ),
+  });
 }
 
 function createCronConfig(name: string): OpenClawConfig {
@@ -555,7 +554,6 @@ describe("buildGatewayCronService", () => {
     cronTriggerEvaluatorMock.mockReset();
     cronTriggerEvaluatorMock.mockResolvedValue({ kind: "evaluated", fire: false });
     cronScriptExecutorMock.mockReset();
-    isAgentDeletionBlockedMock.mockReset().mockReturnValue(false);
     cronScriptExecutorMock.mockResolvedValue({ kind: "completed", stateChanged: false });
     createCronScriptRuntimeMock.mockReset();
     createCronScriptRuntimeMock.mockReturnValue({
@@ -2801,29 +2799,6 @@ describe("buildGatewayCronService", () => {
         "follows-runtime-default",
         "new-runtime-default",
       ]);
-    });
-  });
-
-  it("does not execute jobs for a journal-fenced agent still present in the roster", async () => {
-    const tmpDir = path.join(os.tmpdir(), `server-cron-agent-fenced-${Date.now()}`);
-    const cfg = {
-      cron: { store: path.join(tmpDir, "cron.json") },
-      agents: { entries: { main: {}, yinze: {} } },
-    } as OpenClawConfig;
-    await withCronService(cfg, async (state) => {
-      const job = await addAgentTurnJob(state, "fenced-job", "must not run", {
-        agentId: "yinze",
-      });
-      isAgentDeletionBlockedMock.mockImplementation((agentId: string) => agentId === "yinze");
-
-      await expect(state.cron.run(job.id, "force")).resolves.toEqual({ ok: true, ran: true });
-      expect(runCronIsolatedAgentTurnMock).not.toHaveBeenCalled();
-      expect(await state.cron.readJob(job.id)).toMatchObject({
-        state: {
-          lastRunStatus: "error",
-          lastError: expect.stringContaining("cron job agent is unavailable: yinze"),
-        },
-      });
     });
   });
 
