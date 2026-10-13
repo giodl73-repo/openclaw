@@ -16,8 +16,6 @@ export type CronDeliveryTargetContext = {
   mainSessionKey: string;
   rawSessionKey?: string;
   threadSessionKey?: string;
-  /** Exact session entry that supplied the detached delivery route, when proven. */
-  routeSourceSessionKey?: string;
   main?: SessionEntry;
   usedSharedMainFallback: boolean;
 };
@@ -55,7 +53,7 @@ export async function readCronDeliveryTargetContexts(
   });
   const recovered = await extractDeliveryInfoBatch(
     planned.map((item) => (item.ok ? item.value.threadSessionKey : undefined)),
-    { cfg, includeSourceSessionKey: true },
+    { cfg },
   );
   const targets: Array<{ index: number; plan: CronDeliveryReadPlan }> = [];
   for (const [index, item] of planned.entries()) {
@@ -119,11 +117,6 @@ export async function readCronDeliveryTargetContexts(
                 ? normalizeSessionDeliveryState({ context })
                 : structuredClone(selected?.delivery),
             }
-          : undefined,
-      routeSourceSessionKey: context
-        ? recoveredInfo?.sourceSessionKey
-        : threadEntry
-          ? threadSessionKey
           : undefined,
       usedSharedMainFallback: !context && !threadEntry && mainEntry !== undefined,
     });

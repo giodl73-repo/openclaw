@@ -479,6 +479,20 @@ describe("Gateway heartbeat and cron session routing", () => {
           throw new Error("gateway runtime config snapshot was not initialized");
         }
         const client = gateway.client;
+        const expectCronExecutionTranscript = async (
+          jobId: string,
+          runId: string,
+          reply: string,
+        ) => {
+          const history = await client.request<{
+            entries: Array<{ runId?: string; sessionKey?: string }>;
+          }>("cron.runs", { id: jobId, runId, limit: 1 });
+          const sessionKey = history.entries.find((entry) => entry.runId === runId)?.sessionKey;
+          if (!sessionKey) {
+            throw new Error(`Cron run ${runId} did not record its execution session`);
+          }
+          expect(JSON.stringify(await readSessionTranscript(sessionKey))).toContain(reply);
+        };
 
         const seedSession = async (params: {
           sessionId: string;
@@ -694,12 +708,7 @@ describe("Gateway heartbeat and cron session routing", () => {
           threadId: null,
           to: "cron-source-destination",
         });
-        await expect
-          .poll(() => readSessionTranscript(cronSourceKey).then(JSON.stringify), {
-            timeout: 15_000,
-            interval: 50,
-          })
-          .toContain(cronReply);
+        await expectCronExecutionTranscript(cronJob.id, cronRun.runId, cronReply);
         expect(
           loadSessionEntry({
             agentId: "main",
@@ -707,10 +716,17 @@ describe("Gateway heartbeat and cron session routing", () => {
             readConsistency: "latest",
           })?.sessionId,
         ).toBe(cronSourceSessionId);
-        expect(peekSystemEvents(cronSourceKey).join("\n")).toContain(cronReply);
-        expect(JSON.stringify(await readSessionTranscript(mainSessionKey))).not.toContain(
-          cronReply,
+        // Execution keeps its own transcript; confirmed delivery belongs to the destination.
+        expect(JSON.stringify(await readSessionTranscript(cronSourceKey))).not.toContain(cronReply);
+        expect(peekSystemEvents(cronSourceKey)).toEqual([]);
+        const cronDestinationResults = (await readSessionTranscript(mainSessionKey)).filter(
+          (message) => JSON.stringify(message).includes(cronReply),
         );
+        expect(cronDestinationResults).toHaveLength(1);
+        expect(cronDestinationResults[0]).toMatchObject({
+          role: "assistant",
+          openclawAutomation: { kind: "cron", jobId: cronJob.id, runId: expect.any(String) },
+        });
 
         const allowedMediaJob = await client.request<{
           id: string;
@@ -776,12 +792,27 @@ describe("Gateway heartbeat and cron session routing", () => {
           threadId: null,
           to: "group-media-allowed",
         });
-        await expect
-          .poll(() => readSessionTranscript(allowedMediaSourceKey).then(JSON.stringify), {
-            timeout: 15_000,
-            interval: 50,
-          })
-          .toContain(allowedMediaReply);
+        await expectCronExecutionTranscript(
+          allowedMediaJob.id,
+          allowedMediaRun.runId,
+          allowedMediaReply,
+        );
+        expect(JSON.stringify(await readSessionTranscript(allowedMediaSourceKey))).not.toContain(
+          allowedMediaReply,
+        );
+        expect(peekSystemEvents(allowedMediaSourceKey)).toEqual([]);
+        const allowedMediaDestinationResults = (
+          await readSessionTranscript(`agent:main:${PROOF_CHANNEL_ID}:group:group-media-allowed`)
+        ).filter((message) => JSON.stringify(message).includes(allowedMediaReply));
+        expect(allowedMediaDestinationResults).toHaveLength(1);
+        expect(allowedMediaDestinationResults[0]).toMatchObject({
+          role: "assistant",
+          openclawAutomation: {
+            kind: "cron",
+            jobId: allowedMediaJob.id,
+            runId: expect.any(String),
+          },
+        });
 
         const deniedMediaJob = await client.request<{
           id: string;
@@ -851,12 +882,15 @@ describe("Gateway heartbeat and cron session routing", () => {
             deliveryStatus: "not-delivered",
           }),
         );
-        await expect
-          .poll(() => readSessionTranscript(deniedMediaSourceKey).then(JSON.stringify), {
-            timeout: 15_000,
-            interval: 50,
-          })
-          .toContain(deniedMediaReply);
+        await expectCronExecutionTranscript(
+          deniedMediaJob.id,
+          deniedMediaRun.runId,
+          deniedMediaReply,
+        );
+        expect(JSON.stringify(await readSessionTranscript(deniedMediaSourceKey))).not.toContain(
+          deniedMediaReply,
+        );
+        expect(peekSystemEvents(deniedMediaSourceKey)).toEqual([]);
         expect(await readDeliveryTrace(deliveryTracePath)).toHaveLength(3);
         expect((await readDeliveryTrace(deliveryTracePath)).map((entry) => entry.to)).not.toContain(
           "group-media-denied",
@@ -948,9 +982,12 @@ describe("Gateway heartbeat and cron session routing", () => {
         expect(JSON.stringify(await readSessionTranscript(configuredSessionKey))).not.toContain(
           explicitReply,
         );
-        const mainTranscript = JSON.stringify(await readSessionTranscript(mainSessionKey));
+        const mainMessages = await readSessionTranscript(mainSessionKey);
+        const mainTranscript = JSON.stringify(mainMessages);
         expect(mainTranscript).not.toContain(configuredReply);
-        expect(mainTranscript).not.toContain(cronReply);
+        expect(
+          mainMessages.filter((message) => JSON.stringify(message).includes(cronReply)),
+        ).toEqual(cronDestinationResults);
         expect(mainTranscript).not.toContain(explicitReply);
         expect((await readDeliveryTrace(deliveryTracePath)).map((entry) => entry.to)).not.toContain(
           "main-destination",

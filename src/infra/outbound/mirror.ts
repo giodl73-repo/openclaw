@@ -1,9 +1,5 @@
 import type { SessionTranscriptDeliveryMirror } from "../../config/sessions/transcript-mirror.js";
 
-type DirectCronDeliveryMirror = {
-  kind: "cron-direct-delivery-context";
-};
-
 /**
  * Transcript append data emitted after an outbound send completes.
  */
@@ -14,9 +10,7 @@ export type OutboundMirror = {
   mediaUrls?: string[];
   idempotencyKey?: string;
   expectedSessionId?: string;
-  deliveryMirror?: SessionTranscriptDeliveryMirror | DirectCronDeliveryMirror;
-  /** Also wake the mirrored session with the delivered text after the transcript append succeeds. */
-  enqueueSystemEvent?: boolean;
+  deliveryMirror?: SessionTranscriptDeliveryMirror;
 };
 
 /**

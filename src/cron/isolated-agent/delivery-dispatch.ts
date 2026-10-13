@@ -293,13 +293,7 @@ export async function dispatchCronDelivery(
         jobId: params.job.id,
         target: {
           ...params.resolvedDelivery,
-          sessionKey:
-            params.resolvedDelivery.sourceSessionKey ??
-            params.resolvedDelivery.sessionRoute?.sessionKey,
-          ...(params.resolvedDelivery.sourceSessionKey &&
-          params.resolvedDelivery.sessionRoute?.sessionKey
-            ? { policySessionKey: params.resolvedDelivery.sessionRoute.sessionKey }
-            : {}),
+          sessionKey: params.resolvedDelivery.sessionRoute?.sessionKey,
         },
         payload: deliveryPayloads,
         sessionGeneration: resolveDirectCronDeliveryGeneration(params),
