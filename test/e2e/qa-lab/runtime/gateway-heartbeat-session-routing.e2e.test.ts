@@ -484,14 +484,12 @@ describe("Gateway heartbeat and cron session routing", () => {
           runId: string,
           reply: string,
         ) => {
-          const history = await client.request<{
-            entries: Array<{ runId?: string; sessionKey?: string }>;
-          }>("cron.runs", { id: jobId, runId, limit: 1 });
-          const sessionKey = history.entries.find((entry) => entry.runId === runId)?.sessionKey;
-          if (!sessionKey) {
-            throw new Error(`Cron run ${runId} did not record its execution session`);
-          }
-          expect(JSON.stringify(await readSessionTranscript(sessionKey))).toContain(reply);
+          const history = await client.request<{ messages: unknown[] }>("cron.history", {
+            id: jobId,
+            runId,
+            limit: 100,
+          });
+          expect(JSON.stringify(history.messages)).toContain(reply);
         };
 
         const seedSession = async (params: {
