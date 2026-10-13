@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { withOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
 import { appendAssistantMessageToSessionTranscript } from "../../config/sessions/transcript.runtime.js";
+import { peekSystemEvents, resetSystemEventsForTest } from "../system-events.js";
 import { mirrorDeliveredPayloads } from "./deliver-transcript.js";
 import type { NormalizedOutboundPayload } from "./payloads.js";
 
@@ -66,6 +67,7 @@ function appendedArgs() {
 
 describe("outbound delivery mirror writer fence", () => {
   beforeEach(() => {
+    resetSystemEventsForTest();
     mocks.appendAssistantMessageToSessionTranscript.mockClear();
     mocks.appendAssistantMessageToSessionTranscript.mockResolvedValue({ ok: true } as const);
   });
@@ -102,5 +104,24 @@ describe("outbound delivery mirror writer fence", () => {
     const args = appendedArgs();
     expect(args).toMatchObject({ sessionKey: RUNNING_SESSION_KEY });
     expect(args).not.toHaveProperty("expectedWriterRunId");
+  });
+
+  it("queues a system event for mirrors that request a session wake", async () => {
+    await mirrorDeliveredPayloads({
+      delivery: {
+        cfg: {},
+        channel: "discord",
+        to: "1497965766035640391",
+        payloads: [],
+        mirror: {
+          agentId: "wolf",
+          sessionKey: RUNNING_SESSION_KEY,
+          enqueueSystemEvent: true,
+        },
+      },
+      payloads: [payload("delivered wake notice")],
+    });
+
+    expect(peekSystemEvents(RUNNING_SESSION_KEY)).toEqual(["delivered wake notice"]);
   });
 });

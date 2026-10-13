@@ -17,6 +17,7 @@ import { outboundDeliveryQueueName } from "../infra/outbound/delivery-queue-name
 import { resolveAgentOutboundIdentity } from "../infra/outbound/identity.js";
 import { buildOutboundSessionContext } from "../infra/outbound/session-context.js";
 import { hasReplyPayloadContent } from "../interactive/payload.js";
+import { CRON_DIRECT_DELIVERY_CONTEXT_KIND } from "../shared/transcript-only-openclaw-assistant.js";
 import type { CronCompletionDeliveryFence } from "./delivery-attempt-fence.js";
 import {
   buildDirectCronDeliveryIdempotencyKey,
@@ -169,6 +170,18 @@ export async function sendCronAnnouncePayloadStrict(params: {
           assertDirectAdapterHandoff: fence?.assertCurrent,
           onDeliveredPayload: ({ hookContent, ...payload }) =>
             deliveredPayloads.push({ ...payload, spokenText: hookContent }),
+          ...(params.sessionGeneration
+            ? {
+                mirror: {
+                  agentId: params.agentId,
+                  sessionKey: params.sessionGeneration.sessionKey,
+                  expectedSessionId: params.sessionGeneration.sessionId,
+                  ...(id ? { idempotencyKey: id } : {}),
+                  deliveryMirror: { kind: CRON_DIRECT_DELIVERY_CONTEXT_KIND },
+                  enqueueSystemEvent: true,
+                },
+              }
+            : {}),
           onDeliveryResult: () => {
             if (!recipientReached) {
               recipientReached = true;

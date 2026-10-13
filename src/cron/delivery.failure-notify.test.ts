@@ -78,6 +78,13 @@ describe("sendCronAnnouncePayloadStrict", () => {
       jobId: job.id,
       payload: payloads,
       completion: { job, runStartedAt: 1000, deliveryAttemptFence: null },
+      sessionGeneration: {
+        agentId: "main",
+        storePath: "/tmp/openclaw/sessions.sqlite",
+        sessionKey: "agent:main:dashboard:cron-source",
+        sessionId: "cron-source-session",
+        lifecycleRevision: "cron-source-revision",
+      },
     });
     expect(result).toEqual({
       status: "sent",
@@ -95,6 +102,14 @@ describe("sendCronAnnouncePayloadStrict", () => {
         payloads,
         bestEffort: false,
         deliveryIntentId: "cron-direct-delivery:v1:cron:job-1:1000:telegram:bot-a:123:42",
+        mirror: {
+          agentId: "main",
+          sessionKey: "agent:main:dashboard:cron-source",
+          expectedSessionId: "cron-source-session",
+          idempotencyKey: "cron-direct-delivery:v1:cron:job-1:1000:telegram:bot-a:123:42",
+          deliveryMirror: { kind: "cron-direct-delivery-context" },
+          enqueueSystemEvent: true,
+        },
       }),
       undefined,
     );

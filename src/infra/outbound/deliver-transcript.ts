@@ -4,6 +4,8 @@ import { getOwnedSessionTranscriptWriterFence } from "../../config/sessions/tran
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { formatErrorMessage } from "../errors.js";
+import { withSystemEventOwner } from "../system-event-ownership.js";
+import { enqueueSystemEvent } from "../system-events.js";
 import type { DeliverOutboundPayloadsCoreParams } from "./deliver-contracts.js";
 import { resolveOutboundPayloadMirrorText, type NormalizedOutboundPayload } from "./payloads.js";
 
@@ -57,6 +59,17 @@ export async function mirrorDeliveredPayloads(params: {
     });
     if (!mirrorResult.ok) {
       warnFailure(mirrorResult.reason);
+      return;
+    }
+    if (mirror.enqueueSystemEvent) {
+      const eventOptions = {
+        sessionKey: mirror.sessionKey,
+        ...(mirror.idempotencyKey ? { contextKey: mirror.idempotencyKey } : {}),
+      };
+      enqueueSystemEvent(
+        mirrorText,
+        mirror.agentId ? withSystemEventOwner(eventOptions, mirror.agentId) : eventOptions,
+      );
     }
   } catch (err) {
     warnFailure(formatErrorMessage(err));

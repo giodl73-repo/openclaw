@@ -200,13 +200,8 @@ export async function resolveDeliveryTarget(
       }
       return result.value;
     })());
-  const {
-    mainSessionKey,
-    rawSessionKey,
-    threadSessionKey,
-    routeSourceSessionKey,
-    usedSharedMainFallback,
-  } = sessionContext;
+  const { rawSessionKey, threadSessionKey, routeSourceSessionKey, usedSharedMainFallback } =
+    sessionContext;
   const hasConversationCompletion =
     jobPayload.sessionTarget === "current" || jobPayload.sourceConversation !== undefined;
   // A missing creating conversation cannot inherit another conversation's shared route.

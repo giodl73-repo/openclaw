@@ -20,6 +20,7 @@ import {
   holdConversationWriterForTest,
   readConversationDeliveryStateForTest,
 } from "../../gateway/conversation-delivery.test-support.js";
+import { withAuthorizedQueuedConversationDelivery } from "../../gateway/conversation-route-ownership.js";
 import { runGatewayConversationSend } from "../../gateway/conversation-send.js";
 import {
   initializeGlobalHookRunner,
@@ -649,60 +650,69 @@ describe("conversation completion through the real delivery queue", () => {
 
   it("rechecks persisted route authority after durable queue admission", async () => {
     const operationId = "revoked-after-queue-admission";
+    const queueId = "revoked-after-queue-admission-queue";
     const message = "must remain unsent after route withdrawal";
     const { stateDir, scope } = await createConversationOperation(operationId, message);
+    const routeFingerprint = resolveConversationRouteFingerprint(conversation);
+    const conversationDeliveryTarget = captureConversationDeliveryTarget(scope);
     const sendText = vi.fn(async () => ({
       channel: "reef" as const,
       messageId: "must-not-send",
     }));
     installSender(sendText);
-    const enqueueReply = holdEnqueueReply();
-    const delivery = runGatewayConversationSend({
-      config: {},
-      readCurrentConfig: () => ({}),
-      agentId: "main",
-      senderIsOwner: true,
-      operationId,
-      conversationRef: conversation.conversationRef,
-      message,
+
+    await registerConversationAddresses(scope, [
+      { ...conversation, deliveryTarget: "reef:withdrawn" },
+    ]);
+
+    await expect(
+      deliverOutboundPayloadsInternal({
+        cfg: {},
+        channel: "reef",
+        to: conversation.target,
+        payloads: [{ text: message }],
+        queuePolicy: "required",
+        deliveryIntentId: queueId,
+        deliveryCompletion: {
+          kind: "conversation",
+          agentId: "main",
+          operationId,
+          routeFingerprint,
+        },
+        conversationDeliveryTarget,
+        onDeliveryAttempt: () =>
+          withAuthorizedQueuedConversationDelivery(
+            {
+              readCurrentConfig: () => ({}),
+              operationId,
+              routeFingerprint,
+            },
+            scope,
+            async () => undefined,
+          ),
+      }),
+    ).rejects.toMatchObject({ queueCustody: "held" });
+    expect(sendText).not.toHaveBeenCalled();
+    expect(await getConversationDeliveryOperation(scope, operationId)).toMatchObject({
+      status: "queued",
+      queueId,
     });
-    const outcome = delivery.then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error }),
+    expect(getDeliveryQueueEntryStatus(OUTBOUND_DELIVERY_QUEUE_NAME, queueId, stateDir)).toBe(
+      "pending",
     );
-    try {
-      await enqueueReply.held;
-      const [queued] = readQueuedEntries(stateDir);
-      if (!queued || typeof queued.id !== "string") {
-        throw new Error("Committed conversation delivery was not readable from the real queue");
-      }
-      const queueId = queued.id;
-      expect(getDeliveryQueueEntryStatus(OUTBOUND_DELIVERY_QUEUE_NAME, queueId, stateDir)).toBe(
-        "pending",
-      );
-      expect(sendText).not.toHaveBeenCalled();
 
-      registerConversationAddresses(scope, [{ ...conversation, deliveryTarget: "reef:withdrawn" }]);
-      enqueueReply.release();
-
-      await expect(delivery).rejects.toMatchObject({
-        name: "ConversationInputError",
-        message: `Conversation is no longer available to this agent: ${conversation.conversationRef}`,
-      });
-      expect(sendText).not.toHaveBeenCalled();
-      expect(await getConversationDeliveryOperation(scope, operationId)).toMatchObject({
-        status: "rejected",
-        queueId,
-        rejectionError: `Conversation is no longer available to this agent: ${conversation.conversationRef}`,
-      });
-      expect(getDeliveryQueueEntryStatus(OUTBOUND_DELIVERY_QUEUE_NAME, queueId, stateDir)).toBe(
-        "failed",
-      );
-      expect(await loadUnfinishedDelivery(queueId, stateDir)).toBeNull();
-    } finally {
-      enqueueReply.release();
-      await outcome;
-      enqueueReply.restore();
-    }
+    await drainReefRecovery(stateDir);
+    expect(sendText).not.toHaveBeenCalled();
+    expect(await getConversationDeliveryOperation(scope, operationId)).toMatchObject({
+      status: "rejected",
+      queueId,
+      rejectionError: expect.stringContaining(
+        "Conversation delivery is missing its current route authorization",
+      ),
+    });
+    expect(getDeliveryQueueEntryStatus(OUTBOUND_DELIVERY_QUEUE_NAME, queueId, stateDir)).toBe(
+      "failed",
+    );
+    expect(await loadUnfinishedDelivery(queueId, stateDir)).toBeNull();
   });
 });
