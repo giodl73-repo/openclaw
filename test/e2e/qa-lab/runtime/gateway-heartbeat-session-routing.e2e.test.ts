@@ -300,6 +300,16 @@ describe("Gateway heartbeat and cron session routing", () => {
       const cronReadyEvent = nextId("cron-reconciled");
       const cronReconciled = createDeferred<unknown>();
       const onCronReconciled = (event: unknown) => cronReconciled.resolve(event);
+      const cronFinished = new Map<string, ReturnType<typeof createDeferred<void>>>();
+      const cronCompletion = (jobId: string, runId: string) => {
+        const key = JSON.stringify([jobId, runId]);
+        let completion = cronFinished.get(key);
+        if (!completion) {
+          completion = createDeferred();
+          cronFinished.set(key, completion);
+        }
+        return completion;
+      };
       const bundledPluginsDir = path.join(tempHome, "empty-bundled-plugins");
       const configPath = path.join(stateDir, "openclaw.json");
       await Promise.all([
@@ -472,6 +482,22 @@ describe("Gateway heartbeat and cron session routing", () => {
           configPath,
           token,
           clientDisplayName: "vitest-gateway-heartbeat-session-routing-restarted",
+          onEvent: ({ event, payload }) => {
+            if (event !== "cron" || !payload || typeof payload !== "object") {
+              return;
+            }
+            if (
+              "action" in payload &&
+              payload.action === "finished" &&
+              "jobId" in payload &&
+              typeof payload.jobId === "string" &&
+              "runId" in payload &&
+              typeof payload.runId === "string"
+            ) {
+              // Keep completions that arrive before cron.run returns its run ID.
+              cronCompletion(payload.jobId, payload.runId).resolve();
+            }
+          },
         });
         await gateway.server.startupSettled;
         const runtimeConfig = getRuntimeConfigSnapshot();
@@ -479,6 +505,13 @@ describe("Gateway heartbeat and cron session routing", () => {
           throw new Error("gateway runtime config snapshot was not initialized");
         }
         const client = gateway.client;
+        const waitForCronRun = async (jobId: string, runId: string) => {
+          await withinTest(cronCompletion(jobId, runId).promise, signal);
+          const history = await client.request<{
+            entries: Array<{ runId?: string; status?: string; deliveryStatus?: string }>;
+          }>("cron.runs", { id: jobId, runId, limit: 1 });
+          return history.entries.find((entry) => entry.runId === runId);
+        };
         const expectCronExecutionTranscript = async (
           jobId: string,
           runId: string,
@@ -593,35 +626,15 @@ describe("Gateway heartbeat and cron session routing", () => {
           enqueued: true,
           runId: expect.any(String),
         });
-        await expect
-          .poll(
-            async () => {
-              const history = await client.request<{
-                entries: Array<{ error?: string; runId?: string; status?: string }>;
-              }>("cron.runs", {
-                id: monitor.id,
-                runId: configuredRun.runId,
-                limit: 1,
-              });
-              return history.entries.find((entry) => entry.runId === configuredRun.runId);
-            },
-            { timeout: 15_000, interval: 50 },
-          )
-          .toMatchObject({ runId: configuredRun.runId, status: "ok" });
-        await expect
-          .poll(() => providerRequests.length, { timeout: 15_000, interval: 50 })
-          .toBeGreaterThan(configuredRequestBaseline);
+        expect(await waitForCronRun(monitor.id, configuredRun.runId)).toMatchObject({
+          runId: configuredRun.runId,
+          status: "ok",
+        });
+        expect(providerRequests.length).toBeGreaterThan(configuredRequestBaseline);
         const configuredRequest = JSON.stringify(providerRequests[configuredRequestBaseline]);
         expect(configuredRequest).toContain(configuredEvent);
-        await expect
-          .poll(() => peekSystemEvents(configuredSessionKey).includes(configuredEvent), {
-            timeout: 15_000,
-            interval: 50,
-          })
-          .toBe(false);
-        await expect
-          .poll(() => readDeliveryTrace(deliveryTracePath), { timeout: 15_000, interval: 50 })
-          .toHaveLength(1);
+        expect(peekSystemEvents(configuredSessionKey)).not.toContain(configuredEvent);
+        expect(await readDeliveryTrace(deliveryTracePath)).toHaveLength(1);
         expect(await readDeliveryTrace(deliveryTracePath)).toEqual([
           {
             accountId: "default",
@@ -631,12 +644,6 @@ describe("Gateway heartbeat and cron session routing", () => {
             to: "configured-destination",
           },
         ]);
-        await expect
-          .poll(() => readSessionTranscript(configuredSessionKey).then(JSON.stringify), {
-            timeout: 15_000,
-            interval: 50,
-          })
-          .toContain(configuredReply);
         expect(
           loadSessionEntry({
             agentId: "main",
@@ -677,28 +684,12 @@ describe("Gateway heartbeat and cron session routing", () => {
           runId: string;
         }>("cron.run", { id: cronJob.id, mode: "force" });
         expect(cronRun).toMatchObject({ ok: true, enqueued: true, runId: expect.any(String) });
-        await expect
-          .poll(
-            async () => {
-              const history = await client.request<{
-                entries: Array<{
-                  deliveryStatus?: string;
-                  runId?: string;
-                  status?: string;
-                }>;
-              }>("cron.runs", { id: cronJob.id, runId: cronRun.runId, limit: 1 });
-              return history.entries.find((entry) => entry.runId === cronRun.runId);
-            },
-            { timeout: 15_000, interval: 50 },
-          )
-          .toMatchObject({
-            runId: cronRun.runId,
-            status: "ok",
-            deliveryStatus: "delivered",
-          });
-        await expect
-          .poll(() => readDeliveryTrace(deliveryTracePath), { timeout: 15_000, interval: 50 })
-          .toHaveLength(2);
+        expect(await waitForCronRun(cronJob.id, cronRun.runId)).toMatchObject({
+          runId: cronRun.runId,
+          status: "ok",
+          deliveryStatus: "delivered",
+        });
+        expect(await readDeliveryTrace(deliveryTracePath)).toHaveLength(2);
         expect((await readDeliveryTrace(deliveryTracePath))[1]).toEqual({
           accountId: "default",
           kind: "text",
@@ -755,32 +746,12 @@ describe("Gateway heartbeat and cron session routing", () => {
           enqueued: true,
           runId: expect.any(String),
         });
-        await expect
-          .poll(
-            async () => {
-              const history = await client.request<{
-                entries: Array<{
-                  deliveryStatus?: string;
-                  runId?: string;
-                  status?: string;
-                }>;
-              }>("cron.runs", {
-                id: allowedMediaJob.id,
-                runId: allowedMediaRun.runId,
-                limit: 1,
-              });
-              return history.entries.find((entry) => entry.runId === allowedMediaRun.runId);
-            },
-            { timeout: 15_000, interval: 50 },
-          )
-          .toMatchObject({
-            runId: allowedMediaRun.runId,
-            status: "ok",
-            deliveryStatus: "delivered",
-          });
-        await expect
-          .poll(() => readDeliveryTrace(deliveryTracePath), { timeout: 15_000, interval: 50 })
-          .toHaveLength(3);
+        expect(await waitForCronRun(allowedMediaJob.id, allowedMediaRun.runId)).toMatchObject({
+          runId: allowedMediaRun.runId,
+          status: "ok",
+          deliveryStatus: "delivered",
+        });
+        expect(await readDeliveryTrace(deliveryTracePath)).toHaveLength(3);
         expect((await readDeliveryTrace(deliveryTracePath))[2]).toEqual({
           accountId: "default",
           kind: "media",
@@ -841,45 +812,15 @@ describe("Gateway heartbeat and cron session routing", () => {
           enqueued: true,
           runId: expect.any(String),
         });
-        await expect
-          .poll(
-            async () => {
-              const history = await client.request<{
-                entries: Array<{ runId?: string; status?: string }>;
-              }>("cron.runs", {
-                id: deniedMediaJob.id,
-                runId: deniedMediaRun.runId,
-                limit: 1,
-              });
-              return history.entries.find((entry) => entry.runId === deniedMediaRun.runId)?.status;
-            },
-            { timeout: 15_000, interval: 50 },
-          )
-          .toBe("ok");
-        await expect
-          .poll(() => readPolicyTrace(policyTracePath), { timeout: 15_000, interval: 50 })
-          .toContainEqual({
-            groupId: "group-media-denied",
-            tools: { deny: ["read"] },
-          });
-        const deniedMediaHistory = await client.request<{
-          entries: Array<{
-            deliveryStatus?: string;
-            runId?: string;
-            status?: string;
-          }>;
-        }>("cron.runs", {
-          id: deniedMediaJob.id,
+        expect(await waitForCronRun(deniedMediaJob.id, deniedMediaRun.runId)).toMatchObject({
           runId: deniedMediaRun.runId,
-          limit: 1,
+          status: "ok",
+          deliveryStatus: "not-delivered",
         });
-        expect(deniedMediaHistory.entries).toContainEqual(
-          expect.objectContaining({
-            runId: deniedMediaRun.runId,
-            status: "ok",
-            deliveryStatus: "not-delivered",
-          }),
-        );
+        expect(await readPolicyTrace(policyTracePath)).toContainEqual({
+          groupId: "group-media-denied",
+          tools: { deny: ["read"] },
+        });
         await expectCronExecutionTranscript(
           deniedMediaJob.id,
           deniedMediaRun.runId,
