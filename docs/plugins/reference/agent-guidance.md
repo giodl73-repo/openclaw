@@ -1,5 +1,5 @@
 ---
-summary: "Adds operator-managed instruction files to selected agents' system context."
+summary: "Shares instruction files across selected agents without editing their workspace files."
 read_when:
   - You are installing, configuring, or auditing the agent-guidance plugin
 title: "Agent Guidance plugin reference"
@@ -10,7 +10,7 @@ Run `pnpm plugins:inventory:gen` to rebuild it. Hand-written text survives only
 between the openclaw-plugin-reference:manual-start and
 openclaw-plugin-reference:manual-end comment markers. -->
 
-Adds operator-managed instruction files to selected agents' system context.
+Shares instruction files across selected agents without editing their workspace files.
 
 ## Distribution
 

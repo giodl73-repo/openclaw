@@ -2,7 +2,7 @@
   "name": "@openclaw/agent-guidance",
   "version": "2026.10.3",
   "private": true,
-  "description": "Operator-managed guidance for selected OpenClaw agents",
+  "description": "Shared instruction files for selected OpenClaw agents",
   "type": "module",
   "dependencies": {
     "@openclaw/fs-safe": "0.26.5"

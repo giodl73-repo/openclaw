@@ -8,10 +8,39 @@ title: "Agent Guidance"
 
 # Agent Guidance
 
-Agent Guidance is an optional bundled plugin that adds operator-managed files
-to selected agents' system context. It keeps shared instructions in one place
-without patching OpenClaw's base prompt or rewriting AGENTS.md, TOOLS.md or
-SOUL.md. Workspace instructions remain agent/user-owned.
+Agent Guidance shares instruction files across selected agents. OpenClaw adds
+their text directly to the prompt sent to the model, before or after its normal
+instructions. The plugin does not edit `AGENTS.md`, `SOUL.md`, or other workspace
+files. Each agent keeps its own instructions, personality, and memory.
+
+## When to use it
+
+| What you need                                                    | Use                                                                       |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Instructions for one agent                                       | That agent's workspace `AGENTS.md`                                        |
+| Additional recognized context files inside a workspace           | The [bootstrap-extra-files hook](/automation/hooks#bootstrap-extra-files) |
+| One separately maintained set of instructions for several agents | Agent Guidance                                                            |
+| Instructions that depend on custom runtime logic                 | A plugin using [prompt hooks](/plugins/hooks/prompt-and-session)          |
+
+Without this plugin, you can copy shared instructions into each agent's workspace
+files and keep the copies in sync, or write a plugin using the existing
+`before_prompt_build` hook. Agent Guidance packages the shared-file approach so
+you can configure it without writing code. It adds no new Plugin SDK hooks.
+
+## Example: two agents, one shared file
+
+Suppose `main` answers everyday questions and `research` investigates topics in
+depth. Both should cite sources, but each should keep its own working style.
+
+|                      | Before                                                          | With Agent Guidance                              |
+| -------------------- | --------------------------------------------------------------- | ------------------------------------------------ |
+| `main` workspace     | Its own instructions plus a copy of the citation guidance       | Its own instructions                             |
+| `research` workspace | Its own instructions plus another copy of the citation guidance | Its own instructions                             |
+| Shared guidance      | Update both copies when the guidance changes                    | Edit one `instructions.md` and reload the plugin |
+
+The configuration below adds the same shared text to both agents' prompts.
+An agent not listed in `agents` receives none of it. Existing workspace files are
+left unchanged; remove any old duplicate guidance yourself when migrating.
 
 ## Configure
 
@@ -31,7 +60,7 @@ with filesystem permissions, then add an entry to your configuration:
         },
         "config": {
           "directory": "/srv/agent-guidance",
-          "agents": ["main"],
+          "agents": ["main", "research"],
           "append": ["instructions.md"]
         }
       }
@@ -47,11 +76,12 @@ hook requires both permissions above, although this plugin ignores event content
 Example `instructions.md`:
 
 ```text
-When comparing proposals, distinguish observations from assumptions.
-Finish with one short recommendation and its main tradeoff.
+Cite sources when doing research.
+Distinguish observations from assumptions.
 ```
 
 `agents` contains exact, case-sensitive agent IDs, not sender identities.
+Use your existing agent IDs; this configuration does not create agents.
 Unselected agents and hooks without an agent ID receive no contribution.
 Instructions are sent to the configured model: never put secrets in them.
 
@@ -59,8 +89,13 @@ Instructions are sent to the configured model: never put secrets in them.
 
 - `directory`: required absolute path. No environment expansion or workspace default.
 - `agents`: 1 to 64 distinct explicit agent IDs.
-- `prepend`: ordered relative file names added as `prependSystemContext`.
-- `append`: ordered relative file names added as `appendSystemContext`.
+- `prepend`: ordered relative file names placed before the normal system prompt
+  through `prependSystemContext`.
+- `append`: ordered relative file names placed after the normal system prompt
+  through `appendSystemContext`.
+
+Placement controls text order, not tool permissions or guaranteed instruction
+precedence. Use `append` as in the example unless you need a prefix.
 
 Configure 1 to 8 files across both placements. Each must be a nonempty UTF-8
 regular file of at most 16 KiB; combined contributions are limited to 64 KiB,

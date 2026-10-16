@@ -1,7 +1,7 @@
 {
   "id": "agent-guidance",
   "name": "Agent Guidance",
-  "description": "Adds operator-managed instruction files to selected agents' system context.",
+  "description": "Shares instruction files across selected agents without editing their workspace files.",
   "categories": ["other"],
   "activation": { "onStartup": true },
   "enabledByDefault": false,
@@ -43,7 +43,7 @@
   "uiHints": {
     "directory": { "label": "Guidance directory", "placeholder": "/srv/agent-guidance" },
     "agents": { "label": "Agent IDs", "help": "Only these exact agent IDs receive guidance." },
-    "prepend": { "label": "Prepend files", "help": "Ordered relative file names. Reload after edits." },
-    "append": { "label": "Append files", "help": "Ordered relative file names. Reload after edits." }
+    "prepend": { "label": "Prepend files", "help": "Relative files added before the system prompt. Reload after edits." },
+    "append": { "label": "Append files", "help": "Relative files added after the system prompt. Reload after edits." }
   }
 }
