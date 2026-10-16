@@ -1,6 +1,7 @@
 import path from "node:path";
 import { TextDecoder } from "node:util";
 import { assertNoSymlinkParentsSync, readRegularFileSync } from "@openclaw/fs-safe/advanced";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 const MAX_FILES = 8;
 const MAX_FILE_BYTES = 16 * 1024;
@@ -11,11 +12,10 @@ function invalid(detail: string): Error {
   return new Error(`agent-guidance: ${detail}`);
 }
 
-function parseConfig(rawValue: unknown) {
-  if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
+function parseConfig(value: unknown) {
+  if (!isRecord(value)) {
     throw invalid("configuration must be an object");
   }
-  const value = rawValue as Record<string, unknown>;
   if (
     Object.keys(value).some((key) => !["directory", "agents", "prepend", "append"].includes(key))
   ) {
