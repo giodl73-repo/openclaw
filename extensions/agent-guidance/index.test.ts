@@ -175,4 +175,26 @@ describe("agent-guidance", () => {
     expect(plugin.configSchema?.safeParse?.(config({ unknown: true })).success).toBe(false);
     expect(plugin.configSchema?.safeParse?.(config({ agents: [] })).success).toBe(false);
   });
+
+  it.each([{}, { prepend: [] }, { append: [] }, { prepend: [], append: [] }])(
+    "rejects configuration without instruction files before registration (%#)",
+    (files) => {
+      const value = { directory, agents: ["main"], ...files };
+      expect(plugin.configSchema?.safeParse?.(value).success).toBe(false);
+      expect(() => loadGuidance(value)).toThrow("configure 1 to 8 instruction files in total");
+    },
+  );
+
+  it.each([
+    { prepend: ["instructions.md"] },
+    { append: ["instructions.md"] },
+    { prepend: [], append: ["instructions.md"] },
+    { prepend: ["instructions.md"], append: [] },
+    { prepend: ["instructions.md"], append: ["second.md"] },
+  ])("accepts nonempty instruction lists through schema and registration (%#)", (files) => {
+    writeFileSync(path.join(directory, "second.md"), "Second.");
+    const value = { directory, agents: ["main"], ...files };
+    expect(plugin.configSchema?.safeParse?.(value).success).toBe(true);
+    expect(loadGuidance(value)({}, { agentId: "main" })).toBeDefined();
+  });
 });

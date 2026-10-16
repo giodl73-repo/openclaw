@@ -9,6 +9,10 @@
     "type": "object",
     "additionalProperties": false,
     "required": ["directory", "agents"],
+    "anyOf": [
+      { "required": ["prepend"], "properties": { "prepend": { "minItems": 1 } } },
+      { "required": ["append"], "properties": { "append": { "minItems": 1 } } }
+    ],
     "properties": {
       "directory": {
         "type": "string",
