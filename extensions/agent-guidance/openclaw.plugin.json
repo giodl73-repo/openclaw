@@ -1,0 +1,45 @@
+{
+  "id": "agent-guidance",
+  "name": "Agent Guidance",
+  "description": "Adds operator-managed instruction files to selected agents' system context.",
+  "categories": ["other"],
+  "activation": { "onStartup": true },
+  "enabledByDefault": false,
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["directory", "agents"],
+    "properties": {
+      "directory": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute, operator-controlled directory outside agent-writable workspaces."
+      },
+      "agents": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 64,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "prepend": {
+        "type": "array",
+        "maxItems": 8,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "append": {
+        "type": "array",
+        "maxItems": 8,
+        "uniqueItems": true,
+        "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    }
+  },
+  "uiHints": {
+    "directory": { "label": "Guidance directory", "placeholder": "/srv/agent-guidance" },
+    "agents": { "label": "Agent IDs", "help": "Only these exact agent IDs receive guidance." },
+    "prepend": { "label": "Prepend files", "help": "Ordered relative file names. Reload after edits." },
+    "append": { "label": "Append files", "help": "Ordered relative file names. Reload after edits." }
+  }
+}
