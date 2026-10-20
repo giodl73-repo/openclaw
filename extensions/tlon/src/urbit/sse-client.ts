@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { readResponseTextLimited } from "openclaw/plugin-sdk/provider-http";
 import { sleepWithAbort } from "openclaw/plugin-sdk/runtime-env";
-import type { LookupFn, SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
+import type { SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   ensureUrbitChannelOpen,
   pokeUrbitChannel,
@@ -22,8 +22,6 @@ type UrbitSseLogger = {
 type UrbitSseOptions = {
   ship?: string;
   ssrfPolicy?: SsrFPolicy;
-  lookupFn?: LookupFn;
-  fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   onReconnect?: (client: UrbitSSEClient) => Promise<void> | void;
   logger?: UrbitSseLogger;
 };
@@ -74,8 +72,6 @@ export class UrbitSSEClient {
   isConnected = false;
   logger: UrbitSseLogger;
   ssrfPolicy?: SsrFPolicy;
-  lookupFn?: LookupFn;
-  fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   streamRelease: (() => Promise<void>) | null = null;
 
   // Event ack tracking keeps each HTTP channel's delivered window bounded.
@@ -95,8 +91,6 @@ export class UrbitSSEClient {
     this.onReconnect = options.onReconnect ?? null;
     this.logger = options.logger ?? {};
     this.ssrfPolicy = options.ssrfPolicy;
-    this.lookupFn = options.lookupFn;
-    this.fetchImpl = options.fetchImpl;
   }
 
   private channelRequestContext() {
@@ -106,8 +100,6 @@ export class UrbitSSEClient {
       ship: this.ship,
       channelId: this.channelId,
       ssrfPolicy: this.ssrfPolicy,
-      lookupFn: this.lookupFn,
-      fetchImpl: this.fetchImpl,
     };
   }
 
@@ -121,6 +113,7 @@ export class UrbitSSEClient {
     await ensureUrbitChannelOpen(this.channelRequestContext(), {
       createBody: this.subscriptions,
       createAuditContext: "tlon-urbit-channel-create",
+      beforeRequest: () => this.reconnectAbortController.signal.throwIfAborted(),
     });
   }
 
@@ -205,9 +198,8 @@ export class UrbitSSEClient {
           },
         },
         ssrfPolicy: this.ssrfPolicy,
-        lookupFn: this.lookupFn,
-        fetchImpl: this.fetchImpl,
-        signal: controller.signal,
+        signal: AbortSignal.any([controller.signal, this.reconnectAbortController.signal]),
+        beforeRequest: () => this.reconnectAbortController.signal.throwIfAborted(),
         auditContext: "tlon-urbit-sse-stream",
       });
     } finally {
@@ -217,6 +209,10 @@ export class UrbitSSEClient {
     }
 
     const { response, release } = stream;
+    if (this.reconnectAbortController.signal.aborted) {
+      await release();
+      this.reconnectAbortController.signal.throwIfAborted();
+    }
     this.streamRelease = release;
 
     if (!response.ok || !response.body) {
@@ -400,9 +396,6 @@ export class UrbitSSEClient {
     if (this.lastHeardEventId - this.lastAcknowledgedEventId <= this.ackThreshold) {
       return;
     }
-    this.logger.log?.(
-      `[SSE] Acking event ${this.lastHeardEventId} (last acked: ${this.lastAcknowledgedEventId})`,
-    );
     // The acknowledged watermark advances only after PUT succeeds. A replay
     // therefore retries a failed ack instead of leaving the subscription clogged.
     await this.ack(this.lastHeardEventId);
@@ -412,6 +405,7 @@ export class UrbitSSEClient {
     return await pokeUrbitChannel(this.channelRequestContext(), {
       ...params,
       auditContext: "tlon-urbit-poke",
+      timeoutMs: 30_000,
     });
   }
 
@@ -500,6 +494,9 @@ export class UrbitSSEClient {
       this.reconnectAttempts = 0;
       this.logger.log?.("[SSE] Reconnection successful!");
     } catch (error) {
+      if (this.aborted) {
+        return;
+      }
       this.logger.error?.(`[SSE] Reconnection failed: ${String(error)}`);
       await this.attemptReconnect();
     }
@@ -516,37 +513,16 @@ export class UrbitSSEClient {
     this.stopReceiving();
 
     try {
-      const unsubscribes = this.subscriptions.map((sub) => ({
-        id: sub.id,
-        action: "unsubscribe",
-        subscription: sub.id,
-      }));
-
-      {
-        const { release } = await putUrbitChannel(this.channelRequestContext(), {
-          body: unsubscribes,
-          timeoutMs: 30_000,
-          auditContext: "tlon-urbit-unsubscribe",
-        });
-        await release();
-      }
-
-      {
-        const { release } = await urbitFetch({
-          baseUrl: this.url,
-          path: `/~/channel/${this.channelId}`,
-          init: {
-            method: "DELETE",
-            headers: {
-              Cookie: this.cookie,
-            },
-          },
-          ssrfPolicy: this.ssrfPolicy,
-          lookupFn: this.lookupFn,
-          fetchImpl: this.fetchImpl,
-          timeoutMs: 30_000,
-          auditContext: "tlon-urbit-channel-close",
-        });
+      const { response, release } = await putUrbitChannel(this.channelRequestContext(), {
+        body: [{ action: "delete" }],
+        timeoutMs: 30_000,
+        auditContext: "tlon-urbit-channel-close",
+      });
+      try {
+        if (!response.ok) {
+          throw new UrbitHttpError({ operation: "Channel close", status: response.status });
+        }
+      } finally {
         await release();
       }
     } catch (error) {

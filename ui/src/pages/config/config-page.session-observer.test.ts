@@ -1,24 +1,24 @@
 /* @vitest-environment jsdom */
 
 import { expectDefined } from "@openclaw/normalization-core";
-import { render } from "lit";
+import { createRouter } from "@openclaw/uirouter";
+import { createComponent } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveThemeBranding } from "../../../../packages/gateway-protocol/src/theme.ts";
 import { createDeferred as deferred } from "../../../../test/helpers/promise.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ModelCatalogEntry, ModelCatalogResult } from "../../api/types.ts";
 import type { ApplicationContext, ApplicationGatewaySnapshot } from "../../app/context.ts";
+import { mountRouterOutlet } from "../../app/router-outlet.test-support.tsx";
 import { resetServerUiPrefsSync } from "../../app/server-prefs.ts";
 import { invalidateChatMetadataStore } from "../../lib/chat/chat-metadata-cache.ts";
 import { createGatewayHarness } from "../../lib/config/config-test-harness.ts";
 import { createRuntimeConfigCapability } from "../../lib/config/runtime-config-capability.ts";
 import * as modelCatalogStore from "../../lib/model-catalog-store.ts";
-import {
-  createApplicationContextProvider,
-  createApplicationGateway,
-} from "../../test-helpers/application-context.ts";
+import { createApplicationGateway } from "../../test-helpers/application-context.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
-import { cleanupSolid } from "../../test-helpers/mount-solid.ts";
+import { cleanupSolid, mountSolid } from "../../test-helpers/mount-solid.ts";
+import { createSolidApplicationContextProvider } from "../../test-helpers/solid-application-context.tsx";
 import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { meetingStatus } from "../../test-helpers/transcripts.test-support.ts";
@@ -27,8 +27,9 @@ import {
   mountConfigPage,
   publishConfigSource,
 } from "./config-page.test-support.ts";
+import type { ConfigPageRouteData } from "./config-page.tsx";
 import { configSelectionFromSearch, type ConfigPageId } from "./config-sections.ts";
-import { configRouteData, type ConfigRouteData } from "./route-data.ts";
+import { configRouteData } from "./route-data.ts";
 import { pages } from "./route.ts";
 
 describe("ConfigPage navigation", () => {
@@ -132,7 +133,7 @@ describe("ConfigPage navigation", () => {
         ensureSchemaLoaded: async () => undefined,
         subscribe,
       },
-      theme: { branding: resolveThemeBranding(undefined), serverSelection: null, subscribe },
+      theme: { branding: resolveThemeBranding(undefined), subscribe },
       overlays: { snapshot: {}, subscribe },
       webPush: { snapshot: undefined, subscribe },
     } as unknown as ApplicationContext;
@@ -261,12 +262,17 @@ describe("ConfigPage navigation", () => {
         if (!data || typeof data !== "object" || !("section" in data)) {
           throw new Error("Config route did not return section data");
         }
+        expect(data).toMatchObject({ pageId });
         const module = await route.component();
-        const provider = createApplicationContextProvider(completeConfigContext(context));
-        document.body.append(provider);
-        render(module.render(data as ConfigRouteData), provider);
+        const provider = createSolidApplicationContextProvider(completeConfigContext(context));
+        const render = expectDefined(module.renderSolid, "Solid config route");
+        const { container } = mountSolid(
+          () =>
+            render({ data: data as ConfigPageRouteData, loaderPending: false, presented: true }),
+          { wrapper: provider.wrapper },
+        );
         const page = expectDefined(
-          provider.querySelector<HTMLElement>("openclaw-config-page"),
+          container.querySelector<HTMLElement>("openclaw-config-page"),
           "mounted config page",
         );
         flush();
@@ -282,7 +288,189 @@ describe("ConfigPage navigation", () => {
     );
   });
 
+  it("keeps the config owner through a pending subpage loader in the real outlet", async () => {
+    const context = completeConfigContext(routeContext());
+    const configPages = pages.filter((route) => route.id !== "settings" && route.id !== "config");
+    const communications = expectDefined(
+      configPages.find((route) => route.id === "communications"),
+      "communications route",
+    );
+    const advanced = expectDefined(
+      configPages.find((route) => route.id === "advanced"),
+      "advanced route",
+    );
+    const loadAdvanced = expectDefined(advanced.loader, "advanced loader");
+    const releaseAdvanced = deferred();
+    const provider = createSolidApplicationContextProvider(context);
+    const productionModule = await communications.component();
+    const render = productionModule.renderSolid;
+    expect((await advanced.component()).renderSolid).toBe(render);
+    const module = {
+      ...productionModule,
+      renderSolid: (props: Parameters<typeof render>[0]) =>
+        createComponent(provider.wrapper, {
+          get children() {
+            return createComponent(render, props);
+          },
+        }),
+    };
+    const router = createRouter<
+      ConfigPageId,
+      ApplicationContext,
+      typeof module,
+      ConfigPageRouteData
+    >({
+      routes: [
+        { ...communications, component: () => module },
+        {
+          ...advanced,
+          component: () => module,
+          loader: async (...args: Parameters<typeof loadAdvanced>) => {
+            const data = loadAdvanced(...args);
+            await releaseAdvanced.promise;
+            return data;
+          },
+        },
+      ],
+    });
+    const mounted = mountRouterOutlet({ router, retryContext: context });
+    try {
+      await router.navigate(
+        "communications",
+        context,
+        {},
+        {
+          pathname: "/settings/communications",
+          search: "?section=tts",
+          hash: "",
+        },
+      );
+      await waitForSolid(() => {
+        expect(mounted.querySelector("#config-section-tts")).not.toBeNull();
+      });
+      const host = expectDefined(mounted.querySelector("openclaw-config-page"), "config host");
+      expect(host.querySelector(".content-header--settings .page-title")?.textContent).toBe(
+        "Communications",
+      );
+
+      const navigation = router.navigate("advanced", context);
+      await waitForSolid(() => {
+        const pending = router.getState().matches[0];
+        expect(pending?.routeId).toBe("advanced");
+        expect(pending?.status).toBe("pending");
+        expect(pending?.module).toBeDefined();
+        expect(pending?.data).toBeUndefined();
+      });
+      expect(mounted.querySelector("openclaw-config-page")).toBe(host);
+      expect(host.isConnected).toBe(true);
+      expect(host.querySelector(".content-header--settings .page-title")?.textContent).toBe(
+        "Communications",
+      );
+      expect(host.querySelector("#config-section-tts")).not.toBeNull();
+
+      releaseAdvanced.resolve(undefined);
+      await navigation;
+      await waitForSolid(() => {
+        expect(host.querySelector(".content-header--settings .page-title")?.textContent).toBe(
+          "Advanced",
+        );
+      });
+      expect(mounted.querySelector("openclaw-config-page")).toBe(host);
+      expect(host.isConnected).toBe(true);
+    } finally {
+      releaseAdvanced.resolve(undefined);
+      mounted.dispose();
+      router.stop();
+    }
+  });
+
   describe("ConfigPage pending section navigation", () => {
+    it.each([
+      {
+        pageId: "appearance",
+        search: "?section=__appearance__",
+        targetId: "settings-appearance-typography",
+      },
+      {
+        pageId: "appearance",
+        search: "?section=__appearance__",
+        targetId: "settings-accent-status",
+      },
+      { pageId: "ai-agents", search: "?section=session", targetId: "settings-session-storage" },
+      {
+        pageId: "communications",
+        search: "?section=transcripts",
+        targetId: "settings-communications-meeting-capture",
+      },
+    ] as const)(
+      "scrolls to the Settings $targetId anchor after rendering",
+      ({ pageId, search, targetId }) => {
+        const frames = new Map<number, FrameRequestCallback>();
+        let nextFrameId = 0;
+        vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+          const id = ++nextFrameId;
+          frames.set(id, callback);
+          return id;
+        });
+        vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+          frames.delete(id);
+        });
+        const context = routeContext();
+        context.runtimeConfig.state.configSchema = {
+          type: "object",
+          properties: {
+            session: { type: "object", properties: { enabled: { type: "boolean" } } },
+            transcripts: { type: "object", properties: { enabled: { type: "boolean" } } },
+          },
+        };
+        const view = mountConfigPage(context, {
+          pageId,
+          routeData: configRouteData({
+            pathname: `/settings/${pageId}`,
+            search,
+            hash: `#${targetId}`,
+          }),
+        });
+        const target = expectDefined(
+          view.page.querySelector<HTMLElement>(`#${targetId}`),
+          "rendered Settings anchor",
+        );
+        const scroll = vi.fn();
+        target.scrollIntoView = scroll;
+        const pending = [...frames.values()];
+        frames.clear();
+        for (const frame of pending) {
+          frame(0);
+        }
+        expect(scroll).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ block: "start" }));
+      },
+    );
+
+    it("does not scroll to a matching ID outside the Settings host", () => {
+      const outside = document.createElement("div");
+      outside.id = "external-setting-target";
+      const scroll = vi.fn();
+      outside.scrollIntoView = scroll;
+      document.body.append(outside);
+      const frames: FrameRequestCallback[] = [];
+      vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        frames.push(callback);
+        return frames.length;
+      });
+      mountConfigPage(routeContext(), {
+        pageId: "communications",
+        routeData: configRouteData({
+          pathname: "/settings/communications",
+          search: "",
+          hash: "#external-setting-target",
+        }),
+      });
+      for (const frame of frames) {
+        frame(0);
+      }
+      expect(scroll).not.toHaveBeenCalled();
+    });
+
     it.each(["replacement", "retirement", "disconnect"] as const)(
       "does not scroll to a stale target after %s",
       async (transition) => {
@@ -388,7 +576,7 @@ describe("ConfigPage model catalog lifecycle", () => {
       agents: { state: { agentsList: null }, subscribe },
       agentIdentity: { ensure: async () => undefined, subscribe },
       runtimeConfig: { state: { configSnapshot: {}, configSchema: {} }, subscribe },
-      theme: { branding: resolveThemeBranding(undefined), serverSelection: null, subscribe },
+      theme: { branding: resolveThemeBranding(undefined), subscribe },
       overlays: { snapshot: {}, subscribe },
       config: { current: { assistantIdentity: { name: "OpenClaw" } }, subscribe },
       webPush: { subscribe },

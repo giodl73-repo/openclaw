@@ -9,12 +9,14 @@ vi.mock("./worker-environments/workspace-sync-preflight.js", () => ({
   preflightWorkerWorkspace: workspace.preflight,
 }));
 
-import { getRuntimeConfig } from "../config/config.js";
+import { getRuntimeConfig, setRuntimeConfigSnapshot } from "../config/config.js";
 import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
-import { beginSessionWorkAdmission } from "../sessions/session-lifecycle-admission.js";
+import { withSessionTurn } from "../sessions/session-controller.admission.js";
+import { captureSessionTarget } from "../sessions/session-controller.lifecycle.js";
 import { createDeferredCore } from "../shared/deferred.js";
-import { closeOpenClawAgentDatabases } from "../state/openclaw-agent-db-lifecycle.js";
+import { closeOpenClawAgentDatabasesAsync } from "../state/openclaw-agent-db-lifecycle.js";
 import { createGatewayWorkerPlacementRuntime } from "./server-worker-placement-startup.js";
+import { resolveGatewaySessionStoreTargetWithStoreAsync } from "./session-utils-store-lookup.js";
 import { REQUEST } from "./worker-environments/placement-dispatch-test-fixtures.js";
 import { createHarness } from "./worker-environments/placement-dispatch-test-harness.js";
 import { createWorkerSessionPlacementStore } from "./worker-environments/placement-store.js";
@@ -63,8 +65,16 @@ describe("worker automatic resume", () => {
       };
       await upsertSessionEntryCore(target, entry);
       const worktree = { id: entry.worktree.id, ownerId: REQUEST.sessionKey, path: root };
+      setRuntimeConfigSnapshot(config, config);
       moveDestinationMocks.getRuntimeConfig.mockReturnValue(config);
-      moveDestinationMocks.resolveGatewaySessionTarget.mockReturnValue(target);
+      moveDestinationMocks.resolveGatewaySessionTarget.mockReturnValue(
+        await resolveGatewaySessionStoreTargetWithStoreAsync({
+          cfg: config,
+          key: REQUEST.sessionKey,
+          agentId: REQUEST.agentId,
+          exactRead: true,
+        }),
+      );
       moveDestinationMocks.resolveCanonicalSession.mockReturnValue(entry);
       moveDestinationMocks.findManagedWorktree.mockReturnValue(worktree);
       moveDestinationMocks.resolveExecutionMode.mockReturnValue(executionMode);
@@ -130,11 +140,11 @@ describe("worker automatic resume", () => {
         signal?.throwIfAborted();
       });
       const controller = new AbortController();
-      const admission = await beginSessionWorkAdmission({
-        scope: target.storePath,
-        identities: [REQUEST.sessionKey, REQUEST.sessionId],
-        assertAllowed: () => controller.signal.throwIfAborted(),
-        onInterrupt: (reason) => controller.abort(reason),
+      const controllerTarget = captureSessionTarget({
+        storeScope: target.storePath,
+        sessionKey: REQUEST.sessionKey,
+        agentId: REQUEST.agentId,
+        incarnation: REQUEST.sessionId,
       });
 
       let current = true;
@@ -146,10 +156,25 @@ describe("worker automatic resume", () => {
           environmentId: replacement.ready.environmentId,
           turnClaim: { owner: "local", runId },
         });
-        return { payloads: [{ text: "The resumed workspace is ready." }], meta: { durationMs: 1 } };
+        return {
+          payloads: [{ text: "The resumed workspace is ready." }],
+          meta: {
+            durationMs: 1,
+            terminalReply: {
+              disposition: "visible" as const,
+              text: "The resumed workspace is ready.",
+            },
+          },
+        };
       });
-      const pending = admission
-        .run(() =>
+      const pending = withSessionTurn(
+        {
+          sessionKey: REQUEST.sessionKey,
+          sessionId: REQUEST.sessionId,
+          target: controllerTarget,
+          abortSignal: controller.signal,
+        },
+        () =>
           runtime.admissionProvider.executeTurn(
             { ...REQUEST, runId },
             {
@@ -171,8 +196,7 @@ describe("worker automatic resume", () => {
               }
             },
           ),
-        )
-        .catch((error: unknown) => error);
+      ).catch((error: unknown) => error);
       try {
         const signal = await Promise.race([
           setupEntered.promise,
@@ -218,8 +242,7 @@ describe("worker automatic resume", () => {
       } finally {
         releaseSetup.resolve();
         await pending;
-        admission.release();
-        closeOpenClawAgentDatabases(root);
+        await closeOpenClawAgentDatabasesAsync(root);
       }
     },
   );

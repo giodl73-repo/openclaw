@@ -1,8 +1,10 @@
 import { MessagePort, type Transferable } from "node:worker_threads";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { readAgentDatabaseExecutionAuthority } from "../state/openclaw-agent-execution-authority.js";
 import { StateDatabaseAdmissionPendingError } from "./gateway-state-owner-record.js";
 import { currentSqliteOperationTiming } from "./sqlite-reader-lifecycle.js";
 import {
+  readSqliteWorkerMonotonicNs,
   SqliteWorkerAdmissionTimeoutError,
   SqliteWorkerError,
   type SqliteWorkerAdmissionRequest,
@@ -12,42 +14,7 @@ import {
   currentSqliteWorkerOperationAdmission as currentAdmission,
   type SqliteWorkerOperationContext,
 } from "./sqlite-worker-operation-settlement.js";
-import {
-  readSqliteWorkerRequestCustody,
-  type SqliteWorkerRequestCustodyDescriptor,
-} from "./sqlite-worker-request-custody.js";
-import type { SqliteWriterAdmissionConnection } from "./sqlite-writer-admission-contract.js";
-
-/** This checks broker custody only; other authority owners and final COMMIT remain required. */
-export function assertSqliteWriterBrokerAdmission(
-  connection: SqliteWriterAdmissionConnection,
-  custody: SqliteWorkerRequestCustodyDescriptor,
-): void {
-  const current = () =>
-    Atomics.load(connection.lifetime, 0) === 1 && readSqliteWorkerRequestCustody(custody);
-  if (!current()) {
-    throw new SqliteWorkerError("SQLite broker admission is revoked", "closed");
-  }
-  const decision = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
-  const deadline = process.hrtime.bigint() + 30_000_000_000n;
-  connection.port.postMessage({ custody, decision }, []);
-  while (Atomics.load(decision, 0) === 0) {
-    const remainingMs = Number(deadline - process.hrtime.bigint()) / 1e6;
-    if (remainingMs <= 0) {
-      // A late service reply cannot turn an expired request into a grant.
-      Atomics.compareExchange(decision, 0, 0, 3);
-    } else {
-      Atomics.wait(decision, 0, 0, remainingMs);
-    }
-  }
-  const result = Atomics.load(decision, 0);
-  if (result === 3) {
-    throw new SqliteWorkerAdmissionTimeoutError();
-  }
-  if (result !== 1 || !current()) {
-    throw new SqliteWorkerError("SQLite broker admission is revoked", "closed");
-  }
-}
+import { readSqliteWorkerRequestCustody } from "./sqlite-worker-request-custody.js";
 
 const REQUESTED = 0;
 const GRANTED = 1;
@@ -56,6 +23,11 @@ const TIMED_OUT = 3;
 function assertRequestCustody(owner: SqliteWorkerOperationContext): void {
   if (owner.requestCustody && !readSqliteWorkerRequestCustody(owner.requestCustody)) {
     const refusal = new SqliteWorkerError("SQLite worker request custody is revoked", "closed");
+    owner.refusal = refusal;
+    throw refusal;
+  }
+  if (owner.executionAuthority && !readAgentDatabaseExecutionAuthority(owner.executionAuthority)) {
+    const refusal = new SqliteWorkerError("SQLite execution authority is revoked", "closed");
     owner.refusal = refusal;
     throw refusal;
   }
@@ -79,12 +51,11 @@ export function requestSqliteWorkerOperationAdmission(
   const deadlineNs =
     request.deadlineMs === undefined
       ? undefined
-      : process.hrtime.bigint() + BigInt(request.deadlineMs) * 1_000_000n;
+      : readSqliteWorkerMonotonicNs() + BigInt(request.deadlineMs) * 1_000_000n;
   scope.port.postMessage(
     {
       ...request,
       decision: decision.buffer,
-      deadlineNs,
       ports: transferList.filter((value) => value instanceof MessagePort),
     },
     transferList,
@@ -93,7 +64,9 @@ export function requestSqliteWorkerOperationAdmission(
   // joins native rollback before the broker releases operation custody.
   while (Atomics.load(decision, 0) === REQUESTED) {
     const remainingMs =
-      deadlineNs === undefined ? undefined : Number(deadlineNs - process.hrtime.bigint()) / 1e6;
+      deadlineNs === undefined
+        ? undefined
+        : Number(deadlineNs - readSqliteWorkerMonotonicNs()) / 1e6;
     if (remainingMs !== undefined && remainingMs <= 0) {
       Atomics.compareExchange(decision, 0, REQUESTED, TIMED_OUT);
     } else {
@@ -127,4 +100,6 @@ export function requestSqliteWorkerOperationAdmission(
     throw refusal;
   }
   assertRequestCustody(scope.owner);
+  // A fresh live grant authorizes compensation after a previous stage was refused.
+  delete scope.owner.refusal;
 }

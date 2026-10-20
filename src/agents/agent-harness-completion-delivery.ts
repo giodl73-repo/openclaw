@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from "node:util";
-import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import {
   getRestartRecoveryTerminalDeliveryEvidence,
   hasRestartRecoveryTerminalRun,
@@ -7,16 +6,11 @@ import {
 import type { HarnessCompletionRecovery } from "../config/sessions/restart-recovery-types.js";
 import { readSessionSubmittedInput } from "../config/sessions/session-accessor.js";
 import {
-  getSessionActorStorageBinding,
+  captureSessionActorStorageOwner,
+  withSessionActorStorage,
   type SessionActorStorageBinding,
 } from "../config/sessions/session-actor-storage-binding.js";
 import { readSessionEntriesFromStoreInWorker } from "../config/sessions/session-entry-read-runtime.js";
-import { decodeSessionTranscriptWorkerReadError } from "../config/sessions/session-history-worker-errors.js";
-import {
-  captureIncognitoSessionBinding,
-  type IncognitoSessionBinding,
-} from "../config/sessions/session-incognito-binding.js";
-import { resolveSessionTranscriptReadFence } from "../config/sessions/session-transcript-read-fence.js";
 import type { InternalSessionEntry as SessionEntry } from "../config/sessions/types.js";
 import {
   getAgentRunContext,
@@ -25,6 +19,14 @@ import {
 } from "../infra/agent-run-registry.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
+import {
+  getRpcSourceForGateway,
+  getRpcSourceIdentity,
+  getRpcSourceLifecycleGeneration,
+  getRpcSourceProjectSessionActive,
+  isRpcSourceQueued,
+} from "../sessions/session-controller.rpc-sources.js";
+import { isCurrentSessionControllerOperation } from "../sessions/session-controller.state.js";
 import { rethrowIncognitoSessionError } from "../state/incognito-session-error.js";
 import {
   getOwedHarnessCompletionTask,
@@ -47,34 +49,39 @@ async function readCurrent(target: CompletionTarget): Promise<SessionEntry | und
   return loaded.entries.find(({ sessionKey }) => sessionKey === target.sessionKey)?.entry;
 }
 
-async function readActorCurrent(
-  target: CompletionTarget,
-  binding: IncognitoSessionBinding,
-): Promise<SessionEntry | undefined> {
-  const { actor, admissionSignal } = binding;
-  const current = await actor.sessions.read(
-    { assertCurrent: () => actor.assertReadable() },
-    { sessionKey: target.sessionKey },
-    admissionSignal,
-  );
-  return current.entry;
-}
-
 /** Only current process owners can hold admission before its input is committed. */
 function hasLiveCompletionOwner(claim: HarnessCompletionRecovery, runId: string): boolean {
   const scope = getPluginRuntimeGatewayRequestScope();
   const gateway = scope?.resolveGatewayContext ? scope.resolveGatewayContext() : scope?.context;
-  const admission = gateway?.chatAbortControllers.get(runId);
+  const admission = gateway
+    ? getRpcSourceForGateway(runId, scope?.resolveGatewayContext)
+    : undefined;
+  const input = admission?.input;
+  const sourceClaim = input?.claim;
+  const operation = sourceClaim?.operation;
+  const claimed =
+    input &&
+    sourceClaim &&
+    input.mailbox.claim === sourceClaim &&
+    !sourceClaim.released &&
+    !sourceClaim.releaseRequested &&
+    !sourceClaim.abortController.signal.aborted &&
+    (!operation ||
+      (isCurrentSessionControllerOperation(operation) &&
+        !operation.result &&
+        !operation.abortSignal.aborted));
   if (
     admission &&
-    admission.sessionKey === claim.requesterSessionKey &&
-    admission.sessionId === claim.sessionId &&
-    admission.agentId === claim.requesterAgentId &&
-    admission.lifecycleGeneration === getAgentRunLifecycleGeneration() &&
-    admission.projectSessionActive === true &&
-    !admission.registrationCleanupRequested &&
-    !admission.controller.signal.aborted &&
-    isFutureDateTimestampMs(admission.expiresAtMs)
+    getRpcSourceIdentity(admission).sessionKey === claim.requesterSessionKey &&
+    getRpcSourceIdentity(admission).sessionId === claim.sessionId &&
+    getRpcSourceIdentity(admission).agentId === claim.requesterAgentId &&
+    getRpcSourceLifecycleGeneration(admission) === getAgentRunLifecycleGeneration() &&
+    admission.adapter.controlUiVisible !== false &&
+    getRpcSourceProjectSessionActive(admission) !== false &&
+    !admission.input.retirementRequested &&
+    !admission.input.abortSignal.aborted &&
+    !admission.input.custody.cancellationRetired &&
+    (isRpcSourceQueued(admission) || claimed)
   ) {
     return true;
   }
@@ -127,19 +134,20 @@ export async function reconcileHarnessCompletionDelivery(
     taskRunId?: string;
   },
 ): Promise<"unowned" | "pending" | "delivered" | "blocked"> {
-  const memory = getSessionActorStorageBinding(params);
+  const memory = captureSessionActorStorageOwner(params, { assertCurrent() {}, authorize() {} });
   if (memory) {
-    return reconcileMemoryHarnessCompletionDelivery(params, memory);
+    return (
+      (await withSessionActorStorage(
+        params,
+        {
+          lifetime: { assertCurrent() {}, assertReadable() {} },
+          authority: memory.authority,
+        },
+        (binding) => reconcileMemoryHarnessCompletionDelivery(params, binding),
+      )) ?? "unowned"
+    );
   }
-  const binding = captureIncognitoSessionBinding(params);
-  const claim = binding?.actor.sessions.captureCurrent(params.sessionKey);
-  const reconcile = async () => {
-    claim?.assertCurrent();
-    const result = await reconcileCurrentHarnessCompletionDelivery(params, binding);
-    claim?.assertCurrent();
-    return result;
-  };
-  return binding ? binding.actor.sessions.withSharedState(reconcile) : reconcile();
+  return reconcileCurrentHarnessCompletionDelivery(params);
 }
 
 function reconcileMemoryHarnessCompletionDelivery(
@@ -189,9 +197,8 @@ function reconcileMemoryHarnessCompletionDelivery(
 
 async function reconcileCurrentHarnessCompletionDelivery(
   params: CompletionTarget & { sourceRunId: string; taskRunId?: string },
-  binding?: IncognitoSessionBinding,
 ): Promise<"unowned" | "pending" | "delivered" | "blocked"> {
-  const entry = binding ? await readActorCurrent(params, binding) : await readCurrent(params);
+  const entry = await readCurrent(params);
   if (!entry) {
     // No saved claim means this reconciler owns nothing; normal admission still
     // applies its existing requester lifecycle checks.
@@ -215,17 +222,7 @@ async function reconcileCurrentHarnessCompletionDelivery(
       { ...params, sessionId: entry.sessionId },
       `${params.sourceRunId}:user`,
     );
-    const current = binding ? await readActorCurrent(params, binding) : await readCurrent(params);
-    return !current ||
-      current.sessionId !== entry.sessionId ||
-      current.lifecycleRevision !== entry.lifecycleRevision ||
-      current.restartRecoveryDeliverySourceRunId === params.sourceRunId ||
-      current.restartRecoveryHarnessCompletion?.sourceRunId === params.sourceRunId ||
-      hasRestartRecoveryTerminalRun(current, params.sourceRunId) ||
-      getRestartRecoveryTerminalDeliveryEvidence(current, params.sourceRunId)?.harnessCompletion ||
-      submitted
-      ? "blocked"
-      : "unowned";
+    return submitted ? "blocked" : "unowned";
   }
   const classified = classifyCompletionClaim(params, entry, claim);
   if (classified) {
@@ -240,41 +237,6 @@ async function reconcileCurrentHarnessCompletionDelivery(
     }
     // Cold custody is pending only while its exact admitted input remains executable.
     // Missing/rejected input retains the durable task, not an uncharged process retry.
-    if (binding) {
-      const snapshot = await binding.actor.sessions.history(
-        { assertCurrent: () => binding.actor.assertReadable() },
-        {
-          type: "session.history.harness-completion-source",
-          input: {
-            sessionKey: params.sessionKey,
-            sessionId: entry.sessionId,
-            lifecycleRevision: entry.lifecycleRevision,
-            claim,
-            admission: resolveSessionTranscriptReadFence({
-              agentId: params.agentId,
-              sessionId: entry.sessionId,
-            }),
-          },
-        },
-        binding.admissionSignal,
-      );
-      if (!snapshot.entry) {
-        return "blocked";
-      }
-      // Delivery and claim state may change while this read waits in the actor queue.
-      const current = classifyCompletionClaim(params, snapshot.entry, claim);
-      if (current) {
-        return current;
-      }
-      const currentRunId = snapshot.entry.restartRecoveryDeliveryRunId;
-      if (currentRunId && hasLiveCompletionOwner(claim, currentRunId)) {
-        return "pending";
-      }
-      if (snapshot.readError) {
-        throw decodeSessionTranscriptWorkerReadError(snapshot.readError);
-      }
-      return snapshot.validInput ? "pending" : "blocked";
-    }
     const validInput = await readAdmittedHarnessCompletionInputAsync({
       claim,
       entry,

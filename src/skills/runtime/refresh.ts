@@ -1,15 +1,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
+import path from "node:path";
 import { getAgentWorkspaceAccess } from "../../agents/workspace-access.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { observeOwnedDirectory } from "../../infra/owned-directory-observation.js";
+import { isPathInside } from "../../infra/path-guards.js";
 import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import { WorkerTaskPool } from "../../infra/worker-task-pool.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
-import type { PluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.types.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import type { readWorkspaceSkillStatusFacts } from "../discovery/status-files.js";
-import { capturePluginSkillContributions } from "../loading/plugin-skills.js";
 import { resolveSkillDiscoveryLimits } from "../loading/skill-root-discovery.js";
 import type { SkillSnapshotProjectionInput } from "../loading/skill-snapshot-projection.js";
 import {
@@ -28,9 +28,15 @@ import {
   type SkillsDiscoveryInput,
   type SkillsDiscoveryResult,
   type SkillsDiscoveryOutput,
+  type SkillsDiscoverySourceSelection,
   type SkillsSourcePlanInput,
 } from "./discovery-worker-contract.js";
 import {
+  captureSkillsSourcePlanInput,
+  type SkillsWatcherParams,
+} from "./discovery-worker-input.js";
+import {
+  closeRemoteSkillsWatchersForAgent,
   closeRemoteSkillsWatchers,
   disposeRemoteSkillsWatcher,
   ensureRemoteSkillsWatcher,
@@ -45,23 +51,27 @@ export { registerSkillsChangeListener } from "./refresh-state.js";
 
 const log = createSubsystemLogger("gateway/skills");
 const runInDiscoveryContext = AsyncLocalStorage.snapshot();
-const PASSIVE_REFRESH_MS = 60_000;
+const SAFETY_REFRESH_MS = 30 * 60_000;
 const MAX_SOURCES = 128;
 type Source = {
-  request: WorkspaceSkillSourceRequest;
+  selection: SkillsDiscoverySourceSelection;
+  workspaceDir: string;
+  agentIds: Set<string>;
+  unowned: boolean;
   environment: SkillsDiscoveryEnvironment;
   watch: boolean;
   dirty: boolean;
   sources?: WorkspaceSkillSources;
   fingerprint?: string;
   unavailable?: boolean;
-  plan?: { input: SkillsSourcePlanInput; scope?: "gateway" };
+  watchDirectories?: string[];
+  observations: Map<string, ReturnType<typeof observeOwnedDirectory>>;
 };
 type DiscoveryState = {
   sources: Map<string, Source>;
   plans: Map<string, Promise<{ plan: WorkspaceSkillSourcePlan; input: SkillsSourcePlanInput }>>;
   pool?: WorkerTaskPool<SkillsDiscoveryInput, SkillsDiscoveryOutput>;
-  timer?: ReturnType<typeof setInterval>;
+  refreshTimer?: ReturnType<typeof setTimeout>;
   pending?: Promise<void>;
   closing?: Promise<void>;
 };
@@ -83,24 +93,54 @@ function pool() {
   ));
 }
 
-function startPassiveRefresh() {
-  if (state.timer || ![...state.sources.values()].some((source) => source.watch)) {
+function observeSource(source: Source) {
+  if (!source.watch || !source.watchDirectories) {
     return;
   }
-  // No filesystem events, classification, or discovery run on the Gateway thread.
-  state.timer = runInDiscoveryContext(() =>
-    setInterval(() => {
-      for (const source of state.sources.values()) {
-        if (source.watch) {
-          source.dirty = true;
-        }
-      }
-      void scanDirtySources().catch((error: unknown) =>
-        log.warn(`passive skills refresh failed: ${String(error)}`),
+  const directories = new Set(source.watchDirectories);
+  for (const [directory, observation] of source.observations) {
+    if (!directories.has(directory)) {
+      observation.close();
+      source.observations.delete(directory);
+    }
+  }
+  for (const directory of directories) {
+    if (!source.observations.has(directory)) {
+      // Windows cannot rename a workspace while a watch holds a descendant directory.
+      // One recursive workspace handle still reports edits in each selected subtree.
+      const watchRoot =
+        process.platform === "win32"
+          ? ([source.workspaceDir, source.selection.request.executionWorkspaceDir]
+              .filter((root): root is string => Boolean(root && isPathInside(root, directory)))
+              .toSorted((a, b) => a.length - b.length)[0] ?? path.dirname(directory))
+          : undefined;
+      source.observations.set(
+        directory,
+        observeOwnedDirectory(
+          directory,
+          () => {
+            source.dirty = true;
+            state.refreshTimer ??= runInDiscoveryContext(() =>
+              setTimeout(() => {
+                state.refreshTimer = undefined;
+                void scanDirtySources().catch((error: unknown) =>
+                  log.warn(`passive skills refresh failed: ${String(error)}`),
+                );
+              }, 50).unref(),
+            );
+          },
+          { recursive: true, reconcileIntervalMs: SAFETY_REFRESH_MS, watchRoot },
+        ),
       );
-    }, PASSIVE_REFRESH_MS),
-  );
-  state.timer.unref();
+    }
+  }
+}
+
+function closeSource(source: Source) {
+  for (const observation of source.observations.values()) {
+    observation.close();
+  }
+  source.observations.clear();
 }
 
 function scanDirtySources(): Promise<void> {
@@ -123,9 +163,8 @@ function scanDirtySources(): Promise<void> {
             kind: "scan",
             requests: selected.map(([key, source]) => ({
               key,
-              request: source.request,
               environment: source.environment,
-              plan: source.plan,
+              selection: source.selection,
             })),
             path: process.env.PATH,
           },
@@ -144,7 +183,7 @@ function scanDirtySources(): Promise<void> {
           if (!state.closing && !source.unavailable) {
             source.unavailable = true;
             bumpSkillsSnapshotVersion({
-              workspaceDir: source.request.sourcePlan.workspaceDir,
+              workspaceDir: source.workspaceDir,
               reason: "watch-unavailable",
             });
           }
@@ -168,19 +207,21 @@ function scanDirtySources(): Promise<void> {
           continue;
         }
         if (source.fingerprint !== undefined && source.fingerprint !== result.fingerprint) {
-          changed.add(source.request.sourcePlan.workspaceDir);
+          changed.add(source.workspaceDir);
         }
         if (source.unavailable) {
           source.unavailable = false;
           recovered.push(source);
         }
-        if (result.plan && source.plan) {
-          const input = source.plan.input;
+        if (result.plan && source.selection.plan) {
+          const input = source.selection.plan.input;
           state.plans.set(JSON.stringify(input), Promise.resolve({ plan: result.plan, input }));
         }
         source.sources = result.sources;
         source.fingerprint = result.fingerprint;
-        refreshed.add(source.request.sourcePlan.workspaceDir);
+        source.watchDirectories = result.watchDirectories;
+        observeSource(source);
+        refreshed.add(source.workspaceDir);
       }
       while (state.plans.size > MAX_SOURCES) {
         state.plans.delete(state.plans.keys().next().value!);
@@ -195,8 +236,7 @@ function scanDirtySources(): Promise<void> {
       }
       for (const source of recovered) {
         notifySkillsWatchAvailable({
-          workspaceDir: source.request.sourcePlan.workspaceDir,
-          sourceScope: { executionWorkspaceDir: source.request.executionWorkspaceDir },
+          workspaceDir: source.workspaceDir,
         });
       }
     }
@@ -206,18 +246,19 @@ function scanDirtySources(): Promise<void> {
   return state.pending;
 }
 
-/** The only asynchronous local discovery boundary, shared by all Gateway consumers. */
-export async function prepareLocalSkillSources(
-  request: WorkspaceSkillSourceRequest,
-  options: { watch?: boolean; plan?: Source["plan"] } = {},
-): Promise<WorkspaceSkillSources> {
+async function registerSource(
+  selection: SkillsDiscoverySourceSelection,
+  watch?: boolean,
+  agentId?: string,
+) {
   if (state.closing) {
     await state.closing;
   }
-  const environment = options.plan?.input.environment ?? captureSkillsDiscoveryEnvironment();
+  const environment = selection.plan?.input.environment ?? captureSkillsDiscoveryEnvironment();
+  const { request } = selection;
   const key = JSON.stringify(
-    options.plan
-      ? { ...request, sourcePlan: undefined, plan: options.plan }
+    selection.plan
+      ? { ...request, sourcePlan: undefined, plan: selection.plan }
       : { ...request, environment },
   );
   let source = state.sources.get(key);
@@ -225,35 +266,66 @@ export async function prepareLocalSkillSources(
     if (state.sources.size >= MAX_SOURCES) {
       const oldestKey = state.sources.keys().next().value!;
       const oldest = state.sources.get(oldestKey)!;
+      closeSource(oldest);
       state.sources.delete(oldestKey);
       // An evicted source has no retained fingerprint to compare on readmission.
       bumpSkillsSnapshotVersion({
-        workspaceDir: oldest.request.sourcePlan.workspaceDir,
+        workspaceDir: oldest.workspaceDir,
         reason: "watch",
       });
     }
     source = {
-      request,
+      selection,
+      workspaceDir:
+        selection.kind === "planned"
+          ? selection.plan.input.workspaceDir
+          : selection.request.sourcePlan.workspaceDir,
+      agentIds: new Set(agentId ? [agentId] : []),
+      unowned: agentId === undefined,
       environment,
-      plan: options.plan,
-      watch: options.watch !== false,
+      watch: watch !== false,
       dirty: true,
+      observations: new Map(),
     };
     state.sources.set(key, source);
   } else {
     // An opt-out read must not withdraw another consumer's passive observation.
-    source.watch ||= options.watch !== false;
+    source.watch ||= watch !== false;
+    if (agentId) {
+      source.agentIds.add(agentId);
+    } else {
+      source.unowned = true;
+    }
     state.sources.delete(key);
     state.sources.set(key, source);
   }
-  startPassiveRefresh();
-  if (source.dirty || !source.sources || state.pending) {
-    await scanDirtySources();
-  }
+  observeSource(source);
+  return { key, source };
+}
+
+function readRegisteredSource({ key, source }: Awaited<ReturnType<typeof registerSource>>) {
   if (state.sources.get(key) !== source || !source.sources) {
     throw new Error("Skills discovery was retired before publication");
   }
   return source.sources;
+}
+
+async function publishRegisteredSource(registration: Awaited<ReturnType<typeof registerSource>>) {
+  const { source } = registration;
+  if (source.dirty || !source.sources) {
+    await scanDirtySources();
+  }
+  return readRegisteredSource(registration);
+}
+
+/** The only asynchronous local discovery boundary, shared by all Gateway consumers. */
+export async function prepareLocalSkillSources(
+  request: WorkspaceSkillSourceRequest,
+  options: { watch?: boolean; plan?: SkillsDiscoverySourceSelection["plan"] } = {},
+): Promise<WorkspaceSkillSources> {
+  return publishRegisteredSource(
+    await registerSource({ kind: "selected", request, plan: options.plan }, options.watch),
+  );
 }
 
 /** Compose roots on the same worker, reusing facts until its next completed scan. */
@@ -264,30 +336,7 @@ export async function prepareSkillSourcePlan(
   if (state.closing) {
     await state.closing;
   }
-  const { pluginMetadataSnapshot } = options;
-  const acpRuntimeAvailable = isAcpRuntimeSpawnAvailable({ config: options.config });
-  const input: SkillsSourcePlanInput = {
-    workspaceDir,
-    environment: captureSkillsDiscoveryEnvironment(),
-    options: {
-      config: options.config,
-      agentId: options.agentId,
-      workspaceOnly: options.workspaceOnly,
-      managedSkillsDir: options.managedSkillsDir,
-      bundledSkillsDir: options.bundledSkillsDir,
-      pluginSkillsDir: options.pluginSkillsDir,
-    },
-    acpRuntimeAvailable,
-    ...(pluginMetadataSnapshot
-      ? {
-          pluginContributions: capturePluginSkillContributions({
-            metadataSnapshot: pluginMetadataSnapshot,
-            config: options.config,
-            acpRuntimeAvailable,
-          }),
-        }
-      : {}),
-  };
+  const input = captureSkillsSourcePlanInput(workspaceDir, options);
   const key = JSON.stringify(input);
   let pending = state.plans.get(key);
   if (!pending) {
@@ -344,31 +393,43 @@ export async function prepareSkillStatusFacts(
   return result.facts;
 }
 
-/** Keep remote observation on its owning host; local registration does no scanning. */
-export async function ensureSkillsWatcher(params: {
-  workspaceDir: string;
-  executionWorkspaceDir?: string;
-  executionWorkspaceFileHost?: "gateway";
-  config?: OpenClawConfig;
-  agentId?: string;
-  pluginMetadataSnapshot?: PluginMetadataSnapshot;
-  sourcePlan?: WorkspaceSkillSourcePlan;
-}): Promise<void> {
-  const prepared = params.sourcePlan
-    ? undefined
-    : await prepareSkillSourcePlan(params.workspaceDir, params);
-  const plan = params.sourcePlan ?? prepared!.plan;
+async function registerSkillsWatcher(params: SkillsWatcherParams) {
+  if (state.closing) {
+    await state.closing;
+  }
   const access = getAgentWorkspaceAccess(params.workspaceDir, "loadSkills");
   const watcherKey = JSON.stringify([
     params.workspaceDir,
     params.executionWorkspaceDir,
     params.executionWorkspaceFileHost,
   ]);
+  if (!access?.loadSkills && !params.sourcePlan) {
+    await disposeRemoteSkillsWatcher(watcherKey);
+    // Local discovery selects roots and reads them in one worker pass.
+    return registerSource(
+      {
+        kind: "planned",
+        request: {
+          executionWorkspaceDir: params.executionWorkspaceDir,
+          limits: resolveSkillDiscoveryLimits(params.config),
+          additionalBins: [],
+        },
+        plan: { input: captureSkillsSourcePlanInput(params.workspaceDir, params) },
+      },
+      params.config?.skills?.load?.watch,
+      params.agentId,
+    );
+  }
+  const prepared = params.sourcePlan
+    ? undefined
+    : await prepareSkillSourcePlan(params.workspaceDir, params);
+  const plan = params.sourcePlan ?? prepared!.plan;
   const split = access?.loadSkills ? splitSkillSourcePlan(plan, params) : undefined;
   if (split && params.config?.skills?.load?.watch !== false) {
     await ensureRemoteSkillsWatcher({
       watcherKey,
       workspaceDir: params.workspaceDir,
+      agentId: params.agentId,
       executionWorkspaceDir: split.workspaceExecutionWorkspaceDir,
       access: access!,
       sourcePlan: split.workspacePlan,
@@ -376,25 +437,32 @@ export async function ensureSkillsWatcher(params: {
   } else {
     await disposeRemoteSkillsWatcher(watcherKey);
   }
-  await prepareLocalSkillSources(
+  return registerSource(
     {
-      sourcePlan: split?.gatewayPlan ?? plan,
-      executionWorkspaceDir: split
-        ? split.gatewayExecutionWorkspaceDir
-        : params.executionWorkspaceDir,
-      limits: resolveSkillDiscoveryLimits(params.config),
-      additionalBins: [],
-    },
-    {
-      watch: params.config?.skills?.load?.watch,
+      kind: "selected",
+      request: {
+        sourcePlan: split?.gatewayPlan ?? plan,
+        executionWorkspaceDir: split
+          ? split.gatewayExecutionWorkspaceDir
+          : params.executionWorkspaceDir,
+        limits: resolveSkillDiscoveryLimits(params.config),
+        additionalBins: [],
+      },
       plan: prepared
         ? { input: prepared.input, ...(split ? { scope: "gateway" as const } : {}) }
         : undefined,
     },
+    params.config?.skills?.load?.watch,
+    params.agentId,
   );
 }
 
-/** Explicit actions bypass the passive interval and await a completed worker publication. */
+/** Keep remote observation on its owning host; await the local source publication. */
+export async function ensureSkillsWatcher(params: SkillsWatcherParams): Promise<void> {
+  await publishRegisteredSource(await registerSkillsWatcher(params));
+}
+
+/** Explicit actions await a completed worker publication. */
 export async function refreshSkillsDiscovery(
   params: {
     workspaceDir?: string;
@@ -403,7 +471,7 @@ export async function refreshSkillsDiscovery(
   } = {},
 ): Promise<void> {
   if (params.reason === "config-change") {
-    await closeSkillsWatchers();
+    await resetSkillsDiscoverySources(false);
   }
   for (const source of state.sources.values()) {
     source.dirty = true;
@@ -411,33 +479,55 @@ export async function refreshSkillsDiscovery(
   if (params.config) {
     const { listAgentIds, resolveAgentWorkspaceDir } =
       await import("../../agents/agent-scope-config.js");
-    await Promise.all(
-      listAgentIds(params.config).map((agentId) =>
-        ensureSkillsWatcher({
-          workspaceDir: resolveAgentWorkspaceDir(params.config!, agentId),
-          config: params.config,
-          agentId,
-        }),
-      ),
-    );
-  } else if (!state.sources.size && params.workspaceDir) {
-    await ensureSkillsWatcher({ workspaceDir: params.workspaceDir });
+    const agentIds = listAgentIds(params.config);
+    // Register each bounded batch before dispatch; roots are selected once per source.
+    for (let offset = 0; offset < agentIds.length; offset += MAX_SOURCES) {
+      const registrations = await Promise.all(
+        agentIds.slice(offset, offset + MAX_SOURCES).map((agentId) =>
+          registerSkillsWatcher({
+            workspaceDir: resolveAgentWorkspaceDir(params.config!, agentId),
+            config: params.config,
+            agentId,
+          }),
+        ),
+      );
+      await scanDirtySources();
+      registrations.forEach(readRegisteredSource);
+    }
+  } else {
+    if (!state.sources.size && params.workspaceDir) {
+      await registerSkillsWatcher({ workspaceDir: params.workspaceDir });
+    }
+    await scanDirtySources();
   }
-  await scanDirtySources();
   bumpSkillsSnapshotVersion({
     workspaceDir: params.workspaceDir,
     reason: params.reason ?? "manual",
   });
 }
 
-export async function closeSkillsWatchers(resetState = false): Promise<void> {
+async function resetSkillsDiscoverySources(
+  retireWorker: boolean,
+  resetState = false,
+): Promise<void> {
   if (state.closing) {
-    return state.closing;
+    await state.closing;
+    // A concurrent shutdown must still retire the worker a source reset retained.
+    if (!retireWorker || !state.pool) {
+      return;
+    }
   }
-  clearInterval(state.timer);
-  state.timer = undefined;
-  const activePool = state.pool;
-  state.pool = undefined;
+  clearTimeout(state.refreshTimer);
+  state.refreshTimer = undefined;
+  // Config changes replace plans and subscriptions, not the healthy discovery worker.
+  // Its requests already carry their own environment and freshly selected source plan.
+  const activePool = retireWorker ? state.pool : undefined;
+  if (retireWorker) {
+    state.pool = undefined;
+  }
+  for (const source of state.sources.values()) {
+    closeSource(source);
+  }
   state.sources.clear();
   state.plans.clear();
   state.closing = Promise.allSettled([
@@ -460,6 +550,23 @@ export async function closeSkillsWatchers(resetState = false): Promise<void> {
       state.closing = undefined;
     });
   return state.closing;
+}
+
+export function closeSkillsWatchers(resetState = false): Promise<void> {
+  return resetSkillsDiscoverySources(true, resetState);
+}
+
+export async function closeSkillsWatchersForAgent(params: { agentId: string }): Promise<void> {
+  for (const [key, source] of state.sources) {
+    if (!source.agentIds.delete(params.agentId) || source.agentIds.size || source.unowned) {
+      continue;
+    }
+    state.sources.delete(key);
+    closeSource(source);
+    bumpSkillsSnapshotVersion({ workspaceDir: source.workspaceDir, reason: "watch" });
+  }
+  state.plans.clear();
+  await closeRemoteSkillsWatchersForAgent(params);
 }
 
 export const detachSkillsWatchers = closeSkillsWatchers;

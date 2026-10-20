@@ -1,4 +1,5 @@
 import { notifyListeners, registerListener } from "../../shared/listeners.js";
+import type { ExecutionSkillWorkspace } from "../loading/workspace-skill-roots.js";
 import { normalizeWorkspaceSkillRoots } from "../loading/workspace-skill-roots.js";
 
 type SkillsChangeEvent = {
@@ -11,14 +12,9 @@ type SkillsChangeEvent = {
     | "remote-node"
     | "config-change"
     | "workshop";
-  changedPath?: string;
-  sourceScope?: SkillsSourceScope;
 };
 
-export type SkillsSourceScope = {
-  executionWorkspaceDir?: string;
-  executionWorkspaceFileHost?: "gateway";
-};
+export type SkillsSourceScope = ExecutionSkillWorkspace;
 
 const listeners = new Set<(event: SkillsChangeEvent) => void>();
 const workspaceVersions = new Map<string, number>();
@@ -33,7 +29,6 @@ let versionClock = INITIAL_SKILLS_SNAPSHOT_VERSION;
 let globalVersion = INITIAL_SKILLS_SNAPSHOT_VERSION;
 let sourceClock = INITIAL_SKILLS_SNAPSHOT_VERSION;
 let globalSourceVersion = sourceClock;
-let listenerErrorHandler: ((err: unknown) => void) | undefined;
 
 function bumpVersion(current: number): number {
   const now = Date.now();
@@ -41,7 +36,7 @@ function bumpVersion(current: number): number {
 }
 
 function emit(event: SkillsChangeEvent) {
-  notifyListeners(listeners, event, (err) => listenerErrorHandler?.(err));
+  notifyListeners(listeners, event);
 }
 
 function publishChange(event: SkillsChangeEvent): number {
@@ -55,19 +50,12 @@ function publishChange(event: SkillsChangeEvent): number {
   return versionClock;
 }
 
-export function setSkillsChangeListenerErrorHandler(handler?: (err: unknown) => void): void {
-  listenerErrorHandler = handler;
-}
-
 export function registerSkillsChangeListener(listener: (event: SkillsChangeEvent) => void) {
   return registerListener(listeners, listener);
 }
 
 /** Coverage recovery follows content reconciliation; it never creates a source revision. */
-export function notifySkillsWatchAvailable(params: {
-  workspaceDir: string;
-  sourceScope: SkillsSourceScope;
-}): void {
+export function notifySkillsWatchAvailable(params: { workspaceDir: string }): void {
   emit({ ...params, reason: "watch-available" });
 }
 
@@ -87,13 +75,11 @@ function sourceScopeKey(workspaceDir: string, scope: SkillsSourceScope = {}): st
 export function bumpSkillsSnapshotVersion(params?: {
   workspaceDir?: string;
   reason?: SkillsChangeEvent["reason"];
-  changedPath?: string;
   sourceScopes?: SkillsSourceScope[];
 }): number {
   const event: SkillsChangeEvent = {
     workspaceDir: params?.workspaceDir,
     reason: params?.reason ?? "manual",
-    changedPath: params?.changedPath,
   };
   sourceClock = bumpVersion(sourceClock);
   if (!params?.workspaceDir) {
@@ -162,12 +148,7 @@ export function getSkillsSnapshotVersion(workspaceDir?: string): number {
   return Math.max(globalVersion, workspaceVersions.get(workspaceDir) ?? 0);
 }
 
-export function shouldRefreshSnapshotForVersion(
-  cachedVersion?: number,
-  nextVersion?: number,
-): boolean {
-  const cached = typeof cachedVersion === "number" ? cachedVersion : 0;
-  const next = typeof nextVersion === "number" ? nextVersion : 0;
+export function shouldRefreshSnapshotForVersion(cached = 0, next = 0): boolean {
   return next === 0 ? cached > 0 : cached < next;
 }
 
@@ -182,5 +163,4 @@ export function resetSkillsRefreshStateForTest(): void {
   versionClock = globalVersion;
   sourceClock = bumpVersion(sourceClock);
   globalSourceVersion = sourceClock;
-  listenerErrorHandler = undefined;
 }

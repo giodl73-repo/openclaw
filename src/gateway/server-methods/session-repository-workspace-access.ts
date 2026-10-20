@@ -4,7 +4,10 @@ import type { SessionEntryCurrentFacts } from "../../config/sessions/session-ent
 import { withSessionEntryReadOnlyInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import { captureSessionEntryMetadataRead } from "../../config/sessions/session-entry-source-authority.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
-import { runExclusiveSessionLifecycleMutation } from "../../sessions/session-lifecycle-admission.js";
+import {
+  captureSessionTarget,
+  runSessionMutation,
+} from "../../sessions/session-controller.lifecycle.js";
 import { registerOpenClawAgentDatabaseAsyncResource } from "../../state/openclaw-agent-db-resources.js";
 import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
 import {
@@ -14,18 +17,19 @@ import {
   type WorkspaceInspectionResult,
 } from "../../worker/workspace-inspection-protocol.js";
 import { captureSessionMutationRouting } from "../session-sharing-preparation.js";
-import { loadGatewaySessionEntryReadOnly } from "../session-utils.js";
+import type { GatewaySessionEntryRead } from "../session-utils.js";
 import type { WorkerSessionPlacementStore } from "../worker-environments/placement-store.js";
 import { readSessionWorkerPlacementAsync } from "../worker-environments/session-placement-lifecycle.js";
 import type { GatewayRequestContext } from "./types.js";
 
-type LoadedSession = ReturnType<typeof loadGatewaySessionEntryReadOnly>;
+type LoadedSession = GatewaySessionEntryRead;
 type Operation = WorkspaceInspectionInput["operation"];
 
 /** Repository identity never resolves through the Gateway's local workspace defaults. */
 export async function resolveRepositoryWorkspaceAccess(
   loaded: LoadedSession,
-  context?: GatewayRequestContext,
+  context: GatewayRequestContext | undefined,
+  assertCallerCurrent: () => void,
 ) {
   const entry = loaded.entry;
   const workspaceId = entry?.repositoryWorkspaceId;
@@ -37,7 +41,7 @@ export async function resolveRepositoryWorkspaceAccess(
     sessionKey: loaded.canonicalKey,
     storePath: loaded.storePath,
   };
-  const metadata = captureSessionEntryMetadataRead(scope);
+  const metadata = captureSessionEntryMetadataRead(scope, assertCallerCurrent);
   let facts: ReturnType<typeof retainPreparedSessionSharingFacts> | undefined;
   let placementRead:
     | Awaited<ReturnType<WorkerSessionPlacementStore["prepareSessionPlacement"]>>
@@ -50,15 +54,12 @@ export async function resolveRepositoryWorkspaceAccess(
     placementRead?.release();
     unregister();
   };
-  let readCurrent: () => SessionEntryCurrentFacts | undefined = () =>
-    metadata
-      ? metadata.readCurrent()
-      : loadGatewaySessionEntryReadOnly(loaded.canonicalKey, { agentId: loaded.agentId }).entry;
+  let readCurrent: () => SessionEntryCurrentFacts | undefined = () => metadata?.readCurrent();
   try {
     if (!metadata && !isIncognitoSessionKey(loaded.canonicalKey)) {
       await withSessionEntryReadOnlyInWorker(
         scope,
-        () => {},
+        assertCallerCurrent,
         async (read) => {
           if (!read.ok) {
             throw read.error;
@@ -121,6 +122,7 @@ export async function resolveRepositoryWorkspaceAccess(
       }
     };
     const assertSession = (expectedRevision?: number) => {
+      assertCallerCurrent();
       if (!active) {
         throw new Error("The cloud repository session source is unavailable.");
       }
@@ -166,6 +168,7 @@ export async function resolveRepositoryWorkspaceAccess(
     };
     return {
       kind: "active" as const,
+      assertCurrent: () => assertCurrent(repository.revision),
       repository,
       [Symbol.dispose]: release,
       async inspect<T extends Operation>(
@@ -219,9 +222,15 @@ export async function resolveRepositoryWorkspaceAccess(
             "Cloud repository editing is unavailable; restart the Gateway and retry.",
           );
         }
-        return await runExclusiveSessionLifecycleMutation("workspace-edit", {
-          scope: loaded.storePath,
-          identities: [loaded.canonicalKey, ...loaded.storeKeys, sessionId],
+        return await runSessionMutation({
+          diagnosticLabel: "workspace-edit",
+          target: captureSessionTarget({
+            storeScope: loaded.storePath,
+            sessionKey: loaded.canonicalKey,
+            aliases: loaded.storeKeys,
+            agentId: loaded.agentId,
+            incarnation: sessionId,
+          }),
           run: () => {
             assertAuthorized();
             return mutationService.mutate({

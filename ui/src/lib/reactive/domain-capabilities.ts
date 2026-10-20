@@ -11,6 +11,19 @@ export function projectAgents(source: Pick<AgentCapability, "state" | "subscribe
   return projectOwner(source, (agents) => agents.state);
 }
 
+export type AgentIdentityProjectionSource = {
+  identities: Pick<AgentIdentityCapability, "get" | "subscribe">;
+  agentId: string | null | undefined;
+};
+
+export function projectAgentIdentity(source: AgentIdentityProjectionSource) {
+  return projectSource(source, {
+    read: ({ identities, agentId }) => identities.get(agentId),
+    subscribe: ({ identities }, notify) => identities.subscribe(notify),
+    equality: "revision",
+  });
+}
+
 export function projectRosterActivity(
   source: Pick<ReturnType<typeof rosterActivityStore>, "snapshot" | "subscribe">,
 ) {
@@ -46,19 +59,6 @@ export function projectSessionList(source: SessionListProjectionSource) {
   return projectSource(source, {
     read: ({ sessions, scope }) => sessions.listSnapshot(scope),
     subscribe: ({ sessions, scope }, notify) => sessions.subscribeList(scope, notify),
-    equality: "revision",
-  });
-}
-
-export type AgentIdentityProjectionSource = {
-  identities: Pick<AgentIdentityCapability, "get" | "subscribe">;
-  agentId: string | null | undefined;
-};
-
-export function projectAgentIdentity(source: AgentIdentityProjectionSource) {
-  return projectSource(source, {
-    read: ({ identities, agentId }) => identities.get(agentId),
-    subscribe: ({ identities }, notify) => identities.subscribe(notify),
     equality: "revision",
   });
 }

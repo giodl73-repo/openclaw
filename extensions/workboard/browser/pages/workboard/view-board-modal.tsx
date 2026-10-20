@@ -92,8 +92,7 @@ export function BoardModal(props: {
     }
     const initialDraft = draft();
     const client = props.client;
-    const isPresented = () => !disposed && props.draft === initialDraft;
-    const isCurrent = () => isPresented() && props.client === client;
+    const isCurrent = () => !disposed && props.client === client;
     let sessions: WorkboardSessionsBoardSpec | undefined;
     try {
       sessions = initialDraft.sessions
@@ -156,7 +155,7 @@ export function BoardModal(props: {
       }
     } finally {
       initialDraft.saving = false;
-      if (isPresented()) {
+      if (!disposed) {
         props.requestUpdate();
       }
     }
@@ -270,7 +269,7 @@ export function BoardModal(props: {
               {visibleError()}
             </div>
           ) : undefined}
-          <div class="workboard-modal__actions">
+          <openclaw-modal-actions class="workboard-modal__actions">
             <button
               class="btn"
               type="button"
@@ -286,7 +285,7 @@ export function BoardModal(props: {
             >
               {t(draft().create ? "common.create" : "common.save")}
             </button>
-          </div>
+          </openclaw-modal-actions>
         </form>
         <WorkboardErrorToast
           owner={draft().error ? draft() : props.toastOwner}
