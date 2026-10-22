@@ -637,7 +637,7 @@ describe("conversation completion through the real delivery queue", () => {
     const queueId = "revoked-after-queue-admission-queue";
     const message = "must remain unsent after route withdrawal";
     const config: OpenClawConfig = {};
-    const { stateDir, scope } = await createConversationOperation(operationId, message, config);
+    const { stateDir, scope } = await createOperation(operationId, message, config);
     const routeFingerprint = resolveConversationRouteFingerprint(conversation);
     const conversationDeliveryTarget = captureConversationDeliveryTarget(scope);
     const sendText = vi.fn(async () => ({

@@ -8,6 +8,7 @@ import {
   replaceSessionEntry,
 } from "../../../../src/config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../../../../src/config/types.openclaw.js";
+import type { CronJob } from "../../../../src/cron/types.js";
 import { readSessionMessagesAsync } from "../../../../src/gateway/session-transcript-readers.js";
 import {
   disconnectGatewayClient,
@@ -219,7 +220,7 @@ const transcript = (key: string) => readSessionTranscript(key).then(JSON.stringi
 const readSessionId = (sessionKey: string) =>
   loadSessionEntry({ agentId: "main", sessionKey, readConsistency: "latest" })?.sessionId;
 
-describe("Gateway heartbeat and cron session routing", () => {
+describe("Gateway automation session routing", () => {
   let fixtureSettlement: Promise<void> | undefined;
   // Compile the server before the behavior timeout includes both real starts.
   beforeAll(() => import("../../../../src/gateway/server-start.js"));
@@ -233,7 +234,7 @@ describe("Gateway heartbeat and cron session routing", () => {
   });
 
   it(
-    "routes monitor wakes and current cron delivery through their bound sessions",
+    "routes ordinary automations through their persisted session while preserving explicit wake sessions",
     { timeout: 90_000 },
     async ({ signal }) => {
       const tempHome = tempDirs.make("openclaw-gateway-heartbeat-routing-");
@@ -262,10 +263,6 @@ describe("Gateway heartbeat and cron session routing", () => {
         return completion;
       };
       await Promise.all([
-        fs.writeFile(
-          path.join(workspaceDir, "HEARTBEAT.md"),
-          "Process all pending system events and report what was handled.\n",
-        ),
         fs.writeFile(policyMediaPath, policyMediaContents, "utf8"),
         writeRouteCapturePlugin({
           pluginDir,
@@ -279,6 +276,7 @@ describe("Gateway heartbeat and cron session routing", () => {
       const configuredSessionKey = "agent:main:ops-heartbeat";
       const configuredSessionId = nextId("configured-heartbeat-session");
       const configuredEvent = nextId("configured-heartbeat-event");
+      const configuredPassiveEvent = nextId("configured-passive-event");
       const configuredReply = nextId("configured-heartbeat-reply");
       const cronSourceKey = "agent:main:dashboard:cron-delivery-source";
       const cronSourceSessionId = nextId("cron-source-session");
@@ -347,7 +345,6 @@ describe("Gateway heartbeat and cron session routing", () => {
             defaults: {
               workspace: workspaceDir,
               skipBootstrap: true,
-              heartbeat: { every: "24h", session: "ops-heartbeat", target: "last" },
               model: { primary: provider.modelRef },
               models: {
                 [provider.modelRef]: {
@@ -370,7 +367,7 @@ describe("Gateway heartbeat and cron session routing", () => {
             },
           },
           tools: { allow: ["read"] },
-          // Full configs may contain nested nulls; heartbeat admission must not reinterpret them as patches.
+          // Full configs may contain nested nulls; automation admission must not reinterpret them as patches.
           tts: { providers: { fixture: { disabledVoice: null } } },
           gateway: { auth: { mode: "token", token } },
           plugins: {
@@ -389,6 +386,19 @@ describe("Gateway heartbeat and cron session routing", () => {
           clientDisplayName: "vitest-gateway-heartbeat-session-routing",
         });
         await gateway.server.startupSettled;
+        const automation = await gateway.client.request<CronJob>("cron.add", {
+          agentId: "main",
+          name: "Session routing proof",
+          enabled: true,
+          schedule: { kind: "every", everyMs: 86_400_000 },
+          sessionTarget: `session:${configuredSessionKey}`,
+          wakeMode: "now",
+          payload: {
+            kind: "agentTurn",
+            message: `Process this scheduled task and report what was handled: ${configuredEvent}`,
+          },
+          delivery: { mode: "announce", channel: "last" },
+        });
         await disconnectGatewayClient(gateway.client);
         await gateway.server.close({ reason: "heartbeat catalog-owner restart proof" });
         gateway = await startGatewayWithClient({
@@ -469,34 +479,22 @@ describe("Gateway heartbeat and cron session routing", () => {
         await seedSession(explicitSessionId, explicitSessionKey, "explicit-destination");
         await seedSession(mainSessionId, mainSessionKey, "main-destination");
 
-        await queueEvent(configuredSessionKey, configuredEvent);
+        await queueEvent(configuredSessionKey, configuredPassiveEvent);
 
         // A connected Gateway may still be starting cron; its lifecycle hook owns readiness.
         expect(await withinTest(cronReconciled.promise, signal)).toEqual({
           reason: "startup",
           enabled: true,
         });
-        const listed = await client.request<{
-          jobs: Array<{
-            agentId?: string;
-            declarationKey?: string;
-            enabled: boolean;
-            id: string;
-            payload: { kind: string };
-            sessionTarget: string;
-          }>;
-        }>("cron.list", { includeDisabled: true });
-        const monitor = listed.jobs.find((job) => job.declarationKey === "heartbeat:main");
-        expect(monitor).toMatchObject({
-          agentId: "main",
-          declarationKey: "heartbeat:main",
-          enabled: true,
-          payload: { kind: "heartbeat" },
-          sessionTarget: "main",
+        const listed = await client.request<{ jobs: CronJob[] }>("cron.list", {
+          includeDisabled: true,
         });
-        if (!monitor) {
-          throw new Error("system-owned main-agent heartbeat monitor was not listed");
-        }
+        expect(listed.jobs.find((job) => job.id === automation.id)).toMatchObject({
+          agentId: "main",
+          enabled: true,
+          payload: { kind: "agentTurn" },
+          sessionTarget: `session:${configuredSessionKey}`,
+        });
 
         const configuredRequestBaseline = providerRequests.length;
         const configuredRun = await client.request<{
@@ -504,7 +502,7 @@ describe("Gateway heartbeat and cron session routing", () => {
           ok: boolean;
           runId: string;
         }>("cron.run", {
-          id: monitor.id,
+          id: automation.id,
           mode: "force",
         });
         expect(configuredRun).toMatchObject({
@@ -512,14 +510,15 @@ describe("Gateway heartbeat and cron session routing", () => {
           enqueued: true,
           runId: expect.any(String),
         });
-        expect(await waitForCronRun(monitor.id, configuredRun.runId)).toMatchObject({
+        expect(await waitForCronRun(automation.id, configuredRun.runId)).toMatchObject({
           runId: configuredRun.runId,
           status: "ok",
         });
         expect(providerRequests.length).toBeGreaterThan(configuredRequestBaseline);
         const configuredRequest = JSON.stringify(providerRequests[configuredRequestBaseline]);
         expect(configuredRequest).toContain(configuredEvent);
-        expect(peekSystemEvents(configuredSessionKey)).not.toContain(configuredEvent);
+        expect(configuredRequest).not.toContain(configuredPassiveEvent);
+        expect(peekSystemEvents(configuredSessionKey)).toContain(configuredPassiveEvent);
         const delivery = (text: string, to: string) => ({
           accountId: "default",
           kind: "text",
@@ -715,12 +714,12 @@ describe("Gateway heartbeat and cron session routing", () => {
         ).resolves.toEqual({ ok: true });
         await poll(() => providerRequests.length).toBeGreaterThan(explicitRequestBaseline);
         const explicitRequest = JSON.stringify(providerRequests[explicitRequestBaseline]);
-        expect(explicitRequest).toContain(explicitQueuedEvent);
+        expect(explicitRequest).not.toContain(explicitQueuedEvent);
         expect(explicitRequest).toContain(explicitWakeText);
-        await poll(() => {
-          const queued = peekSystemEvents(explicitSessionKey);
-          return queued.includes(explicitQueuedEvent) || queued.includes(explicitWakeText);
-        }).toBe(false);
+        await poll(() => peekSystemEvents(explicitSessionKey).includes(explicitWakeText)).toBe(
+          false,
+        );
+        expect(peekSystemEvents(explicitSessionKey)).toContain(explicitQueuedEvent);
         await poll(() => readDeliveryTrace(deliveryTracePath)).toHaveLength(4);
         expect(await readDeliveryTrace(deliveryTracePath)).toEqual([
           configuredDelivery,
