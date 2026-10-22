@@ -460,7 +460,11 @@ describe("Gateway heartbeat and cron session routing", () => {
         };
         await seedSession(configuredSessionId, configuredSessionKey, "configured-destination");
         await seedSession(cronSourceSessionId, cronSourceKey, "cron-source-destination");
-        await seedSession(allowedMediaSourceSessionId, allowedMediaSourceKey, "group-media-allowed");
+        await seedSession(
+          allowedMediaSourceSessionId,
+          allowedMediaSourceKey,
+          "group-media-allowed",
+        );
         await seedSession(deniedMediaSourceSessionId, deniedMediaSourceKey, "group-media-denied");
         await seedSession(explicitSessionId, explicitSessionKey, "explicit-destination");
         await seedSession(mainSessionId, mainSessionKey, "main-destination");
