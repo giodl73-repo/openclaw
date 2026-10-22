@@ -3,6 +3,7 @@ import {
   getReplyPayloadMetadata,
   isHostNoticePayload,
   isReplyPayloadTerminalContent,
+  type ReplyPayload,
 } from "../../../auto-reply/reply-payload.js";
 import {
   hasCommittedSourceReplyDeliveryEvidence,
@@ -13,6 +14,18 @@ import type { RunEmbeddedAgentInternalParams } from "./internal-params.js";
 import { isEmbeddedRunTerminalTimeout, type EmbeddedRunTerminalState } from "./terminal-outcome.js";
 import type { prepareEmbeddedRunTerminal } from "./terminal-preparation.js";
 import type { EmbeddedRunAttemptResult } from "./types.js";
+
+function isOrdinaryFinalPayload(payload: ReplyPayload): boolean {
+  const metadata = getReplyPayloadMetadata(payload);
+  return (
+    isReplyPayloadTerminalContent(payload) &&
+    !isHostNoticePayload(payload) &&
+    !payload.btw &&
+    !metadata?.precedingInputAnswer &&
+    !metadata?.sourceReplyTranscriptMirror &&
+    !metadata?.deliverDespiteSourceReplySuppression
+  );
+}
 
 /** Decorates the selected ordinary final after the terminal owner has resolved retries and errors. */
 export function attachEmbeddedFinalPresentation(
@@ -43,18 +56,9 @@ export function attachEmbeddedFinalPresentation(
   }
   const payloads = result.payloads;
   // Select first, then check eligibility: a structured final must not retarget earlier prose.
-  const index = payloads?.findLastIndex((payload) => {
-    const metadata = getReplyPayloadMetadata(payload);
-    return (
-      isReplyPayloadTerminalContent(payload) &&
-      !isHostNoticePayload(payload) &&
-      Boolean(payload.text?.trim()) &&
-      !payload.btw &&
-      !metadata?.precedingInputAnswer &&
-      !metadata?.sourceReplyTranscriptMirror &&
-      !metadata?.deliverDespiteSourceReplySuppression
-    );
-  });
+  const index = payloads?.findLastIndex(
+    (payload) => isOrdinaryFinalPayload(payload) && Boolean(payload.text?.trim()),
+  );
   if (payloads && index !== undefined && index >= 0) {
     const payload = payloads[index];
     if (payload && !payload.presentation && !payload.interactive && !payload.channelData) {
@@ -67,7 +71,16 @@ export function attachEmbeddedFinalPresentation(
       };
     }
   } else if (
-    !payloads?.length &&
+    (payloads ?? []).every(
+      (payload) =>
+        isOrdinaryFinalPayload(payload) &&
+        !payload.text?.trim() &&
+        Boolean(payload.mediaUrl || payload.mediaUrls?.length) &&
+        !payload.isError &&
+        !payload.presentation &&
+        !payload.interactive &&
+        !payload.channelData,
+    ) &&
     input.prepared.replyDeliveryState === "delivered" &&
     input.prepared.sourceReplyDeliveryState !== "pending" &&
     input.runParams.sourceReplyDeliveryMode !== "message_tool_only" &&
@@ -76,7 +89,7 @@ export function attachEmbeddedFinalPresentation(
     !hasMessagingToolDeliveryEvidence(input.attempt)
   ) {
     // Ordinary prose already streamed. Do not replay it or revive a suppressed tool reply.
-    return { ...result, payloads: [{ presentation: finalPresentation }] };
+    return { ...result, payloads: [...(payloads ?? []), { presentation: finalPresentation }] };
   }
   return result;
 }

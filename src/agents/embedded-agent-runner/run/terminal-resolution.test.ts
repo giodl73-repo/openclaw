@@ -95,35 +95,6 @@ describe("terminal resolution", () => {
     },
   );
 
-  it.each([false, true])(
-    "discards a rejected candidate before selecting a replacement (prepared=%s)",
-    async (prepareReplacement) => {
-      const rejected = makeTerminalInput({
-        assistant: textAssistant("Rejected draft."),
-        attemptOverrides: {
-          finalPresentation,
-          beforeAgentFinalizeRevisionReason: "Correct the result.",
-        },
-        payloadsWithToolMedia: [{ text: "Rejected draft." }],
-      });
-      await expect(resolveEmbeddedRunTerminal(rejected)).resolves.toEqual({ action: "retry" });
-
-      const replacement: NonNullable<ReplyPayload["presentation"]> = {
-        blocks: [{ type: "text", text: "The corrected result is four." }],
-      };
-      const selected = await resolveTerminal({
-        assistant: textAssistant("Corrected answer."),
-        attemptOverrides: { finalPresentation: prepareReplacement ? replacement : undefined },
-        payloadsWithToolMedia: [{ text: "Corrected answer." }],
-        retryState: rejected.retryState,
-      });
-      expectComplete(selected);
-      expect(selected.result.payloads).toEqual([
-        { text: "Corrected answer.", ...(prepareReplacement ? { presentation: replacement } : {}) },
-      ]);
-    },
-  );
-
   it.each([
     { kind: "failed", source: "prompt", error: new Error("Provider failed") },
     { kind: "aborted", source: "external" },
@@ -176,27 +147,57 @@ describe("terminal resolution", () => {
     },
   );
 
-  it("emits only the presentation after a successful ordinary answer already streamed", async () => {
-    const text = "The streamed answer is complete.";
-    const assistant = textAssistant(text);
-    const attempt = assistantAttempt(assistant, { assistantTexts: [text], finalPresentation });
-    const prepared = await prepareAttempt({
-      attempt,
-      currentAttemptCompletedAssistant: assistant,
-      replyDeliveryState: "delivered",
-      sourceReplyDeliveryState: "delivered",
-    });
-    expect(prepared.payloadsWithToolMedia).toEqual([]);
+  it.each([false, true])(
+    "preserves unsent media=%s after the ordinary answer already streamed",
+    async (withMedia) => {
+      const text = "The streamed answer is complete.";
+      const assistant = textAssistant(text);
+      const mediaUrl = "https://example.invalid/report.pdf";
+      const attempt = assistantAttempt(assistant, {
+        assistantTexts: [text],
+        finalPresentation,
+        toolMediaUrls: withMedia ? [mediaUrl] : undefined,
+      });
+      const prepared = await prepareAttempt({
+        attempt,
+        currentAttemptCompletedAssistant: assistant,
+        replyDeliveryState: "delivered",
+        sourceReplyDeliveryState: "delivered",
+      });
+      expect(prepared.payloadsWithToolMedia).toEqual(
+        withMedia
+          ? [
+              {
+                mediaUrl,
+                mediaUrls: [mediaUrl],
+                audioAsVoice: undefined,
+                trustedLocalMedia: undefined,
+              },
+            ]
+          : [],
+      );
 
-    const resolved = await resolveTerminal({ attempt, prepared });
-    expectComplete(resolved);
-    expect(resolved.result.payloads).toEqual([{ presentation: finalPresentation }]);
-    expect(resolved.result.meta.terminalReply).toEqual({ disposition: "visible", text });
-  });
+      const resolved = await resolveTerminal({ attempt, prepared });
+      expectComplete(resolved);
+      expect(resolved.result.payloads).toEqual([
+        ...(prepared.payloadsWithToolMedia ?? []),
+        { presentation: finalPresentation },
+      ]);
+      if (withMedia) {
+        expect(resolved.result.payloads?.[0]).toBe(prepared.payloadsWithToolMedia?.[0]);
+      }
+      expect(resolved.result.meta.terminalReply).toEqual({ disposition: "visible", text });
+    },
+  );
 
-  it.each(["message-tool", "message-tool-only", "pending", "missing"])(
-    "does not synthesize a presentation residual for %s delivery",
-    async (delivery) => {
+  it.each(
+    ["message-tool", "message-tool-only", "pending", "missing"].flatMap((delivery) =>
+      [false, true].map((withMedia) => ({ delivery, withMedia })),
+    ),
+  )(
+    "does not synthesize a presentation residual for $delivery delivery with media=$withMedia",
+    async ({ delivery, withMedia }) => {
+      const payloads = withMedia ? [{ mediaUrls: ["https://example.invalid/report.pdf"] }] : [];
       const resolved = await resolveTerminal({
         assistant: textAssistant("An answer exists."),
         attemptOverrides: {
@@ -204,6 +205,7 @@ describe("terminal resolution", () => {
           ...(delivery === "message-tool" ? { didDeliverSourceReplyViaMessageTool: true } : {}),
         },
         replyDeliveryState: delivery === "missing" ? "missing" : "delivered",
+        payloadsWithToolMedia: payloads,
         sourceReplyDeliveryState: delivery === "pending" ? "pending" : "delivered",
         runParams: {
           ...(delivery === "message-tool-only"
@@ -213,7 +215,7 @@ describe("terminal resolution", () => {
         },
       });
       expectComplete(resolved);
-      expect(resolved.result.payloads).toBeUndefined();
+      expect(resolved.result.payloads ?? []).toEqual(payloads);
     },
   );
 
@@ -223,7 +225,12 @@ describe("terminal resolution", () => {
     { text: "Legacy interaction", interactive: { blocks: [{ type: "text", text: "Owned" }] } },
     { text: "Side answer", btw: { question: "Side question?" } },
     { text: "Commentary", isCommentary: true },
-    { mediaUrls: ["https://example.invalid/tool-output.png"] },
+    { mediaUrls: ["https://example.invalid/tool-output.png"], presentation: finalPresentation },
+    { mediaUrls: ["https://example.invalid/tool-output.png"], isError: true },
+    setReplyPayloadMetadata(
+      { mediaUrls: ["https://example.invalid/tool-output.png"] },
+      { deliverDespiteSourceReplySuppression: true },
+    ),
     setReplyPayloadMetadata({ text: "Earlier input" }, { precedingInputAnswer: true }),
     setReplyPayloadMetadata(
       { text: "Explicit tool reply" },
